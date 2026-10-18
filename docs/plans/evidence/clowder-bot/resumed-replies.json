@@ -1,0 +1,14 @@
+[
+  {
+    "name": "松果",
+    "messageId": "0001792338402137-000003-5ec17770",
+    "reply": "我是松果，本对话约定的恢复标记是「松果-271」，刚才交付了 summarize.py 和运行生成并验证的 summary.json。[松果/GPT-6🐾]\n\n[松果/🐾]",
+    "cliSessionId": "01a14faa-1fdd-76c2-8a6a-b36f1bfd688e"
+  },
+  {
+    "name": "青禾",
+    "messageId": "0001792338490753-000001-6d2df07b",
+    "reply": "我是青禾，本对话正式约定的恢复标记是「青禾-638」，交付的报告文件名是 `review.md`。[青禾/GPT-6🐾]\n\n[青禾/🐾]",
+    "cliSessionId": "01a14fae-f8e3-7d20-b577-c9f97375be75"
+  }
+]

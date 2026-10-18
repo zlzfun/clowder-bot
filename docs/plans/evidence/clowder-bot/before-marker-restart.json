@@ -1,0 +1,125 @@
+{
+  "pluginInstances": [
+    "pi_70778319-6895-4dc1-a2e8-96de85d16eb4"
+  ],
+  "entities": [
+    {
+      "name": "松果",
+      "availability": "ready",
+      "binding": {
+        "threadId": "thread_owned_814a505f8bd1d53fef31f0dd3208585192377502",
+        "catId": "native-8eedb268cac409bd530cb5be",
+        "workspacePath": "/private/tmp/clowder-bot-workspace",
+        "executionTemplateId": "bot-codex"
+      },
+      "messages": [
+        {
+          "id": "0001792337755373-000000-18110fce",
+          "type": "user",
+          "catId": null,
+          "contentSha256": "d9873f1fce2c3be7fb497e7b021117f734d548e622388ae47e5b2c03a88bfc92"
+        },
+        {
+          "id": "0001792337755522-000001-add4ea26",
+          "type": "assistant",
+          "catId": "native-8eedb268cac409bd530cb5be",
+          "contentSha256": "b1e96b651760188991639fe8c421a01aee3d73af48cb0d65b69cff7da8aed70d"
+        },
+        {
+          "id": "0001792337909030-000000-b3093b33",
+          "type": "user",
+          "catId": null,
+          "contentSha256": "54034db66f33c691765f107984d555622b8f9fdda5cad05c3dc5fc48ed8a8295"
+        },
+        {
+          "id": "0001792337909162-000001-667c435a",
+          "type": "assistant",
+          "catId": "native-8eedb268cac409bd530cb5be",
+          "contentSha256": "85554c9564c771b9383d0c7651b26a2ee788cde657e3ee17690509daf5b44a1c"
+        },
+        {
+          "id": "0001792338402102-000002-02f05c03",
+          "type": "user",
+          "catId": null,
+          "contentSha256": "341d771f96496a9e6ecaf5d54d390d358a9c74577c36143994e9142f0be49674"
+        },
+        {
+          "id": "0001792338402137-000003-5ec17770",
+          "type": "assistant",
+          "catId": "native-8eedb268cac409bd530cb5be",
+          "contentSha256": "99150c20b17aae3f62afca50fa4c71903636ca11119eb64d3438a9265d7bf63e"
+        }
+      ],
+      "sessions": [
+        {
+          "id": "eaa5cae9-7784-4205-ac57-136358825e49",
+          "catId": "native-8eedb268cac409bd530cb5be",
+          "cliSessionId": "01a14faa-1fdd-76c2-8a6a-b36f1bfd688e",
+          "status": "active"
+        }
+      ]
+    },
+    {
+      "name": "青禾",
+      "availability": "ready",
+      "binding": {
+        "threadId": "thread_owned_a8d7501aa3d8d88e93e7c72619a2a67779d75c39",
+        "catId": "native-b42b95fe3cd3684fb3409a3a",
+        "workspacePath": "/private/tmp/clowder-bot-workspace",
+        "executionTemplateId": "bot-codex"
+      },
+      "messages": [
+        {
+          "id": "0001792338225824-000000-d66316bd",
+          "type": "user",
+          "catId": null,
+          "contentSha256": "87371d0e6b909e842947ca5e967cb3d881827b052717ad135f714cf7b307ebb3"
+        },
+        {
+          "id": "0001792338225981-000001-fd2808d2",
+          "type": "assistant",
+          "catId": "native-b42b95fe3cd3684fb3409a3a",
+          "contentSha256": "0bb251c5f74cceabef7e94af2a5be50d0a66a27aa4e6d1560100fa2a850c236a"
+        },
+        {
+          "id": "0001792338386520-000000-81fc51c3",
+          "type": "user",
+          "catId": null,
+          "contentSha256": "f7ab29ff8ca35e8b8537a6afdae28ff4998a665bd61534c0d90f8b416c1a08af"
+        },
+        {
+          "id": "0001792338386638-000001-d5d7ec76",
+          "type": "assistant",
+          "catId": "native-b42b95fe3cd3684fb3409a3a",
+          "contentSha256": "4ade1c700eb0fe1fce3b3f164b171a12715404a5a838e536eb36e1e209a45998"
+        },
+        {
+          "id": "0001792338444690-000006-a8fd5976",
+          "type": "user",
+          "catId": null,
+          "contentSha256": "7c3ba8a4767e38b9b60cc66da2c1c5d5ec3c7c2f340a651f6231a4de575ecc43"
+        },
+        {
+          "id": "0001792338444703-000007-b884fd12",
+          "type": "assistant",
+          "catId": "native-b42b95fe3cd3684fb3409a3a",
+          "contentSha256": "0f028bd21c1f9602025f43864972c4a775066e0e50e700fc4fe6339d726c7331"
+        }
+      ],
+      "sessions": [
+        {
+          "id": "d730f4f4-987b-409e-8f2a-06fb35ea5e09",
+          "catId": "native-b42b95fe3cd3684fb3409a3a",
+          "cliSessionId": "01a14fae-f8e3-7d20-b577-c9f97375be75",
+          "status": "active"
+        }
+      ]
+    }
+  ],
+  "files": {
+    "tickets.csv": "2530c64e5c7e3389a8e7b49e28becb50dbea72b6f170d71139f1c1aeafc6d1cf",
+    "summarize.py": "471a3005efb4920e865e6e99a83f96cac59c145e06ad7f4f975901484e2bd882",
+    "summary.json": "43db9c8e2cf345e486e4fbf71cd261818bc3f11e9a59317b15e404588ef5c35b",
+    "review.md": "da0085d0dd3aba4201842ebb77d8d97cbd84593da3661935c082cd906c8609f7"
+  }
+}

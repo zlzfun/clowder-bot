@@ -1,0 +1,10 @@
+{
+  "total": 8,
+  "total_estimated_hours": 21.0,
+  "by_status": {
+    "done": 3,
+    "doing": 2,
+    "todo": 3
+  },
+  "high_priority_count": 3
+}

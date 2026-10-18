@@ -1,0 +1,116 @@
+{
+  "source": "isolated API log c31720aab3707754.log",
+  "redaction": "Allowlisted session lifecycle fields only; hostname, userId, CLI options and configuration keys omitted. Values are unchanged.",
+  "events": [
+    {
+      "sourceLine": 11427,
+      "time": "2026-10-18T15:38:31.978Z",
+      "pid": 65870,
+      "module": "invoke",
+      "catId": "native-8eedb268cac409bd530cb5be",
+      "threadId": "thread_owned_814a505f8bd1d53fef31f0dd3208585192377502",
+      "invocationId": "9e7dadda-a360-48a7-bb26-2731fa0bc513",
+      "cliSessionId": "01a14faa-1fdd-76c2-8a6a-b36f1bfd688e",
+      "msg": "Session init: binding session"
+    },
+    {
+      "sourceLine": 13318,
+      "time": "2026-10-18T15:43:49.642Z",
+      "pid": 66955,
+      "module": "invoke",
+      "catId": "native-b42b95fe3cd3684fb3409a3a",
+      "threadId": "thread_owned_a8d7501aa3d8d88e93e7c72619a2a67779d75c39",
+      "invocationId": "af89d9e8-82cb-46e6-934a-077aa904dd1e",
+      "cliSessionId": "01a14fae-f8e3-7d20-b577-c9f97375be75",
+      "msg": "Session init: binding session"
+    },
+    {
+      "sourceLine": 14456,
+      "time": "2026-10-18T15:46:26.800Z",
+      "pid": 67657,
+      "module": "codex-agent",
+      "catId": "native-b42b95fe3cd3684fb3409a3a",
+      "invocationId": "420374bb-afe7-4307-919e-33fde7045208",
+      "sessionId": "01a14fae-f8e3-7d20-b577-c9f97375be75",
+      "cwd": "/private/tmp/clowder-bot-workspace",
+      "msg": "[codex-diag] Invoking Codex CLI"
+    },
+    {
+      "sourceLine": 14462,
+      "time": "2026-10-18T15:46:29.338Z",
+      "pid": 67657,
+      "module": "invoke",
+      "catId": "native-b42b95fe3cd3684fb3409a3a",
+      "threadId": "thread_owned_a8d7501aa3d8d88e93e7c72619a2a67779d75c39",
+      "invocationId": "420374bb-afe7-4307-919e-33fde7045208",
+      "cliSessionId": "01a14fae-f8e3-7d20-b577-c9f97375be75",
+      "msg": "Session init: binding session"
+    },
+    {
+      "sourceLine": 14690,
+      "time": "2026-10-18T15:46:42.297Z",
+      "pid": 67657,
+      "module": "codex-agent",
+      "catId": "native-8eedb268cac409bd530cb5be",
+      "invocationId": "48c45416-765d-4bd5-a18f-3a60d47f2748",
+      "sessionId": "01a14faa-1fdd-76c2-8a6a-b36f1bfd688e",
+      "cwd": "/private/tmp/clowder-bot-workspace",
+      "msg": "[codex-diag] Invoking Codex CLI"
+    },
+    {
+      "sourceLine": 14692,
+      "time": "2026-10-18T15:46:42.411Z",
+      "pid": 67657,
+      "module": "invoke",
+      "catId": "native-8eedb268cac409bd530cb5be",
+      "threadId": "thread_owned_814a505f8bd1d53fef31f0dd3208585192377502",
+      "invocationId": "48c45416-765d-4bd5-a18f-3a60d47f2748",
+      "cliSessionId": "01a14faa-1fdd-76c2-8a6a-b36f1bfd688e",
+      "msg": "Session init: binding session"
+    },
+    {
+      "sourceLine": 15065,
+      "time": "2026-10-18T15:47:24.852Z",
+      "pid": 67657,
+      "module": "codex-agent",
+      "catId": "native-b42b95fe3cd3684fb3409a3a",
+      "invocationId": "9b1d89c0-5dc9-4e35-9d3f-aa89eee09e1a",
+      "sessionId": "01a14fae-f8e3-7d20-b577-c9f97375be75",
+      "cwd": "/private/tmp/clowder-bot-workspace",
+      "msg": "[codex-diag] Invoking Codex CLI"
+    },
+    {
+      "sourceLine": 15069,
+      "time": "2026-10-18T15:47:24.980Z",
+      "pid": 67657,
+      "module": "invoke",
+      "catId": "native-b42b95fe3cd3684fb3409a3a",
+      "threadId": "thread_owned_a8d7501aa3d8d88e93e7c72619a2a67779d75c39",
+      "invocationId": "9b1d89c0-5dc9-4e35-9d3f-aa89eee09e1a",
+      "cliSessionId": "01a14fae-f8e3-7d20-b577-c9f97375be75",
+      "msg": "Session init: binding session"
+    },
+    {
+      "sourceLine": 15733,
+      "time": "2026-10-18T15:48:10.919Z",
+      "pid": 68025,
+      "module": "codex-agent",
+      "catId": "native-b42b95fe3cd3684fb3409a3a",
+      "invocationId": "092fbdae-6a7c-44a2-b69a-c9d8c88fc53d",
+      "sessionId": "01a14fae-f8e3-7d20-b577-c9f97375be75",
+      "cwd": "/private/tmp/clowder-bot-workspace",
+      "msg": "[codex-diag] Invoking Codex CLI"
+    },
+    {
+      "sourceLine": 15737,
+      "time": "2026-10-18T15:48:13.262Z",
+      "pid": 68025,
+      "module": "invoke",
+      "catId": "native-b42b95fe3cd3684fb3409a3a",
+      "threadId": "thread_owned_a8d7501aa3d8d88e93e7c72619a2a67779d75c39",
+      "invocationId": "092fbdae-6a7c-44a2-b69a-c9d8c88fc53d",
+      "cliSessionId": "01a14fae-f8e3-7d20-b577-c9f97375be75",
+      "msg": "Session init: binding session"
+    }
+  ]
+}
