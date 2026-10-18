@@ -28,15 +28,18 @@ Cells: plugin, identity-session, thread-navigation, thread-chat-surface; consume
 - [x] Plugin descriptor package + fresh packed consumer verification (self-contained alpha.2).
 - [x] Native Console directory and setup; 39 targeted UI tests and Web typecheck.
 - [ ] Real file tasks + persistent restart recovery.
-- [ ] Independent review + published source and user-visible preview.
+- [x] Independent review + published draft source and user-visible preview.
 
 ## Current verification evidence
 
-- Host full API build and subsequent TypeScript checks passed. Real L0 subprocess compilation includes the accepted colleague name and role without writing a member catalog.
+- Host full API build and subsequent TypeScript checks passed; 189 existing capability/member/L0 regression tests also passed. Real L0 subprocess compilation includes the accepted colleague name and role without writing a member catalog.
 - Independent review found and closed: template MCP restriction inheritance, strict owner provenance, late workspace/liveness recheck, memory-only recovery rejection, reserved identity namespace, and provider-control bypasses. Final independent scan reported no remaining P1/P2; this is not a substitute for real Agent acceptance.
 - Dedicated preview: Console `http://localhost:5192`, API `3192`, Redis `6308`, data `/private/tmp/clowder-bot-state`. All processes are managed launchd previews with bounded leases. Existing user instance untouched.
 - Packed plugin `@zlzfun/clowder-native-colleagues@0.1.0-alpha.2` installed and enabled through the real Host manager. Native directory displays 松果 and 青禾. The initial dependency-bearing alpha.1 failed runtime materialization; alpha.2 bundles MCP dependencies and passed a fresh extracted-package stdio client check.
+- Browser inspection confirmed one existing composer, a native directory and zero iframes. A normal API SIGTERM/shutdown/restart retained the same plugin instance and automatically restored both directory entries. This verifies plugin lifecycle recovery, not yet post-task conversation recovery.
+- The managed preview stop command terminates the entire process group, including MCP children. Existing Host supervision treats that as a plugin crash and requires explicit re-enable. Forced process-group termination is therefore a known recovery limitation, not presented as automatic restart success.
 - Pending: the clean Host catalog has no local Codex member. The user was asked for explicit permission to create one only in this isolated instance, because their AGENTS.md requires human action for runtime configuration changes. No actual Agent task or post-task restart recovery is claimed yet.
+- Draft source: [Host PR](https://github.com/zlzfun/clowder-bot/pull/1), [plugin PR](https://github.com/zlzfun/clowder-ai-plugins/pull/1). No upstream PR or stable release was published.
 
 ## Deliberate MVP limits
 
