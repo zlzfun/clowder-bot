@@ -1381,6 +1381,9 @@ export interface InvocationParams {
  * - Storing the final response in messageStore
  */
 export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationParams): AsyncIterable<AgentMessage> {
+  // All ingress paths (composer, mentions, queue and retry) converge here.
+  const { authorizeNativeConversation } = await import('../../../../plugin/native-conversations/authority.js');
+  await authorizeNativeConversation(params.catId, params.userId, params.threadId, params.ownerAuthProvenance);
   const originTriggerMessageId = params.a2aTriggerMessageId ?? params.executionCausal?.triggerMessageId;
   const originMessage = originTriggerMessageId ? await deps.messageStore?.getById(originTriggerMessageId) : undefined;
   if (originMessage?.extra?.collectiveAuthorizationInvalid) throw new Error('collective_authority_invalid');
@@ -5596,6 +5599,10 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           return { prompt: effectivePrompt, promptGenerationId: promptGenerationId(effectivePrompt) };
         },
       };
+      // Recheck at the effect boundary after asynchronous preflight and workspace resolution.
+      // No fallback to the process cwd is allowed for a bound native identity.
+      if (catId.startsWith('native-') && !workingDirectory) throw new Error('Native workspace unavailable');
+      await authorizeNativeConversation(catId, userId, threadId, params.ownerAuthProvenance, workingDirectory);
       const serviceIter = (
         usesProviderContinuityPreflight && service.invokeWithContinuityPreflight
           ? service.invokeWithContinuityPreflight(continuityPreflight, options)

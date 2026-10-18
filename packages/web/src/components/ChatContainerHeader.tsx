@@ -7,6 +7,8 @@ import { AppTooltip } from './AppTooltip';
 import { ThreadTitleResetMenu } from './execution-row/ThreadTitleResetMenu';
 import { CatCafeLogo } from './icons/CatCafeLogo';
 import { MessageSearchButton } from './message-search/MessageSearchButton';
+import { NativeConversationIdentity } from './native-conversations/NativeConversationIdentity';
+import { useNativeConversation } from './native-conversations/NativeConversationsProvider';
 import { ConversationViewMenu } from './shell/ConversationViewMenu';
 import { ThreadTasksButton, ThreadWorksButton } from './shell/HeaderCounts';
 import { ShellGlyph } from './shell/ShellIcons';
@@ -50,6 +52,7 @@ export function ChatContainerHeader({
   conversationViewMessages,
   conversationViewQueue,
 }: ChatContainerHeaderProps) {
+  const nativeConversation = useNativeConversation(threadId);
   const isV2 = useShellPresentation() === 'v2';
   if (isV2) {
     return (
@@ -76,7 +79,11 @@ export function ChatContainerHeader({
               </AppTooltip>
             )}
             <div className="flex min-w-0 flex-1 items-center gap-2">
-              <ThreadIndicator threadId={threadId} showProject={false} />
+              {nativeConversation ? (
+                <NativeConversationIdentity threadId={threadId} />
+              ) : (
+                <ThreadIndicator threadId={threadId} showProject={false} />
+              )}
               {/* F322 original-B (new shell only): the title's ⌄ menu holds the normal force-reset; it appears only while something runs. Keyed by thread so a question opened for one thread cannot be confirmed against the next. */}
               <ThreadTitleResetMenu key={threadId} threadId={threadId} />
               {/* F198 Phase C AC-C5: Daemon active indicator */}
@@ -124,15 +131,19 @@ export function ChatContainerHeader({
             />
           </svg>
         </button>
-        <CatCafeLogo className="h-16 w-auto -my-3" />
+        {!nativeConversation && <CatCafeLogo className="h-16 w-auto -my-3" />}
         <div className="flex-1 min-w-0">
-          <h1 className="text-lg font-bold text-cafe-black">Clowder AI</h1>
+          {nativeConversation ? (
+            <NativeConversationIdentity threadId={threadId} />
+          ) : (
+            <h1 className="text-lg font-bold text-cafe-black">Clowder AI</h1>
+          )}
           <div className="flex items-center gap-2 min-w-0">
-            <ThreadIndicator threadId={threadId} />
+            {!nativeConversation && <ThreadIndicator threadId={threadId} />}
             {/* F198 Phase C AC-C5: Daemon active indicator */}
             <DaemonActiveIndicator threadId={threadId} />
             {/* F154 Phase B: Preferred cat pill — desktop only (KD-10) */}
-            <div className="hidden lg:block flex-shrink-0">
+            <div className={`${nativeConversation ? 'hidden' : 'hidden lg:block'} flex-shrink-0`}>
               <ThreadCatPill threadId={threadId} />
             </div>
           </div>

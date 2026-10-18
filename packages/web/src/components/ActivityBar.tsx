@@ -8,6 +8,8 @@ import { AttentionRailButtons } from './attention/AttentionRailButtons';
 import { ConciergeRailToggle } from './concierge/ConciergeRailToggle';
 import { HubIcon } from './hub-icons';
 import { MemoryIcon } from './icons/MemoryIcon';
+import { NativeConversationRail } from './native-conversations/NativeConversationRail';
+import { useNativeConversations } from './native-conversations/NativeConversationsProvider';
 import { SETTINGS_SECTIONS } from './settings/settings-nav-config';
 import { resolveShellNavTarget } from './shell/shell-navigation';
 import { usePresentationRail } from './shell/use-presentation-rail';
@@ -218,6 +220,7 @@ function PresentationRailToggle() {
 }
 
 export function ActivityBar({ className }: ActivityBarProps) {
+  const nativeConversations = useNativeConversations();
   const pathname = usePathname() ?? '/';
   const router = useRouter();
   const { pinned } = usePinnedSections();
@@ -228,9 +231,10 @@ export function ActivityBar({ className }: ActivityBarProps) {
 
   const handleNav = useCallback(
     (path: string) => {
+      nativeConversations?.leaveMode();
       router.push(resolveShellNavTarget(path, pathname));
     },
-    [pathname, router],
+    [pathname, router, nativeConversations],
   );
 
   return (
@@ -240,7 +244,7 @@ export function ActivityBar({ className }: ActivityBarProps) {
     >
       {NAV_ITEMS.map((item) => {
         const Icon = ICON_MAP[item.id];
-        const active = item.match(pathname);
+        const active = item.match(pathname) && !nativeConversations?.activeContribution;
         return (
           <button
             key={item.id}
@@ -260,6 +264,7 @@ export function ActivityBar({ className }: ActivityBarProps) {
           </button>
         );
       })}
+      <NativeConversationRail />
 
       <Suspense>
         <PinnedSections pinned={pinned} onNav={handleNav} />

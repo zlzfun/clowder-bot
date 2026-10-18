@@ -14,6 +14,7 @@ created: 2026-08-28
 updated: 2026-08-29
 canonical_features: [F229]
 code_anchors:
+  - packages/web/src/components/native-conversations/NativeConversationIdentity.tsx
   - packages/web/src/components/thread-chat/ThreadChatRuntimeProvider.tsx
   - packages/web/src/components/thread-chat/ThreadChatSurface.tsx
   - packages/web/src/components/thread-chat/ThreadChatExport.tsx
@@ -63,6 +64,8 @@ M1a–M4 now establish the canonical full/compact path end to end:
 - M5 cross-thread attention / Peek & Reply remains separate and must consume `thread-navigation` truth rather than recreate an unread store below Cat Ball.
 
 ## Contract Invariants
+
+- The Clowder Bot plugin directory opens the existing thread route and supplies bounded identity/empty-state/placeholder chrome. Its provider does not own another socket, transcript, composer, queue or execution path; switching directory mode leaves the mounted native chat runtime intact.
 
 - One mounted `AppShell` owns one chat socket lifecycle.
 - Room membership is the normalized union of mounted consumers' visible thread IDs; duplicate consumers cannot duplicate a join or cause an early leave.

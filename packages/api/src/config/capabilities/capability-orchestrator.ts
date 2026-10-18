@@ -22,6 +22,7 @@ import type {
   McpServerDescriptor,
 } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
+import { nativeExecutionTemplateFor } from '../../domains/plugin/native-conversations/authority.js';
 import { resolveCatCafeSkillsSource } from '../../utils/skill-source.js';
 import { migrateCapabilitiesV1ToV2 } from '../governance/capabilities-migration.js';
 import {
@@ -1610,6 +1611,11 @@ export function isMcpEnabledForCat(
   catId: string,
   options: ResolveServersForCatOptions = {},
 ): boolean {
+  // A derived identity cannot gain tools that its selected execution template lacks.
+  if (catId.startsWith('native-')) {
+    const templateId = nativeExecutionTemplateFor(catId);
+    if (!templateId || !isMcpEnabledForCat(cap, templateId, options)) return false;
+  }
   if (options.accessScope === 'project' && Array.isArray(cap.blockedCats)) {
     return !cap.blockedCats.includes(catId);
   }

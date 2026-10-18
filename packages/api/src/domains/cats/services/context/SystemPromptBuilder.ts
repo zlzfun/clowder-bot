@@ -241,7 +241,7 @@ function pickDisplayNameOrVariantMention(id: string, config: CatConfig): string 
 /** @internal F237 — exported for ContextAssembler bridge */
 export function buildCallableMentions(currentCatId: CatId): CallableMentionsResult {
   const entries: CallableCatEntry[] = Object.entries(getAllConfigs())
-    .filter(([id]) => id !== currentCatId && isCatAvailable(id))
+    .filter(([id]) => id !== currentCatId && !id.startsWith('native-') && isCatAvailable(id))
     .map(([id, config]) => ({ id, config }));
 
   if (entries.length === 0) {
@@ -363,7 +363,9 @@ function ensureMergeGateSourceProvenanceTrigger(content: string): string {
 /** @internal F237 — exported for ContextAssembler bridge */
 export function buildTeammateRoster(currentCatId: CatId): string | null {
   const allConfigs = getAllConfigs();
-  const entries = Object.entries(allConfigs).filter(([id]) => id !== currentCatId && isCatAvailable(id));
+  const entries = Object.entries(allConfigs).filter(
+    ([id]) => id !== currentCatId && !id.startsWith('native-') && isCatAvailable(id),
+  );
   if (entries.length === 0) return null;
 
   const rows: string[] = [];

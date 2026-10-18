@@ -24,6 +24,7 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { catRegistry } from '@cat-cafe/shared';
 import {
   CURRENT_CORPUS_PROFILE_URI,
   CURRENT_RELATIONSHIP_PROFILE_URI,
@@ -267,6 +268,7 @@ async function doCompileL0(
     scriptPath,
     '--cat',
     catId,
+    ...(catId.startsWith('native-') ? ['--native-identity-stdin'] : []),
     ...(projectionContext.projection !== 'owner'
       ? ['--projection', projectionContext.projection]
       : ['--profile-dir', projectionContext.profileDir]),
@@ -274,7 +276,9 @@ async function doCompileL0(
   ];
 
   const stdout = await new Promise<string>((resolvePromise, rejectPromise) => {
-    const child = spawnFn(process.execPath, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const nativeIdentity = catId.startsWith('native-') ? catRegistry.getOrThrow(catId).config : undefined;
+    const child = spawnFn(process.execPath, args, { cwd, stdio: [nativeIdentity ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
+    if (nativeIdentity) child.stdin?.end(JSON.stringify(nativeIdentity));
     let out = '';
     let err = '';
     let settled = false;

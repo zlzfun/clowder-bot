@@ -4,6 +4,9 @@ title: Plugin Framework
 summary: Terminal Plugin Manager plus Host-governed package inventory, repository-local and builtin activation, Broker sessions, supervised execution, grants, resource adapters, Console and Agent management surfaces.
 canonical_features: [F202, F247, F285, F290, F292]
 code_anchors:
+  - packages/api/src/domains/plugin/native-conversations/service.ts
+  - packages/api/src/domains/plugin/native-conversations/composition.ts
+  - packages/api/src/routes/native-conversations.ts
   - packages/api/src/domains/plugin/chatgpt-dot-manifest.ts
   - packages/api/src/domains/cats/services/cloud-bridge/dot/DotConnectionService.ts
   - packages/api/src/domains/cats/services/cloud-bridge/dot/DotConnectionStore.ts
@@ -71,6 +74,10 @@ cited_by:
 ---
 
 # Plugin Framework
+
+## Clowder Bot native conversation validation
+
+This fork accepts the bounded `clowder_native_conversations_v1` data descriptor through the existing supervised MCP contribution. Plugin inventory and live grants remain authoritative. The Host owns local-owner admission and the accepted entity/identity/thread/workspace binding; the plugin owns names, roles and directory content. The binding store contains no messages, queue or provider sessions. See [validation contract](../../../plans/clowder-bot-native-colleague-validation.md).
 
 ## F317 Desktop Consumer
 

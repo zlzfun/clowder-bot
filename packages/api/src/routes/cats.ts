@@ -914,6 +914,11 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
     }
 
     const body = parsed.data;
+    if (body.catId.startsWith('native-'))
+      return reply.code(409).send({
+        code: 'PLUGIN_IDENTITY_RESERVED',
+        error: 'Native conversation identities are managed by their plugin binding',
+      });
     const createViolationFields = builtinCloudIdentityCreateViolationFields(body);
     if (
       body.catId === 'gpt-dot' ||
@@ -1149,6 +1154,11 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
   });
 
   app.patch<{ Params: { id: string } }>('/api/cats/:id', async (request, reply) => {
+    if (request.params.id.startsWith('native-'))
+      return reply.code(409).send({
+        code: 'PLUGIN_IDENTITY_RESERVED',
+        error: 'Native conversation identities are managed by their plugin binding',
+      });
     const operator = resolveHeaderUserId(request);
     if (!operator) {
       reply.status(400);
@@ -1579,6 +1589,11 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
   });
 
   app.delete<{ Params: { id: string } }>('/api/cats/:id', async (request, reply) => {
+    if (request.params.id.startsWith('native-'))
+      return reply.code(409).send({
+        code: 'PLUGIN_IDENTITY_RESERVED',
+        error: 'Native conversation identities are managed by their plugin binding',
+      });
     const operator = resolveHeaderUserId(request);
     if (!operator) {
       reply.status(400);

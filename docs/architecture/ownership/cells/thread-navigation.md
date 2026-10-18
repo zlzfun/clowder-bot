@@ -4,6 +4,8 @@ title: Thread Navigation / Metadata
 summary: Thread labels、pins、favorites、sidebar filters、权威 Sidebar snapshot 与用户面向的 thread 组织语义。
 canonical_features: [F057, F095, F187, F277, F297]
 code_anchors:
+  - packages/web/src/components/native-conversations/NativeConversationsProvider.tsx
+  - packages/web/src/components/native-conversations/NativeConversationDirectory.tsx
   - packages/api/src/routes/labels.ts
   - packages/api/src/routes/threads.ts
   - packages/api/src/domains/cats/services/stores/ports/ThreadStore.ts

@@ -13,6 +13,11 @@ import { ConciergeHost } from './concierge/ConciergeHost';
 import { HomeActionHost } from './concierge/HomeActionHost';
 import { DesktopUpdatePrompt } from './DesktopUpdatePrompt';
 import { ListenModePlayer } from './listen-mode/ListenModePlayer';
+import { NativeConversationDirectory } from './native-conversations/NativeConversationDirectory';
+import {
+  NativeConversationsProvider,
+  useNativeConversations,
+} from './native-conversations/NativeConversationsProvider';
 import { ShellDocumentLanguage } from './shell/ShellDocumentLanguage';
 import { isMemoryRoute } from './shell/shell-navigation';
 import {
@@ -100,6 +105,12 @@ function useShellPresentationFromUrl(pathname: string, shellParam: string | null
 export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname() ?? '/';
   const fallbackThreadId = getThreadIdFromPathname(pathname);
+  // Next route commits need the same re-subscription as the shell's thread route projection.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pathname is the Next navigation signal.
+  const subscribeNativeRoute = useCallback((listener: () => void) => subscribeBrowserThreadRoute(listener), [pathname]);
+  const nativePathname = useSyncExternalStore(subscribeNativeRoute, getBrowserThreadRoutePathname, () => pathname);
+  const nativeThreadId =
+    nativePathname === '/' || nativePathname.startsWith('/thread/') ? getThreadIdFromPathname(nativePathname) : null;
 
   useEffect(() => {
     getPlaybackManager();
@@ -107,7 +118,7 @@ export function AppShell({ children }: AppShellProps) {
   }, []);
 
   return (
-    <>
+    <NativeConversationsProvider routeThreadId={nativeThreadId}>
       <Suspense
         // The fallback must not expose a second interactive route tree. Resolving
         // the shell query replaces this branch, including any embedded iframe.
@@ -125,11 +136,12 @@ export function AppShell({ children }: AppShellProps) {
         <AppShellContent pathname={pathname}>{children}</AppShellContent>
       </Suspense>
       <DesktopUpdatePrompt />
-    </>
+    </NativeConversationsProvider>
   );
 }
 
 function AppShellContent({ children, pathname }: AppShellProps & { pathname: string }) {
+  const nativeConversations = useNativeConversations();
   // Next can commit the address after this render without emitting either browser route event.
   // Resubscribing checks that committed address while keeping custom thread history as the route owner.
   // biome-ignore lint/correctness/useExhaustiveDependencies: pathname is the Next navigation signal that rechecks the browser snapshot
@@ -197,7 +209,8 @@ function AppShellContent({ children, pathname }: AppShellProps & { pathname: str
   }
 
   const routeHidesSidebar = SIDEBAR_HIDDEN_ROUTES.some((r) => pathname.startsWith(r)) && activeDestination === null;
-  const showSidebar = isOpen && isDesktop && !routeHidesSidebar;
+  const showNativeDirectory = nativeConversations?.activeContribution != null;
+  const showSidebar = isOpen && isDesktop && (!routeHidesSidebar || showNativeDirectory);
   const workspaceVisible = isChatRoute && rightPanelMode === 'workspace';
 
   return (
@@ -220,12 +233,16 @@ function AppShellContent({ children, pathname }: AppShellProps & { pathname: str
               aria-hidden={suppressCafeSidebar || undefined}
             >
               <div style={{ width }} className="flex-shrink-0">
-                <ThreadSidebar
-                  onClose={close}
-                  className="w-full"
-                  routeThreadId={routeThreadId}
-                  activeDestination={activeDestination}
-                />
+                {showNativeDirectory ? (
+                  <NativeConversationDirectory onClose={close} />
+                ) : (
+                  <ThreadSidebar
+                    onClose={close}
+                    className="w-full"
+                    routeThreadId={routeThreadId}
+                    activeDestination={activeDestination}
+                  />
+                )}
               </div>
               <ResizeHandle
                 direction="horizontal"
@@ -236,6 +253,18 @@ function AppShellContent({ children, pathname }: AppShellProps & { pathname: str
                 showLine={false}
               />
             </div>
+          )}
+          {showNativeDirectory && isOpen && !isDesktop && (
+            <>
+              <div
+                className="fixed inset-0 z-20 bg-[var(--console-overlay-backdrop)] backdrop-blur-sm"
+                onClick={close}
+                aria-hidden="true"
+              />
+              <div className="fixed inset-y-0 left-[52px] z-30 w-[min(300px,calc(100vw-52px))]">
+                <NativeConversationDirectory onClose={close} />
+              </div>
+            </>
           )}
           <div
             className="flex-1 min-w-0 overflow-y-auto"

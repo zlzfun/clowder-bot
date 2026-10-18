@@ -9,6 +9,8 @@ import { ClapperboardIcon } from '../ActivityBar';
 import { useConciergeRailToggle } from '../concierge/ConciergeRailToggle';
 import { HubIcon } from '../hub-icons';
 import { MeowClubMark } from '../icons/MeowClubMark';
+import { NativeConversationRail } from '../native-conversations/NativeConversationRail';
+import { useNativeConversations } from '../native-conversations/NativeConversationsProvider';
 import { type ResolvedPin, resolvePin } from '../settings/settings-ia';
 import { MailboxButton } from './MailboxButton';
 import { RailButton } from './RailButton';
@@ -31,6 +33,7 @@ function RailSeparator() {
  * Everything here is global and about "me" — the content of a world lives in that world's sidebar.
  */
 export function WorldRail() {
+  const nativeConversations = useNativeConversations();
   const pathname = usePathname() ?? '/';
   const router = useRouter();
   // The one mount of the F246 approval sync for the shell (classic ActivityBar is not rendered alongside).
@@ -39,10 +42,11 @@ export function WorldRail() {
   const captureSettingsOrigin = useSettingsReadingEntry();
   const go = useCallback(
     (path: string) => {
+      nativeConversations?.leaveMode();
       if (isSettingsRoute(path)) captureSettingsOrigin();
       router.push(resolveShellNavTarget(path, pathname));
     },
-    [router, pathname, captureSettingsOrigin],
+    [router, pathname, captureSettingsOrigin, nativeConversations],
   );
 
   const inCafe = pathname === '/' || pathname.startsWith('/thread/');
@@ -56,7 +60,8 @@ export function WorldRail() {
       className="flex h-full w-[52px] flex-none flex-col items-center gap-1.5 px-0 pb-3 pt-2.5"
       style={{ background: 'var(--shell-frame)', borderRight: '1px solid var(--shell-hairline)' }}
     >
-      <CafeWorld selected={inCafe} onOpen={() => go('/')} />
+      <CafeWorld selected={inCafe && !nativeConversations?.activeContribution} onOpen={() => go('/')} />
+      <NativeConversationRail />
       <RailSeparator />
       <CollectiveWorld selected={inCollective} onOpen={() => go('/collective')} />
 

@@ -332,7 +332,7 @@ function buildTeammateRoster(currentCatId) {
   const teammates = filterAvailableTeammates(
     allConfigs,
     currentCatId,
-    (id) => !_isCatAvailable || _isCatAvailable(id, _loadedConfig),
+    (id) => !id.startsWith('native-') && (!_isCatAvailable || _isCatAvailable(id, _loadedConfig)),
   );
   if (teammates.length === 0) return '（无其他可用队友）';
 
@@ -548,6 +548,18 @@ if (isCliEntrypoint(import.meta.url, process.argv[1])) {
     process.exit(2);
   }
   const catId = args[catIdx + 1];
+  if (args.includes('--native-identity-stdin')) {
+    // Trusted Host parent transports its accepted identity without mutating a runtime catalog.
+    const input = readFileSync(0, 'utf8');
+    if (input.length > 65536) throw new Error('Native identity exceeds size limit');
+    const identity = JSON.parse(input);
+    if (!/^native-[a-f0-9]{24}$/.test(catId) || identity.id !== catId || typeof identity.personality !== 'string') {
+      throw new Error('Invalid native identity');
+    }
+    await bootstrapCatRegistry();
+    if (catRegistry.has(catId)) throw new Error('Native identity namespace collision');
+    catRegistry.register(catId, identity);
+  }
   const profileDirIdx = args.indexOf('--profile-dir');
   const profileDir = profileDirIdx >= 0 ? args[profileDirIdx + 1] : undefined;
   const projectionIdx = args.indexOf('--projection');

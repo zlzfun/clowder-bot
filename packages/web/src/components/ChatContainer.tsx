@@ -55,6 +55,7 @@ import { GameIcon } from './icons/GameIcon';
 import { PawIcon } from './icons/PawIcon';
 import { MessageSearchOverlay } from './message-search/MessageSearchOverlay';
 import { useMessageSearchHost } from './message-search/useMessageSearchHost';
+import { useNativeConversation, useNativeConversations } from './native-conversations/NativeConversationsProvider';
 import { NewConversationPage } from './new-conversation/NewConversationPage';
 import { ProjectSetupCard } from './ProjectSetupCard';
 import { RuntimeUpdateRequiredDialog } from './RuntimeUpdateRequiredDialog';
@@ -184,6 +185,8 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
     intentMode,
     targetCats,
   } = useThreadLiveness(threadId);
+  const nativeConversation = useNativeConversation(threadId);
+  const nativeConversations = useNativeConversations();
   const navigateToThread = useCallback((tid: string) => {
     pushThreadRouteWithHistory(tid, typeof window !== 'undefined' ? window : undefined);
   }, []);
@@ -1028,7 +1031,7 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
         <ArtworkLightboxHost />
         {connectionStatus.updateRequired && <RuntimeUpdateRequiredDialog onReload={() => window.location.reload()} />}
         {/* Mobile-only sidebar overlay — desktop sidebar is in AppShell */}
-        {sidebarOpen && !isDesktop && (
+        {sidebarOpen && !isDesktop && !nativeConversations?.activeContribution && (
           <>
             <div
               className="fixed inset-0 bg-[var(--console-overlay-backdrop)] backdrop-blur-sm z-20"
@@ -1122,6 +1125,7 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
             <>
               <ThreadChatSurface
                 threadId={threadId}
+                composerPlaceholder={nativeConversation?.composerPlaceholder}
                 density="full"
                 presentation={workComposerOnlyActive ? 'composer-only' : 'conversation'}
                 onReadingPort={isV2 ? registerShellReadingPort : undefined}
@@ -1147,86 +1151,96 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
                   ) : undefined
                 }
                 emptyState={
-                  <div className="text-center mt-20">
-                    <PawIcon className="w-12 h-12 text-cafe-muted mx-auto mb-4" />
-                    <p className="text-lg text-cafe-secondary mb-1">欢迎来到 Clowder AI!</p>
-                    <p className="text-sm text-cafe-muted" suppressHydrationWarning>
-                      {cats.length > 0
-                        ? '输入 @布偶 召唤布偶猫开始聊天'
-                        : '还没有可用成员，先开始新手教程创建第一只猫猫'}
-                    </p>
-                    {showSetupCard && govStatus && (
-                      <div className="mt-6 text-left">
-                        <ProjectSetupCard
-                          key={threadId}
-                          projectPath={currentProjectPath}
-                          isEmptyDir={govStatus.isEmptyDir}
-                          isGitRepo={govStatus.isGitRepo}
-                          gitAvailable={govStatus.gitAvailable}
-                          agentHookHealth={agentHookHealth.health}
-                          agentHookHealthError={agentHookHealth.error}
-                          agentHookSyncing={agentHookHealth.syncing}
-                          agentHookSynced={agentHookHealth.synced}
-                          agentHookSyncAttempted={agentHookHealth.syncAttempted}
-                          onSyncAgentHooks={agentHookHealth.sync}
-                          onComplete={() => {
-                            setSetupDone(true);
-                            govRefetch();
-                            void agentHookHealth.refresh();
-                          }}
-                        />
-                      </div>
-                    )}
-                    {!showSetupCard &&
-                      currentProjectPath &&
-                      currentProjectPath !== 'default' &&
-                      currentProjectPath !== 'lobby' && (
-                        <div className="mt-4 text-left">
-                          <BootstrapOrchestrator
+                  nativeConversation ? (
+                    <div className="mx-auto mt-16 max-w-lg px-6 text-center">
+                      <h2 className="text-xl font-semibold text-[var(--cafe-text)]">{nativeConversation.name}</h2>
+                      <p className="mt-3 text-sm text-[var(--cafe-text-muted)]">{nativeConversation.description}</p>
+                      <p className="mt-6 break-all text-xs text-[var(--cafe-text-muted)]">
+                        工作目录：{nativeConversation.binding?.workspacePath}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="text-center mt-20">
+                      <PawIcon className="w-12 h-12 text-cafe-muted mx-auto mb-4" />
+                      <p className="text-lg text-cafe-secondary mb-1">欢迎来到 Clowder AI!</p>
+                      <p className="text-sm text-cafe-muted" suppressHydrationWarning>
+                        {cats.length > 0
+                          ? '输入 @布偶 召唤布偶猫开始聊天'
+                          : '还没有可用成员，先开始新手教程创建第一只猫猫'}
+                      </p>
+                      {showSetupCard && govStatus && (
+                        <div className="mt-6 text-left">
+                          <ProjectSetupCard
+                            key={threadId}
                             projectPath={currentProjectPath}
-                            indexState={indexState}
-                            isSnoozed={isSnoozed}
-                            progress={bootstrapProgress}
-                            summary={bootstrapSummary}
-                            durationMs={bootstrapDurationMs}
-                            isNewProject={setupDone}
-                            governanceDone={setupDone}
-                            onStartBootstrap={startBootstrap}
-                            onSnooze={snoozeBootstrap}
-                            onSearchKnowledge={handleSearchKnowledge}
-                            onGoToMemoryHub={handleGoToMemoryHub}
+                            isEmptyDir={govStatus.isEmptyDir}
+                            isGitRepo={govStatus.isGitRepo}
+                            gitAvailable={govStatus.gitAvailable}
+                            agentHookHealth={agentHookHealth.health}
+                            agentHookHealthError={agentHookHealth.error}
+                            agentHookSyncing={agentHookHealth.syncing}
+                            agentHookSynced={agentHookHealth.synced}
+                            agentHookSyncAttempted={agentHookHealth.syncAttempted}
+                            onSyncAgentHooks={agentHookHealth.sync}
+                            onComplete={() => {
+                              setSetupDone(true);
+                              govRefetch();
+                              void agentHookHealth.refresh();
+                            }}
                           />
                         </div>
                       )}
-                    {(() => {
-                      const isCurrentBootcamp = storeThreads.find((thread) => thread.id === threadId)?.bootcampState;
-                      if (isCurrentBootcamp) return null;
-                      if (bootcampCount > 0) {
+                      {!showSetupCard &&
+                        currentProjectPath &&
+                        currentProjectPath !== 'default' &&
+                        currentProjectPath !== 'lobby' && (
+                          <div className="mt-4 text-left">
+                            <BootstrapOrchestrator
+                              projectPath={currentProjectPath}
+                              indexState={indexState}
+                              isSnoozed={isSnoozed}
+                              progress={bootstrapProgress}
+                              summary={bootstrapSummary}
+                              durationMs={bootstrapDurationMs}
+                              isNewProject={setupDone}
+                              governanceDone={setupDone}
+                              onStartBootstrap={startBootstrap}
+                              onSnooze={snoozeBootstrap}
+                              onSearchKnowledge={handleSearchKnowledge}
+                              onGoToMemoryHub={handleGoToMemoryHub}
+                            />
+                          </div>
+                        )}
+                      {(() => {
+                        const isCurrentBootcamp = storeThreads.find((thread) => thread.id === threadId)?.bootcampState;
+                        if (isCurrentBootcamp) return null;
+                        if (bootcampCount > 0) {
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => setShowBootcampList(true)}
+                              className="mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-cafe-accent/20 bg-accent-50 text-cafe-accent hover:bg-accent-100 transition-colors text-sm font-medium"
+                              data-testid="empty-state-bootcamp-list"
+                            >
+                              <BootcampIcon className="w-4 h-4" />
+                              我的训练营（{bootcampCount}）
+                            </button>
+                          );
+                        }
                         return (
                           <button
                             type="button"
                             onClick={() => setShowBootcampList(true)}
                             className="mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-cafe-accent/20 bg-accent-50 text-cafe-accent hover:bg-accent-100 transition-colors text-sm font-medium"
-                            data-testid="empty-state-bootcamp-list"
+                            data-testid="empty-state-bootcamp"
                           >
                             <BootcampIcon className="w-4 h-4" />
-                            我的训练营（{bootcampCount}）
+                            第一次来？开始猫猫训练营
                           </button>
                         );
-                      }
-                      return (
-                        <button
-                          type="button"
-                          onClick={() => setShowBootcampList(true)}
-                          className="mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-cafe-accent/20 bg-accent-50 text-cafe-accent hover:bg-accent-100 transition-colors text-sm font-medium"
-                          data-testid="empty-state-bootcamp"
-                        >
-                          <BootcampIcon className="w-4 h-4" />
-                          第一次来？开始猫猫训练营
-                        </button>
-                      );
-                    })()}
-                  </div>
+                      })()}
+                    </div>
+                  )
                 }
                 footerLead={
                   <>

@@ -2184,6 +2184,10 @@ async function main(): Promise<void> {
             app.log.warn(`[api] Unknown client "${config.clientId}" for cat "${id}". It will not be routable.`);
             continue;
         }
+      if (id.startsWith('native-')) {
+        const { nativeConversationAgentFacade } = await import('./domains/plugin/native-conversations/agent-facade.js');
+        service = nativeConversationAgentFacade(service);
+      }
       agentRegistry.register(id, service);
     }
     await closeStaleAcpPools(acpPoolRegistry, activeAcpProfileIds, {
@@ -5874,6 +5878,52 @@ async function main(): Promise<void> {
       },
     },
   });
+  const { NativeConversationService } = await import('./domains/plugin/native-conversations/service.js');
+  const { nativeConversationPersistence, nativeConversationPluginSource } = await import(
+    './domains/plugin/native-conversations/composition.js'
+  );
+  const { setNativeConversationAuthority } = await import('./domains/plugin/native-conversations/authority.js');
+  const { registerNativeConversationRoutes } = await import('./routes/native-conversations.js');
+  const { resolvePersistentProjectPathDetailed } = await import('./utils/persistent-project-path.js');
+  const nativeConversations = new NativeConversationService({
+    threads: threadStore,
+    storageDurable: storageResult.mode === 'redis',
+    persistence: nativeConversationPersistence(
+      resolve(pluginProjectRoot, '.cat-cafe', 'plugin-host', 'native-conversations.json'),
+    ),
+    source: nativeConversationPluginSource(pluginRuntime.inventoryStore, pluginManagerRuntime.builtinSupervisor),
+    templates: () =>
+      Object.fromEntries(
+        Object.entries(catRegistry.getAllConfigs()).filter(
+          ([id, config]) =>
+            !id.startsWith('native-') &&
+            config.clientId === 'openai' &&
+            ['cli', 'app_server'].includes(config.carrier) &&
+            isCatAvailable(id),
+        ),
+      ),
+    register: async (configs) => {
+      let changed = false;
+      for (const config of configs) {
+        const existing = catRegistry.tryGet(config.id)?.config;
+        if (existing && JSON.stringify(existing) !== JSON.stringify(config))
+          throw new Error(`Native identity collision: ${config.id}`);
+        if (!catRegistry.has(config.id)) {
+          catRegistry.register(config.id, config);
+          changed = true;
+        }
+      }
+      if (changed) await syncAgentRegistry(catRegistry.getAllConfigs());
+    },
+    validateWorkspace: async (path) => {
+      const result = await resolvePersistentProjectPathDetailed(path);
+      if (!result.ok) throw new Error(`Workspace unavailable: ${result.reason}`);
+      return result.path;
+    },
+  });
+  await nativeConversations.restore();
+  setNativeConversationAuthority(nativeConversations);
+  registerNativeConversationRoutes(app, nativeConversations);
   // Released once app.listen resolves. A resumed desktop window's bridge calls
   // app.inject; before Fastify has booted that breaks the remaining app.register
   // calls (AVV_ERR_ROOT_PLG_BOOTED). Other plugins resume immediately.

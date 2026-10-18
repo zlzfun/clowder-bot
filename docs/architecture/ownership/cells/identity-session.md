@@ -4,6 +4,8 @@ title: Identity / Session
 summary: Agent identity、connector session binding、bubble identity、runtime session binding、context continuity、thread access policy 与 user profile 等 subcell 的边界。
 canonical_features: [F032, F088, F136, F171, F183, F211, F231, F262, F291, F296, F299, F320, F322]
 code_anchors:
+  - packages/api/src/domains/plugin/native-conversations/authority.ts
+  - packages/api/src/domains/plugin/native-conversations/agent-facade.ts
   - packages/api/src/domains/cats/services/cloud-bridge/dot/dot-identity.ts
   - cat-config.json
   - packages/api/src/config/cat-config-loader.ts
