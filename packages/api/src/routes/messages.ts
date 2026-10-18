@@ -417,6 +417,11 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
     // Default to 'default' thread for lobby (prevents global broadcast)
     const resolvedThreadId = threadId ?? 'default';
+    // Trigger the existing browser-session refresh before accepting native work.
+    // Compatibility identity must never become a durable, unexecutable queue row.
+    const { isNativeConversationThread } = await import('../domains/plugin/native-conversations/authority.js');
+    if (isNativeConversationThread(resolvedThreadId) && ownerAuthProvenance !== 'strict')
+      return reply.code(401).send({ error: 'Session required for this conversation', code: 'SESSION_REQUIRED' });
     if (!opts.invocationQueue) {
       return reply.code(503).send({ error: 'Message delivery is unavailable', code: 'MESSAGE_DELIVERY_UNAVAILABLE' });
     }

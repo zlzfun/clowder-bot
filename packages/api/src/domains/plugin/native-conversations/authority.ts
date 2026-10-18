@@ -20,3 +20,8 @@ export async function authorizeNativeConversation(
 export function nativeExecutionTemplateFor(catId: string): string | undefined {
   return authority?.executionTemplateFor(catId);
 }
+
+/** Read-only admission hint; execution still performs the full binding authorization. */
+export function isNativeConversationThread(threadId: string): boolean {
+  return authority?.ownsThread(threadId) ?? false;
+}

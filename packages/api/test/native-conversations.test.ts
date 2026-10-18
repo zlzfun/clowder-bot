@@ -125,6 +125,8 @@ test('concurrent open and service restart recover exactly the same binding', asy
   assert.equal(threads.list('owner').length, 1);
   const restarted = new NativeConversationService(options);
   await restarted.restore();
+  assert.equal(restarted.ownsThread(opened[0]!.threadId), true);
+  assert.equal(restarted.ownsThread('ordinary-thread'), false);
   assert.deepEqual(await restarted.open('owner', { pluginId: 'example.partners', entityKey: 'planner' }), opened[0]);
 });
 

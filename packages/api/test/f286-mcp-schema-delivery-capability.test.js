@@ -209,6 +209,27 @@ describe('F286 MCP schema-delivery capability', () => {
     assert.match(result.attestation.ref, /openai--app-server--gpt-5.6-sol--0.149.1--full--/);
   });
 
+  it('allows a blank configured model to inherit the provider default at launch', async () => {
+    const { resolveMcpSchemaDeliveryForProviderLaunch } = await modulePromise;
+    const repoRoot = mkdtempSync(join(tmpdir(), 'f286-default-model-'));
+    for (const modelFamily of ['', '   ']) {
+      const result = await resolveMcpSchemaDeliveryForProviderLaunch({
+        repoRoot,
+        command: 'codex',
+        provider: 'openai',
+        carrier: 'exec_json',
+        modelFamily,
+        profileClass: 'full',
+        profileId: 'full',
+        config: {},
+        hostVersionProbe: () => '0.149.1',
+      });
+      assert.equal(result.requestedMode, 'unknown');
+      assert.equal(result.fallbackReason, 'attestation_unavailable');
+      assert.equal(result.hostVersion, '0.149.1');
+    }
+  });
+
   it('keeps availability independent when the host version cannot be probed', async () => {
     const { resolveMcpSchemaDeliveryForProviderLaunch } = await modulePromise;
     const health = [];

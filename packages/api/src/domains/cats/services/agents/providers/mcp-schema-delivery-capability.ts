@@ -257,7 +257,8 @@ export async function resolveMcpSchemaDeliveryForProviderLaunch(input: {
   const subject = mcpSchemaDeliveryCapabilitySubjectSchema.parse({
     provider: input.provider,
     carrier: input.carrier,
-    modelFamily: input.modelFamily,
+    // OAuth members may intentionally leave the model blank to use the CLI default.
+    modelFamily: input.modelFamily.trim() || 'provider-default',
     hostVersion,
     configDigest: createMcpSchemaDeliveryConfigDigest(input.config),
     profileId: input.profileId,

@@ -70,6 +70,10 @@ export class NativeConversationService {
   private serial: Promise<unknown> = Promise.resolve();
   constructor(private readonly options: NativeConversationOptions) {}
 
+  ownsThread(threadId: string): boolean {
+    return this.bindings.some((binding) => binding.threadId === threadId);
+  }
+
   async restore(): Promise<void> {
     this.bindings = await this.options.persistence.load();
     for (const binding of this.bindings) {
