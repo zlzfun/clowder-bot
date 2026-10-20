@@ -20,10 +20,10 @@ function ensureValidMacInstallLocation({ app, dialog }) {
     buttons: ['OK'],
     defaultId: 0,
     cancelId: 0,
-    title: 'Clowder AI',
-    message: 'Clowder AI must be installed before it can open',
+    title: 'Clowder Bot',
+    message: 'Clowder Bot must be installed before it can open',
     detail:
-      'Running directly from the install disk image is not supported. Drag Clowder AI.app to the Applications folder, then open it from Applications.',
+      'Running directly from the install disk image is not supported. Drag Clowder Bot.app to the Applications folder, then open it from Applications.',
   });
 
   app.quit();

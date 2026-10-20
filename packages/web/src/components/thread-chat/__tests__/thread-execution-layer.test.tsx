@@ -3,9 +3,13 @@
  * "待处理" queue panel; the new shell shows the one execution row instead. The shell switch is the one the header and the
  * messages already use.
  */
+
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
+import { useChatStore } from '@/stores/chatStore';
+import { ConversationAppearance } from '../../bot/ConversationAppearance';
 import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '../../shell/shell-presentation';
 
 vi.mock('../../execution-row/ExecutionRow', () => ({
@@ -45,6 +49,54 @@ describe('ThreadExecutionLayer', () => {
   });
 
   const ids = () => [...container.querySelectorAll('[data-testid]')].map((el) => el.getAttribute('data-testid'));
+
+  it('messenger retains a collapsed canonical-only execution after recovery and hides it on another colleague', () => {
+    useChatStore.setState({
+      currentThreadId: 't1',
+      hasActiveInvocation: false,
+      activeInvocations: {},
+      catInvocations: {},
+      catStatuses: {},
+      queue: [],
+      threadStates: {},
+    });
+    useActiveExecutionStore.setState({
+      executionsByKey: {
+        recovered: {
+          executionId: 'recovered',
+          threadId: 't1',
+          projectPath: '/work',
+          catId: 'opus',
+          kind: 'live_invocation',
+          startedAt: 1,
+          cancelability: {
+            state: 'cancelable',
+            target: { kind: 'live_invocation', threadId: 't1', catId: 'opus', executionId: 'recovered' },
+          },
+        },
+      },
+    });
+    act(() =>
+      root.render(
+        <ConversationAppearance.Provider value="messenger">
+          <ThreadExecutionLayer threadId="t1" />
+        </ConversationAppearance.Provider>,
+      ),
+    );
+    expect(container.querySelector('details')).not.toBeNull();
+    expect(container.querySelector('details')?.open).toBe(false);
+    expect(container.querySelector('summary')?.textContent).toContain('正在处理');
+    expect(ids()).toContain('old-execution-bar');
+    act(() =>
+      root.render(
+        <ConversationAppearance.Provider value="messenger">
+          <ThreadExecutionLayer threadId="t2" />
+        </ConversationAppearance.Provider>,
+      ),
+    );
+    expect(container.querySelector('details')).toBeNull();
+    useActiveExecutionStore.getState().reset();
+  });
 
   it('classic (and the default): the old execution bar then the queue panel, in that order, and no row', () => {
     act(() => root.render(<ThreadExecutionLayer threadId="t1" />));

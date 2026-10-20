@@ -14,6 +14,7 @@ import type { ChatMessage, QueueEntry } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { computeCliDiagnosticsDedup } from '@/utils/cli-diagnostics-dedup';
 import { computeScrollRecomputeSignal } from '@/utils/scrollRecomputeSignal';
+import { useMessengerAppearance } from '../bot/ConversationAppearance';
 import { ChatInput } from '../ChatInput';
 import { ChatMessageRow } from '../ChatMessageRow';
 import { ConnectionStatusBar } from '../ConnectionStatusBar';
@@ -132,6 +133,7 @@ export function ThreadChatSurface({
   conversationViewQueue = [],
 }: ThreadChatSurfaceProps) {
   const artworkLightbox = useArtworkLightboxScope();
+  const messenger = useMessengerAppearance();
   const companion = useCompanionConversation(threadId);
   // The composer is told it is hosted with the one execution row only in the new shell (see ChatInput `presentation`).
   const composerPresentation = useShellPresentation();
@@ -246,7 +248,7 @@ export function ThreadChatSurface({
         backgroundMountDelayMs={mountPolicy.backgroundMountDelayMs}
         sendContext={interactiveSendContext}
         confirmations={messageConfirmations?.get(message.id)}
-        showCapabilityTip={message.id === lifecycleTipMessageId}
+        showCapabilityTip={!messenger && message.id === lifecycleTipMessageId}
         capabilityTipContexts={capabilityTipContexts}
       />
     );
@@ -330,7 +332,7 @@ export function ThreadChatSurface({
                 }))}
               />
             ) : null}
-            {!hasMore && messages.length > 0 && (
+            {!messenger && !hasMore && messages.length > 0 && (
               <div className="py-3 text-center text-xs text-cafe-muted">没有更多消息了</div>
             )}
             <ReplyRecallRuntimeProvider enabled={composerPresentation === 'v2'} threadId={threadId} messages={messages}>
@@ -345,30 +347,32 @@ export function ThreadChatSurface({
             <div ref={messagesEndRef} />
           </div>
         </main>
-        <ThreadChatHistoryNavigation
-          visible={!composerOnly}
-          bottomProps={{
-            scrollContainerRef,
-            messagesEndRef,
-            onJumpToLatest: jumpToLatest,
-            recomputeSignal: computeScrollRecomputeSignal(
-              threadId,
-              visibleMessages,
-              uiThinkingExpandedByDefault ? 1 : 0,
-            ),
-            observerKey: `${threadId}:${density}:${conversationViewKey}`,
-          }}
-          navigatorProps={{
-            messages: visibleMessages,
-            scrollContainerRef,
-            onJumpToMessage: jumpToMessage,
-            beginUserScroll,
-            compact,
-            hasMore,
-            observerKey: `${threadId}:${density}:${conversationViewKey}`,
-            onTrackReadyChange: setPianoReady,
-          }}
-        />
+        {!messenger && (
+          <ThreadChatHistoryNavigation
+            visible={!composerOnly}
+            bottomProps={{
+              scrollContainerRef,
+              messagesEndRef,
+              onJumpToLatest: jumpToLatest,
+              recomputeSignal: computeScrollRecomputeSignal(
+                threadId,
+                visibleMessages,
+                uiThinkingExpandedByDefault ? 1 : 0,
+              ),
+              observerKey: `${threadId}:${density}:${conversationViewKey}`,
+            }}
+            navigatorProps={{
+              messages: visibleMessages,
+              scrollContainerRef,
+              onJumpToMessage: jumpToMessage,
+              beginUserScroll,
+              compact,
+              hasMore,
+              observerKey: `${threadId}:${density}:${conversationViewKey}`,
+              onTrackReadyChange: setPianoReady,
+            }}
+          />
+        )}
       </div>
 
       <ThreadComposerHost threadId={threadId}>

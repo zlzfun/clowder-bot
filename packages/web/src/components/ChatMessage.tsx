@@ -26,6 +26,7 @@ import {
   doesAssistantMessageRenderBubble,
   projectEmptyResponseLifecycleNotice,
 } from './assistant-message-renderability';
+import { useMessengerAppearance } from './bot/ConversationAppearance';
 import { CapabilityTipStrip } from './CapabilityTipStrip';
 import { CatAvatar } from './CatAvatar';
 import { CatNameplate } from './CatNameplate';
@@ -207,11 +208,17 @@ function ChatMessageContent({
   // The Café 1.6 cat reply (nameplate, no outer bubble) is a presentation of the same message, switched by the one shell
   // switch. Read it with the other hooks, before any early return.
   const shellPresentation = useShellPresentation();
+  const messenger = useMessengerAppearance();
   const replyRecall = useReplyRecallProjection(message.id);
   const coCreator = useCoCreatorConfig();
   const currentThreadId = useChatStore((s) => s.currentThreadId);
   const renderThreadId = threadId ?? currentThreadId;
-  const replyLayersPresentation = { shellPresentation, compact, getCatById, currentThreadId: renderThreadId };
+  const replyLayersPresentation = {
+    shellPresentation: messenger ? ('v2' as const) : shellPresentation,
+    compact,
+    getCatById,
+    currentThreadId: renderThreadId,
+  };
   const nativeReplyOutput = useReplyOutput(
     message,
     renderThreadId,
@@ -1044,7 +1051,7 @@ function ChatMessageContent({
   return (
     <MessageBubble
       messageId={message.id}
-      presentation={showsNameplate || isCrossThreadLetter ? 'nameplate' : 'bubble'}
+      presentation={!messenger && (showsNameplate || isCrossThreadLetter) ? 'nameplate' : 'bubble'}
       railColor={showsNameplate && !isCrossThreadLetter ? catColorVar(message.catId, 'primary') : undefined}
       avatar={
         companionIdentity ? (
@@ -1058,11 +1065,19 @@ function ChatMessageContent({
                 ? 'streaming'
                 : undefined
             }
-            onClick={onEditCat ? () => onEditCat(catData.id) : undefined}
+            onClick={!messenger && onEditCat ? () => onEditCat(catData.id) : undefined}
           />
         ) : null
       }
-      header={catHeader}
+      header={
+        messenger ? (
+          <span className="text-xs font-medium text-cafe-muted">
+            {catData?.displayName ?? catData?.name ?? message.catId}
+          </span>
+        ) : (
+          catHeader
+        )
+      }
       maxWidth={isCrossThreadLetter ? 'w-full max-w-full' : compact ? 'max-w-[86%]' : undefined}
       /* F056: always add cat-persona-derived so nested ThinkingContent/CliOutputBlock
        * have valid --cat-msg-{inset,inset-text,...} tokens even when catData is
@@ -1073,17 +1088,19 @@ function ChatMessageContent({
       }
       bubbleRadius={catStyle ? catStyle.radius : 'rounded-2xl'}
       bubbleClassName={
-        isCrossThreadLetter
-          ? 'pl-2'
-          : compact
-            ? `w-fit max-w-full border border-[var(--conn-emerald-bubble-border)] ${catStyle?.font ?? ''}`
-            : showsNameplate
-              ? /* No breed voice: DESIGN.md keeps mono for machine output, and the reply is plain working text.
-                 * `pl-2` is the only inset: it lines the text (and the cards under it) up with the plate's avatar. */
-                'pl-2'
-              : catStyle
-                ? (catStyle.font ?? '')
-                : 'bg-cafe-surface'
+        messenger
+          ? 'bot-reply'
+          : isCrossThreadLetter
+            ? 'pl-2'
+            : compact
+              ? `w-fit max-w-full border border-[var(--conn-emerald-bubble-border)] ${catStyle?.font ?? ''}`
+              : showsNameplate
+                ? /* No breed voice: DESIGN.md keeps mono for machine output, and the reply is plain working text.
+                   * `pl-2` is the only inset: it lines the text (and the cards under it) up with the plate's avatar. */
+                  'pl-2'
+                : catStyle
+                  ? (catStyle.font ?? '')
+                  : 'bg-cafe-surface'
       }
       bubbleStyle={
         isCrossThreadLetter
@@ -1171,7 +1188,9 @@ function ChatMessageContent({
           status={cliStatus}
           thinkingMode={currentThreadThinkingMode}
           defaultExpanded={
-            bubbleRestorePending ? false : resolveBubbleExpanded(currentThreadBubbleCli, globalBubbleDefaults.cliOutput)
+            messenger || bubbleRestorePending
+              ? false
+              : resolveBubbleExpanded(currentThreadBubbleCli, globalBubbleDefaults.cliOutput)
           }
           breedColor={catData?.color.primary}
           disclosureKey={cliDisclosureKey}
@@ -1211,7 +1230,9 @@ function ChatMessageContent({
           threadId={renderThreadId}
           disclosureKey={cliDisclosureKey}
           defaultExpanded={
-            bubbleRestorePending ? false : resolveBubbleExpanded(currentThreadBubbleCli, globalBubbleDefaults.cliOutput)
+            messenger || bubbleRestorePending
+              ? false
+              : resolveBubbleExpanded(currentThreadBubbleCli, globalBubbleDefaults.cliOutput)
           }
           workingText={!isStreamOrigin && mergedCliStdout?.trim() ? mergedCliStdout : undefined}
           recall={replyRecall}

@@ -1,0 +1,107 @@
+Window: "Clowder Bot", App: Clowder Bot.
+0 标准窗口 Clowder Bot, Secondary Actions: Raise
+	1 HTML 内容 Clowder Bot, URL: localhost:5194/thread/thread_owned_29a18c0c4a6cd623c181d812ce069c23197a4482
+		2 文本 Clowder Bot
+		3 container 同事目录
+			4 标题 同事, Value: 2
+				5 文本 同事
+			6 container
+				7 按钮 Description: 松果, Help: 实施伙伴 · 把想法拆成步骤，落成可用的文件。
+					8 文本 松果
+					9 文本 实施伙伴 · 把想法拆成步骤，落成可用的文件。
+					10 文本 可接收消息
+				11 按钮 Description: 青禾, Help: 研究伙伴 · 读材料、查证据，把发现写清楚。
+					12 文本 青禾
+					13 文本 研究伙伴 · 读材料、查证据，把发现写清楚。
+					14 文本 可接收消息
+		15 按钮 连接与插件
+		16 container 同事聊天
+			17 container
+				18 标题 青禾, Value: 1
+					19 文本 青禾
+				20 文本 研究伙伴 · 读材料、查证据，把发现写清楚。
+				21 文本 workspace
+			22 container
+				23 container 对话内容
+					24 container
+						25 工具栏 消息操作
+							26 按钮 Description: 复制消息 ID: 0001792462983554-000003-79672b7b, Help: 0001792462983554-000003-79672b7b
+							27 按钮 引用回复
+							28 按钮 多选消息
+							29 按钮 创建分支
+							30 按钮 删除
+						31 text 10/20 10:23 co-creator 青禾，请独立读取工作目录中的 tasks.csv、summary.py 和 summary.json，自己复算各状态的记录数与工时，检查脚本和输出是否一致，把结论与核验依据写入 review.md。只新增 review.md，不改三个输入文件，不访问目录外的任务文件。最后简短回复核验结论和报告名。本对话记忆词「青叶-1020」，只记在对话中，不写文件。
+						32 内容列表 消息收件进度
+							33 container 已投递 青禾 · 10/20 10:23:03
+								34 未加标签的图片 青禾
+								35 text 青禾 收到，已回复
+								36 按钮 看青禾的回复
+						37 按钮 编辑 co-creator
+							38 图像 co-creator
+					39 container
+						40 未加标签的图片 青禾
+						41 text 青禾 我会读取这三个输入文件，独立复算各状态的记录数与工时，再核对脚本逻辑和现有输出；只新增
+						42 文本 review.md
+						43 text 。 独立复算得到 7 条记录、27 小时，各状态均与
+						44 文本 summary.json
+						45 text  一致。实际执行脚本时，我将写入拦截到内存，生成内容也与现有 JSON 逐字节一致；接下来把明细和核验方法写入报告。 核验一致：done 2 条／5 小时，doing 2 条／9 小时，todo 3 条／13 小时，共 7 条／27 小时。脚本生成内容与现有输出完全一致。 已新增
+						46 按钮 review.md, Help: 在工作区中打开 /Users/zhuliuzi/Library/Application%20Support/Clowder%20Bot/workspace/review.md
+						47 text ，三个输入文件未改动。 [青禾/GPT-6🐾] [青禾/🐾]
+						48 按钮 展开执行记录
+						49 按钮 打开这一轮的轨迹
+						50 工具栏 消息操作
+							51 按钮 播放语音
+							52 按钮 Description: 复制消息 ID: 0001792462983575-000004-4a1d0083, Help: 0001792462983575-000004-4a1d0083
+							53 按钮 引用回复
+							54 按钮 多选消息
+							55 按钮 创建分支
+							56 按钮 删除
+							57 弹出式按钮 更多消息操作
+					58 container
+						59 工具栏 消息操作
+							60 按钮 Description: 复制消息 ID: 0001792463138556-000000-e69ce952, Help: 0001792463138556-000000-e69ce952
+							61 按钮 引用回复
+							62 按钮 多选消息
+							63 按钮 创建分支
+							64 按钮 删除
+						65 text 10/20 10:25 co-creator 刚才已完全退出并重新打开客户端。请只根据我们之前的对话，告诉我你的名字、我让你记住的记忆词，以及你交付的文件名。不要读取文件，不要重复执行任务，用一句话回复。
+						66 内容列表 消息收件进度
+							67 container 已投递 青禾 · 10/20 10:25:38
+								68 未加标签的图片 青禾
+								69 text 青禾 收到，已回复
+								70 按钮 看青禾的回复
+						71 按钮 编辑 co-creator
+							72 图像 co-creator
+					73 container
+						74 未加标签的图片 青禾
+						75 text 青禾 我叫青禾，你让我记住的记忆词是「青叶-1020」，我交付的文件名是
+						76 文本 review.md
+						77 text 。[青禾/GPT-6🐾] [青禾/🐾]
+						78 按钮 展开执行记录
+						79 按钮 打开这一轮的轨迹
+						80 工具栏 消息操作
+							81 按钮 播放语音
+							82 按钮 Description: 复制消息 ID: 0001792463138689-000001-99790d02, Help: 0001792463138689-000001-99790d02
+							83 按钮 引用回复
+							84 按钮 多选消息
+							85 按钮 创建分支
+							86 按钮 删除
+							87 弹出式按钮 更多消息操作
+				88 container
+					89 按钮 Description: 添加, Help: 添加上下文、上传或打开更多模式
+					90 文本输入区 (settable) Description: 消息输入框, Placeholder: 给青禾发消息…
+					91 按钮 Description: Start voice input (⌥V), Help: 语音输入 (⌥V)
+						92 图像
+	93 关闭按钮
+	94 全屏幕按钮 Help: 此按钮也可以执行缩放窗口的操作, Secondary Actions: 缩放窗口
+	95 最小化按钮
+96 menu bar
+	97 Clowder Bot
+	98 编辑
+	99 窗口
+
+Selected text: ```
+￼
+```
+
+Note: Pay special attention to the content selected by the user. If the user asks a question or refers to the content they are looking at on-screen, they might be referring to the selected content (but they might be referring to something else that's visible, too).

@@ -90,6 +90,17 @@ describe('production ChatMessage consumes proven ordinary-native output', () => 
     await act(async () => harness.render(message));
   }
 
+  it('messenger shows the canonical answer in a bubble with execution collapsed without changing the workspace preference', async () => {
+    await act(async () => harness.render(reply(), true));
+    expect(harness.q('message-bubble')?.className).toContain('bot-reply');
+    expect(harness.q('message-bubble')?.textContent).toContain('真正回答。');
+    expect(harness.q('message-bubble')?.textContent).not.toContain('查看前文');
+    expect(harness.q('reply-record')).toBeNull();
+    harness.click('reply-record-toggle');
+    expect(harness.q('reply-record')?.textContent).toContain('查看前文');
+    await render(reply());
+    expect(harness.q('reply-layers')).toBeNull();
+  });
   it('moves only proven process text, keeps Markdown and the typed signature in the visible answer', async () => {
     harness.enableV2();
     const message = reply();

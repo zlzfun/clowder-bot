@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# build-mac.sh — Produces macOS DMG installers for Clowder AI.
+# build-mac.sh — Produces macOS DMG installers for Clowder Bot.
 #
 # Mirrors desktop/scripts/build-desktop.ps1 for macOS. Outputs two DMGs
 # (arm64 + x64) under dist/:
-#   ClowderAI-0.10.1-arm64.dmg
-#   ClowderAI-0.10.1-x64.dmg
+#   ClowderBot-0.10.1-arm64.dmg
+#   ClowderBot-0.10.1-x64.dmg
 #
 # Prerequisites on the build machine:
 #   - macOS 13+ (Xcode Command Line Tools: xcode-select --install)
@@ -28,6 +28,8 @@
 set -euo pipefail
 
 # ─── Args ───────────────────────────────────────────────────────────────
+APP_ONLY=0
+export CLOWDER_PRODUCT=bot API_SERVER_PORT=3194 FRONTEND_PORT=5194 NEXT_PUBLIC_API_URL=http://localhost:3194
 SKIP_WEB=0
 SKIP_DEPLOY=0
 SKIP_REDIS=0
@@ -35,6 +37,7 @@ SKIP_NODE=0
 ARCHS=("arm64" "x64")
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --app-only)    APP_ONLY=1; shift ;;
     --skip-web)    SKIP_WEB=1; shift ;;
     --skip-deploy) SKIP_DEPLOY=1; shift ;;
     --skip-redis)  SKIP_REDIS=1; shift ;;
@@ -258,7 +261,7 @@ for arch in "${ARCHS[@]}"; do
     x64) app_dir="${DESKTOP_DIR}/dist/mac" ;;
     *) continue ;;
   esac
-  app_bundle="${app_dir}/Clowder AI.app"
+  app_bundle="${app_dir}/Clowder Bot.app"
   if [[ -d "$app_bundle" ]]; then
     echo "  Ad-hoc signing ${arch} bundle ..."
     codesign -s - --deep --force "$app_bundle" || die "codesign ${arch} failed"
@@ -269,12 +272,17 @@ for arch in "${ARCHS[@]}"; do
   fi
 done
 
+if [[ $APP_ONLY -eq 1 ]]; then
+  ok "Clowder Bot.app is ready under desktop/dist/"
+  exit 0
+fi
+
 # Create DMGs from .app bundles using hdiutil (handles large bundles reliably).
 # Each DMG contains the .app plus an /Applications symlink, with Finder window
 # layout configured to visually guide users to drag the app icon onto the
 # Applications shortcut. Without this layout, users frequently double-click
 # the app inside the mounted DMG, which holds the volume open (Redis/API/Web
-# subprocesses anchor cwd + module loading to /Volumes/Clowder AI/...) and
+# subprocesses anchor cwd + module loading to /Volumes/Clowder Bot/...) and
 # prevents ejection. main.js has a runtime guard for this case, but a clear
 # install UI prevents the user from ever hitting that error path.
 mkdir -p "$DIST_DIR"
@@ -346,13 +354,13 @@ PYTHON
 # DMG opens to a 540x380 window with the app icon on the left and the
 # Applications symlink on the right, both at icon size 96, with a green arrow
 # background pointing from the app to Applications. macOS persists this view in
-# /Volumes/Clowder AI/.DS_Store, which hdiutil bakes into the final image when
+# /Volumes/Clowder Bot/.DS_Store, which hdiutil bakes into the final image when
 # we re-convert it to UDZO.
 # Configure the Finder icon layout for the staging DMG.
 #
 # Takes a POSIX path to the mounted staging volume (NOT a volume name), so the
 # layout always targets the disk we just attached — even when an unrelated DMG
-# with the same volume name (e.g. another "Clowder AI" image left over from a
+# with the same volume name (e.g. another "Clowder Bot" image left over from a
 # parallel build or a tester install) is already mounted on the build machine.
 # (clowder-ai#1004 hardening point 2.)
 configure_dmg_layout() {
@@ -370,7 +378,7 @@ tell application "Finder"
     set arrangement of viewOptions to not arranged
     set icon size of viewOptions to 96
     set background picture of viewOptions to file ".background:install-arrow.png"
-    set position of item "Clowder AI.app" of container window to {140, 190}
+    set position of item "Clowder Bot.app" of container window to {140, 190}
     set position of item "Applications" of container window to {400, 190}
     update without registering applications
     delay 1
@@ -386,14 +394,14 @@ for arch in "${ARCHS[@]}"; do
     x64) app_dir="${DESKTOP_DIR}/dist/mac" ;;
     *) die "Unsupported macOS arch: ${arch}" ;;
   esac
-  dmg_name="ClowderAI-${VERSION}-${arch}.dmg"
+  dmg_name="ClowderBot-${VERSION}-${arch}.dmg"
   dmg_out="${DIST_DIR}/${dmg_name}"
   if [[ ! -d "$app_dir" ]]; then
     die "Expected app bundle directory not found for ${arch}: ${app_dir}"
   fi
   # Stage .app + /Applications symlink in a temp directory for the DMG.
   dmg_staging="$(mktemp -d)"
-  cp -R "${app_dir}/Clowder AI.app" "$dmg_staging/"
+  cp -R "${app_dir}/Clowder Bot.app" "$dmg_staging/"
   ln -s /Applications "$dmg_staging/Applications"
   mkdir -p "$dmg_staging/.background"
   create_dmg_background "$dmg_staging/.background/install-arrow.png"
@@ -404,7 +412,7 @@ for arch in "${ARCHS[@]}"; do
   #   2. Convert the writable image to compressed UDZO for distribution.
   rw_dmg="$(mktemp -u).dmg"
   echo "  Creating writable staging DMG for ${arch} ..."
-  hdiutil create -volname "Clowder AI" -srcfolder "$dmg_staging" -ov \
+  hdiutil create -volname "Clowder Bot" -srcfolder "$dmg_staging" -ov \
     -fs HFS+ -format UDRW "$rw_dmg" \
     || die "hdiutil create (writable) failed for ${arch}"
   rm -rf "$dmg_staging"
@@ -458,7 +466,7 @@ done
 echo ""
 echo "  ========================================"
 echo "  Installer(s) ready!"
-for dmg in "${DIST_DIR}"/ClowderAI-*-*.dmg; do
+for dmg in "${DIST_DIR}"/ClowderBot-*-*.dmg; do
   [[ -f "$dmg" ]] || continue
   size_mb="$(stat -f "%z" "$dmg" 2>/dev/null | awk '{printf "%.2f", $1/1024/1024}')"
   echo "  $(basename "$dmg")  (${size_mb} MB)"

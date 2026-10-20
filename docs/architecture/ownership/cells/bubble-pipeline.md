@@ -104,6 +104,8 @@ F322 J3 keeps a conversation decision's exact `InteractiveBlock` inside that ord
 
 ## Use This When
 
+- Clowder Bot's messenger appearance reads the existing `outputLayout` reply projection and renders final text directly in the canonical message bubble. Tool/CLI evidence remains a disclosure on that same message. It does not copy replies into another transcript or infer final answers from arbitrary stdout; the workspace appearance remains unchanged.
+
 - Adding or changing provider-neutral semantic events, bubble identity, placeholder upgrade, hydration, or
   replay behavior.
 - Touching `useAgentMessages`, `bubble-reducer`, `chatStore`, `useSocket`, IndexedDB hydration, or

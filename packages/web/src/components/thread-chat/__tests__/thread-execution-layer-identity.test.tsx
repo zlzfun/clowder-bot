@@ -9,6 +9,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { useChatStore } from '@/stores/chatStore';
+import { ConversationAppearance } from '../../bot/ConversationAppearance';
 import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '../../shell/shell-presentation';
 
 const mocks = vi.hoisted(() => ({ apiFetch: vi.fn() }));
@@ -42,7 +43,10 @@ function run(threadId: string): ActiveExecutionProjection {
   };
 }
 
-describe('ThreadExecutionLayer (v2): pending confirmations are scoped to their thread', () => {
+describe.each([
+  'v2',
+  'messenger',
+] as const)('ThreadExecutionLayer (%s): pending confirmations are scoped to their thread', (appearance) => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -89,7 +93,14 @@ describe('ThreadExecutionLayer (v2): pending confirmations are scoped to their t
 
   const $ = (testId: string) => container.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
   const click = (el: Element | null) => act(async () => (el as HTMLElement | null)?.click());
-  const render = (threadId: string) => act(async () => root.render(<ThreadExecutionLayer threadId={threadId} />));
+  const render = (threadId: string) =>
+    act(async () =>
+      root.render(
+        <ConversationAppearance.Provider value={appearance === 'messenger' ? 'messenger' : 'workspace'}>
+          <ThreadExecutionLayer threadId={threadId} />
+        </ConversationAppearance.Provider>,
+      ),
+    );
   const dialog = () => document.querySelector('[role="dialog"]');
   const confirm = () =>
     Array.from(document.querySelectorAll('[role="dialog"] button')).find((b) => b.textContent?.trim() === '强制重置');
@@ -97,7 +108,7 @@ describe('ThreadExecutionLayer (v2): pending confirmations are scoped to their t
 
   it('control: the question opened on A and confirmed on A resets A', async () => {
     await render(A);
-    await click($('execution-row-force-reset'));
+    await click($(appearance === 'messenger' ? 'force-reset-entry' : 'execution-row-force-reset'));
     expect(dialog()).not.toBeNull();
     await click(confirm() ?? null);
     expect(resets().map((c) => c[0])).toEqual([`/api/threads/${A}/force-reset`]);
@@ -105,10 +116,10 @@ describe('ThreadExecutionLayer (v2): pending confirmations are scoped to their t
 
   it('the question opened on A is dropped when the footer moves to B: nothing to confirm, no request to B', async () => {
     await render(A);
-    await click($('execution-row-force-reset'));
+    await click($(appearance === 'messenger' ? 'force-reset-entry' : 'execution-row-force-reset'));
     expect(dialog()).not.toBeNull();
     await render(B);
-    expect($('execution-row')).not.toBeNull();
+    expect(appearance === 'messenger' ? container.querySelector('details') : $('execution-row')).not.toBeNull();
     expect(dialog()).toBeNull();
     await click(confirm() ?? null);
     expect(resets()).toEqual([]);

@@ -9,6 +9,7 @@ import { CallbackAuthSnapshotMount } from '@/stores/callbackAuthStore';
 import { useChatStore } from '@/stores/chatStore';
 import { initSidebarWidth, useSidebarStore } from '@/stores/sidebarStore';
 import { ActivityBar } from './ActivityBar';
+import { BotShell } from './bot/BotShell';
 import { ConciergeHost } from './concierge/ConciergeHost';
 import { HomeActionHost } from './concierge/HomeActionHost';
 import { DesktopUpdatePrompt } from './DesktopUpdatePrompt';
@@ -55,6 +56,7 @@ const SIDEBAR_HIDDEN_ROUTES = [
 ];
 
 interface AppShellProps {
+  product?: string;
   children: React.ReactNode;
 }
 
@@ -102,7 +104,7 @@ function useShellPresentationFromUrl(pathname: string, shellParam: string | null
   return presentation;
 }
 
-export function AppShell({ children }: AppShellProps) {
+export function AppShell({ children, product }: AppShellProps) {
   const pathname = usePathname() ?? '/';
   const fallbackThreadId = getThreadIdFromPathname(pathname);
   // Next route commits need the same re-subscription as the shell's thread route projection.
@@ -116,6 +118,13 @@ export function AppShell({ children }: AppShellProps) {
     getPlaybackManager();
     return destroyPlaybackRuntime;
   }, []);
+
+  if (product === 'bot')
+    return (
+      <NativeConversationsProvider routeThreadId={nativeThreadId}>
+        <BotShell threadId={nativeThreadId} />
+      </NativeConversationsProvider>
+    );
 
   return (
     <NativeConversationsProvider routeThreadId={nativeThreadId}>

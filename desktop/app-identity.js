@@ -1,8 +1,8 @@
-// Runtime application identity.
-//
-// electron-builder consumes desktop/package.json's `build` block while
-// packaging and does not preserve that build-only metadata for the running
-// application. Keep the Windows process identity in packaged code instead.
-const DESKTOP_APP_ID = 'ai.clowderai.desktop';
-
-module.exports = { DESKTOP_APP_ID };
+// Runtime identity must survive electron-builder removing build metadata.
+module.exports = {
+  DESKTOP_APP_ID: 'ai.clowderbot.desktop',
+  PRODUCT_NAME: 'Clowder Bot',
+  FRONTEND_PORT: 5194,
+  API_PORT: 3194,
+  REDIS_PORT: 6306,
+};

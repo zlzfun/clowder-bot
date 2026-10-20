@@ -1,7 +1,7 @@
 // ServiceManager — spawns and monitors Redis, API, and Web processes.
 // Used by the Electron main process to manage backend services.
 
-const { spawn, execSync } = require('node:child_process');
+const { spawn, execSync, execFileSync } = require('node:child_process');
 const path = require('node:path');
 const net = require('node:net');
 const http = require('node:http');
@@ -25,12 +25,7 @@ const ARCH_SEG = process.arch === 'arm64' ? 'arm64' : 'x64';
 // Reads brand name from electron-builder config — single source of truth
 // shared with main.js (which imports USER_DATA_DIR from this module).
 function resolveUserDataDir() {
-  let brandName;
-  try {
-    brandName = require('./package.json').build?.productName || 'Clowder AI';
-  } catch {
-    brandName = 'Clowder AI';
-  }
+  const brandName = require('./app-identity').PRODUCT_NAME;
   const base = IS_MAC
     ? path.join(process.env.HOME || os.homedir(), 'Library', 'Application Support')
     : process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local');
@@ -91,10 +86,14 @@ function resolveNode(projectRoot) {
 }
 
 class ServiceManager {
-  constructor(projectRoot, { frontendPort, apiPort, onStatus }) {
+  constructor(projectRoot, { frontendPort, apiPort, redisPort = 6399, isolated = false, onStatus }) {
     this.root = projectRoot;
     this.frontendPort = frontendPort;
     this.apiPort = apiPort;
+    this.redisPort = redisPort;
+    this.isolated = isolated;
+    this.stopping = false;
+    this.stopPromise = null;
     this.onStatus = onStatus || (() => {});
     this.procs = {};
     this.memoryMode = false;
@@ -103,6 +102,14 @@ class ServiceManager {
   async startAll() {
     log(`=== ServiceManager.startAll() ===`);
     log(`projectRoot: ${this.root}`);
+
+    if (this.stopping) throw new Error('Application is stopping');
+    if (this.isolated) {
+      for (const port of [this.apiPort, this.frontendPort]) {
+        if (await this._isPortOpen(port))
+          throw new Error(`Port ${port} is occupied; refusing to connect to another application`);
+      }
+    }
 
     // ---- Pre-flight checks ----
     const nodeExe = resolveNode(this.root);
@@ -146,6 +153,7 @@ class ServiceManager {
       apiReady = true;
     } catch (err) {
       log(`API first-attempt failed: ${err.message}`);
+      if (this.isolated) throw err;
       // If API failed and we haven't tried memory mode yet, retry with MEMORY_STORE=1
       if (!this.memoryMode) {
         this.onStatus('API failed — retrying with memory store...');
@@ -420,6 +428,16 @@ class ServiceManager {
     const salt = this._getOrCreateTelemetrySalt(userDataDir);
     return {
       TELEMETRY_HMAC_SALT: salt,
+      ...(this.isolated
+        ? {
+            CAT_CAFE_DATA_DIR: path.join(userDataDir, 'data'),
+            CAT_CAFE_CONFIG_ROOT: path.join(userDataDir, 'project'),
+            CAT_CAFE_GLOBAL_CONFIG_ROOT: path.join(userDataDir, 'config'),
+            CAT_CAFE_SKIP_HOMEDIR_MIGRATION: '1',
+            PREVIEW_GATEWAY_PORT: '4194',
+            API_SERVER_HOST: '127.0.0.1',
+          }
+        : {}),
       EVIDENCE_DB: path.join(userDataDir, 'evidence.sqlite'),
       TRANSCRIPT_DATA_DIR: path.join(userDataDir, 'data', 'transcripts'),
       LOG_DIR: path.join(userDataDir, 'data', 'logs', 'api'),
@@ -440,13 +458,14 @@ class ServiceManager {
     const portableRedis = path.join(redisDir, `redis-server${EXE_SUFFIX}`);
 
     // Already running — verify it is actually Redis
-    if (await this._isPortOpen(6399)) {
-      const isRedis = await this._verifyRedisPing(6399);
+    if (await this._isPortOpen(this.redisPort)) {
+      if (this.isolated) throw new Error(`Redis port ${this.redisPort} is occupied`);
+      const isRedis = await this._verifyRedisPing(this.redisPort);
       if (isRedis) {
-        this.onStatus('Redis already running on 6399');
+        this.onStatus('Redis already running on this.redisPort');
         return;
       }
-      log('Port 6399 occupied by non-Redis — using memory store');
+      log('Port this.redisPort occupied by non-Redis — using memory store');
       this.memoryMode = true;
       return;
     }
@@ -455,6 +474,7 @@ class ServiceManager {
     const hasSystem = await this._commandExists('redis-server');
 
     if (!hasPortable && !hasSystem) {
+      if (this.isolated) throw new Error('Redis is required for persistent conversations');
       log('Redis not found — using memory store');
       this.memoryMode = true;
       return;
@@ -469,7 +489,9 @@ class ServiceManager {
     // process file descriptor limit).  512 is far above local desktop needs.
     const redisArgs = [
       '--port',
-      '6399',
+      String(this.redisPort),
+      '--bind',
+      '127.0.0.1',
       '--dir',
       redisDataDir,
       '--save',
@@ -486,6 +508,7 @@ class ServiceManager {
       redisCwd = redisDir;
       const canRun = this._testRedisBinary(portableRedis, redisDir);
       if (!canRun) {
+        if (this.isolated) throw new Error('Redis binary cannot run');
         log('Redis binary test failed — using memory store');
         this.memoryMode = true;
         return;
@@ -493,8 +516,9 @@ class ServiceManager {
     }
 
     this._startProcess('redis', redisCmd, redisArgs, { cwd: redisCwd });
-    const redisReady = await this._waitForPortWithFallback(6399, 'Redis', 'redis');
+    const redisReady = await this._waitForPortWithFallback(this.redisPort, 'Redis', 'redis');
     if (!redisReady) {
+      if (this.isolated) throw new Error('Redis failed to start');
       log('Redis failed to start — using memory store');
       this.memoryMode = true;
       if (this.procs.redis && !this.procs.redis.killed) {
@@ -564,7 +588,7 @@ class ServiceManager {
     let cmd, args;
     if (nextJs) {
       cmd = nodeExe;
-      args = [nextJs, 'start', '--port', String(this.frontendPort)];
+      args = [nextJs, 'start', '--hostname', '127.0.0.1', '--port', String(this.frontendPort)];
     } else if (IS_WIN) {
       cmd = 'cmd.exe';
       const localNext = path.join(webDir, 'node_modules', '.bin', 'next.cmd');
@@ -578,12 +602,35 @@ class ServiceManager {
     }
 
     log(`Starting Next.js: ${cmd} ${args.join(' ')}`);
-    this._startProcess('web', cmd, args, { cwd: webDir });
+    this._startProcess('web', cmd, args, {
+      cwd: webDir,
+      envOverrides: this.isolated ? { CLOWDER_PRODUCT: 'bot' } : {},
+    });
   }
 
-  _startProcess(name, cmd, args, opts = {}) {
+  _buildProcessEnv(source = process.env, overrides = {}) {
+    const inherited = this.isolated
+      ? Object.fromEntries(
+          [
+            'HOME',
+            'USER',
+            'LOGNAME',
+            'PATH',
+            'SHELL',
+            'TMPDIR',
+            'LANG',
+            'LC_ALL',
+            'SystemRoot',
+            'APPDATA',
+            'LOCALAPPDATA',
+            'USERPROFILE',
+          ]
+            .filter((key) => source[key] !== undefined)
+            .map((key) => [key, source[key]]),
+        )
+      : source;
     const env = {
-      ...process.env,
+      ...inherited,
       API_SERVER_PORT: String(this.apiPort),
       FRONTEND_PORT: String(this.frontendPort),
       NEXT_PUBLIC_API_URL: `http://localhost:${this.apiPort}`,
@@ -625,13 +672,17 @@ class ServiceManager {
       env.MEMORY_STORE = '1';
       delete env.REDIS_URL;
     } else {
-      env.REDIS_URL = 'redis://localhost:6399';
+      env.REDIS_URL = `redis://127.0.0.1:${this.redisPort}`;
     }
 
     // Apply API-specific env overrides (writable paths, telemetry salt, etc.)
-    if (opts.envOverrides) {
-      Object.assign(env, opts.envOverrides);
-    }
+    Object.assign(env, overrides);
+    return env;
+  }
+
+  _startProcess(name, cmd, args, opts = {}) {
+    if (this.stopping) throw new Error('Application is stopping');
+    const env = this._buildProcessEnv(process.env, opts.envOverrides);
 
     log(`[${name}] spawn: ${cmd} ${args.join(' ')}`);
     log(`[${name}] cwd: ${opts.cwd || this.root}`);
@@ -646,6 +697,7 @@ class ServiceManager {
     });
 
     proc.on('error', (err) => {
+      proc.spawnError = err;
       log(`[${name}] spawn error: ${err.message}`);
     });
 
@@ -723,10 +775,47 @@ class ServiceManager {
     });
   }
 
+  _assertOwnedChild(name) {
+    if (!this.isolated) return;
+    const proc = this.procs[name];
+    if (!proc?.pid || proc.spawnError || proc.exitCode !== null || proc.signalCode !== null) {
+      throw new Error(`${name} owned process exited or failed before readiness`);
+    }
+  }
+
+  _ownsListeningPort(port, proc) {
+    // This validation build targets macOS. Do not accept an unverified listener on another platform.
+    if (!IS_MAC) throw new Error('Isolated listener ownership is currently supported on macOS only');
+    try {
+      const owners = execFileSync(
+        '/usr/sbin/lsof',
+        ['-nP', '-a', '-p', String(proc.pid), `-iTCP:${port}`, '-sTCP:LISTEN', '-t'],
+        { encoding: 'utf8', timeout: 3000 },
+      )
+        .trim()
+        .split(/\s+/);
+      return owners.includes(String(proc.pid));
+    } catch {
+      return false;
+    }
+  }
+
+  _verifyOwnedListener(port, name) {
+    if (!this.isolated) return;
+    this._assertOwnedChild(name);
+    if (!this._ownsListeningPort(port, this.procs[name]))
+      throw new Error(`${name} port ${port} ownership does not match the owned process`);
+    this._assertOwnedChild(name);
+  }
+
   async _waitForPort(port, label) {
     const deadline = Date.now() + MAX_WAIT_MS;
     while (Date.now() < deadline) {
+      if (this.stopping) throw new Error('Application is stopping');
+      const owner = label.toLowerCase().includes('api') ? 'api' : 'web';
+      this._assertOwnedChild(owner);
       if (await this._isPortOpen(port)) {
+        this._verifyOwnedListener(port, owner);
         this.onStatus(`${label} ready on port ${port}`);
         return;
       }
@@ -749,7 +838,10 @@ class ServiceManager {
   async _waitForHttpReady(port, label) {
     const deadline = Date.now() + MAX_WAIT_MS;
     while (Date.now() < deadline) {
+      if (this.stopping) throw new Error('Application is stopping');
+      this._assertOwnedChild('web');
       if (await this._isHttpReady(port)) {
+        this._verifyOwnedListener(port, 'web');
         this.onStatus(`${label} ready on port ${port}`);
         return;
       }
@@ -769,7 +861,10 @@ class ServiceManager {
     const deadline = Date.now() + MAX_WAIT_MS;
     const earlyCheckDeadline = Date.now() + REDIS_FALLBACK_PORT_CHECK_MS;
     while (Date.now() < deadline) {
+      if (this.stopping) throw new Error('Application is stopping');
+      this._assertOwnedChild(procName);
       if (await this._isPortOpen(port)) {
+        this._verifyOwnedListener(port, procName);
         this.onStatus(`${label} ready on port ${port}`);
         return true;
       }
@@ -786,24 +881,19 @@ class ServiceManager {
     return false;
   }
 
-  async stopAll() {
-    const KILL_TIMEOUT_MS = 5000;
-    const killPromises = [];
+  stopAll() {
+    this.stopping = true;
+    if (!this.stopPromise) this.stopPromise = this._stopAll();
+    return this.stopPromise;
+  }
 
-    for (const [name, proc] of Object.entries(this.procs)) {
-      if (!proc || proc.killed) continue;
-      // Skip children that already exited on their own — their PID may have
-      // been reused by Windows, so taskkill could hit an unrelated process.
-      if (proc.exitCode !== null || proc.signalCode !== null) {
-        log(`[desktop] ${name} already exited (code=${proc.exitCode}), skipping`);
-        continue;
-      }
-      log(`[desktop] stopping ${name} (pid=${proc.pid})...`);
-
-      killPromises.push(this._killProcessTree(name, proc, KILL_TIMEOUT_MS));
+  async _stopAll() {
+    // API close hooks need Redis alive to persist sessions and stop plugin/CLI children.
+    for (const name of ['web', 'api', 'redis']) {
+      const proc = this.procs[name];
+      if (!proc || proc.exitCode !== null || proc.signalCode !== null) continue;
+      await this._killProcessTree(name, proc, 15000);
     }
-
-    await Promise.allSettled(killPromises);
     this.procs = {};
   }
 
@@ -848,6 +938,10 @@ class ServiceManager {
       log(`[${name}] did not exit after SIGTERM, sending SIGKILL`);
       try {
         proc.kill('SIGKILL');
+        await new Promise((resolve) => {
+          if (proc.exitCode !== null || proc.signalCode !== null) return resolve();
+          proc.once('exit', resolve);
+        });
       } catch {}
     }
   }

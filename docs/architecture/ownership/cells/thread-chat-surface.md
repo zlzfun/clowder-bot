@@ -65,6 +65,8 @@ M1a–M4 now establish the canonical full/compact path end to end:
 
 ## Contract Invariants
 
+- The independent Clowder Bot Electron product mounts `BotShell` as an alternative `AppShell` consumer. It registers the foreground thread, hydrates the existing execution projection and renders one `ThreadChatSurface`. `ConversationAppearance` changes chrome only; it carries no execution or message authority. Last-selection storage is validated against the current native binding catalog before navigation.
+
 - The Clowder Bot plugin directory opens the existing thread route and supplies bounded identity/empty-state/placeholder chrome. Its provider does not own another socket, transcript, composer, queue or execution path; switching directory mode leaves the mounted native chat runtime intact.
 
 - One mounted `AppShell` owns one chat socket lifecycle.

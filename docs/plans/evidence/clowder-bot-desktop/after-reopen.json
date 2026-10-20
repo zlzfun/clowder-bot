@@ -1,0 +1,77 @@
+{
+  "pluginInstances": [
+    "pi_9f3a141f-7157-47ac-bf19-1499d8fceecd"
+  ],
+  "entities": [
+    {
+      "name": "松果",
+      "availability": "ready",
+      "binding": {
+        "threadId": "thread_owned_05ac28dcca35a4b9b1f5c2eb4c06ad4c21e566b1",
+        "catId": "native-3e9469bfa2dd98f88ede3a8f",
+        "workspacePath": "/Users/zhuliuzi/Library/Application Support/Clowder Bot/workspace",
+        "executionTemplateId": "bot-local-codex"
+      },
+      "messages": [
+        {
+          "id": "0001792462865952-000000-21bbca76",
+          "type": "user",
+          "catId": null,
+          "contentSha256": "54a914fbb0335d660bbdd4b3cc44ba419e2e394042b27447673a95b7c448f7f1"
+        },
+        {
+          "id": "0001792462866093-000001-4ca81238",
+          "type": "assistant",
+          "catId": "native-3e9469bfa2dd98f88ede3a8f",
+          "contentSha256": "fbfcbfeac9deacabb76c247111cba802c32cb9c18d33f46e0c4905aa9fc67ba7"
+        }
+      ],
+      "sessions": [
+        {
+          "id": "ffebf294-5614-4861-aba6-25b064cbbd27",
+          "catId": "native-3e9469bfa2dd98f88ede3a8f",
+          "cliSessionId": "01a1571c-d1ce-7623-9bc5-37bf02bb8f59",
+          "status": "active"
+        }
+      ]
+    },
+    {
+      "name": "青禾",
+      "availability": "ready",
+      "binding": {
+        "threadId": "thread_owned_29a18c0c4a6cd623c181d812ce069c23197a4482",
+        "catId": "native-1e3e8fda87ab5c2c66ff708e",
+        "workspacePath": "/Users/zhuliuzi/Library/Application Support/Clowder Bot/workspace",
+        "executionTemplateId": "bot-local-codex"
+      },
+      "messages": [
+        {
+          "id": "0001792462983554-000003-79672b7b",
+          "type": "user",
+          "catId": null,
+          "contentSha256": "c486945f853715a6f656fe0e87c8940c60c8793881e058c89cc1bd1ba63eefde"
+        },
+        {
+          "id": "0001792462983575-000004-4a1d0083",
+          "type": "assistant",
+          "catId": "native-1e3e8fda87ab5c2c66ff708e",
+          "contentSha256": "d2e74bf7d091ed5a25bdd3c1c224d5ea7e18bd6a322f7799010b7fcb265a1c7b"
+        }
+      ],
+      "sessions": [
+        {
+          "id": "ac76f41a-4699-4202-8ae3-903b3e57f84c",
+          "catId": "native-1e3e8fda87ab5c2c66ff708e",
+          "cliSessionId": "01a1571e-9d69-73a3-9bac-ba15a654fff1",
+          "status": "active"
+        }
+      ]
+    }
+  ],
+  "files": {
+    "tasks.csv": "af5fcaa0291bcc4bdfbe6032396ffacd176c67429f76515d14f73e1714db9417",
+    "summary.py": "a6e60a6a741a3c6e3e280869f6d41f694b444d2d7a88764df258b12db8f5a18d",
+    "summary.json": "5cc62b3788bfd490e732c3382e2f6be66c49061b9d9a40dcc913dd2eb39199c3",
+    "review.md": "e69a1ff447ab61898d75fb4cebc70bf39dca1fe74856b2d6a8d8f33675b56675"
+  }
+}

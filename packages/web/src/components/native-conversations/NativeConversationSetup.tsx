@@ -6,20 +6,24 @@ import { DirectoryBrowser } from '../ThreadSidebar/DirectoryBrowser';
 
 export function NativeConversationSetup({
   entity,
+  simple = false,
   templates,
   busy,
   error,
   onCancel,
+  onConfigure,
   onConfirm,
 }: {
   entity: NativeConversationEntityView;
+  simple?: boolean;
   templates: NativeConversationCatalog['executionTemplates'];
   busy: boolean;
   error: string | null;
   onCancel: () => void;
+  onConfigure?: () => void;
   onConfirm: (executionTemplateId: string, workspacePath: string) => void;
 }) {
-  const [template, setTemplate] = useState('');
+  const [template, setTemplate] = useState(simple && templates.length === 1 ? templates[0].id : '');
   const [workspace, setWorkspace] = useState('');
   const [browsing, setBrowsing] = useState(false);
   const panel = useRef<HTMLDivElement>(null);
@@ -71,25 +75,34 @@ export function NativeConversationSetup({
           <p className="mt-1 text-sm text-[var(--cafe-text-muted)]">{entity.description}</p>
         </div>
         <div className="space-y-5 overflow-y-auto p-5">
-          <label className="block text-sm">
-            本地 Agent 配置
-            <select
-              value={template}
-              onChange={(event) => setTemplate(event.target.value)}
-              disabled={busy}
-              className="mt-2 w-full rounded-lg border border-[var(--cafe-border)] bg-[var(--cafe-surface)] p-2"
-            >
-              <option value="">选择已有配置</option>
-              {templates.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name} · {item.model}
-                </option>
-              ))}
-            </select>
-          </label>
+          {(!simple || templates.length > 1) && (
+            <label className="block text-sm">
+              本地 Agent 配置
+              <select
+                value={template}
+                onChange={(event) => setTemplate(event.target.value)}
+                disabled={busy}
+                className="mt-2 w-full rounded-lg border border-[var(--cafe-border)] bg-[var(--cafe-surface)] p-2"
+              >
+                <option value="">选择已有配置</option>
+                {templates.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name} · {item.model}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {templates.length === 0 && (
             <output className="block text-sm text-[var(--cafe-text-muted)]">
-              没有可用的本地 Codex 配置，请先在设置中配置。
+              还没有连接本地 Agent。
+              {onConfigure ? (
+                <button type="button" onClick={onConfigure} className="ml-2 underline">
+                  连接本地 Agent
+                </button>
+              ) : (
+                '请先在设置中配置。'
+              )}
             </output>
           )}
           <div>

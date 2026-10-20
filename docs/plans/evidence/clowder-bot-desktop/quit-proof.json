@@ -1,0 +1,17 @@
+{
+  "quitUtc": "2026-10-20T02:24:51Z",
+  "observedExitedPids": [
+    87208,
+    87212,
+    87213,
+    87224,
+    87230,
+    87346,
+    87377,
+    87364
+  ],
+  "ownedListeningPortsAfterQuit": [],
+  "apiExitCode": 0,
+  "redisExitCode": 0,
+  "redisAofFsyncAndFinalSnapshot": true
+}

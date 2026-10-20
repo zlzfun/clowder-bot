@@ -1,7 +1,7 @@
 {
-  "name": "cat-cafe-desktop",
+  "name": "clowder-bot-desktop",
   "version": "0.10.1",
-  "description": "Clowder AI Desktop - Multi-Agent Collaboration Platform",
+  "description": "Clowder Bot — local colleague messenger",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -21,9 +21,9 @@
     }
   },
   "build": {
-    "appId": "ai.clowderai.desktop",
-    "productName": "Clowder AI",
-    "artifactName": "ClowderAI-${version}-${arch}.${ext}",
+    "appId": "ai.clowderbot.desktop",
+    "productName": "Clowder Bot",
+    "artifactName": "ClowderBot-${version}-${arch}.${ext}",
     "win": {
       "target": "dir",
       "icon": "assets/icon.ico"

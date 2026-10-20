@@ -24,7 +24,7 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: 'Clowder AI',
+  title: process.env.CLOWDER_PRODUCT === 'bot' ? 'Clowder Bot' : 'Clowder AI',
   description: 'Your AI team collaboration space',
   manifest: '/manifest.json',
   icons: {
@@ -38,7 +38,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: 'Clowder AI',
+    title: process.env.CLOWDER_PRODUCT === 'bot' ? 'Clowder Bot' : 'Clowder AI',
   },
 };
 
@@ -67,6 +67,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="stylesheet" href="/vendor/app/console-shell.css" />
         <link rel="stylesheet" href="/vendor/app/console-controls.css" />
         <link rel="stylesheet" href="/vendor/app/shell-v2.css" />
+        {process.env.CLOWDER_PRODUCT === 'bot' && <link rel="stylesheet" href="/vendor/app/bot-shell.css" />}
         <link rel="stylesheet" href="/vendor/app/werewolf-theme.css" />
         <link rel="stylesheet" href="/vendor/xterm/xterm.css" />
       </head>
@@ -84,7 +85,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ThemeProvider>
           <ThemeApplier />
           <ConfirmProvider>
-            <AppShell>{children}</AppShell>
+            <AppShell product={process.env.CLOWDER_PRODUCT}>{children}</AppShell>
           </ConfirmProvider>
           <BrakeModal />
           <GuideOverlay />

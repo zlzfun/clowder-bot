@@ -1,7 +1,7 @@
 // Clowder AI Desktop — Electron main process
 // Launches backend services (Redis, API, Web) then shows the web UI.
 
-const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, net, session, shell, Notification } = require('electron');
+const { app, BrowserWindow, Menu, dialog, net, shell } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { resolveProjectRootFromDir } = require('./project-root');
@@ -15,23 +15,15 @@ const {
 } = require('./renderer-link-policy');
 const { isExpectedOrigin } = require('./update-prompt-controller');
 const { safeErrorMessage, safeHost } = require('./update-network-diagnostics');
-const { DESKTOP_APP_ID } = require('./app-identity');
-const { createDesktopUpdateRuntime } = require('./desktop-update-runtime');
+const { DESKTOP_APP_ID, PRODUCT_NAME, FRONTEND_PORT, API_PORT, REDIS_PORT } = require('./app-identity');
+app.setName(PRODUCT_NAME);
+app.setPath('userData', ServiceManager.USER_DATA_DIR);
 const { ensureValidMacInstallLocation } = require('./mac-install-location');
-const {
-  createDesktopTray,
-  createManualUpdateHandler,
-  installMacApplicationMenu,
-  showAboutDialog,
-} = require('./desktop-update-menu');
-
 if (process.platform === 'win32') {
   app.setAppUserModelId(DESKTOP_APP_ID);
 }
 
 const PROJECT_ROOT = resolveProjectRootFromDir(__dirname);
-const FRONTEND_PORT = 3003;
-const API_PORT = 3004;
 const APP_URL = `http://localhost:${FRONTEND_PORT}`;
 const APP_ORIGIN = new URL(APP_URL).origin;
 const API_ORIGIN = new URL(`http://localhost:${API_PORT}`).origin;
@@ -68,15 +60,11 @@ let mainWindow = null;
 let splashWindow = null;
 let tray = null;
 let services = null;
-let updater = null;
+const updater = null;
 let updatePrompt = null;
 let isQuitting = false;
 let quitPromise = null;
-const checkForUpdatesManually = createManualUpdateHandler({
-  getUpdatePrompt: () => updatePrompt,
-  getUpdater: () => updater,
-});
-
+let shutdownComplete = false;
 async function refreshRendererLinkOrigins() {
   try {
     rendererLinkOrigins = await resolveRendererLinkOrigins({
@@ -107,6 +95,7 @@ function createSplashWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      partition: 'persist:clowder-bot',
     },
   });
   splashWindow.loadFile(path.join(__dirname, 'splash.html'));
@@ -115,17 +104,18 @@ function createSplashWindow() {
 
 function createMainWindow() {
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
-    minWidth: 900,
+    width: 1120,
+    height: 760,
+    minWidth: 760,
     minHeight: 600,
-    title: 'Clowder AI',
+    title: PRODUCT_NAME,
     icon: path.join(__dirname, 'assets', 'icon.ico'),
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      partition: 'persist:clowder-bot',
     },
   });
 
@@ -202,6 +192,7 @@ async function quitApp() {
         tray.destroy();
         tray = null;
       }
+      shutdownComplete = true;
       app.quit();
     })();
   }
@@ -247,69 +238,65 @@ app.on('ready', async () => {
   }
 
   createSplashWindow();
-  const showAbout = () => showAboutDialog({ app, dialog, onManualUpdate: checkForUpdatesManually });
-  tray = createDesktopTray({
-    Menu,
-    Tray,
-    iconPath: path.join(__dirname, 'assets', 'icon.ico'),
-    getMainWindow: () => mainWindow,
-    onManualUpdate: checkForUpdatesManually,
-    onQuit: () => quitApp(),
-    showAbout,
-  });
-  installMacApplicationMenu({ app, Menu, onManualUpdate: checkForUpdatesManually, showAbout });
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      {
+        label: PRODUCT_NAME,
+        submenu: [
+          {
+            label: `关于 ${PRODUCT_NAME}`,
+            click: () =>
+              dialog.showMessageBox({
+                title: PRODUCT_NAME,
+                message: PRODUCT_NAME,
+                detail: '本地同事聊天 · 桌面验证版',
+                buttons: ['好'],
+              }),
+          },
+          { type: 'separator' },
+          { label: `退出 ${PRODUCT_NAME}`, accelerator: 'CommandOrControl+Q', click: () => void quitApp() },
+        ],
+      },
+      {
+        label: '编辑',
+        submenu: [
+          { role: 'undo' },
+          { role: 'redo' },
+          { type: 'separator' },
+          { role: 'cut' },
+          { role: 'copy' },
+          { role: 'paste' },
+          { role: 'selectAll' },
+        ],
+      },
+      { label: '窗口', submenu: [{ role: 'minimize' }, { role: 'zoom' }] },
+    ]),
+  );
 
   services = new ServiceManager(PROJECT_ROOT, {
     frontendPort: FRONTEND_PORT,
     apiPort: API_PORT,
+    redisPort: REDIS_PORT,
+    isolated: true,
     onStatus: sendSplashStatus,
   });
-  // F273: Initialize updater — check pending upgrade result BEFORE services
-  // (spec §3.2: "main.js 早期、服务启动前检测")
-  ({ updater, updatePrompt } = createDesktopUpdateRuntime({
-    app,
-    net,
-    netSession: session.defaultSession,
-    ipcMain,
-    shell,
-    dialog,
-    Notification,
-    getMainWindow: () => mainWindow,
-    getTray: () => tray,
-    trustedOrigin: APP_ORIGIN,
-    quitApp,
-    stopServices: async () => {
-      const activeServices = services;
-      services = null;
-      rendererLinkOrigins = createBaseRendererLinkOrigins();
-      if (activeServices) await activeServices.stopAll();
-    },
-    startServices: async () => {
-      services = new ServiceManager(PROJECT_ROOT, { frontendPort: FRONTEND_PORT, apiPort: API_PORT });
-      await services.startAll();
-      await refreshRendererLinkOrigins();
-    },
-    dbg,
-    userDataRoot,
-    platform: process.platform,
-    arch: process.arch,
-  }));
-  const upgradeResult = await updater.checkPendingUpgrade();
-  if (upgradeResult === 'quitting') return; // P1-2: installer launched — skip startAll
+  // Bot has its own release identity. Do not consume the upstream application's update feed.
 
   try {
     dbg('startAll() called');
     await services.startAll();
     await refreshRendererLinkOrigins();
+    if (isQuitting) return;
     dbg('startAll() done — creating main window');
     createMainWindow();
   } catch (err) {
     dbg(`startAll() FAILED: ${err.message}`);
+    if (isQuitting) return;
     dialog.showErrorBox(
-      'Clowder AI - Startup Error',
-      `Failed to start services:\n${err.message}\n\nCheck logs in .cat-cafe/logs/`,
+      `${PRODUCT_NAME} — 启动失败`,
+      `服务未启动，对话数据仍保留。\n${err.message}\n\n日志：${mainLogDir}`,
     );
-    app.quit();
+    await quitApp();
   }
 });
 
@@ -317,24 +304,9 @@ app.on('window-all-closed', () => {
   // keep running in tray on Windows
   if (process.platform !== 'win32') quitApp();
 });
-app.on('before-quit', (e) => {
-  // Signal close handlers to stop hiding windows to tray.
-  isQuitting = true;
-  updater?.stopSchedule();
-  updatePrompt?.dispose();
-  updatePrompt = null;
-  // Electron does NOT await async event handlers. Without blocking here,
-  // the app exits before stopAll() finishes → orphaned node/redis processes.
-  // Prevent default, run cleanup, then quit when done.
-  if (services) {
-    e.preventDefault();
-    services.stopAll().finally(() => {
-      services = null; // prevent re-entry
-      if (tray) {
-        tray.destroy();
-        tray = null;
-      }
-      app.quit();
-    });
+app.on('before-quit', (event) => {
+  if (services || (quitPromise && !shutdownComplete)) {
+    event.preventDefault();
+    void quitApp();
   }
 });

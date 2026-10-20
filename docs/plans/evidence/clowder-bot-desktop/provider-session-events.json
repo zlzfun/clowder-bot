@@ -1,0 +1,30 @@
+[
+  {
+    "time": "2026-10-20T02:21:09.060Z",
+    "msg": "Session init: binding session",
+    "threadId": "thread_owned_05ac28dcca35a4b9b1f5c2eb4c06ad4c21e566b1",
+    "catId": "native-3e9469bfa2dd98f88ede3a8f",
+    "cliSessionId": "01a1571c-d1ce-7623-9bc5-37bf02bb8f59"
+  },
+  {
+    "time": "2026-10-20T02:23:06.676Z",
+    "msg": "Session init: binding session",
+    "threadId": "thread_owned_29a18c0c4a6cd623c181d812ce069c23197a4482",
+    "catId": "native-1e3e8fda87ab5c2c66ff708e",
+    "cliSessionId": "01a1571e-9d69-73a3-9bac-ba15a654fff1"
+  },
+  {
+    "time": "2026-10-20T02:25:41.645Z",
+    "msg": "Session init: binding session",
+    "threadId": "thread_owned_29a18c0c4a6cd623c181d812ce069c23197a4482",
+    "catId": "native-1e3e8fda87ab5c2c66ff708e",
+    "cliSessionId": "01a1571e-9d69-73a3-9bac-ba15a654fff1"
+  },
+  {
+    "time": "2026-10-20T02:25:49.903Z",
+    "msg": "Session init: binding session",
+    "threadId": "thread_owned_05ac28dcca35a4b9b1f5c2eb4c06ad4c21e566b1",
+    "catId": "native-3e9469bfa2dd98f88ede3a8f",
+    "cliSessionId": "01a1571c-d1ce-7623-9bc5-37bf02bb8f59"
+  }
+]

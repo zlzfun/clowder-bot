@@ -14,7 +14,16 @@ const avatarTokens = {
   blue: { background: 'var(--semantic-info-surface)', color: 'var(--semantic-info)' },
 };
 
-export function NativeConversationDirectory({ onClose }: { onClose: () => void }) {
+export function NativeConversationDirectory({
+  onClose,
+  appearance = 'workspace',
+  onConfigure,
+}: {
+  onClose: () => void;
+  appearance?: 'workspace' | 'messenger';
+  onConfigure?: () => void;
+}) {
+  const messenger = appearance === 'messenger';
   const context = useNativeConversations();
   const isDesktop = useIsDesktop();
   const [setup, setSetup] = useState<NativeConversationEntityView | null>(null);
@@ -73,16 +82,20 @@ export function NativeConversationDirectory({ onClose }: { onClose: () => void }
       <div className="flex items-start gap-2 p-4">
         <div className="min-w-0 flex-1">
           <h2 className="break-words text-base font-semibold">{contribution.label}</h2>
-          <p className="mt-1 break-words text-xs text-[var(--cafe-text-muted)]">{contribution.description}</p>
+          {!messenger && (
+            <p className="mt-1 break-words text-xs text-[var(--cafe-text-muted)]">{contribution.description}</p>
+          )}
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="收起目录"
-          className="rounded-lg px-2 py-1 hover:bg-[var(--console-hover-bg)]"
-        >
-          ‹
-        </button>
+        {!messenger && (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="收起目录"
+            className="rounded-lg px-2 py-1 hover:bg-[var(--console-hover-bg)]"
+          >
+            ‹
+          </button>
+        )}
       </div>
       {context.error && (
         <div className="mx-3 mb-3 rounded-lg border border-[var(--cafe-border)] p-3 text-xs" role="alert">
@@ -116,17 +129,28 @@ export function NativeConversationDirectory({ onClose }: { onClose: () => void }
           </p>
         )}
       </div>
-      <div className="border-t border-[var(--cafe-border)] p-3">
-        <button
-          type="button"
-          onClick={context.leaveMode}
-          className="w-full rounded-lg px-3 py-2 text-left text-sm text-[var(--cafe-text-muted)] hover:bg-[var(--console-hover-bg)]"
-        >
-          返回任务列表
-        </button>
-      </div>
+      {!messenger && (
+        <div className="border-t border-[var(--cafe-border)] p-3">
+          <button
+            type="button"
+            onClick={context.leaveMode}
+            className="w-full rounded-lg px-3 py-2 text-left text-sm text-[var(--cafe-text-muted)] hover:bg-[var(--console-hover-bg)]"
+          >
+            返回任务列表
+          </button>
+        </div>
+      )}
       {setup && (
         <NativeConversationSetup
+          simple={messenger}
+          onConfigure={
+            onConfigure
+              ? () => {
+                  setSetup(null);
+                  onConfigure();
+                }
+              : undefined
+          }
           entity={setup}
           templates={context.catalog?.executionTemplates ?? []}
           busy={busy}

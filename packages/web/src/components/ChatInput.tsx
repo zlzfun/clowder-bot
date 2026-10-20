@@ -34,6 +34,7 @@ import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { compressImage } from '@/utils/compressImage';
 import { AppTooltip } from './AppTooltip';
+import { useMessengerAppearance } from './bot/ConversationAppearance';
 import { ChatComposerDraftExtras } from './ChatComposerDraftExtras';
 import { ChatContextPicker } from './ChatContextPicker';
 import { ChatInputActionButton } from './ChatInputActionButton';
@@ -261,6 +262,7 @@ export function ChatInput({
     ? projectedCancelState
     : 'hidden';
   const shellV2 = presentation === 'v2';
+  const messenger = useMessengerAppearance();
   const workScope = useWorkspaceChatWorkScope();
   const activeCatIds = useMemo(() => {
     const ids = new Set<string>();
@@ -1193,7 +1195,8 @@ export function ChatInput({
             onClick={() => {
               closeContextPicker(false);
               closeMenus();
-              setAddMenuOpen((open) => !open);
+              if (messenger) fileInputRef.current?.click();
+              else setAddMenuOpen((open) => !open);
             }}
             disabled={disabled || sendTemporarilyDisabled}
             className={`${

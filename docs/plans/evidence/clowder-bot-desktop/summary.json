@@ -1,0 +1,18 @@
+{
+  "total_records": 7,
+  "total_hours": 27,
+  "by_status": {
+    "done": {
+      "records": 2,
+      "hours": 5
+    },
+    "doing": {
+      "records": 2,
+      "hours": 9
+    },
+    "todo": {
+      "records": 3,
+      "hours": 13
+    }
+  }
+}

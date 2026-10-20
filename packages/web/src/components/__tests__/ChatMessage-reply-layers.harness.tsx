@@ -4,6 +4,7 @@ import { vi } from 'vitest';
 import type { CatData } from '@/hooks/useCatData';
 import type { ChatMessage as ChatMessageData, ToolEvent } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
+import { ConversationAppearance } from '../bot/ConversationAppearance';
 import { ChatMessage } from '../ChatMessage';
 import { resetMessageDisclosureStateForTest } from '../message-disclosure-state';
 import { ReplyRecallProjectionProvider } from '../reply-layers/ReplyRecallContext';
@@ -126,29 +127,31 @@ export class ReplyLayersHarness {
     window.localStorage.setItem(SHELL_PRESENTATION_STORAGE_KEY, 'v2');
   }
 
-  render(message: ChatMessageData): void {
-    this.renderTimeline([message]);
+  render(message: ChatMessageData, messenger = false): void {
+    this.renderTimeline([message], new Map(), { messenger });
   }
 
   renderTimeline(
     messages: readonly ChatMessageData[],
     recall: ReadonlyMap<string, ReplyRecallProjection> = new Map(),
-    options: { compact?: boolean } = {},
+    options: { compact?: boolean; messenger?: boolean } = {},
   ): void {
     act(() => {
       this.root.render(
-        <ReplyRecallProjectionProvider value={recall}>
-          {messages.map((message) => (
-            <ChatMessage
-              key={message.id}
-              message={message}
-              compact={options.compact}
-              threadId="thread-1"
-              timelineMessages={messages}
-              getCatById={(id) => registry.cats.find((cat) => cat.id === id) as CatData | undefined}
-            />
-          ))}
-        </ReplyRecallProjectionProvider>,
+        <ConversationAppearance.Provider value={options.messenger ? 'messenger' : 'workspace'}>
+          <ReplyRecallProjectionProvider value={recall}>
+            {messages.map((message) => (
+              <ChatMessage
+                key={message.id}
+                message={message}
+                compact={options.compact}
+                threadId="thread-1"
+                timelineMessages={messages}
+                getCatById={(id) => registry.cats.find((cat) => cat.id === id) as CatData | undefined}
+              />
+            ))}
+          </ReplyRecallProjectionProvider>
+        </ConversationAppearance.Provider>,
       );
     });
   }

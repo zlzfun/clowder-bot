@@ -29,6 +29,7 @@ const appGlobalCssFiles = [
   'console-controls.css',
   'console-tokens.css',
   'shell-v2.css',
+  'bot-shell.css',
   'connector-tokens.css',
   'theme-extras.css',
   'werewolf-theme.css',
