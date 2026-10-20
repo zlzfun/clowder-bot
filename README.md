@@ -1,3 +1,9 @@
+# Clowder Bot desktop prototype
+
+This personal fork adds an independent colleague messenger using Clowder AI's Electron shell, native chat and local Agent runtime. Colleague identities and roles come from the [native colleague plugin](https://github.com/zlzfun/clowder-ai-plugins/tree/feat/native-colleagues/packages/native-colleagues). App identity and persistent data are isolated from Clowder AI.
+
+The `feat/bot-desktop` branch has been exercised on macOS arm64 with two colleagues, real file tasks, full app quit/reopen and continued conversations. See the [implementation, screenshots and acceptance evidence](docs/plans/clowder-bot-desktop.md). Build the local app with `bash desktop/scripts/build-mac.sh --arch arm64 --app-only` (Node 24 and pnpm; build prerequisites below and in the script). This is a local prototype, not a notarized release. The upstream project documentation follows.
+
 <div align="center">
 
 <!-- TODO: replace with actual logo once synced from assets/icons/clowder-ai-logo-v2-clean.svg -->
