@@ -1,0 +1,284 @@
+{
+  "version": 3,
+  "title": "clowder-bot 猫猫头像 · 已选方案",
+  "updated": "2026-10-31",
+  "activeStyle": "clay",
+  "interfaceTheme": "cat-cafe",
+  "selectedAvatarCount": 24,
+  "previousRounds": [
+    "round-1.html",
+    "round-2.html"
+  ],
+  "characters": [
+    {
+      "id": "ragdoll",
+      "name": "宪宪",
+      "breed": "布偶猫",
+      "role": "架构与开发"
+    },
+    {
+      "id": "maine-coon",
+      "name": "砚砚",
+      "breed": "缅因猫",
+      "role": "代码审查"
+    },
+    {
+      "id": "siamese",
+      "name": "烁烁",
+      "breed": "暹罗猫",
+      "role": "视觉与创意"
+    },
+    {
+      "id": "turkish-van",
+      "name": "墨墨",
+      "breed": "梵花猫",
+      "role": "文档与验收"
+    },
+    {
+      "id": "dsh",
+      "name": "鲸鲸",
+      "breed": "蓝灰短毛猫",
+      "role": "推理与分析"
+    },
+    {
+      "id": "dragon-li",
+      "name": "小狸花",
+      "breed": "狸花猫",
+      "role": "中文实证"
+    },
+    {
+      "id": "bengal",
+      "name": "斑斑",
+      "breed": "孟加拉猫",
+      "role": "探索与多模态"
+    },
+    {
+      "id": "golden-chinchilla",
+      "name": "金哥",
+      "breed": "金渐层",
+      "role": "全栈开发"
+    }
+  ],
+  "collections": [
+    {
+      "id": "clay",
+      "code": "G",
+      "name": "3D 玩偶肖像",
+      "format": "PNG",
+      "group": "active",
+      "note": "当前使用。立体眼神与细腻毛发，搭配奶油、燕麦与咖啡棕。",
+      "status": "active",
+      "avatars": [
+        {
+          "id": "ragdoll",
+          "name": "宪宪",
+          "code": "G01",
+          "column": 0,
+          "row": 0
+        },
+        {
+          "id": "maine-coon",
+          "name": "砚砚",
+          "code": "G02",
+          "column": 1,
+          "row": 0
+        },
+        {
+          "id": "siamese",
+          "name": "烁烁",
+          "code": "G03",
+          "column": 2,
+          "row": 0
+        },
+        {
+          "id": "turkish-van",
+          "name": "墨墨",
+          "code": "G04",
+          "column": 3,
+          "row": 0
+        },
+        {
+          "id": "dsh",
+          "name": "鲸鲸",
+          "code": "G05",
+          "column": 0,
+          "row": 1
+        },
+        {
+          "id": "dragon-li",
+          "name": "小狸花",
+          "code": "G06",
+          "column": 1,
+          "row": 1
+        },
+        {
+          "id": "bengal",
+          "name": "斑斑",
+          "code": "G07",
+          "column": 2,
+          "row": 1
+        },
+        {
+          "id": "golden-chinchilla",
+          "name": "金哥",
+          "code": "G08",
+          "column": 3,
+          "row": 1
+        }
+      ],
+      "sheet": "sheets/clay.png",
+      "width": 1774,
+      "height": 887,
+      "columns": 4,
+      "rows": 2,
+      "sha256": "51744ca0d0ddf5efb79cde75f74f90bc8ba2d3ec005fef575d4ae2fbc9aefca4"
+    },
+    {
+      "id": "ink-editorial",
+      "code": "N",
+      "name": "手绘墨稿",
+      "format": "PNG",
+      "group": "retained",
+      "note": "保留方向。自然的黑白笔触、清楚的表情与不同姿态。",
+      "status": "shortlisted",
+      "avatars": [
+        {
+          "id": "ragdoll",
+          "name": "宪宪",
+          "code": "N01",
+          "column": 0,
+          "row": 0
+        },
+        {
+          "id": "maine-coon",
+          "name": "砚砚",
+          "code": "N02",
+          "column": 1,
+          "row": 0
+        },
+        {
+          "id": "siamese",
+          "name": "烁烁",
+          "code": "N03",
+          "column": 2,
+          "row": 0
+        },
+        {
+          "id": "turkish-van",
+          "name": "墨墨",
+          "code": "N04",
+          "column": 3,
+          "row": 0
+        },
+        {
+          "id": "dsh",
+          "name": "鲸鲸",
+          "code": "N05",
+          "column": 0,
+          "row": 1
+        },
+        {
+          "id": "dragon-li",
+          "name": "小狸花",
+          "code": "N06",
+          "column": 1,
+          "row": 1
+        },
+        {
+          "id": "bengal",
+          "name": "斑斑",
+          "code": "N07",
+          "column": 2,
+          "row": 1
+        },
+        {
+          "id": "golden-chinchilla",
+          "name": "金哥",
+          "code": "N08",
+          "column": 3,
+          "row": 1
+        }
+      ],
+      "sheet": "sheets/ink-editorial.png",
+      "width": 1774,
+      "height": 887,
+      "columns": 4,
+      "rows": 2,
+      "sha256": "87a22864474fe150f427b8f55c2fd8566e905d5761e017dde9454cba8781ec09"
+    },
+    {
+      "id": "watercolor",
+      "code": "I",
+      "name": "水彩绘本",
+      "format": "PNG",
+      "group": "retained",
+      "note": "保留方向。透明水色与轻盈笔触，可继续发展为绘本主题。",
+      "status": "shortlisted",
+      "avatars": [
+        {
+          "id": "ragdoll",
+          "name": "宪宪",
+          "code": "I01",
+          "column": 0,
+          "row": 0
+        },
+        {
+          "id": "maine-coon",
+          "name": "砚砚",
+          "code": "I02",
+          "column": 1,
+          "row": 0
+        },
+        {
+          "id": "siamese",
+          "name": "烁烁",
+          "code": "I03",
+          "column": 2,
+          "row": 0
+        },
+        {
+          "id": "turkish-van",
+          "name": "墨墨",
+          "code": "I04",
+          "column": 3,
+          "row": 0
+        },
+        {
+          "id": "dsh",
+          "name": "鲸鲸",
+          "code": "I05",
+          "column": 0,
+          "row": 1
+        },
+        {
+          "id": "dragon-li",
+          "name": "小狸花",
+          "code": "I06",
+          "column": 1,
+          "row": 1
+        },
+        {
+          "id": "bengal",
+          "name": "斑斑",
+          "code": "I07",
+          "column": 2,
+          "row": 1
+        },
+        {
+          "id": "golden-chinchilla",
+          "name": "金哥",
+          "code": "I08",
+          "column": 3,
+          "row": 1
+        }
+      ],
+      "sheet": "sheets/watercolor.png",
+      "width": 1774,
+      "height": 887,
+      "columns": 4,
+      "rows": 2,
+      "sha256": "f11bf4e08efae54a0aea218a6bf2dbacc05e58d297446f4d629f8252721b56c3"
+    }
+  ],
+  "usage": "The three selected PNG collections use a 4-column, 2-row grid. The app currently uses clay (3D toy portraits) with the cat-cafe palette. Earlier studies are archived and remain included in the bundle."
+}

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>猫猫头像 · 第二轮 · clowder-bot</title>
+  <link rel="stylesheet" href="./lab-v2.css">
+</head>
+<body>
+  <main>
+    <header class="masthead">
+      <a class="brand" href="#">clowder-bot <span> / 猫猫头像研究所</span></a>
+      <a class="edition" href="./round-1.html">查看首轮 A—I ↗</a>
+    </header>
+    <section class="intro">
+      <div><p class="eyebrow">AVATAR STUDIES / ROUND 02 / 2026.10.31</p><h1>猫猫头像 · 第二轮</h1><p class="intro-note">黑白线描 × 扁平极简。6 组新提案，48 款新头像；F、G、I 原稿保留，继续作为主题方向。</p></div>
+      <div class="round-mark"><span>J — O</span><small>NEW EXPLORATIONS</small></div>
+    </section>
+    <details class="tryout" id="preview-panel">
+      <summary>聊天场景与小尺寸预览 <span>展开查看浅色 / 深色效果</span></summary>
+      <div class="section-top"><div><h2 id="tryout-title">放进聊天里看看</h2><span class="muted" id="selected-label" aria-live="polite">L · 极简双眼</span></div><label class="select-label">预览风格 <select id="style-select" aria-label="聊天预览风格"></select></label></div>
+      <div class="preview-pair" id="previews"></div>
+    </details>
+    <section class="catalog" aria-labelledby="catalog-title">
+      <div class="catalog-toolbar"><div><h2 id="catalog-title">同样八只猫，换一种表达</h2><p>点击头像可看大图和 24 / 36 / 44 / 72px 实际尺寸，也可把整组放进聊天。</p></div><div class="controls"><div class="segmented" aria-label="头像裁切"><button data-shape="round" aria-pressed="true">圆形</button><button data-shape="square" aria-pressed="false">方形</button></div><button id="theme-toggle" class="outline" aria-pressed="false">深色背景</button></div></div>
+      <div class="column-head" id="column-head"></div>
+      <div id="style-rows"></div>
+    </section>
+    <footer><div><strong>同一软件，可以拥有不同气质。</strong><p>所有方案共用角色与编号，可继续发展为主题。极简方向参考 <a href="https://x.ai/bot" target="_blank" rel="noreferrer">Grok Bot</a> 的简洁表达；本页为原创猫猫探索。<br>SVG 可直接使用；生图保留整组原图。首轮素材和样页均保留。</p></div><div class="footer-links"><a href="./avatar-collection.zip" download>下载全部素材 ↗</a><a href="./overview-board-v2.png" download>保存本轮样页 ↗</a></div></footer>
+  </main>
+  <dialog id="detail"><button class="close" aria-label="关闭详情">×</button><div id="detail-content"></div></dialog>
+  <script src="./lab-v2.js" defer></script>
+</body>
+</html>

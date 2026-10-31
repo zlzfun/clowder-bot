@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>猫猫头像 · 已选方案 · clowder-bot</title>
+  <link rel="stylesheet" href="./lab.css?v=3">
+</head>
+<body>
+  <main>
+    <header class="masthead">
+      <a class="brand" href="#">clowder-bot <span> / 猫猫头像研究所</span></a>
+      <a class="edition" href="./round-2.html">查看第二轮全部方案 ↗</a>
+    </header>
+    <section class="intro">
+      <div><p class="eyebrow">AVATAR STUDIES / SELECTED / 2026.10.31</p><h1>猫猫咖啡馆 · 已选方案</h1><p class="intro-note">保留手绘墨稿、3D 玩偶肖像、水彩绘本。当前使用 G · 3D 玩偶肖像，搭配暖色猫咖界面。</p></div>
+      <div class="round-mark"><span>G / N / I</span><small>THREE SELECTED DIRECTIONS</small></div>
+    </section>
+    <details class="tryout" id="preview-panel">
+      <summary>聊天场景与小尺寸预览 <span>展开查看浅色 / 深色效果</span></summary>
+      <div class="section-top"><div><h2 id="tryout-title">放进聊天里看看</h2><span class="muted" id="selected-label" aria-live="polite">G · 3D 玩偶肖像</span></div><label class="select-label">预览风格 <select id="style-select" aria-label="聊天预览风格"></select></label></div>
+      <div class="preview-pair" id="previews"></div>
+    </details>
+    <section class="catalog" aria-labelledby="catalog-title">
+      <div class="catalog-toolbar"><div><h2 id="catalog-title">同样八只猫，换一种表达</h2><p>点击头像可看大图和 24 / 36 / 44 / 72px 实际尺寸，也可把整组放进聊天。</p></div><div class="controls"><div class="segmented" aria-label="头像裁切"><button data-shape="round" aria-pressed="true">圆形</button><button data-shape="square" aria-pressed="false">方形</button></div><button id="theme-toggle" class="outline" aria-pressed="false">深色背景</button></div></div>
+      <div class="column-head" id="column-head"></div>
+      <div id="style-rows"></div>
+    </section>
+    <footer><div><strong>同一软件，可以拥有不同气质。</strong><p>当前保留 G / N / I 三组，每组八只猫。原图、历史方案和前两轮样页均保留；其他方向暂不进入候选。<br>这里的切换仅作对照预览，应用当前使用 3D 玩偶肖像。</p></div><div class="footer-links"><a href="./avatar-collection.zip" download>下载全部素材 ↗</a><a href="./overview.png" download>保存已选样页 ↗</a></div></footer>
+  </main>
+  <dialog id="detail"><button class="close" aria-label="关闭详情">×</button><div id="detail-content"></div></dialog>
+  <script src="./lab.js?v=3" defer></script>
+</body>
+</html>

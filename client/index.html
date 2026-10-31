@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="application-name" content="clowder-bot">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F0E5D6" id="theme-color">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<script>
+try {
+  var t = localStorage.getItem("xbot-theme");
+  if (t !== "light" && t !== "dark") {
+    t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  document.documentElement.setAttribute("data-theme", t);
+  var m = document.getElementById("theme-color");
+  if (m) m.setAttribute("content", t === "dark" ? "#201A17" : "#F0E5D6");
+} catch (e) {}
+</script>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<title>clowder-bot</title>
+<link rel="preload" href="/fonts/MonaSansVF.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/NotoSansSC-subset.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/tokens.css">
+<link rel="stylesheet" href="/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/devices.css">
+<link rel="stylesheet" href="/remotechat.css">
+<link rel="stylesheet" href="/providers.css">
+<link rel="stylesheet" href="/web-search.css">
+<link rel="stylesheet" href="/image-gen.css">
+<link rel="stylesheet" href="/skills.css">
+<link rel="stylesheet" href="/persona-cards.css">
+<link rel="stylesheet" href="/apps.css">
+<link rel="stylesheet" href="/account.css">
+<link rel="stylesheet" href="/cafe-theme.css">
+</head>
+<body>
+<svg aria-hidden="true" width="0" height="0" style="position:absolute;overflow:hidden"><defs>
+<symbol id="doodle-chat" viewBox="0 0 200 120">
+<path d="M52 62c-.6 13 .4 22 2.6 27.5 9.6 3 20.4 3 30 .2 2.2-6 3-15 2.4-27.6-11.6 1.6-23.4 1.4-35-.1z"/><path d="M87.4 68c8.8-1.6 12.4 2.4 11.2 7.6-1 4.8-6 7-12.6 6"/>
+<path d="M60 54c-4-5 2.4-8-.6-13.6"/><path d="M70 52c-3.4-5.4 3-8.6 0-14.4"/><path d="M80 54c-3.6-4.6 2-7.6-.4-12"/>
+<path d="M40 94c18 5.2 46 5.4 66-.4"/><path d="M134 46l38-15.4-15.6 33-6.4-11.4z"/><path d="M150 52.2l22-21.6"/>
+<path d="M104 56c8-3 16-6.4 24-10" stroke-dasharray="1.5 5"/><circle cx="46" cy="100" r=".9" fill="currentColor" stroke="none"/><circle cx="54" cy="103" r=".9" fill="currentColor" stroke="none"/><circle cx="63" cy="101" r=".9" fill="currentColor" stroke="none"/><circle cx="72" cy="104" r=".9" fill="currentColor" stroke="none"/><circle cx="82" cy="101" r=".9" fill="currentColor" stroke="none"/><circle cx="92" cy="103" r=".9" fill="currentColor" stroke="none"/><circle cx="100" cy="100" r=".9" fill="currentColor" stroke="none"/></symbol>
+<symbol id="doodle-memory" viewBox="0 0 200 120">
+<path d="M46 32c18-5 36-4 54 4.6v56c-17.6-8-35.4-9-54-4.4z"/><path d="M100 36.6c17-8.4 35-9.8 54-5v56c-18.6-4.4-36.6-3.2-54 5"/>
+<path d="M56 46c12-2 22-1.4 34 2.6M56 56c12-2 22-1.4 34 2.6M56 66c10-1.6 18-1 26 1.4" stroke-dasharray="2 4"/><path d="M110 48c12-4 22-4.6 34-3M110 58c12-4 22-4.6 34-3" stroke-dasharray="2 4"/>
+<path d="M132 30v24l5.4-4.4 5.4 4.2V29.4"/><circle cx="60" cy="100" r=".9" fill="currentColor" stroke="none"/><circle cx="70" cy="102" r=".9" fill="currentColor" stroke="none"/><circle cx="80" cy="100" r=".9" fill="currentColor" stroke="none"/><circle cx="90" cy="103" r=".9" fill="currentColor" stroke="none"/><circle cx="100" cy="101" r=".9" fill="currentColor" stroke="none"/><circle cx="110" cy="103" r=".9" fill="currentColor" stroke="none"/><circle cx="120" cy="100" r=".9" fill="currentColor" stroke="none"/><circle cx="130" cy="102" r=".9" fill="currentColor" stroke="none"/><circle cx="140" cy="100" r=".9" fill="currentColor" stroke="none"/></symbol>
+<symbol id="doodle-trace" viewBox="0 0 200 120">
+<path d="M26 92c22-2 30-22 52-24s24 14 44 10 18-26 34-34" stroke-dasharray="1.5 6"/><circle cx="26" cy="92" r="3.4"/>
+<path d="M156 44V16.4"/><path d="M156 17c6 1.6 11 1 16.6 3.4-5 3.6-10.6 4.2-16.6 5.4"/><circle cx="150" cy="48" r=".9" fill="currentColor" stroke="none"/><circle cx="158" cy="49" r=".9" fill="currentColor" stroke="none"/><circle cx="164" cy="47" r=".9" fill="currentColor" stroke="none"/><circle cx="146" cy="50" r=".9" fill="currentColor" stroke="none"/></symbol>
+<symbol id="doodle-tasks" viewBox="0 0 200 120">
+<path d="M100 36c15.6-.4 26 11 25.6 25.4-.4 14.6-11.4 25-26 24.6C85 85.6 74.4 75 74.6 60.4 74.8 46 85.4 36.4 100 36z"/><path d="M100 46v15l9 6"/>
+<path d="M80 36.4c-3.6-6 2.4-11.4 8.4-8.6M120 36.4c3.6-6-2.4-11.4-8.4-8.6"/><path d="M86 86l-5 8M114 86l5 8"/>
+<path d="M136 34h9l-9 10h9M150 22h6l-6 7h6"/><circle cx="78" cy="100" r=".9" fill="currentColor" stroke="none"/><circle cx="88" cy="102" r=".9" fill="currentColor" stroke="none"/><circle cx="98" cy="100" r=".9" fill="currentColor" stroke="none"/><circle cx="108" cy="102" r=".9" fill="currentColor" stroke="none"/><circle cx="118" cy="100" r=".9" fill="currentColor" stroke="none"/></symbol>
+<symbol id="doodle-offline" viewBox="0 0 220 120">
+<path d="M14 66c18 2 32-1 46-6"/><path d="M60 50.4c8-.6 15-.4 21.4.4 2.4.4 3.4 2 3.4 4.6v9.4c0 2.6-1 4-3.4 4.4-6.6 1-13.6 1-21.4.4z"/><path d="M85 54h9M85 65h9"/>
+<path d="M130 48c7.6-.8 15.6-.6 23 .2 2.4.4 3.4 2 3.4 4.4v14c0 2.4-1 3.8-3.4 4.2-7.6.8-15.4.8-23 0z"/><path d="M137 55.6v3M137 63v3"/><path d="M156.4 60c20 1.4 34 4 50 1"/>
+<path d="M105 46l2-6M111 59h6M105 72l2 6" /><circle cx="40" cy="84" r=".9" fill="currentColor" stroke="none"/><circle cx="50" cy="86" r=".9" fill="currentColor" stroke="none"/><circle cx="60" cy="84" r=".9" fill="currentColor" stroke="none"/><circle cx="150" cy="86" r=".9" fill="currentColor" stroke="none"/><circle cx="160" cy="84" r=".9" fill="currentColor" stroke="none"/><circle cx="170" cy="86" r=".9" fill="currentColor" stroke="none"/><circle cx="180" cy="84" r=".9" fill="currentColor" stroke="none"/></symbol>
+<symbol id="doodle-devices" viewBox="0 0 220 110">
+<path d="M30 40c14-.6 28-.6 42 0v30c-14 .6-28 .6-42 0z"/><path d="M22 76c19 1.4 39 1.4 58 0"/><path d="M148 40c14-.6 28-.6 42 0v30c-14 .6-28 .6-42 0z"/><path d="M140 76c19 1.4 39 1.4 58 0"/>
+<path d="M78 38c18-18 46-18 64 0" stroke-dasharray="1.5 6"/><path d="M106 26.4l3.4-3.4M114 26.4l-3.4-3.4"/><circle cx="40" cy="90" r=".9" fill="currentColor" stroke="none"/><circle cx="50" cy="92" r=".9" fill="currentColor" stroke="none"/><circle cx="60" cy="90" r=".9" fill="currentColor" stroke="none"/><circle cx="160" cy="92" r=".9" fill="currentColor" stroke="none"/><circle cx="170" cy="90" r=".9" fill="currentColor" stroke="none"/><circle cx="180" cy="92" r=".9" fill="currentColor" stroke="none"/></symbol>
+</defs></svg>
+<div id="login" class="gate" hidden>
+  <form id="login-form" class="gate-card" novalidate>
+    <div class="mark" aria-hidden="true">
+      <svg viewBox="0 0 100 100"><path d="M16 20 L40 50 L16 80 M84 20 L60 50 L84 80" fill="none" stroke="currentColor" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+    <h1>clowder-bot</h1>
+    <label class="field">
+      <span>登录码</span>
+      <input id="token" name="token" type="password" autocomplete="current-password" required autofocus aria-describedby="login-hint">
+    </label>
+    <p id="login-hint" class="hint">启动 clowder-bot 时，终端里会打印登录码</p>
+    <p id="login-notice" class="hint" role="status" hidden></p>
+    <p id="login-error" class="error" hidden></p>
+    <button class="primary" type="submit">进入</button>
+  </form>
+</div>
+
+<!-- The account screens (sign in, sign up, check mail, my devices). The form above is the old install code, kept for #login-code only. -->
+<div id="acct" class="acct" hidden></div>
+
+<div id="setup" class="gate" hidden>
+  <form id="setup-form" class="gate-card" novalidate>
+    <h1>先填模型密钥</h1>
+    <p class="hint">clowder-bot 默认用 DeepSeek：在 platform.deepseek.com 创建一个 API key，整段粘贴到这里。</p>
+    <label class="field">
+      <span>API key</span>
+      <input id="setup-key" name="key" type="password" autocomplete="off" spellcheck="false" required aria-describedby="setup-hint">
+    </label>
+    <p id="setup-hint" class="hint">会先向 <span id="setup-host">模型服务</span> 发一个请求试一下。密钥只存在这台电脑的 clowder-bot 数据目录里，只有你的账户能读，不会写进系统环境变量。</p>
+    <p id="setup-error" class="error" role="alert" hidden></p>
+    <button id="setup-save" class="primary" type="submit" disabled>测试并保存</button>
+  </form>
+</div>
+
+<div id="shell" class="shell" hidden>
+  <aside id="sidebar" class="sidebar">
+    <div class="side-drag" aria-hidden="true"></div>
+    <div id="side-grip" class="sgrip" aria-hidden="true"></div>
+    <div class="side-scroll">
+      <div id="greeting" class="greeting" aria-live="polite"></div>
+      <div id="pin-row" class="pin-row"></div>
+      <nav id="roster" class="list" aria-label="Bot"></nav>
+      <nav id="remote-roster" class="list g7-remote" aria-label="其他电脑上的 Bot" hidden></nav>
+    </div>
+    <div class="side-foot">
+      <button id="rail-new" class="railnew" type="button" aria-label="新建 Bot 或群组" data-tip="新建" data-tip-placement="right"></button>
+      <!-- Account actions and the unified settings dialog. -->
+      <div class="account-wrap">
+        <button id="account" class="account-trigger" type="button" aria-label="我" aria-expanded="false" aria-controls="account-menu">
+          <span id="me-avatar"></span>
+          <span class="me-text"><span id="me-name" class="me-name">我</span><span id="me-device" class="me-device" hidden></span></span>
+          <svg class="icon me-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
+        </button>
+        <div id="account-menu" class="pop account-menu" hidden>
+          <button id="account-settings" type="button" aria-haspopup="dialog">设置</button>
+        </div>
+      </div>
+    </div>
+  </aside>
+  <div id="backdrop" class="backdrop" hidden></div>
+
+  <main class="main">
+   <div class="chat">
+    <header class="top">
+      <div class="top-inner">
+        <button id="menu" class="icon-btn mobile-only" type="button" aria-label="列表" data-tip="列表">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg>
+        </button>
+        <button id="back" class="icon-btn" type="button" aria-label="返回" data-tip="返回" hidden>
+          <svg class="icon" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>
+        </button>
+        <!-- The identity chip opens and closes the bot panel. -->
+        <button id="head-chip" class="top-title" type="button" aria-label="打开信息" aria-expanded="false" disabled>
+          <span id="title" class="title">clowder-bot</span>
+          <span id="subtitle" class="subtitle" hidden></span>
+        </button>
+        <!-- Shown once a newer version is downloaded: a click installs it and
+             starts XBot again. Nothing appears while it downloads in the
+             background, and nothing at all when there is no update. -->
+        <button id="update" class="update-btn" type="button" hidden>
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M4 20h16"/></svg>
+          <span class="update-label">更新</span>
+        </button>
+      </div>
+    </header>
+    <div id="thread" class="thread"></div>
+    <!-- The exchange between two bots is read-only: this replaces the composer. -->
+    <div class="peer-dock"><button id="peer-close" class="peer-close secondary" type="button">关闭聊天</button></div>
+    <div class="dock">
+      <div id="work-status" class="work-status"></div>
+      <form id="composer" class="composer">
+        <div id="quote-bar" class="quote-row" hidden>
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>
+          <p id="quote-bar-text" class="quote-row-text"></p>
+          <button id="quote-clear" class="ghost" type="button" aria-label="取消引用" data-tip="取消">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+        <!-- Pictures pasted or dropped into the composer wait here until send. -->
+        <div id="attach-bar" class="attach-row" hidden>
+          <div id="attach-list" class="attach-list" aria-label="待发送的图片"></div>
+          <p id="attach-note" class="attach-note" hidden></p>
+        </div>
+        <!-- Plain text with one twist: http(s) URLs render as links. The
+             desktop shell opens off-origin navigations externally; the web
+             page opens them with target=_blank + noopener. -->
+        <div id="input" class="composer-input" role="textbox" aria-multiline="true" aria-label="写一条消息" contenteditable="plaintext-only" data-placeholder="写一条消息"></div>
+        <div class="composer-actions">
+          <button id="send" class="send secondary" disabled type="submit" aria-label="发送" data-tip="发送">
+            <svg class="icon" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+          </button>
+        </div>
+      </form>
+    </div>
+    <div id="toast" class="toast" role="status" hidden></div>
+   </div>
+    <div id="panel-scrim" class="panel-scrim" hidden></div>
+    <aside id="panel" class="panel" aria-label="详情">
+      <div id="panel-head" class="panel-head">
+        <header class="phdr">
+          <div id="panel-ident" class="id" hidden></div>
+          <div id="panel-actions" class="acts" role="toolbar" aria-label="Bot 操作" hidden></div>
+        </header>
+        <div id="ctxbar" hidden></div>
+        <div id="panel-tabs" class="panel-tabs"></div>
+      </div>
+      <div id="panel-body" class="panel-body"></div>
+    </aside>
+  </main>
+
+</div>
+
+<div id="modal" class="modal" hidden>
+  <form id="modal-form" class="modal-card" novalidate>
+    <h2 id="modal-title">新建</h2>
+    <div id="modal-fields"></div>
+    <p id="modal-error" class="error" hidden></p>
+    <div class="modal-actions">
+      <button class="secondary" type="button" id="modal-cancel">取消</button>
+      <button class="primary" type="submit" id="modal-ok">创建</button>
+    </div>
+  </form>
+</div>
+<dialog id="lightbox" class="lightbox" aria-label="查看图片" hidden></dialog>
+<div class="setscrim" id="setscrim" hidden></div>
+<div class="setpage" id="setpage" hidden tabindex="-1" role="dialog" aria-modal="true" aria-label="设置">
+ <div class="setbar">
+  <button id="settings-back" class="setbarback" type="button" hidden><svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg><span id="settings-back-label">设置</span></button>
+  <h2 id="settings-bar-title">设置</h2>
+  <button id="settings-close-m" class="icon-btn setbarclose" type="button" aria-label="关闭设置"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+ </div>
+ <div class="setbody">
+  <nav class="setnav">
+   <p class="setnavlead">整台 clowder-bot 的共用选项。点开一项继续。</p>
+   <button type="button" data-set="general"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M1 14h6"/><path d="M9 8h6"/><path d="M17 16h6"/></svg><span>通用</span></button>
+   <button type="button" data-set="account"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><span>账号</span></button>
+   <button type="button" data-set="perm"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg><span>权限</span></button>
+   <button type="button" data-set="search"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>网页搜索</span></button>
+   <button type="button" data-set="skills"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/></svg><span>技能</span></button>
+   <button type="button" data-set="persona"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="16" x="3" y="4" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M6 16c.6-1.6 1.7-2.4 3-2.4s2.4.8 3 2.4"/><path d="M15 9h3"/><path d="M15 13h2"/></svg><span>人设卡</span></button>
+   <button type="button" data-set="image-gen"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg><span>图片生成</span></button>
+   <button type="button" data-set="devices"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg><span>设备</span></button>
+   <button type="button" data-set="apps"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg><span>连接应用</span></button>
+   <button type="button" data-set="providers"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5"/></svg><span>模型与供应商</span></button>
+   <button type="button" data-set="about"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg><span>关于</span></button>
+  </nav>
+  <div class="setmain">
+   <button id="settings-close" class="icon-btn setclose" type="button" aria-label="关闭设置"><svg class="ic " width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+   <div class="setcnt"><p id="settings-error" class="bad" role="alert" hidden></p>
+   <div class="setpane" data-spane="general">
+    <h2>通用</h2>
+    <div class="setsec" style="margin-top:0">
+     <h4>外观</h4>
+     <div class="setrows">
+      <div class="setrow">
+       <div class="tx"><b>主题</b></div>
+       <select class="setselect" id="settings-theme" aria-label="主题">
+        <option value="light" selected>浅色</option>
+        <option value="dark">深色</option>
+        <option value="system">跟随系统</option>
+       </select>
+      </div>
+     </div>
+    </div>
+    <div class="setsec"><h4>通知</h4><div class="approw"><span class="icwrap" id="push-icon"></span><div class="tx"><b>手机推送</b><div class="st" id="phone-push-hint">Bot 有话找你时，推送到这台设备</div></div><button id="phone-push" type="button" class="tog" role="switch" aria-checked="false" aria-label="手机推送"></button></div></div>
+   </div>
+   <div class="setpane" data-spane="account" hidden><h2>账号</h2><div id="settings-account" class="acct acct-settings"></div></div>
+   <div class="setpane" data-spane="perm">
+    <h2>权限</h2>
+    <div class="setsec" style="margin-top:0">
+     <div class="setrows">
+      <div class="setrow">
+       <div class="tx"><b>操作前先确认</b><div class="hint" data-perm-hint>Bot 删除、对外发消息等会直接做，做完在对话里告诉你。</div></div>
+       <button class="tog" id="settings-permissions" type="button" role="switch" aria-checked="false" aria-label="操作前先确认" disabled></button>
+      </div>
+     </div>
+    </div>
+    <div class="setsec" data-perm-on hidden>
+     <h4>会确认的操作</h4>
+     <div class="setlist">
+      <div class="li"><svg class="ic " width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2"/></svg><span>删除文件或 Bot</span></div>
+      <div class="li"><svg class="ic " width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg><span>对外发送消息</span></div>
+      <div class="li"><svg class="ic " width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg><span>非读取的网络请求（带密钥或改数据）</span></div>
+      <div class="li"><svg class="ic " width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span>改自己的职责或资料</span></div>
+      <div class="li"><svg class="ic " width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg><span>尚未归类的工具、MCP 工具</span></div>
+     </div>
+    </div>
+    <div class="setsec">
+     <h4>始终会问的</h4>
+     <div class="setlist">
+      <div class="li"><svg class="ic " width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg><span>装连接器时填写密钥</span></div>
+      <div class="li"><svg class="ic " width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span>触到保险箱或密钥文件</span></div>
+     </div>
+    </div>
+    <p class="setfoot">命令行同样生效：<code>xbot permissions on|off</code></p>
+   </div>
+   <div class="setpane" data-spane="search"><div id="settings-search"></div></div>
+   <div class="setpane" data-spane="skills"><div id="settings-skills"></div></div>
+   <div class="setpane" data-spane="persona"><div id="settings-persona"></div></div>
+   <div class="setpane" data-spane="image-gen"><div id="settings-image-gen"></div></div>
+   <div class="setpane setdev" data-spane="devices"><div id="settings-devices"></div></div>
+   <div class="setpane" data-spane="apps"><div id="settings-apps"></div></div>
+   <div class="setpane" data-spane="providers"><div id="settings-providers"></div></div>
+   <div class="setpane" data-spane="about">
+    <h2>关于</h2>
+    <div class="aboutlogo"><div class="mark">X</div><div><h3>clowder-bot</h3><div class="v"><span data-settings-version></span></div></div></div>
+    <div class="kvrow"><span class="k">版本</span><span id="settings-version-status" aria-live="polite"></span><button id="settings-version" class="v" type="button" title="点击复制" aria-label="版本，点击复制" data-settings-version></button></div>
+    <p class="setfoot">版本来自当前运行的 clowder-bot；短号用于核对构建。</p>
+   </div>
+   </div>
+  </div>
+ </div>
+</div>
+
+<script src="/cat-avatars.js"></script>
+<script src="/vendor/katex/katex.min.js"></script>
+<script src="/providers.js"></script>
+<script src="/web-search.js"></script>
+<script src="/image-gen.js"></script>
+<script src="/skills.js"></script>
+<script src="/persona-cards.js"></script>
+<script src="/apps.js"></script>
+<script src="/account.js"></script>
+<script src="/app.js"></script>
+<script src="/devices.js"></script>
+<script src="/pairing.js"></script>
+<script src="/remotechat.js"></script>
+</body>
+</html>

@@ -1,0 +1,569 @@
+{
+  "repository": "https://github.com/liu-zhengdong/xbot",
+  "commit": "3b81c8efe55fee2606a9992203abd2e6082e08c4",
+  "files": [
+    {
+      "file": "account.css",
+      "target": "client/public/account.css",
+      "sourceSha256": "fb4c6e9e7732f1cb9088aa1228c54ca800ac7a5a5e143db2ac4f3bb273e3fbf2",
+      "sha256": "fb4c6e9e7732f1cb9088aa1228c54ca800ac7a5a5e143db2ac4f3bb273e3fbf2",
+      "unchanged": true
+    },
+    {
+      "file": "account.js",
+      "target": "client/public/account.js",
+      "sourceSha256": "1ad312ac1b74f6fcd8894910918cb798153912d83c0b50d5ff9b6ea7cd1b8461",
+      "sha256": "c4ac6836eae7233b65c5970a9910a6cb7d4f439af6008bba6709724c91863591",
+      "unchanged": false
+    },
+    {
+      "file": "app.css",
+      "target": "client/public/app.css",
+      "sourceSha256": "76bac69ff2dd42d1f8d2039bb15438f1202153dffe05fba037915f2cee448c5c",
+      "sha256": "76bac69ff2dd42d1f8d2039bb15438f1202153dffe05fba037915f2cee448c5c",
+      "unchanged": true
+    },
+    {
+      "file": "app.js",
+      "target": "client/public/app.js",
+      "sourceSha256": "1248f793493826bf044359c71e7d8772ccc3472d6021d6abb979dff9b6cb29bc",
+      "sha256": "de78923cda473c3aec4911172ebe99deb904195ce8c6f429201e9ae58f886d21",
+      "unchanged": false
+    },
+    {
+      "file": "apple-touch-icon.png",
+      "target": "client/public/apple-touch-icon.png",
+      "sourceSha256": "c1b9d59f09f745a3be687d945ea2152227b21d0536a7304fb1c61136962194b7",
+      "sha256": "c1b9d59f09f745a3be687d945ea2152227b21d0536a7304fb1c61136962194b7",
+      "unchanged": true
+    },
+    {
+      "file": "apps.css",
+      "target": "client/public/apps.css",
+      "sourceSha256": "3e007220c655c28ee7751a87d3e279fb9c32581151d76516983ec3aeb14352d6",
+      "sha256": "3e007220c655c28ee7751a87d3e279fb9c32581151d76516983ec3aeb14352d6",
+      "unchanged": true
+    },
+    {
+      "file": "apps.js",
+      "target": "client/public/apps.js",
+      "sourceSha256": "2c2ac204351e9f6a953d091f8497b73a8d6e0b87ae26ad2ab72e6d5d160eeb73",
+      "sha256": "20edea70f9856ac66452d035c7273107a317e323642bb4bdb6350d7afacaaabd",
+      "unchanged": false
+    },
+    {
+      "file": "devices.css",
+      "target": "client/public/devices.css",
+      "sourceSha256": "5540e5d5a72cd505095fd5519b814731d5849b7467b68d601f9c60890331b048",
+      "sha256": "5540e5d5a72cd505095fd5519b814731d5849b7467b68d601f9c60890331b048",
+      "unchanged": true
+    },
+    {
+      "file": "devices.js",
+      "target": "client/public/devices.js",
+      "sourceSha256": "7488a4624387cb4805fa0f9fc3d299a8d54044e189942e8204ea4fdbdc4ebac9",
+      "sha256": "83caff57df6e041e65266e395d7b76243d1c3288ad66df43ff1a3f8caf5c7b8b",
+      "unchanged": false
+    },
+    {
+      "file": "favicon-32.png",
+      "target": "client/public/favicon-32.png",
+      "sourceSha256": "3aeed917b23832321783986f1ce67343034af32cb262345a47bdecead3a451b2",
+      "sha256": "3aeed917b23832321783986f1ce67343034af32cb262345a47bdecead3a451b2",
+      "unchanged": true
+    },
+    {
+      "file": "favicon.svg",
+      "target": "client/public/favicon.svg",
+      "sourceSha256": "fac75a9203bfa318394cbd275a3de20d6aad796ba6681a32f935f6f583e483b8",
+      "sha256": "fac75a9203bfa318394cbd275a3de20d6aad796ba6681a32f935f6f583e483b8",
+      "unchanged": true
+    },
+    {
+      "file": "fonts/MonaSansVF.woff2",
+      "target": "client/public/fonts/MonaSansVF.woff2",
+      "sourceSha256": "875ad1fab0c1f4854927fa8086963fb6ddd4608b04a58b267cddf8a9d78f80d3",
+      "sha256": "875ad1fab0c1f4854927fa8086963fb6ddd4608b04a58b267cddf8a9d78f80d3",
+      "unchanged": true
+    },
+    {
+      "file": "fonts/NotoSansSC-OFL.txt",
+      "target": "client/public/fonts/NotoSansSC-OFL.txt",
+      "sourceSha256": "1c05c68c34f9708415aada51f17e1b0092d2cea709bf4a94cd38114f9e73d7d9",
+      "sha256": "1c05c68c34f9708415aada51f17e1b0092d2cea709bf4a94cd38114f9e73d7d9",
+      "unchanged": true
+    },
+    {
+      "file": "fonts/NotoSansSC-full.woff2",
+      "target": "client/public/fonts/NotoSansSC-full.woff2",
+      "sourceSha256": "74a86e444613d611c49bcc9a5dd08ea84370f9642f5c033bc8a329cbdec1097b",
+      "sha256": "74a86e444613d611c49bcc9a5dd08ea84370f9642f5c033bc8a329cbdec1097b",
+      "unchanged": true
+    },
+    {
+      "file": "fonts/NotoSansSC-subset.woff2",
+      "target": "client/public/fonts/NotoSansSC-subset.woff2",
+      "sourceSha256": "704f3ea880da1327b7cc705497f6664a33e43e87b59fbfc22143480a298bf41e",
+      "sha256": "704f3ea880da1327b7cc705497f6664a33e43e87b59fbfc22143480a298bf41e",
+      "unchanged": true
+    },
+    {
+      "file": "fonts/OFL.txt",
+      "target": "client/public/fonts/OFL.txt",
+      "sourceSha256": "9261dcb61fb5e3c587d50d7a9fdae12bc7422d8822d7ac06b8f34550479575de",
+      "sha256": "9261dcb61fb5e3c587d50d7a9fdae12bc7422d8822d7ac06b8f34550479575de",
+      "unchanged": true
+    },
+    {
+      "file": "icon-192.png",
+      "target": "client/public/icon-192.png",
+      "sourceSha256": "0624f3357e2442972ec673eb95eb75d759502f016fec8cd2623bfebebdd0bbd4",
+      "sha256": "0624f3357e2442972ec673eb95eb75d759502f016fec8cd2623bfebebdd0bbd4",
+      "unchanged": true
+    },
+    {
+      "file": "icon-512.png",
+      "target": "client/public/icon-512.png",
+      "sourceSha256": "4ce7ad847e33fc64f1ff21992f405f614a1e3c322e5e7275c9f8f7b1a0dcf661",
+      "sha256": "4ce7ad847e33fc64f1ff21992f405f614a1e3c322e5e7275c9f8f7b1a0dcf661",
+      "unchanged": true
+    },
+    {
+      "file": "icon-maskable-512.png",
+      "target": "client/public/icon-maskable-512.png",
+      "sourceSha256": "f713684ffde523bb1985290ce349fdc7c903a33547c61078a7228e6a5094fd9c",
+      "sha256": "f713684ffde523bb1985290ce349fdc7c903a33547c61078a7228e6a5094fd9c",
+      "unchanged": true
+    },
+    {
+      "file": "image-gen.css",
+      "target": "client/public/image-gen.css",
+      "sourceSha256": "332fa129a03ca031be321e3ee6b557ff41e71b9951310d0ffbb6cdcf8b3c5149",
+      "sha256": "332fa129a03ca031be321e3ee6b557ff41e71b9951310d0ffbb6cdcf8b3c5149",
+      "unchanged": true
+    },
+    {
+      "file": "image-gen.js",
+      "target": "client/public/image-gen.js",
+      "sourceSha256": "674099f36f5615cbc016fec72a72c3f61ac430ac602d2e77afc9969624aa913a",
+      "sha256": "57458fd577a56b4aae942ad39f1ad62e58b135c543b5484d9d0c2e5130fa5267",
+      "unchanged": false
+    },
+    {
+      "file": "index.html",
+      "target": "client/index.html",
+      "sourceSha256": "a4160c18e23489fbc6a9e21fe494e1ac52840a67b2e138997400a0b42835b556",
+      "sha256": "701a95e6103792437c96c1a6b64444a083bd1055f6bb11ee746a10bbec80b3eb",
+      "unchanged": false
+    },
+    {
+      "file": "manifest.webmanifest",
+      "target": "client/public/manifest.webmanifest",
+      "sourceSha256": "f79422e564e30e032c12c9611d5136951ef77416450e997100b446ae3a909eab",
+      "sha256": "1fa6f775b32025c4c2b6bbe590e69ae6cae29c9d9172410f5bce6c301b3b1c25",
+      "unchanged": false
+    },
+    {
+      "file": "pairing.js",
+      "target": "client/public/pairing.js",
+      "sourceSha256": "1752560b3d0c809fe1d9711d8e3581ec1e4c2d18658d379eeecb3452c6842244",
+      "sha256": "af884126d0e8154e82b120688ae61b70b739fc2e28de4b7c344e83f21c57eff3",
+      "unchanged": false
+    },
+    {
+      "file": "persona-cards.css",
+      "target": "client/public/persona-cards.css",
+      "sourceSha256": "de854b8d40b2cdf44bec35796193ad1ef2c4b668b19b368e1ad48d797148e305",
+      "sha256": "de854b8d40b2cdf44bec35796193ad1ef2c4b668b19b368e1ad48d797148e305",
+      "unchanged": true
+    },
+    {
+      "file": "persona-cards.js",
+      "target": "client/public/persona-cards.js",
+      "sourceSha256": "ac9ea34ce150e10125c6d952c6b7c787e936342d948bf3a345a3e8decd87177d",
+      "sha256": "a519e0890f6da8ef7f7047710bb618234cab74a51a7f225852c634398065ae94",
+      "unchanged": false
+    },
+    {
+      "file": "provider-icons/anthropic.svg",
+      "target": "client/public/provider-icons/anthropic.svg",
+      "sourceSha256": "32d47c2945f1f2b2a9bdae8ce1ee619991417aa75f2defaa171ee10d65b9e460",
+      "sha256": "32d47c2945f1f2b2a9bdae8ce1ee619991417aa75f2defaa171ee10d65b9e460",
+      "unchanged": true
+    },
+    {
+      "file": "provider-icons/claude.svg",
+      "target": "client/public/provider-icons/claude.svg",
+      "sourceSha256": "365a70a7eb3956d9b9a96086058ebe04e1dbd8e291a756ad964e8a283fbd6d38",
+      "sha256": "365a70a7eb3956d9b9a96086058ebe04e1dbd8e291a756ad964e8a283fbd6d38",
+      "unchanged": true
+    },
+    {
+      "file": "provider-icons/deepseek.svg",
+      "target": "client/public/provider-icons/deepseek.svg",
+      "sourceSha256": "79e578a8dd0e598fb86946633686899e2098a57f476e653bb3dcc28e9b0dc8bb",
+      "sha256": "79e578a8dd0e598fb86946633686899e2098a57f476e653bb3dcc28e9b0dc8bb",
+      "unchanged": true
+    },
+    {
+      "file": "provider-icons/gemini.svg",
+      "target": "client/public/provider-icons/gemini.svg",
+      "sourceSha256": "98f63346aba3c0bca569c59a0ff4557fa42e0c77af34fb4b6ca37697ca32a7ac",
+      "sha256": "98f63346aba3c0bca569c59a0ff4557fa42e0c77af34fb4b6ca37697ca32a7ac",
+      "unchanged": true
+    },
+    {
+      "file": "provider-icons/kimi-code.svg",
+      "target": "client/public/provider-icons/kimi-code.svg",
+      "sourceSha256": "41320e3ca4eff0dd4262ee4f1f35bdb421def6f380d1999b62658fde6bb9adc0",
+      "sha256": "41320e3ca4eff0dd4262ee4f1f35bdb421def6f380d1999b62658fde6bb9adc0",
+      "unchanged": true
+    },
+    {
+      "file": "provider-icons/kimi.svg",
+      "target": "client/public/provider-icons/kimi.svg",
+      "sourceSha256": "41320e3ca4eff0dd4262ee4f1f35bdb421def6f380d1999b62658fde6bb9adc0",
+      "sha256": "41320e3ca4eff0dd4262ee4f1f35bdb421def6f380d1999b62658fde6bb9adc0",
+      "unchanged": true
+    },
+    {
+      "file": "provider-icons/mimo.svg",
+      "target": "client/public/provider-icons/mimo.svg",
+      "sourceSha256": "74a7c013dc7dd17ed699fa18f8bdfada7bd8e6711f84e6ba0adb518c317cc139",
+      "sha256": "74a7c013dc7dd17ed699fa18f8bdfada7bd8e6711f84e6ba0adb518c317cc139",
+      "unchanged": true
+    },
+    {
+      "file": "provider-icons/minimax.svg",
+      "target": "client/public/provider-icons/minimax.svg",
+      "sourceSha256": "718a88072ffa1c3b59b62c81ae52628a39fd0d4206c93d6f83722eeaca914bf2",
+      "sha256": "718a88072ffa1c3b59b62c81ae52628a39fd0d4206c93d6f83722eeaca914bf2",
+      "unchanged": true
+    },
+    {
+      "file": "provider-icons/openai.svg",
+      "target": "client/public/provider-icons/openai.svg",
+      "sourceSha256": "abcf3ce6c536b078b7de9401354f6639449da3b590870339d023fee1b989fd6f",
+      "sha256": "abcf3ce6c536b078b7de9401354f6639449da3b590870339d023fee1b989fd6f",
+      "unchanged": true
+    },
+    {
+      "file": "provider-icons/openrouter.svg",
+      "target": "client/public/provider-icons/openrouter.svg",
+      "sourceSha256": "391813fd1ebd7a2a29d0c03f532f839064239cb1fb9124525e1f32e9c64c40d1",
+      "sha256": "391813fd1ebd7a2a29d0c03f532f839064239cb1fb9124525e1f32e9c64c40d1",
+      "unchanged": true
+    },
+    {
+      "file": "provider-icons/qianfan.svg",
+      "target": "client/public/provider-icons/qianfan.svg",
+      "sourceSha256": "85aea674c402182c14f0a60d5948aaf5f7c67282edd23d3b40f29a8c714b2673",
+      "sha256": "85aea674c402182c14f0a60d5948aaf5f7c67282edd23d3b40f29a8c714b2673",
+      "unchanged": true
+    },
+    {
+      "file": "provider-icons/stepfun.svg",
+      "target": "client/public/provider-icons/stepfun.svg",
+      "sourceSha256": "6d5c0b1cedf026885b2ec04e824a79266adfbc0f7de6e6a2bd2de779b3bacbac",
+      "sha256": "6d5c0b1cedf026885b2ec04e824a79266adfbc0f7de6e6a2bd2de779b3bacbac",
+      "unchanged": true
+    },
+    {
+      "file": "provider-icons/tencent.svg",
+      "target": "client/public/provider-icons/tencent.svg",
+      "sourceSha256": "6f6d02230092e6b0cb37fd01074266da8a995f2e5d7552a6774906ccc257063a",
+      "sha256": "6f6d02230092e6b0cb37fd01074266da8a995f2e5d7552a6774906ccc257063a",
+      "unchanged": true
+    },
+    {
+      "file": "provider-icons/vertex.svg",
+      "target": "client/public/provider-icons/vertex.svg",
+      "sourceSha256": "46547c71fb5c33e8b908526b0150dc4a6e362f5eecc9d40e939cdd41b560c7f4",
+      "sha256": "46547c71fb5c33e8b908526b0150dc4a6e362f5eecc9d40e939cdd41b560c7f4",
+      "unchanged": true
+    },
+    {
+      "file": "provider-icons/xai.svg",
+      "target": "client/public/provider-icons/xai.svg",
+      "sourceSha256": "da53e89b9da6354f9183cff5f311829587eec122379210d8252c727a5332edde",
+      "sha256": "da53e89b9da6354f9183cff5f311829587eec122379210d8252c727a5332edde",
+      "unchanged": true
+    },
+    {
+      "file": "provider-icons/zai.svg",
+      "target": "client/public/provider-icons/zai.svg",
+      "sourceSha256": "e493192d35cc7cbebbef08e1470dbecbed25fb90559f889ce92dcce166c64697",
+      "sha256": "e493192d35cc7cbebbef08e1470dbecbed25fb90559f889ce92dcce166c64697",
+      "unchanged": true
+    },
+    {
+      "file": "provider-icons/zhipu.svg",
+      "target": "client/public/provider-icons/zhipu.svg",
+      "sourceSha256": "a608b8b385283e1b5a0a297915317f7cf49e54496b6410e9834bd76139a03d61",
+      "sha256": "a608b8b385283e1b5a0a297915317f7cf49e54496b6410e9834bd76139a03d61",
+      "unchanged": true
+    },
+    {
+      "file": "providers.css",
+      "target": "client/public/providers.css",
+      "sourceSha256": "fd34feaf40253d44ff45355a946ba2eae74c3d6bd20e61e9b226de435213f1d0",
+      "sha256": "fd34feaf40253d44ff45355a946ba2eae74c3d6bd20e61e9b226de435213f1d0",
+      "unchanged": true
+    },
+    {
+      "file": "providers.js",
+      "target": "client/public/providers.js",
+      "sourceSha256": "fb8967f6c9e63e5944cae9ac60e5740f7d5b25bcebf7b5b83e1aad4589af1f9e",
+      "sha256": "af03a8bbbfaf059b93e02211870fe0fbdf4eeab60feffdad99f35ad799088e9f",
+      "unchanged": false
+    },
+    {
+      "file": "remotechat.css",
+      "target": "client/public/remotechat.css",
+      "sourceSha256": "d275299f3aa8bcff5a8b6bfda4ac8fbf8c71742df927a03c1dd7b26233bcde19",
+      "sha256": "d275299f3aa8bcff5a8b6bfda4ac8fbf8c71742df927a03c1dd7b26233bcde19",
+      "unchanged": true
+    },
+    {
+      "file": "remotechat.js",
+      "target": "client/public/remotechat.js",
+      "sourceSha256": "9d1cb3d9f17af18894f817fcec317a6f0a6b93a69a95bb8d70ab2232336c5aa5",
+      "sha256": "eb1eb4d6319868cc50c0d6e3759afb8c86d7100db37b43fe7dafeb5b9a98c512",
+      "unchanged": false
+    },
+    {
+      "file": "skills.css",
+      "target": "client/public/skills.css",
+      "sourceSha256": "014e668af6ed80550cec1d42185466dcebbc29a9e5bec3fb86399cad1c9f4293",
+      "sha256": "014e668af6ed80550cec1d42185466dcebbc29a9e5bec3fb86399cad1c9f4293",
+      "unchanged": true
+    },
+    {
+      "file": "skills.js",
+      "target": "client/public/skills.js",
+      "sourceSha256": "6061ecc44ffdd05ba5eb10c79738ee9b9988902bf79dfb0da29803a899262871",
+      "sha256": "6f92c35347dbbc3340285b5b13ecdddd755e8365ca9d4dde2ba1843613036140",
+      "unchanged": false
+    },
+    {
+      "file": "sw.js",
+      "target": "client/public/sw.js",
+      "sourceSha256": "f2746b5e9917edf941760f508597524f3357c9569b48eb00ec7816ad2409583b",
+      "sha256": "a78bf0dce9ce2b6149659251d483eb37c83a0a7933bdfc27fcea193b1348c3d0",
+      "unchanged": false
+    },
+    {
+      "file": "tokens.css",
+      "target": "client/public/tokens.css",
+      "sourceSha256": "e7c3efd42c03ebcb64b6bb848fe8e25c19b89e9f233f7f6a02b274a286ffd474",
+      "sha256": "e7c3efd42c03ebcb64b6bb848fe8e25c19b89e9f233f7f6a02b274a286ffd474",
+      "unchanged": true
+    },
+    {
+      "file": "vendor/LICENSES.txt",
+      "target": "client/public/vendor/LICENSES.txt",
+      "sourceSha256": "f672e2d0b45ca441e403de7268569f305ce7008665cce0dfb7157a04ba8c428c",
+      "sha256": "f672e2d0b45ca441e403de7268569f305ce7008665cce0dfb7157a04ba8c428c",
+      "unchanged": true
+    },
+    {
+      "file": "vendor/katex/LICENSE",
+      "target": "client/public/vendor/katex/LICENSE",
+      "sourceSha256": "766ccc1f306c885aa45542a9846bbd0a505b27a0374f146778171c2254ce18e3",
+      "sha256": "766ccc1f306c885aa45542a9846bbd0a505b27a0374f146778171c2254ce18e3",
+      "unchanged": true
+    },
+    {
+      "file": "vendor/katex/fonts/KaTeX_AMS-Regular.woff2",
+      "target": "client/public/vendor/katex/fonts/KaTeX_AMS-Regular.woff2",
+      "sourceSha256": "0cdd387c9590a1a9f9794560022dbb59654a7d86f187aa0c81495ad42d3a7308",
+      "sha256": "0cdd387c9590a1a9f9794560022dbb59654a7d86f187aa0c81495ad42d3a7308",
+      "unchanged": true
+    },
+    {
+      "file": "vendor/katex/fonts/KaTeX_Caligraphic-Bold.woff2",
+      "target": "client/public/vendor/katex/fonts/KaTeX_Caligraphic-Bold.woff2",
+      "sourceSha256": "de7701e42cf1f4cf0b766c03fb27977207eee2f4fd5d76fa82188406da43ea4c",
+      "sha256": "de7701e42cf1f4cf0b766c03fb27977207eee2f4fd5d76fa82188406da43ea4c",
+      "unchanged": true
+    },
+    {
+      "file": "vendor/katex/fonts/KaTeX_Caligraphic-Regular.woff2",
+      "target": "client/public/vendor/katex/fonts/KaTeX_Caligraphic-Regular.woff2",
+      "sourceSha256": "5d53e70ad607c2352162dec9e0923fb54ecdafaccbf604cd8dcf7d00facb989b",
+      "sha256": "5d53e70ad607c2352162dec9e0923fb54ecdafaccbf604cd8dcf7d00facb989b",
+      "unchanged": true
+    },
+    {
+      "file": "vendor/katex/fonts/KaTeX_Fraktur-Bold.woff2",
+      "target": "client/public/vendor/katex/fonts/KaTeX_Fraktur-Bold.woff2",
+      "sourceSha256": "74444efd593c005e3f4573b44524704c0af0a937fe911cca9e94068d0d140d3f",
+      "sha256": "74444efd593c005e3f4573b44524704c0af0a937fe911cca9e94068d0d140d3f",
+      "unchanged": true
+    },
+    {
+      "file": "vendor/katex/fonts/KaTeX_Fraktur-Regular.woff2",
+      "target": "client/public/vendor/katex/fonts/KaTeX_Fraktur-Regular.woff2",
+      "sourceSha256": "51814d270d06ff0255dba0799994fa4d8c84d11f09951d47595f4abb1f3602dc",
+      "sha256": "51814d270d06ff0255dba0799994fa4d8c84d11f09951d47595f4abb1f3602dc",
+      "unchanged": true
+    },
+    {
+      "file": "vendor/katex/fonts/KaTeX_Main-Bold.woff2",
+      "target": "client/public/vendor/katex/fonts/KaTeX_Main-Bold.woff2",
+      "sourceSha256": "0f60d1b897938ec918c8ce073092411baf9438f6739465693ff18b0f9d20b021",
+      "sha256": "0f60d1b897938ec918c8ce073092411baf9438f6739465693ff18b0f9d20b021",
+      "unchanged": true
+    },
+    {
+      "file": "vendor/katex/fonts/KaTeX_Main-BoldItalic.woff2",
+      "target": "client/public/vendor/katex/fonts/KaTeX_Main-BoldItalic.woff2",
+      "sourceSha256": "99cd42a3c072d918f2f44984a807cf7aa16e13545fd0875fc07c6c65f99e715b",
+      "sha256": "99cd42a3c072d918f2f44984a807cf7aa16e13545fd0875fc07c6c65f99e715b",
+      "unchanged": true
+    },
+    {
+      "file": "vendor/katex/fonts/KaTeX_Main-Italic.woff2",
+      "target": "client/public/vendor/katex/fonts/KaTeX_Main-Italic.woff2",
+      "sourceSha256": "97479ca6cce906abc961ecac96faa5f9ca2e61b8e7670d475826bcdee9a7c267",
+      "sha256": "97479ca6cce906abc961ecac96faa5f9ca2e61b8e7670d475826bcdee9a7c267",
+      "unchanged": true
+    },
+    {
+      "file": "vendor/katex/fonts/KaTeX_Main-Regular.woff2",
+      "target": "client/public/vendor/katex/fonts/KaTeX_Main-Regular.woff2",
+      "sourceSha256": "c2342cd8b869e01752a9321dc17213fc40d4d04c79688c1d43f2cf316abd7866",
+      "sha256": "c2342cd8b869e01752a9321dc17213fc40d4d04c79688c1d43f2cf316abd7866",
+      "unchanged": true
+    },
+    {
+      "file": "vendor/katex/fonts/KaTeX_Math-BoldItalic.woff2",
+      "target": "client/public/vendor/katex/fonts/KaTeX_Math-BoldItalic.woff2",
+      "sourceSha256": "dc47344dbb6cb5b655c8460d561f4df5f501b90c804ad3c6cec65fe322351ab1",
+      "sha256": "dc47344dbb6cb5b655c8460d561f4df5f501b90c804ad3c6cec65fe322351ab1",
+      "unchanged": true
+    },
+    {
+      "file": "vendor/katex/fonts/KaTeX_Math-Italic.woff2",
+      "target": "client/public/vendor/katex/fonts/KaTeX_Math-Italic.woff2",
+      "sourceSha256": "7af58c5ec8f132a2ddde9027c6d7814decce4d3b822a11192a42a20e2e973264",
+      "sha256": "7af58c5ec8f132a2ddde9027c6d7814decce4d3b822a11192a42a20e2e973264",
+      "unchanged": true
+    },
+    {
+      "file": "vendor/katex/fonts/KaTeX_SansSerif-Bold.woff2",
+      "target": "client/public/vendor/katex/fonts/KaTeX_SansSerif-Bold.woff2",
+      "sourceSha256": "e99ae51144bf1232efcc1bfe5add36262c6866b0faab24fa75740e1b98577a62",
+      "sha256": "e99ae51144bf1232efcc1bfe5add36262c6866b0faab24fa75740e1b98577a62",
+      "unchanged": true
+    },
+    {
+      "file": "vendor/katex/fonts/KaTeX_SansSerif-Italic.woff2",
+      "target": "client/public/vendor/katex/fonts/KaTeX_SansSerif-Italic.woff2",
+      "sourceSha256": "00b26ac825e2095056396e0553b8ac26d3f8ad158c3826e28b4c45b385c4714a",
+      "sha256": "00b26ac825e2095056396e0553b8ac26d3f8ad158c3826e28b4c45b385c4714a",
+      "unchanged": true
+    },
+    {
+      "file": "vendor/katex/fonts/KaTeX_SansSerif-Regular.woff2",
+      "target": "client/public/vendor/katex/fonts/KaTeX_SansSerif-Regular.woff2",
+      "sourceSha256": "68e8c73ef42afd3ccec58bf0fba302cce448938e7fc020a5e31f8a952eee1342",
+      "sha256": "68e8c73ef42afd3ccec58bf0fba302cce448938e7fc020a5e31f8a952eee1342",
+      "unchanged": true
+    },
+    {
+      "file": "vendor/katex/fonts/KaTeX_Script-Regular.woff2",
+      "target": "client/public/vendor/katex/fonts/KaTeX_Script-Regular.woff2",
+      "sourceSha256": "036d4e95149b69ff9bcc0cd55771efeb25ffa3947293e69acd78d5ac328c684b",
+      "sha256": "036d4e95149b69ff9bcc0cd55771efeb25ffa3947293e69acd78d5ac328c684b",
+      "unchanged": true
+    },
+    {
+      "file": "vendor/katex/fonts/KaTeX_Size1-Regular.woff2",
+      "target": "client/public/vendor/katex/fonts/KaTeX_Size1-Regular.woff2",
+      "sourceSha256": "6b47c40166b6dbe21a5dfca7718413f2147fd2399be1ba605d8ad39cedf25dfe",
+      "sha256": "6b47c40166b6dbe21a5dfca7718413f2147fd2399be1ba605d8ad39cedf25dfe",
+      "unchanged": true
+    },
+    {
+      "file": "vendor/katex/fonts/KaTeX_Size2-Regular.woff2",
+      "target": "client/public/vendor/katex/fonts/KaTeX_Size2-Regular.woff2",
+      "sourceSha256": "d04c54219f9eaec6d4d4fd42dfb28785975a4794d6b2fc71e566b9cd6db842dd",
+      "sha256": "d04c54219f9eaec6d4d4fd42dfb28785975a4794d6b2fc71e566b9cd6db842dd",
+      "unchanged": true
+    },
+    {
+      "file": "vendor/katex/fonts/KaTeX_Size3-Regular.woff2",
+      "target": "client/public/vendor/katex/fonts/KaTeX_Size3-Regular.woff2",
+      "sourceSha256": "73d591271b1604960cb10bb90fee021670af7297017e0e98480b332d11f51995",
+      "sha256": "73d591271b1604960cb10bb90fee021670af7297017e0e98480b332d11f51995",
+      "unchanged": true
+    },
+    {
+      "file": "vendor/katex/fonts/KaTeX_Size4-Regular.woff2",
+      "target": "client/public/vendor/katex/fonts/KaTeX_Size4-Regular.woff2",
+      "sourceSha256": "a4af7d414440a1c1790825cfb700cf9cf43b0f2c4b04f0ebc523011ad9853ec0",
+      "sha256": "a4af7d414440a1c1790825cfb700cf9cf43b0f2c4b04f0ebc523011ad9853ec0",
+      "unchanged": true
+    },
+    {
+      "file": "vendor/katex/fonts/KaTeX_Typewriter-Regular.woff2",
+      "target": "client/public/vendor/katex/fonts/KaTeX_Typewriter-Regular.woff2",
+      "sourceSha256": "71d517d67827787cfabdf186914cc3358eda539e37931941f2b2fd4a21f68c0b",
+      "sha256": "71d517d67827787cfabdf186914cc3358eda539e37931941f2b2fd4a21f68c0b",
+      "unchanged": true
+    },
+    {
+      "file": "vendor/katex/katex.min.css",
+      "target": "client/public/vendor/katex/katex.min.css",
+      "sourceSha256": "717bc9ae7853b61f0f76455dddf0ecd4f527a783f42de2ac24684899c1c46258",
+      "sha256": "717bc9ae7853b61f0f76455dddf0ecd4f527a783f42de2ac24684899c1c46258",
+      "unchanged": true
+    },
+    {
+      "file": "vendor/katex/katex.min.js",
+      "target": "client/public/vendor/katex/katex.min.js",
+      "sourceSha256": "e6bfe5deebd4c7ccd272055bab63bd3ab2c73b907b6e6a22d352740a81381fd4",
+      "sha256": "e6bfe5deebd4c7ccd272055bab63bd3ab2c73b907b6e6a22d352740a81381fd4",
+      "unchanged": true
+    },
+    {
+      "file": "vendor/xbot-avatar.min.js",
+      "target": "client/public/vendor/xbot-avatar.min.js",
+      "sourceSha256": "fc2f09ce119fd3810162ad3e96579de30f53bcea7b26cdfb07d307ec59a64d72",
+      "sha256": "fc2f09ce119fd3810162ad3e96579de30f53bcea7b26cdfb07d307ec59a64d72",
+      "unchanged": true
+    },
+    {
+      "file": "web-search.css",
+      "target": "client/public/web-search.css",
+      "sourceSha256": "a75da204af85d47a7ba9e3ccd9faa92d63efd573181bda5e040e42a8ba036926",
+      "sha256": "a75da204af85d47a7ba9e3ccd9faa92d63efd573181bda5e040e42a8ba036926",
+      "unchanged": true
+    },
+    {
+      "file": "web-search.js",
+      "target": "client/public/web-search.js",
+      "sourceSha256": "bc83c03eee529b58ed9a57b972bf48c0c12a8e34b9835edd59131bf3897d8ff5",
+      "sha256": "544549065192fff6a76aa5f5b4c7c5fa0900838a79157202d1f55ca744590323",
+      "unchanged": false
+    }
+  ],
+  "extensions": [
+    {
+      "target": "client/public/cat-avatars.js",
+      "description": "Original 3D cat portrait renderer and preset identity mapping",
+      "sha256": "e24c7c4ae54d191db36970646876a79c912cc5654d6c86f29e7443624f9f8be0"
+    },
+    {
+      "target": "client/public/avatars/clay-cats.png",
+      "description": "User-selected G collection; shared 4 by 2 image sheet",
+      "sha256": "51744ca0d0ddf5efb79cde75f74f90bc8ba2d3ec005fef575d4ae2fbc9aefca4"
+    },
+    {
+      "target": "client/public/cafe-theme.css",
+      "description": "Cat-cafe light/dark color overrides",
+      "sha256": "c36dc68d3e995c3f5968de0ac6cd9b8fdeb438f509e707b5638000abd2e1345a"
+    }
+  ]
+}

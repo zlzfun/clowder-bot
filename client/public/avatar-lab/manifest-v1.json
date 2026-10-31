@@ -1,0 +1,631 @@
+{
+  "version": 1,
+  "title": "clowder-bot 猫猫头像样页",
+  "created": "2026-10-29",
+  "avatarCount": 72,
+  "basePath": "/avatar-lab/",
+  "characters": [
+    {
+      "id": "ragdoll",
+      "name": "宪宪",
+      "breed": "布偶猫",
+      "role": "架构与开发"
+    },
+    {
+      "id": "maine-coon",
+      "name": "砚砚",
+      "breed": "缅因猫",
+      "role": "代码审查"
+    },
+    {
+      "id": "siamese",
+      "name": "烁烁",
+      "breed": "暹罗猫",
+      "role": "视觉与创意"
+    },
+    {
+      "id": "turkish-van",
+      "name": "墨墨",
+      "breed": "梵花猫",
+      "role": "文档与验收"
+    },
+    {
+      "id": "dsh",
+      "name": "鲸鲸",
+      "breed": "蓝灰短毛猫",
+      "role": "推理与分析"
+    },
+    {
+      "id": "dragon-li",
+      "name": "小狸花",
+      "breed": "狸花猫",
+      "role": "中文实证"
+    },
+    {
+      "id": "bengal",
+      "name": "斑斑",
+      "breed": "孟加拉猫",
+      "role": "探索与多模态"
+    },
+    {
+      "id": "golden-chinchilla",
+      "name": "金哥",
+      "breed": "金渐层",
+      "role": "全栈开发"
+    }
+  ],
+  "collections": [
+    {
+      "id": "soft",
+      "code": "A",
+      "name": "奶油扁平",
+      "format": "SVG",
+      "note": "柔和轮廓与奶油色块，温柔、亲近，适合日常陪伴。",
+      "description": "柔和轮廓与奶油色块，温柔、亲近，适合日常陪伴。",
+      "assets": [
+        {
+          "id": "ragdoll",
+          "character": "宪宪",
+          "code": "A01",
+          "path": "sets/soft/ragdoll.svg"
+        },
+        {
+          "id": "maine-coon",
+          "character": "砚砚",
+          "code": "A02",
+          "path": "sets/soft/maine-coon.svg"
+        },
+        {
+          "id": "siamese",
+          "character": "烁烁",
+          "code": "A03",
+          "path": "sets/soft/siamese.svg"
+        },
+        {
+          "id": "turkish-van",
+          "character": "墨墨",
+          "code": "A04",
+          "path": "sets/soft/turkish-van.svg"
+        },
+        {
+          "id": "dsh",
+          "character": "鲸鲸",
+          "code": "A05",
+          "path": "sets/soft/dsh.svg"
+        },
+        {
+          "id": "dragon-li",
+          "character": "小狸花",
+          "code": "A06",
+          "path": "sets/soft/dragon-li.svg"
+        },
+        {
+          "id": "bengal",
+          "character": "斑斑",
+          "code": "A07",
+          "path": "sets/soft/bengal.svg"
+        },
+        {
+          "id": "golden-chinchilla",
+          "character": "金哥",
+          "code": "A08",
+          "path": "sets/soft/golden-chinchilla.svg"
+        }
+      ]
+    },
+    {
+      "id": "mono",
+      "code": "B",
+      "name": "黑白线描",
+      "format": "SVG",
+      "note": "用笔触与留白建立表情，贴近当前 demo 的克制气质。",
+      "description": "用笔触与留白建立表情，贴近当前 demo 的克制气质。",
+      "assets": [
+        {
+          "id": "ragdoll",
+          "character": "宪宪",
+          "code": "B01",
+          "path": "sets/mono/ragdoll.svg"
+        },
+        {
+          "id": "maine-coon",
+          "character": "砚砚",
+          "code": "B02",
+          "path": "sets/mono/maine-coon.svg"
+        },
+        {
+          "id": "siamese",
+          "character": "烁烁",
+          "code": "B03",
+          "path": "sets/mono/siamese.svg"
+        },
+        {
+          "id": "turkish-van",
+          "character": "墨墨",
+          "code": "B04",
+          "path": "sets/mono/turkish-van.svg"
+        },
+        {
+          "id": "dsh",
+          "character": "鲸鲸",
+          "code": "B05",
+          "path": "sets/mono/dsh.svg"
+        },
+        {
+          "id": "dragon-li",
+          "character": "小狸花",
+          "code": "B06",
+          "path": "sets/mono/dragon-li.svg"
+        },
+        {
+          "id": "bengal",
+          "character": "斑斑",
+          "code": "B07",
+          "path": "sets/mono/bengal.svg"
+        },
+        {
+          "id": "golden-chinchilla",
+          "character": "金哥",
+          "code": "B08",
+          "path": "sets/mono/golden-chinchilla.svg"
+        }
+      ]
+    },
+    {
+      "id": "geo",
+      "code": "C",
+      "name": "几何拼贴",
+      "format": "SVG",
+      "note": "圆、三角与大胆色面，简洁但有鲜明的设计感。",
+      "description": "圆、三角与大胆色面，简洁但有鲜明的设计感。",
+      "assets": [
+        {
+          "id": "ragdoll",
+          "character": "宪宪",
+          "code": "C01",
+          "path": "sets/geo/ragdoll.svg"
+        },
+        {
+          "id": "maine-coon",
+          "character": "砚砚",
+          "code": "C02",
+          "path": "sets/geo/maine-coon.svg"
+        },
+        {
+          "id": "siamese",
+          "character": "烁烁",
+          "code": "C03",
+          "path": "sets/geo/siamese.svg"
+        },
+        {
+          "id": "turkish-van",
+          "character": "墨墨",
+          "code": "C04",
+          "path": "sets/geo/turkish-van.svg"
+        },
+        {
+          "id": "dsh",
+          "character": "鲸鲸",
+          "code": "C05",
+          "path": "sets/geo/dsh.svg"
+        },
+        {
+          "id": "dragon-li",
+          "character": "小狸花",
+          "code": "C06",
+          "path": "sets/geo/dragon-li.svg"
+        },
+        {
+          "id": "bengal",
+          "character": "斑斑",
+          "code": "C07",
+          "path": "sets/geo/bengal.svg"
+        },
+        {
+          "id": "golden-chinchilla",
+          "character": "金哥",
+          "code": "C08",
+          "path": "sets/geo/golden-chinchilla.svg"
+        }
+      ]
+    },
+    {
+      "id": "sticker",
+      "code": "D",
+      "name": "潮玩贴纸",
+      "format": "SVG",
+      "note": "粗线条、夸张表情和小配饰，角色感更强。",
+      "description": "粗线条、夸张表情和小配饰，角色感更强。",
+      "assets": [
+        {
+          "id": "ragdoll",
+          "character": "宪宪",
+          "code": "D01",
+          "path": "sets/sticker/ragdoll.svg"
+        },
+        {
+          "id": "maine-coon",
+          "character": "砚砚",
+          "code": "D02",
+          "path": "sets/sticker/maine-coon.svg"
+        },
+        {
+          "id": "siamese",
+          "character": "烁烁",
+          "code": "D03",
+          "path": "sets/sticker/siamese.svg"
+        },
+        {
+          "id": "turkish-van",
+          "character": "墨墨",
+          "code": "D04",
+          "path": "sets/sticker/turkish-van.svg"
+        },
+        {
+          "id": "dsh",
+          "character": "鲸鲸",
+          "code": "D05",
+          "path": "sets/sticker/dsh.svg"
+        },
+        {
+          "id": "dragon-li",
+          "character": "小狸花",
+          "code": "D06",
+          "path": "sets/sticker/dragon-li.svg"
+        },
+        {
+          "id": "bengal",
+          "character": "斑斑",
+          "code": "D07",
+          "path": "sets/sticker/bengal.svg"
+        },
+        {
+          "id": "golden-chinchilla",
+          "character": "金哥",
+          "code": "D08",
+          "path": "sets/sticker/golden-chinchilla.svg"
+        }
+      ]
+    },
+    {
+      "id": "pixel",
+      "code": "E",
+      "name": "像素伙伴",
+      "format": "SVG",
+      "note": "清晰的像素网格，像住在终端里的小小冒险家。",
+      "description": "清晰的像素网格，像住在终端里的小小冒险家。",
+      "assets": [
+        {
+          "id": "ragdoll",
+          "character": "宪宪",
+          "code": "E01",
+          "path": "sets/pixel/ragdoll.svg"
+        },
+        {
+          "id": "maine-coon",
+          "character": "砚砚",
+          "code": "E02",
+          "path": "sets/pixel/maine-coon.svg"
+        },
+        {
+          "id": "siamese",
+          "character": "烁烁",
+          "code": "E03",
+          "path": "sets/pixel/siamese.svg"
+        },
+        {
+          "id": "turkish-van",
+          "character": "墨墨",
+          "code": "E04",
+          "path": "sets/pixel/turkish-van.svg"
+        },
+        {
+          "id": "dsh",
+          "character": "鲸鲸",
+          "code": "E05",
+          "path": "sets/pixel/dsh.svg"
+        },
+        {
+          "id": "dragon-li",
+          "character": "小狸花",
+          "code": "E06",
+          "path": "sets/pixel/dragon-li.svg"
+        },
+        {
+          "id": "bengal",
+          "character": "斑斑",
+          "code": "E07",
+          "path": "sets/pixel/bengal.svg"
+        },
+        {
+          "id": "golden-chinchilla",
+          "character": "金哥",
+          "code": "E08",
+          "path": "sets/pixel/golden-chinchilla.svg"
+        }
+      ]
+    },
+    {
+      "id": "risograph",
+      "code": "F",
+      "name": "孔版印刷",
+      "format": "SVG",
+      "note": "有限色彩与纸面颗粒，带一点独立杂志的手作感。",
+      "description": "有限色彩与纸面颗粒，带一点独立杂志的手作感。",
+      "assets": [
+        {
+          "id": "ragdoll",
+          "character": "宪宪",
+          "code": "F01",
+          "path": "sets/risograph/ragdoll.svg"
+        },
+        {
+          "id": "maine-coon",
+          "character": "砚砚",
+          "code": "F02",
+          "path": "sets/risograph/maine-coon.svg"
+        },
+        {
+          "id": "siamese",
+          "character": "烁烁",
+          "code": "F03",
+          "path": "sets/risograph/siamese.svg"
+        },
+        {
+          "id": "turkish-van",
+          "character": "墨墨",
+          "code": "F04",
+          "path": "sets/risograph/turkish-van.svg"
+        },
+        {
+          "id": "dsh",
+          "character": "鲸鲸",
+          "code": "F05",
+          "path": "sets/risograph/dsh.svg"
+        },
+        {
+          "id": "dragon-li",
+          "character": "小狸花",
+          "code": "F06",
+          "path": "sets/risograph/dragon-li.svg"
+        },
+        {
+          "id": "bengal",
+          "character": "斑斑",
+          "code": "F07",
+          "path": "sets/risograph/bengal.svg"
+        },
+        {
+          "id": "golden-chinchilla",
+          "character": "金哥",
+          "code": "F08",
+          "path": "sets/risograph/golden-chinchilla.svg"
+        }
+      ]
+    },
+    {
+      "id": "clay",
+      "code": "G",
+      "name": "3D 玩偶肖像",
+      "format": "PNG",
+      "note": "立体眼神与细腻毛发，品种特征直观，存在感饱满。",
+      "description": "立体眼神与细腻毛发，品种特征直观，存在感饱满。",
+      "sheet": "sheets/clay.png",
+      "sheetWidth": 1774,
+      "sheetHeight": 887,
+      "columns": 4,
+      "rows": 2,
+      "assets": [
+        {
+          "id": "ragdoll",
+          "character": "宪宪",
+          "code": "G01",
+          "column": 0,
+          "row": 0
+        },
+        {
+          "id": "maine-coon",
+          "character": "砚砚",
+          "code": "G02",
+          "column": 1,
+          "row": 0
+        },
+        {
+          "id": "siamese",
+          "character": "烁烁",
+          "code": "G03",
+          "column": 2,
+          "row": 0
+        },
+        {
+          "id": "turkish-van",
+          "character": "墨墨",
+          "code": "G04",
+          "column": 3,
+          "row": 0
+        },
+        {
+          "id": "dsh",
+          "character": "鲸鲸",
+          "code": "G05",
+          "column": 0,
+          "row": 1
+        },
+        {
+          "id": "dragon-li",
+          "character": "小狸花",
+          "code": "G06",
+          "column": 1,
+          "row": 1
+        },
+        {
+          "id": "bengal",
+          "character": "斑斑",
+          "code": "G07",
+          "column": 2,
+          "row": 1
+        },
+        {
+          "id": "golden-chinchilla",
+          "character": "金哥",
+          "code": "G08",
+          "column": 3,
+          "row": 1
+        }
+      ]
+    },
+    {
+      "id": "felt",
+      "code": "H",
+      "name": "羊毛毡伙伴",
+      "format": "PNG",
+      "note": "纤维、绒毛与手工温度，把猫猫变成桌边的小玩偶。",
+      "description": "纤维、绒毛与手工温度，把猫猫变成桌边的小玩偶。",
+      "sheet": "sheets/felt.png",
+      "sheetWidth": 1774,
+      "sheetHeight": 887,
+      "columns": 4,
+      "rows": 2,
+      "assets": [
+        {
+          "id": "ragdoll",
+          "character": "宪宪",
+          "code": "H01",
+          "column": 0,
+          "row": 0
+        },
+        {
+          "id": "maine-coon",
+          "character": "砚砚",
+          "code": "H02",
+          "column": 1,
+          "row": 0
+        },
+        {
+          "id": "siamese",
+          "character": "烁烁",
+          "code": "H03",
+          "column": 2,
+          "row": 0
+        },
+        {
+          "id": "turkish-van",
+          "character": "墨墨",
+          "code": "H04",
+          "column": 3,
+          "row": 0
+        },
+        {
+          "id": "dsh",
+          "character": "鲸鲸",
+          "code": "H05",
+          "column": 0,
+          "row": 1
+        },
+        {
+          "id": "dragon-li",
+          "character": "小狸花",
+          "code": "H06",
+          "column": 1,
+          "row": 1
+        },
+        {
+          "id": "bengal",
+          "character": "斑斑",
+          "code": "H07",
+          "column": 2,
+          "row": 1
+        },
+        {
+          "id": "golden-chinchilla",
+          "character": "金哥",
+          "code": "H08",
+          "column": 3,
+          "row": 1
+        }
+      ]
+    },
+    {
+      "id": "watercolor",
+      "code": "I",
+      "name": "水彩绘本",
+      "format": "PNG",
+      "note": "透明水色与轻盈笔触，像从一本安静的绘本里走来。",
+      "description": "透明水色与轻盈笔触，像从一本安静的绘本里走来。",
+      "sheet": "sheets/watercolor.png",
+      "sheetWidth": 1774,
+      "sheetHeight": 887,
+      "columns": 4,
+      "rows": 2,
+      "assets": [
+        {
+          "id": "ragdoll",
+          "character": "宪宪",
+          "code": "I01",
+          "column": 0,
+          "row": 0
+        },
+        {
+          "id": "maine-coon",
+          "character": "砚砚",
+          "code": "I02",
+          "column": 1,
+          "row": 0
+        },
+        {
+          "id": "siamese",
+          "character": "烁烁",
+          "code": "I03",
+          "column": 2,
+          "row": 0
+        },
+        {
+          "id": "turkish-van",
+          "character": "墨墨",
+          "code": "I04",
+          "column": 3,
+          "row": 0
+        },
+        {
+          "id": "dsh",
+          "character": "鲸鲸",
+          "code": "I05",
+          "column": 0,
+          "row": 1
+        },
+        {
+          "id": "dragon-li",
+          "character": "小狸花",
+          "code": "I06",
+          "column": 1,
+          "row": 1
+        },
+        {
+          "id": "bengal",
+          "character": "斑斑",
+          "code": "I07",
+          "column": 2,
+          "row": 1
+        },
+        {
+          "id": "golden-chinchilla",
+          "character": "金哥",
+          "code": "I08",
+          "column": 3,
+          "row": 1
+        }
+      ]
+    }
+  ],
+  "reference": {
+    "threadTitle": "开发 clowder-bot 独立项目",
+    "characterSource": "server/templates.ts",
+    "avatarSizes": [
+      24,
+      36,
+      44,
+      72
+    ]
+  },
+  "usage": "SVG files are standalone assets. PNG sheets use a 4 by 2 grid; the review page can export each square cell. Open index.html to view; PNG export works when served by a local HTTP server. This collection does not change the app avatar configuration."
+}

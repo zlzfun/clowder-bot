@@ -1,0 +1,181 @@
+/* Clowder Café: color overrides only. Load after the original XBot styles.
+   Layout, typography, spacing, and interaction remain owned by app.css. */
+:root {
+  --x-win: #f0e5d6;
+  --x-card: #fffbf5;
+  --x-panel: #f6ede1;
+  --x-panel-card: #fffcf7;
+  --x-fill-1: #f5ede2;
+  --x-fill-2: #ede0cf;
+  --x-fill-3: #e2cfb7;
+  --x-zebra: #f5ede2;
+  --x-input: #f0e5d6;
+  --x-code: #efe3d3;
+  --x-bot-bubble: #f3e9db;
+  --x-bot-code: rgba(61, 45, 36, .06);
+  --x-user-bubble: #6a4933;
+  --x-user-bubble-text: #fffbf5;
+  --x-user-code: #573c2a;
+  --x-user-sel: rgba(255, 251, 245, .18);
+
+  --x-text: #3d2d24;
+  --x-text-2: #584536;
+  --x-muted: #6d5544;
+  --x-faint: #6d5544;
+  --x-ph: #6d5544;
+  --x-primary: #6a4933;
+  --x-primary-hover: #583c2b;
+  --x-on-primary: #fffbf5;
+  --x-disabled: #e7d7c2;
+  --x-on-disabled: #6d5544;
+
+  --x-danger: #9d3328;
+  --x-danger-bg: #f8e5df;
+  --x-online: #395f40;
+  --x-pending: #94691e;
+  --x-text-link: #355f58;
+  --x-text-link-hover: #d8e3d7;
+  --x-user-link: #d0e9db;
+  --x-user-link-hover: rgba(208, 233, 219, .12);
+  --x-type-dev: #3f624c;
+  --x-type-dev-bg: #e5ebdf;
+  --x-type-res: #435e70;
+  --x-type-res-bg: #e3e8e8;
+  --x-type-gen: #6d5544;
+  --x-type-gen-bg: #eee3d4;
+  --x-type-own: #655471;
+  --x-type-own-bg: #eae3e8;
+
+  --x-avatar-bg: #e2d0b9;
+  --x-popover: #fffcf7;
+  --x-popover-hover: var(--x-fill-2);
+  --x-shadow-pop: 0 8px 30px rgba(66, 42, 25, .14), 0 1px 3px rgba(66, 42, 25, .08);
+  --x-scrim: rgba(46, 31, 21, .30);
+  --scroll: #bda78e;
+  --warn-bg: #f2e7cf;
+  --warn: #76541f;
+}
+
+/* A quiet espresso room at night, with warm light for text and controls. */
+html[data-theme="dark"] {
+  --x-win: #201a17;
+  --x-card: #2a221e;
+  --x-panel: #251e1a;
+  --x-panel-card: #332a24;
+  --x-fill-1: #352b25;
+  --x-fill-2: #403329;
+  --x-fill-3: #504032;
+  --x-zebra: #352b25;
+  --x-input: #392e27;
+  --x-code: #3b3028;
+  --x-bot-bubble: #352b25;
+  --x-bot-code: rgba(244, 235, 221, .07);
+  --x-user-bubble: #d6b58e;
+  --x-user-bubble-text: #271e18;
+  --x-user-code: #c9ab87;
+  --x-user-sel: rgba(39, 30, 24, .18);
+
+  --x-text: #f4ebdd;
+  --x-text-2: #d8c8b7;
+  --x-muted: #c0ac97;
+  --x-faint: #c0ac97;
+  --x-ph: #c0ac97;
+  --x-primary: #d6b58e;
+  --x-primary-hover: #e5c5a2;
+  --x-on-primary: #271e18;
+  --x-disabled: #403329;
+  --x-on-disabled: #c0ac97;
+
+  --x-danger: #f1a295;
+  --x-danger-bg: #482e27;
+  --x-online: #aac6a4;
+  --x-pending: #dfc187;
+  --x-text-link: #b0d0bd;
+  --x-text-link-hover: #3a4b3f;
+  --x-user-link: #203d36;
+  --x-user-link-hover: rgba(32, 61, 54, .12);
+  --x-type-dev: #b5cbb0;
+  --x-type-dev-bg: #303c2f;
+  --x-type-res: #b7c9d1;
+  --x-type-res-bg: #303a40;
+  --x-type-gen: #d2bba2;
+  --x-type-gen-bg: #403329;
+  --x-type-own: #cfbed6;
+  --x-type-own-bg: #3c323f;
+
+  --x-avatar-bg: #594736;
+  --x-popover: #382d25;
+  --x-popover-hover: #493a2e;
+  --x-shadow-pop: 0 10px 34px rgba(12, 8, 5, .50), 0 1px 3px rgba(12, 8, 5, .28);
+  --x-scrim: rgba(15, 10, 7, .52);
+  --scroll: #74604d;
+  --warn-bg: #403526;
+  --warn: #dec18d;
+}
+
+/* These legacy aliases contain literal gray values in app.css, so point them
+   at the same palette in both themes. Other aliases already use --x-* tokens. */
+:root,
+html[data-theme="dark"] {
+  --accent: var(--x-primary);
+  --accent-ink: var(--x-primary);
+  --badge-bg: var(--x-fill-3);
+  --badge-ink: var(--x-text);
+  --ring: var(--x-primary);
+  --ok-bg: var(--x-type-dev-bg);
+  --ok: var(--x-type-dev);
+  --info-bg: var(--x-type-res-bg);
+  --info: var(--x-type-res);
+  --composer: var(--x-input);
+  --bg-pop: var(--x-popover);
+  --bg-shadow: var(--x-shadow-pop);
+}
+
+/* Replace hard-coded surface grays without changing the avatar artwork. */
+.avatar:not(.glyph):not(.blob),
+html[data-theme="dark"] .avatar:not(.glyph):not(.blob) {
+  background: var(--x-avatar-bg);
+}
+.avatar.glyph,
+html[data-theme="dark"] .avatar.glyph {
+  --av-bg: var(--x-avatar-bg);
+  --av-ink: var(--x-text);
+}
+.acct .ac-av { color: var(--x-text); }
+.who > time { color: var(--x-faint); }
+.backdrop, .modal, .mshade, .panel-scrim { background: var(--x-scrim); }
+.bubble.message-target,
+html[data-theme="dark"] .bubble.message-target { background: var(--x-primary-hover); }
+#settings-providers,
+html[data-theme="dark"] #settings-providers {
+  --provider-accent: var(--x-primary);
+  --provider-selected: var(--x-fill-2);
+}
+
+/* Code remains readable on both cream code blocks and coffee user bubbles. */
+.code-block {
+  --syn-kw: #57345a;
+  --syn-str: #31412e;
+  --syn-cm: #4a392b;
+  --syn-num: #5e3514;
+  --syn-fn: #214660;
+  --syn-lit: #224951;
+}
+html[data-theme="dark"] .code-block,
+html:not([data-theme="dark"]) .bubble .code-block {
+  --syn-kw: #ddafdd;
+  --syn-str: #c4d2a6;
+  --syn-cm: #c9baaa;
+  --syn-num: #edc599;
+  --syn-fn: #adcfe4;
+  --syn-lit: #b0d8d3;
+}
+/* More specific than the dark code-block rule above. */
+html[data-theme="dark"] .bubble .code-block {
+  --syn-kw: #57345a;
+  --syn-str: #31412e;
+  --syn-cm: #4a392b;
+  --syn-num: #5e3514;
+  --syn-fn: #214660;
+  --syn-lit: #224951;
+}

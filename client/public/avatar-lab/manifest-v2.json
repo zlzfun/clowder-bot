@@ -1,0 +1,692 @@
+{
+  "version": 2,
+  "title": "clowder-bot 猫猫头像 · 第二轮",
+  "updated": "2026-10-31",
+  "newAvatarCount": 48,
+  "retainedAvatarCount": 24,
+  "previousRound": "round-1.html",
+  "characters": [
+    {
+      "id": "ragdoll",
+      "name": "宪宪",
+      "breed": "布偶猫",
+      "role": "架构与开发"
+    },
+    {
+      "id": "maine-coon",
+      "name": "砚砚",
+      "breed": "缅因猫",
+      "role": "代码审查"
+    },
+    {
+      "id": "siamese",
+      "name": "烁烁",
+      "breed": "暹罗猫",
+      "role": "视觉与创意"
+    },
+    {
+      "id": "turkish-van",
+      "name": "墨墨",
+      "breed": "梵花猫",
+      "role": "文档与验收"
+    },
+    {
+      "id": "dsh",
+      "name": "鲸鲸",
+      "breed": "蓝灰短毛猫",
+      "role": "推理与分析"
+    },
+    {
+      "id": "dragon-li",
+      "name": "小狸花",
+      "breed": "狸花猫",
+      "role": "中文实证"
+    },
+    {
+      "id": "bengal",
+      "name": "斑斑",
+      "breed": "孟加拉猫",
+      "role": "探索与多模态"
+    },
+    {
+      "id": "golden-chinchilla",
+      "name": "金哥",
+      "breed": "金渐层",
+      "role": "全栈开发"
+    }
+  ],
+  "collections": [
+    {
+      "id": "ink-portrait",
+      "code": "J",
+      "name": "墨线侧写",
+      "format": "SVG",
+      "group": "ink",
+      "note": "微侧的姿态、流畅轮廓与杏仁眼，让黑白头像更有神情。",
+      "status": "new",
+      "avatars": [
+        {
+          "id": "ragdoll",
+          "name": "宪宪",
+          "code": "J01",
+          "path": "sets/ink-portrait/ragdoll.svg",
+          "sha256": "858dce8b3d70250f8c5bc63c3e912f10be15f230003a1786b6de7f1c4b1197bf"
+        },
+        {
+          "id": "maine-coon",
+          "name": "砚砚",
+          "code": "J02",
+          "path": "sets/ink-portrait/maine-coon.svg",
+          "sha256": "88e7e70a6980b1de54ac849eab76710496f4a46f8165f4f8736adac25e9d6a5b"
+        },
+        {
+          "id": "siamese",
+          "name": "烁烁",
+          "code": "J03",
+          "path": "sets/ink-portrait/siamese.svg",
+          "sha256": "fbe9e21360cb837343ff3d3a38c76ef602ab3d44b08bd40857fc30ed33a623f4"
+        },
+        {
+          "id": "turkish-van",
+          "name": "墨墨",
+          "code": "J04",
+          "path": "sets/ink-portrait/turkish-van.svg",
+          "sha256": "1e7742b0a0e78c6a21ee1dcbc43486052f9ae069094fa70bd85113047d202ec1"
+        },
+        {
+          "id": "dsh",
+          "name": "鲸鲸",
+          "code": "J05",
+          "path": "sets/ink-portrait/dsh.svg",
+          "sha256": "6dec2a1ce70f911db39998dc63db7692dbe56bb1aa0dc2a20820832980419cb2"
+        },
+        {
+          "id": "dragon-li",
+          "name": "小狸花",
+          "code": "J06",
+          "path": "sets/ink-portrait/dragon-li.svg",
+          "sha256": "5928b2dc537b3a14dbd885f8e0476c3b8e17670a9f45cca25549c6a1d3aafa7f"
+        },
+        {
+          "id": "bengal",
+          "name": "斑斑",
+          "code": "J07",
+          "path": "sets/ink-portrait/bengal.svg",
+          "sha256": "e25a1368798bdc302ec8ac27dba22bdb5bc38f0688dcb727133f411113ed399a"
+        },
+        {
+          "id": "golden-chinchilla",
+          "name": "金哥",
+          "code": "J08",
+          "path": "sets/ink-portrait/golden-chinchilla.svg",
+          "sha256": "3c2d15089bfd037d4f0079ff87913fb8d6efce5665262164baf4f9c10459387f"
+        }
+      ]
+    },
+    {
+      "id": "round-comic",
+      "code": "K",
+      "name": "圆脸漫画",
+      "format": "SVG",
+      "group": "ink",
+      "note": "圆润脸型与利落墨线，少量实黑色块，表情轻松有趣。",
+      "status": "new",
+      "avatars": [
+        {
+          "id": "ragdoll",
+          "name": "宪宪",
+          "code": "K01",
+          "path": "sets/round-comic/ragdoll.svg",
+          "sha256": "ef1fd883b4d2907f0951c5231731f147327fba044a04cbb4091ed707077439bb"
+        },
+        {
+          "id": "maine-coon",
+          "name": "砚砚",
+          "code": "K02",
+          "path": "sets/round-comic/maine-coon.svg",
+          "sha256": "a1fe601993c499682637f75b5130bc8f4a8c973ffd3bab90fe7a637974b32a12"
+        },
+        {
+          "id": "siamese",
+          "name": "烁烁",
+          "code": "K03",
+          "path": "sets/round-comic/siamese.svg",
+          "sha256": "3651f1ba186f0cd050c1068fe4d25166b189f848e1d1d5d400abe56e95f7d7df"
+        },
+        {
+          "id": "turkish-van",
+          "name": "墨墨",
+          "code": "K04",
+          "path": "sets/round-comic/turkish-van.svg",
+          "sha256": "91ec7a1c52b457c482eb3f5b58afe18830757b356ce15ae4a9888a61e51ffe18"
+        },
+        {
+          "id": "dsh",
+          "name": "鲸鲸",
+          "code": "K05",
+          "path": "sets/round-comic/dsh.svg",
+          "sha256": "79e9d287856c40415838427e731812d0cb90b826923477f446cc437993ea6943"
+        },
+        {
+          "id": "dragon-li",
+          "name": "小狸花",
+          "code": "K06",
+          "path": "sets/round-comic/dragon-li.svg",
+          "sha256": "2c01ec0efc18622d682051ebf91d07244c5476b3ec54deb2fcadcd65eccb8d94"
+        },
+        {
+          "id": "bengal",
+          "name": "斑斑",
+          "code": "K07",
+          "path": "sets/round-comic/bengal.svg",
+          "sha256": "6744f2d59d89dc61c4d45c3e62c415cc92b4bb6c2db1bbe78ed04292b30950bb"
+        },
+        {
+          "id": "golden-chinchilla",
+          "name": "金哥",
+          "code": "K08",
+          "path": "sets/round-comic/golden-chinchilla.svg",
+          "sha256": "4ba68fb5dd59d9dafecd49fa5d5e8cede2940cd728f548058b679cdfe3ecefc2"
+        }
+      ]
+    },
+    {
+      "id": "ink-editorial",
+      "code": "N",
+      "name": "手绘墨稿",
+      "format": "PNG",
+      "group": "ink",
+      "note": "用更自然的手绘线条，探索轮廓、留白与不同性格。",
+      "status": "new",
+      "avatars": [
+        {
+          "id": "ragdoll",
+          "name": "宪宪",
+          "code": "N01",
+          "column": 0,
+          "row": 0
+        },
+        {
+          "id": "maine-coon",
+          "name": "砚砚",
+          "code": "N02",
+          "column": 1,
+          "row": 0
+        },
+        {
+          "id": "siamese",
+          "name": "烁烁",
+          "code": "N03",
+          "column": 2,
+          "row": 0
+        },
+        {
+          "id": "turkish-van",
+          "name": "墨墨",
+          "code": "N04",
+          "column": 3,
+          "row": 0
+        },
+        {
+          "id": "dsh",
+          "name": "鲸鲸",
+          "code": "N05",
+          "column": 0,
+          "row": 1
+        },
+        {
+          "id": "dragon-li",
+          "name": "小狸花",
+          "code": "N06",
+          "column": 1,
+          "row": 1
+        },
+        {
+          "id": "bengal",
+          "name": "斑斑",
+          "code": "N07",
+          "column": 2,
+          "row": 1
+        },
+        {
+          "id": "golden-chinchilla",
+          "name": "金哥",
+          "code": "N08",
+          "column": 3,
+          "row": 1
+        }
+      ],
+      "sheet": "sheets/ink-editorial.png",
+      "width": 1774,
+      "height": 887,
+      "columns": 4,
+      "rows": 2,
+      "sha256": "87a22864474fe150f427b8f55c2fd8566e905d5761e017dde9454cba8781ec09"
+    },
+    {
+      "id": "capsule",
+      "code": "L",
+      "name": "极简双眼",
+      "format": "SVG",
+      "group": "flat",
+      "note": "深石墨底、圆润剪影、胶囊双眼，把猫简化成鲜明的符号。",
+      "status": "new",
+      "avatars": [
+        {
+          "id": "ragdoll",
+          "name": "宪宪",
+          "code": "L01",
+          "path": "sets/capsule/ragdoll.svg",
+          "sha256": "7286729f3f9940e97b0cea0beefc49470a3085bc408adec70e9c4ebf091deeec"
+        },
+        {
+          "id": "maine-coon",
+          "name": "砚砚",
+          "code": "L02",
+          "path": "sets/capsule/maine-coon.svg",
+          "sha256": "f7e5db90ae0b14e14dd195b157201459bc6bf5d651586cd389947880e786bd80"
+        },
+        {
+          "id": "siamese",
+          "name": "烁烁",
+          "code": "L03",
+          "path": "sets/capsule/siamese.svg",
+          "sha256": "d4fabd86344d8c68e0f901bca248023437d738017d75eec032f751c6ca686b31"
+        },
+        {
+          "id": "turkish-van",
+          "name": "墨墨",
+          "code": "L04",
+          "path": "sets/capsule/turkish-van.svg",
+          "sha256": "ebd0f9d58d5ef594e17d6b0cc70cf2276db81192c4c549863e2140e47a497651"
+        },
+        {
+          "id": "dsh",
+          "name": "鲸鲸",
+          "code": "L05",
+          "path": "sets/capsule/dsh.svg",
+          "sha256": "127679d63f27d4d37aca36c6b56e4f127a641348aea8535d4966afa8ff37075b"
+        },
+        {
+          "id": "dragon-li",
+          "name": "小狸花",
+          "code": "L06",
+          "path": "sets/capsule/dragon-li.svg",
+          "sha256": "5bced1f4515c9e27c85269312d044289a64babd5c65723142cd7bf6bfc4090be"
+        },
+        {
+          "id": "bengal",
+          "name": "斑斑",
+          "code": "L07",
+          "path": "sets/capsule/bengal.svg",
+          "sha256": "65b37ce94c6c0ea38e2a23aaf598f6583b0d7914e933b53dd995666e84a127e8"
+        },
+        {
+          "id": "golden-chinchilla",
+          "name": "金哥",
+          "code": "L08",
+          "path": "sets/capsule/golden-chinchilla.svg",
+          "sha256": "7bf38e2e0e22a7d60b6196919e4fea66045c6cfec5e141b162ab3e0779474334"
+        }
+      ]
+    },
+    {
+      "id": "quiet-flat",
+      "code": "M",
+      "name": "柔色色块",
+      "format": "SVG",
+      "group": "flat",
+      "note": "暖灰底与柔和毛色，只留少量大色块和眼睛，安静、轻盈。",
+      "status": "new",
+      "avatars": [
+        {
+          "id": "ragdoll",
+          "name": "宪宪",
+          "code": "M01",
+          "path": "sets/quiet-flat/ragdoll.svg",
+          "sha256": "21d2121be38640a9f8bc49a698d287a36ab8090b7936e1a4795799679809f669"
+        },
+        {
+          "id": "maine-coon",
+          "name": "砚砚",
+          "code": "M02",
+          "path": "sets/quiet-flat/maine-coon.svg",
+          "sha256": "e2b626b5e790e9229b8481ecb44c46e211521ebded300222d4a5e1de89301753"
+        },
+        {
+          "id": "siamese",
+          "name": "烁烁",
+          "code": "M03",
+          "path": "sets/quiet-flat/siamese.svg",
+          "sha256": "e4cfc49b23066578edef0665ffc3023b38a6d98b8ec57f83b3fd88b9826b8551"
+        },
+        {
+          "id": "turkish-van",
+          "name": "墨墨",
+          "code": "M04",
+          "path": "sets/quiet-flat/turkish-van.svg",
+          "sha256": "38327a581202ce7f41549e18c7e6711f622f7820c2e9c4aa322b9cbeeadd75fe"
+        },
+        {
+          "id": "dsh",
+          "name": "鲸鲸",
+          "code": "M05",
+          "path": "sets/quiet-flat/dsh.svg",
+          "sha256": "1178c61a5dd1df42a0737e54c79709ef2649a7fbff8b341f10584d67549d6123"
+        },
+        {
+          "id": "dragon-li",
+          "name": "小狸花",
+          "code": "M06",
+          "path": "sets/quiet-flat/dragon-li.svg",
+          "sha256": "0414a8f8e015f538d02a1666138da26353509ecc3d67e8286d43778044878bed"
+        },
+        {
+          "id": "bengal",
+          "name": "斑斑",
+          "code": "M07",
+          "path": "sets/quiet-flat/bengal.svg",
+          "sha256": "c03d0590f160fc0e62a1a20f1b70f9c0d6c50f8516d4a013b233bbfbd4a4cf38"
+        },
+        {
+          "id": "golden-chinchilla",
+          "name": "金哥",
+          "code": "M08",
+          "path": "sets/quiet-flat/golden-chinchilla.svg",
+          "sha256": "5cce3c0ba2e96412aadb79004d5a64fa04f245c450bfa27d743699f083b4dbb0"
+        }
+      ]
+    },
+    {
+      "id": "bot-flat",
+      "code": "O",
+      "name": "极简纸片",
+      "format": "PNG",
+      "group": "flat",
+      "note": "平整色面与有机圆角，进一步减少五官，保留猫耳和花色。",
+      "status": "new",
+      "avatars": [
+        {
+          "id": "ragdoll",
+          "name": "宪宪",
+          "code": "O01",
+          "column": 0,
+          "row": 0
+        },
+        {
+          "id": "maine-coon",
+          "name": "砚砚",
+          "code": "O02",
+          "column": 1,
+          "row": 0
+        },
+        {
+          "id": "siamese",
+          "name": "烁烁",
+          "code": "O03",
+          "column": 2,
+          "row": 0
+        },
+        {
+          "id": "turkish-van",
+          "name": "墨墨",
+          "code": "O04",
+          "column": 3,
+          "row": 0
+        },
+        {
+          "id": "dsh",
+          "name": "鲸鲸",
+          "code": "O05",
+          "column": 0,
+          "row": 1
+        },
+        {
+          "id": "dragon-li",
+          "name": "小狸花",
+          "code": "O06",
+          "column": 1,
+          "row": 1
+        },
+        {
+          "id": "bengal",
+          "name": "斑斑",
+          "code": "O07",
+          "column": 2,
+          "row": 1
+        },
+        {
+          "id": "golden-chinchilla",
+          "name": "金哥",
+          "code": "O08",
+          "column": 3,
+          "row": 1
+        }
+      ],
+      "sheet": "sheets/bot-flat.png",
+      "width": 1774,
+      "height": 887,
+      "columns": 4,
+      "rows": 2,
+      "sha256": "54815fad51ac29317ccdb54b5d0bf5dafb3785f54540105488cdbbdc97309e02"
+    },
+    {
+      "id": "risograph",
+      "code": "F",
+      "name": "孔版印刷",
+      "format": "SVG",
+      "group": "retained",
+      "note": "保留首轮原稿。纸面颗粒与双色叠印，可发展为复古主题。",
+      "status": "shortlisted",
+      "avatars": [
+        {
+          "id": "ragdoll",
+          "name": "宪宪",
+          "code": "F01",
+          "path": "sets/risograph/ragdoll.svg",
+          "sha256": "0de5f7b8400dae19be982e3866ccec75054b413bee43b33cee27f5581835e33a"
+        },
+        {
+          "id": "maine-coon",
+          "name": "砚砚",
+          "code": "F02",
+          "path": "sets/risograph/maine-coon.svg",
+          "sha256": "953d90f86899636a65b162d5f1450d7033f01c06905be14892e89323974c52b3"
+        },
+        {
+          "id": "siamese",
+          "name": "烁烁",
+          "code": "F03",
+          "path": "sets/risograph/siamese.svg",
+          "sha256": "af538074de63cf41bedde258183dd4df674ab058ce1149e5dcef4ac46f9c2dbe"
+        },
+        {
+          "id": "turkish-van",
+          "name": "墨墨",
+          "code": "F04",
+          "path": "sets/risograph/turkish-van.svg",
+          "sha256": "53b72a2d46713fba2597fa773adfa2d3e314dbd47233087ecab6203bb10165cf"
+        },
+        {
+          "id": "dsh",
+          "name": "鲸鲸",
+          "code": "F05",
+          "path": "sets/risograph/dsh.svg",
+          "sha256": "1d10a1ce51cf1090fcc00b2d96ba5091702b2cb3da8aab81dec23e3eed6dea7c"
+        },
+        {
+          "id": "dragon-li",
+          "name": "小狸花",
+          "code": "F06",
+          "path": "sets/risograph/dragon-li.svg",
+          "sha256": "92e7bfedf3f35e4df6716e0247d83fce57d42dd815baef57fcce5ed056f07410"
+        },
+        {
+          "id": "bengal",
+          "name": "斑斑",
+          "code": "F07",
+          "path": "sets/risograph/bengal.svg",
+          "sha256": "b72ec1e967e232718431ddbdd529f6d95323fbbff75f3444c7551d65e4cec772"
+        },
+        {
+          "id": "golden-chinchilla",
+          "name": "金哥",
+          "code": "F08",
+          "path": "sets/risograph/golden-chinchilla.svg",
+          "sha256": "0a1697266ec7e3bf3c8ba35addb69295e5cf2912911395ed5f5f53e23869425d"
+        }
+      ]
+    },
+    {
+      "id": "clay",
+      "code": "G",
+      "name": "3D 玩偶肖像",
+      "format": "PNG",
+      "group": "retained",
+      "note": "保留首轮原稿。立体眼神与细腻毛发，可发展为玩偶主题。",
+      "status": "shortlisted",
+      "avatars": [
+        {
+          "id": "ragdoll",
+          "name": "宪宪",
+          "code": "G01",
+          "column": 0,
+          "row": 0
+        },
+        {
+          "id": "maine-coon",
+          "name": "砚砚",
+          "code": "G02",
+          "column": 1,
+          "row": 0
+        },
+        {
+          "id": "siamese",
+          "name": "烁烁",
+          "code": "G03",
+          "column": 2,
+          "row": 0
+        },
+        {
+          "id": "turkish-van",
+          "name": "墨墨",
+          "code": "G04",
+          "column": 3,
+          "row": 0
+        },
+        {
+          "id": "dsh",
+          "name": "鲸鲸",
+          "code": "G05",
+          "column": 0,
+          "row": 1
+        },
+        {
+          "id": "dragon-li",
+          "name": "小狸花",
+          "code": "G06",
+          "column": 1,
+          "row": 1
+        },
+        {
+          "id": "bengal",
+          "name": "斑斑",
+          "code": "G07",
+          "column": 2,
+          "row": 1
+        },
+        {
+          "id": "golden-chinchilla",
+          "name": "金哥",
+          "code": "G08",
+          "column": 3,
+          "row": 1
+        }
+      ],
+      "sheet": "sheets/clay.png",
+      "width": 1774,
+      "height": 887,
+      "columns": 4,
+      "rows": 2,
+      "sha256": "51744ca0d0ddf5efb79cde75f74f90bc8ba2d3ec005fef575d4ae2fbc9aefca4"
+    },
+    {
+      "id": "watercolor",
+      "code": "I",
+      "name": "水彩绘本",
+      "format": "PNG",
+      "group": "retained",
+      "note": "保留首轮原稿。透明水色与轻盈笔触，可发展为绘本主题。",
+      "status": "shortlisted",
+      "avatars": [
+        {
+          "id": "ragdoll",
+          "name": "宪宪",
+          "code": "I01",
+          "column": 0,
+          "row": 0
+        },
+        {
+          "id": "maine-coon",
+          "name": "砚砚",
+          "code": "I02",
+          "column": 1,
+          "row": 0
+        },
+        {
+          "id": "siamese",
+          "name": "烁烁",
+          "code": "I03",
+          "column": 2,
+          "row": 0
+        },
+        {
+          "id": "turkish-van",
+          "name": "墨墨",
+          "code": "I04",
+          "column": 3,
+          "row": 0
+        },
+        {
+          "id": "dsh",
+          "name": "鲸鲸",
+          "code": "I05",
+          "column": 0,
+          "row": 1
+        },
+        {
+          "id": "dragon-li",
+          "name": "小狸花",
+          "code": "I06",
+          "column": 1,
+          "row": 1
+        },
+        {
+          "id": "bengal",
+          "name": "斑斑",
+          "code": "I07",
+          "column": 2,
+          "row": 1
+        },
+        {
+          "id": "golden-chinchilla",
+          "name": "金哥",
+          "code": "I08",
+          "column": 3,
+          "row": 1
+        }
+      ],
+      "sheet": "sheets/watercolor.png",
+      "width": 1774,
+      "height": 887,
+      "columns": 4,
+      "rows": 2,
+      "sha256": "f11bf4e08efae54a0aea218a6bf2dbacc05e58d297446f4d629f8252721b56c3"
+    }
+  ],
+  "reference": {
+    "url": "https://x.ai/bot",
+    "use": "General inspiration for flat shapes and two simple eyes; all cat artwork is original."
+  },
+  "usage": "SVG files are standalone avatars. Generated PNGs are 4-column, 2-row concept sheets. The web page displays each square cell using CSS. Original round-one assets remain included. App avatar settings are unchanged."
+}
