@@ -1,0 +1,53 @@
+--- a/packages/api/src/domains/cats/services/types.ts
++++ b/packages/api/src/domains/cats/services/types.ts
+@@ -294,6 +294,8 @@
+ export interface AgentMessage {
+   /** The type of this message */
+   type: AgentMessageType;
++  /** Persist the current output without settling the still-running invocation. */
++  outputCheckpoint?: 'turn_complete';
+   /** F306: provider-neutral user-meaning event; native wire names stop in the adapter. */
+   semanticEvent?: ProviderSemanticEvent;
+   /** F306: provider-neutral goal observation awaiting exact SessionChain fencing and ThreadStore revision. */
+--- a/packages/api/src/domains/cats/services/agents/providers/ClaudeSdkAgentService.ts
++++ b/packages/api/src/domains/cats/services/agents/providers/ClaudeSdkAgentService.ts
+@@ -276,6 +276,9 @@
+         // The archive is ordered best-effort diagnostics, not the receipt
+         // authority. Disk I/O must not delay cancellation or member output.
+         archive(event);
++        // Child SDK wire records belong to their own output/state. Retain the
++        // raw evidence, but never merge a child's text or idle into the parent.
++        if (process.env.CAT_CAFE_BOT_BACKGROUND_DELEGATION === '1' && raw.parent_tool_use_id) continue;
+         turnInputs.observeSessionState(raw);
+         const isResultTerminal = raw.type === 'result';
+         if (typeof raw.session_id === 'string' && raw.session_id) {
+@@ -320,6 +323,18 @@
+             }
+             yield { ...message, metadata };
+           }
++        }
++        // A reply can finish while children keep the same query alive. Publish
++        // its trailing text now; do not emit done or close the host session.
++        if (isResultTerminal && process.env.CAT_CAFE_BOT_BACKGROUND_DELEGATION === '1') {
++          yield {
++            type: 'system_info',
++            catId: this.catId,
++            content: JSON.stringify({ type: 'provider_turn_complete' }),
++            outputCheckpoint: 'turn_complete',
++            metadata,
++            timestamp: Date.now(),
++          };
+         }
+         // A streaming-input query may carry multiple accepted turns. Close at
+         // native idle only after accepted inputs and background report turns
+--- a/packages/api/src/domains/cats/services/agents/routing/route-serial.ts
++++ b/packages/api/src/domains/cats/services/agents/routing/route-serial.ts
+@@ -2299,6 +2299,8 @@
+             const childUpdate = effectiveMsg.semanticEvent?.kind === 'subexecution';
+             if (
+               childUpdate ||
++              (effectiveMsg.outputCheckpoint === 'turn_complete' &&
++                (charDelta !== 0 || collectedToolEvents.length !== lastFlushToolLen)) ||
+               (effectiveMsg.type === 'text' &&
+                 charDelta !== 0 &&
+                 (neverFlushed ||

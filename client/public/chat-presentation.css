@@ -1,0 +1,6 @@
+/* Message presentation (chat-presentation.js). Single-chat bot rows reuse the
+   group chat's face, name and continuation layout; an execution record is a
+   routine-line drawer with the writer's xs face. Existing tokens only. */
+.msg.bot.with-face.cont > .body { margin-left: 32px; }
+.activity-line summary .avatar svg { width: 100%; height: 100%; }
+.activity-line.failed .activity-state { color: var(--err); }

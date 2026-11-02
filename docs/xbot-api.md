@@ -1,29 +1,26 @@
-# 原版 XBot 前端兼容层
+# XBot 兼容层范围
 
-`server/xbot/core.ts` 与 `server/xbot/settings.ts` 适配原版 XBot JavaScript 所需的数据形状。原版静态文件只把 `/api/` 前缀改成 `/xbot-api/`；已有 clowder-bot `/api/` 接口仍然保留。
+UI 保留 Bot 名称和文件夹概念，实际成员、执行和历史以 Clowder AI ID 为准。
 
-兼容层连接同一个 `Store` 和 `Orchestrator`，不是第二套聊天数据。Bot 在原版界面通过名称定位，内部仍使用稳定 ID；更名不会改变原有消息、记忆和会话归属。头像选择、分组、人设卡、模型绑定、已读位置和当前会话等元数据写入同一个版本化状态文件的 `xbot` 字段。
-
-## 核心路径
-
-| 路径 | 行为 |
+| XBot 行为 | 原生映射 |
 | --- | --- |
-| `/session` | 单机免登录会话，明确 `app:false`、`remote:false`。 |
-| `/bots`、`/bots/:name` | 新建、查询、编辑和删除 Bot；原版 profile 字段与人设卡。 |
-| `/bots/:name/avatar` | 默认使用 3D 猫猫预设，`templateId` 与 `cat:品种` seed 保持身份稳定；上传图片有大小、MIME 和签名检查，支持恢复对应猫猫头像。 |
-| `/bots/:name/template`、`/bots/import`、`/bots/:name/fork` | 无历史/记忆的模板导出导入、复刻；带非空定时任务的模板明确拒绝，避免静默漏导入。 |
-| `/groups` | 无 `members` 时创建侧栏分组；有 `members` 时创建真实群聊。 |
-| `/bots/:name/messages` | 原版 POST SSE：`part`、`tool`、完成后的 `result(send_message_to_user)`、`done`；失败通过 `error` 返回。 |
-| `/groups/:id/messages` | 按原版协议返回 JSON `sent`，实际群聊在后台运行，原版轮询读取结果。 |
-| `/bots/:name/transcript` | 真实持久消息映射成原版交付回执格式。原版渲染器要求 `send_message_to_user` call + receipt 才显示新 assistant 消息。这里的 call 表示应用实际交付该消息，并非虚构模型工具执行。 |
-| `/bots/:name/context` | 返回实际模型调用前捕获的输入快照和估算预算；没有运行过时返回空 `requests`，不伪造快照。 |
-| `/bots/:name/memory` | 共享/本猫/当前会话记忆读取与增删。 |
-| `/bots/:name/binding` | 单 Bot 的 provider/model 选择，覆盖旧 API 全局模式；不同猫可混用演示和真实 provider，压缩同样选择该 Bot 的实际 provider。 |
-| `/bots/:name/stop`、`/bots/:name/agents/:run/cancel` | 取消当前实际运行，原版任务页使用后者。 |
-| `/bots/:name/new`、`/bots/:name/compact` | 新开会话保留旧历史，或整理当前上下文。 |
+| Bot 创建/职责/重命名/删除 | `/api/cats`；删除成员保留原生历史 |
+| 本地 Agent 接入 | `/agents` 原生发现；`/bots/:name/agent` 绑定执行者并恢复原生默认继承 |
+| 单聊/新会话 | 原生 Thread，preferredCats 为该成员；新建保留旧会话 |
+| 群聊 | 原生 Thread，preferredCats 为显式成员；消息路由保持原生 |
+| 发消息/回复引用 | `/api/messages`，原生 ID 与幂等键 |
+| 历史/导出 | 原生消息；主界面最近 200 条，导出完整分页 |
+| 状态/停止 | 原生 queue、activeInvocations、withdraw、cancel；单成员取消不取消兄弟任务 |
+| 笔记 | 原生 `/api/memory` 会话 KV；旧 shared/bot scope 明确拒绝 |
+| 上下文压缩 | 原生 compact-native；工具不支持时保留原生错误 |
+| 头像/文件夹/置顶 | Bot presentation store |
 
-原版 UI 不呈现全部附加接口；没有为此改写原版视觉和交互。`/notes` 当前为空，因为该独立版本没有额外后台通知来源。模型自身的工具执行沿用 provider 的 CLI 设置。账号、跨设备、插件和定时任务等未实现能力返回明确的 unsupported 信息或失败状态，不能视为已接通。
+运行面板补充原生队列、会话链、原生消息分页、记忆 catalog/search、Agent 与审批。F306 question/approval/elicitation 使用原生 revision、cardRef、operationId；其他支持内联操作的审批按原生 manifest 转发。需要完整原生会话卡片的交互不会自动批准。
 
-兼容层仅允许回环访问，先做 Origin/跨站检查再解析请求体。JSON 写请求与头像 multipart 分别验证；支持原版不携带 body 的 POST。API key 由供应商模块独立保存在权限 `0600` 的本地秘密文件，状态快照和列表不含密钥。
+`transcript` 为兼容 XBot 渲染器生成的投影，包含原生消息对象和 `native_message_id`。显示用 `send_message_to_user` 行带 `presentation_receipt: true`，不可计入模型工具调用/成本。真实工具轨迹来自 `toolEvents`。Bot 不自行估算或编造 Token。
 
-`tests/xbot-core.test.ts` 覆盖原版 boot/profile 格式、SSE 与交付回执、群聊传球、分组、画像与人设、头像上传和带图模板导入、每猫 provider 与压缩、记忆隔离、重启持久化和跨站拒绝。`tests/xbot-settings.test.ts` 覆盖供应商设置、人设卡及不支持能力的显式失败。
+单聊与群聊消息包含 `presentation_kind: "message" | "activity"`、`native_cat_id` 和 `speaker`（真实发送成员的 ID、名称和头像元数据；成员不可用时为 null）。只有当前返回页存在同一成员、同一原生 turn 的显式 callback 发言，才将对应 stream 累计记录投影为 `activity`；它不再生成聊天发送回执。前端将其显示为默认折叠的执行过程，正式发言保持原生顺序与各自时间戳。关联依赖精确执行身份，不用文本、时间接近程度或跨成员共享的外层 invocation ID 推断。错误、取消和缺少关联证据的回复继续作为普通消息；跨分页的关联暂不推断。该投影不修改或删除原生历史。
+
+未迁移的跨设备、云账号、语音、应用、完整 skills/plugins 配置、定时任务编辑器返回 supported=false 或明确 4xx/501。未读数量目前尚未从原生 read cursor 完整映射，不应将列表零值用于业务统计。
+
+旧 `/models`、`/providers`、`/providers/*`、`/setup/key`、`/bots/:name/binding` 已退役为 410。Bot 新建和更新不再接受模型配置；更换 Agent 走专用绑定接口，避免普通资料更新意外改变接入。原生管理 API 中的账号能力不随 XBot 旧逻辑删除。

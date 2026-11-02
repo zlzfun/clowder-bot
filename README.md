@@ -1,92 +1,63 @@
-# clowder-bot
+# Clowder Bot
 
-一个本地运行的猫猫协作聊天应用。把不同角色的 Bot 放进单聊或群聊，用熟悉的聊天界面完成协作。
-
-后端核心对照 [Clowder AI](https://github.com/zts212653/clowder-ai)，前端复用 [XBot](https://github.com/liu-zhengdong/xbot) 的 HTML、CSS、JavaScript 与字体，保留原布局和交互。当前使用原创 3D 猫猫头像与奶油、燕麦、咖啡棕配色，深色模式采用夜间咖啡馆配色。项目独立运行，不代表上游项目。
+本地运行的多成员聊天产品：界面沿用 XBot，执行引擎直接运行 [Clowder AI](https://github.com/zts212653/clowder-ai) 的原始代码。Bot 层只负责界面、产品元数据与协议适配。
 
 ## 启动
 
-需要 **Node.js 22.13+**（开发验证使用 Node 24）和 npm。
+需要 **Node.js 24、npm、Git、redis-server**。pnpm 9.15.4 随项目开发依赖安装。成员接入本机已安装并配置的 Agent，沿用它的登录与默认配置。没有演示引擎，也不会在原生服务不可用时生成模拟回复。
 
 ```bash
-npm install
-npm run dev
+git submodule update --init --recursive
+npm ci
+npm run runtime:prepare
+cp .env.example .env
+npm run runtime:start
 ```
 
-打开 **http://127.0.0.1:5173**。开发 API 在 `127.0.0.1:3210`，Vite 代理原后端 `/api` 和 XBot 兼容层 `/xbot-api`。
-
-生产构建在同一个服务中提供界面和 API：
+另开终端启动 Bot：
 
 ```bash
 npm run build
 npm start
 ```
 
-打开 **http://127.0.0.1:3210**。首次启动自动创建三只猫猫、一间协作室和对应私聊。默认 **演示模式**，不需要 API key 或任何 agent CLI。演示回复来自本地确定性脚本，用于体验聊天、流式更新和传球；它不进行真实推理，也不执行代码任务。
+打开 **http://127.0.0.1:3210**。开发时第二个终端改用 `npm run dev`，访问 **http://127.0.0.1:5173**。运行面板位于 `/runtime.html`。
 
-## 现在可以做什么
+首次启动原生成员名册为空。在界面新建 Bot，选择本机检测到的执行工具，再开始聊天。角色模板直接读取上游；在「本地 Agent」中查看检测与执行状态，为 Bot 选择执行者。待审批事项在运行面板管理。原生启动包含数据库初始化和可选插件检查，看到 API listening 后再打开界面。
 
-第一次体验时，在侧栏选择「宪宪」，输入「你好，介绍一下自己」并按 Enter。测试群聊时选择「猫猫协作室」，发送「请一起设计一个待办应用，并传给砚砚审查」；测试记忆时发送「记住：我喜欢简洁的中文回答」，随后打开 Bot 信息抽屉的「记忆」页。默认演示回复有明确标记，不代表已调用真实 AI。真实聊天按下方步骤配置模型后再试。
+默认端口：Bot 3210、Clowder AI API 4331、专属 Redis 6392、原生指标 9492，均绑定本机。不要把本项目指向其他 Clowder 部署的数据或 Redis。启动器遇到端口占用会停止，不接管已有进程。
 
-- 单聊、群聊、连续聊天记录、Markdown 消息与流式回复。
-- 八种猫猫角色模板：布偶猫、缅因猫、暹罗猫、梵花猫、小鲸鱼、狸花猫、孟加拉猫、金渐层。职责和性格取自 Clowder AI 默认画像；当前使用 3D 玩偶猫猫头像，支持选择预设和上传图片。
-- 从模板创建 Bot，编辑名字、画像、模型和接入方式；新建群聊、调整群成员、置顶、重命名和删除会话。
-- 在群聊中 @ 指定成员；猫猫通过明确的行首 @ 传球。编排层检查成员身份，限制传球次数，并支持中止当前协作。
-- 共享记忆、猫猫私有记忆和当前会话记忆；原版记忆面板可查看，后端保留增删接口。猫猫可用明确的记忆标记存储事实。
-- 上下文预算和压缩，原始消息保留；长期记忆和历史摘要在后续轮次注入。
-- 本地持久化、服务重启恢复、浅色/深色界面、窄屏布局。
+## 架构与复用
 
-## 接入真实模型
-
-初始 Bot 使用本地演示。打开 Bot 的信息抽屉，在「详情 → 模型」中选择对应供应商和模型；该绑定对这一个 Bot 生效，可以在同一群中混合演示与真实 Bot。调用失败会显示错误，不会退回模拟答案。
-
-### OpenAI 兼容 API
-
-```bash
-cp .env.example .env
-# 编辑 .env，填入 OPENAI_API_KEY=你的密钥
-npm run dev
+```mermaid
+flowchart LR
+  UI[Bot 聊天界面 / 原生运行面板] --> B[Bot 协议适配层]
+  B -->|HTTP + Socket.IO| N[原版 Clowder AI API]
+  B --> P[头像 / 分组 / 原生 ID 引用]
+  N --> A[原生路由 / 队列 / A2A / Agent CLI / MCP]
+  N --> D[原生 Redis / SQLite / 会话与转录]
 ```
 
-1. 在原版「设置 → 模型与供应商」中配置 OpenAI 密钥并同步模型；也可以使用上面的环境变量方式。
-2. 在 Bot 的「详情 → 模型」中选择 OpenAI 和该服务实际返回的模型。
-3. 发消息验证连接。网页填入的密钥独立保存在数据目录的 `provider-secrets.json`（文件权限 `0600`），不写进聊天数据，也不返回状态接口。修改 `.env` 后需重启服务。
+- `upstream/clowder-ai/`：Git 子模块，固定完整提交，源码保持干净。
+- `.runtime/clowder-ai/`：从固定版本生成的独立构建目录，自动应用外置补丁。
+- `server/native/`：原生会话认证、消息/成员映射和实时事件转接，不实现第二套推理或调度。
+- `server/xbot/`：XBot 协议适配；`client/` 保留聊天布局、猫猫头像与猫咖配色。
+- `data/bot/presentation.json`：仅保存头像、文件夹、置顶、活动原生 Thread ID、消息序号引用。
+- `data/native/`：原生配置、Redis AOF、SQLite、transcripts、工具与账号数据。可通过 `BOT_RUNTIME_DATA_DIR` 调整。
 
-默认 base URL 是 `https://api.openai.com/v1`。原版设置布局没有自定义地址、上下文预算或 CLI 工作目录字段，本轮没有增加新控件；这些参数仍可以通过原后端 `PUT /api/settings` 配置。例如切换兼容服务地址：
+原自研 Orchestrator、Provider、上下文拼接、JSON 消息/记忆存储和演示路径已经移除。规划、工具执行、A2A、持久化队列、会话恢复、上下文和长期记忆由上游实现。
 
-```bash
-curl -X PUT http://127.0.0.1:3210/api/settings \
-  -H 'Content-Type: application/json' \
-  -d '{"baseUrl":"http://127.0.0.1:11434/v1","apiKeyEnv":"OPENAI_API_KEY"}'
-```
+当前有 **3 个外置运行时补丁、涉及 7 个文件**：原生执行入口的成员检查、原生 L0 编译后的后台委派指令、后台会话仍在运行时的答复落盘检查点。源码子模块保持干净，详细差异与退出条件见维护台账。成员检查属于执行准入，不是文件或长期记忆的保密隔离。
 
-接口使用标准 `/chat/completions` 文本 SSE。兼容服务需支持流式文本输出；目前未提供通用工具调用循环或图像输入。
+轻量后台方案保留一个 Bot 的主 Agent/session：长任务交给原生后台 subagent，进度询问和独立问题由主会话处理，调整方向通过原生消息送给对应子任务。普通新消息使用原生 `continue_current` 准入，不主动中断已有执行。本部署的 Claude 使用原生 Agent SDK carrier；其他 runtime 的同等体验尚未完成真实验收。
 
-### 本地 Agent CLI
+详见 [底层对照与 MAS 要素](docs/backend-reference.md)、[差异与升级流程](docs/upstream-maintenance.md)、[Provider 边界](docs/provider-reference.md)、[接口范围](docs/xbot-api.md)。
 
-Bot 的模型选择器可以选择 Claude Code、Codex CLI 或 Gemini CLI。需要你自行安装相应 CLI 并完成登录；工作目录默认是项目目录，可通过 `PUT /api/settings` 的 `cliWorkingDirectory` 字段修改。后端以参数数组启动进程、解析结构化输出，并处理取消、超时、缺少命令和异常退出。
+## 当前边界
 
-没有为本项目自动安装或登录这些 CLI，也没有加入跳过权限的参数。本机缺少完整多 CLI 环境，真实 CLI 的端到端执行未验证；已用协议样例和替身进程测试适配逻辑。参数和会话处理细节见 [Provider 对照](docs/provider-reference.md)。
+主聊天页展示最近 200 条原生消息；运行面板支持向前分页，单聊导出读取全部分页。界面完成回执是显示格式，不伪装为模型真实工具调用。任务、队列、会话链、用量、审批和记忆检索可在运行面板查看原生数据。
 
-## 数据与架构
-
-```text
-client/index.html   XBot 原版页面结构
-client/public/      XBot 基础资源、cat-avatars.js、cafe-theme.css 与头像素材
-shared/types.ts     前后端和 Provider 契约
-server/core/        提及路由、上下文和记忆组装
-server/providers/  演示、OpenAI 兼容 API、CLI 适配器
-server/xbot/        将 XBot 原版接口映射到本项目后端
-server/             HTTP/SSE、编排与原子存储
-tests/              核心行为和协议测试
-data/state.json     本机运行数据（已被 Git 忽略）
-```
-
-数据默认位于项目的 `data/`，可用 `CLOWDER_DATA_DIR` 改变位置。服务只监听本机；这一版面向一个用户、一个服务进程，不应直接暴露到公网。备份数据时停止服务并复制数据目录。原始聊天、摘要和记忆保存在一起，删除会话前请确认不再需要其记录。
-
-上下文预算是混合中文/英文的保守估算，不是模型厂商的计费 token 数。历史压缩是有损操作；原文保留在界面，但不保证每一轮都把全部历史发送给模型。
-
-本版没有接入账号登录、跨设备、语音、插件、猫猫球、外部消息渠道和定时任务。原版 UI 的扩展入口保留，但未接入的写操作会明确报不可用；没有伪造完成结果。完整的参考边界与来源见 [REFERENCES](docs/REFERENCES.md)，接口适配范围见 [XBot API 兼容层](docs/xbot-api.md)。
+原生能力与 Bot UI 覆盖率分开计算：底层有的功能，不一定已经映射为 XBot 按钮。语音、跨设备、外部渠道、复杂审批卡片、完整插件管理和 XBot 定时任务编辑器尚未适配。未知接口明确报错，不返回伪成功。当前仍是独立产品，尚未实现 Clowder AI 插件形态。
 
 ## 验证
 
@@ -94,9 +65,22 @@ data/state.json     本机运行数据（已被 Git 忽略）
 npm test
 npm run verify:frontend
 npm run build
+npm run verify:upstream
+npm run test:background-policy
+npm run test:background-output
+# 以下需要已启动专属运行时
+npm run test:native
 npm run smoke
+# 可选：会实际调用一次已登录的 Codex，消耗模型额度
+BOT_MODEL_SMOKE=1 npm run test:native
+# 可选：真实 Claude 后台旅程，约 5 分钟，会消耗模型额度
+BOT_BACKGROUND_SMOKE=1 npm run test:background-journey
 ```
 
-测试不需要真实密钥或 CLI。`verify:frontend` 对照固定上游版本的哈希清单，验证所有原版视觉资源，以及已记录的少量接口适配。资源来源与精确差异见 [XBot 前端接入说明](docs/xbot-frontend.md)。
+原生集成测试使用专用临时成员和会话，结束时通过原生接口删除测试成员、软删除测试会话，不清空存储。更多验收与上游回归命令见 [维护说明](docs/upstream-maintenance.md)。
 
-头像候选保留 **N 手绘墨稿、G 3D 玩偶肖像、I 水彩绘本**，当前启用 G。开发服务下访问 `/avatar-lab/` 查看已选方案及历史样页；这不是应用的主题切换设置。
+后台旅程验收保留独立 Bot、聊天与 `.runtime/background-journey/` 证据，不删除原有数据。它核对原生子任务身份、定向消息、连续心跳和完成回报，不能代替所有复杂任务或进程故障恢复的验证。
+
+升级前先停止两个服务并备份整个 `data/` 和 `.env`。旧版 `data/state.json` 不会被读取、覆盖或自动转换；旧会话/Provider 状态不能冒充原生会话。已有旧数据时应单独做迁移，保留原始导出。当前工作区未发现旧业务数据需要迁移。
+
+来源、许可和精确前端差异见 [REFERENCES](docs/REFERENCES.md) 与 [前端说明](docs/xbot-frontend.md)。

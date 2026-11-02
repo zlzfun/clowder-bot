@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { once } from 'node:events';
 import vm from 'node:vm';
 import { createApp } from '../server/app.js';
+import { NativeFixture } from './native-fixture.js';
 
 const browser = { window: {} as any };
 vm.runInNewContext(readFileSync(new URL('../client/public/cat-avatars.js', import.meta.url), 'utf8'), browser);
@@ -61,7 +62,7 @@ test('all eight portraits use bounded, distinct cells of the production sheet', 
 
 test('bot API preserves breed through creation, rename, upload, restore and export', async t => {
   const dir = mkdtempSync(join(tmpdir(), 'clowder-cat-avatars-'));
-  const runtime = createApp({ dataFile: join(dir, 'state.json') });
+  const runtime = createApp({ dataFile: join(dir, 'state.json'), native: new NativeFixture() });
   const server = runtime.app.listen(0, '127.0.0.1');
   await once(server, 'listening');
   const address = server.address(); assert.ok(address && typeof address !== 'string');
@@ -70,7 +71,7 @@ test('bot API preserves breed through creation, rename, upload, restore and expo
   const call = (method: string, path: string, body?: unknown) => fetch(base + path, { method, ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) });
   const json = async (path: string) => (await call('GET', path)).json() as Promise<any>;
   for (const id of ids) {
-    assert.equal((await call('POST', '/bots', { name: id, templateId: id })).status, 200);
+    assert.equal((await call('POST', '/bots', { name: id, templateId: id })).status, 201);
     const bot = await json('/bots/' + id);
     assert.equal(bot.templateId, id);
     assert.equal(bot.avatar_seed, 'cat:' + id);

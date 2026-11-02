@@ -27,7 +27,7 @@
       "file": "app.js",
       "target": "client/public/app.js",
       "sourceSha256": "1248f793493826bf044359c71e7d8772ccc3472d6021d6abb979dff9b6cb29bc",
-      "sha256": "de78923cda473c3aec4911172ebe99deb904195ce8c6f429201e9ae58f886d21",
+      "sha256": "6a91e2db6ca74c8efae2dd42424e152a5ef7627f5dccd2ba61954e818af786d7",
       "unchanged": false
     },
     {
@@ -146,14 +146,14 @@
       "file": "image-gen.js",
       "target": "client/public/image-gen.js",
       "sourceSha256": "674099f36f5615cbc016fec72a72c3f61ac430ac602d2e77afc9969624aa913a",
-      "sha256": "57458fd577a56b4aae942ad39f1ad62e58b135c543b5484d9d0c2e5130fa5267",
+      "sha256": "e8d18a3cff1851cadf92174d95206cfdb774e0513f11105583b380d3defe0b8f",
       "unchanged": false
     },
     {
       "file": "index.html",
       "target": "client/index.html",
       "sourceSha256": "a4160c18e23489fbc6a9e21fe494e1ac52840a67b2e138997400a0b42835b556",
-      "sha256": "701a95e6103792437c96c1a6b64444a083bd1055f6bb11ee746a10bbec80b3eb",
+      "sha256": "a35cee73a3938436f16646e7b92a6687cb6f3644b6e0ae836c708b1fe636e7a2",
       "unchanged": false
     },
     {
@@ -314,7 +314,7 @@
       "file": "providers.js",
       "target": "client/public/providers.js",
       "sourceSha256": "fb8967f6c9e63e5944cae9ac60e5740f7d5b25bcebf7b5b83e1aad4589af1f9e",
-      "sha256": "af03a8bbbfaf059b93e02211870fe0fbdf4eeab60feffdad99f35ad799088e9f",
+      "sha256": "44cad5c80cba896567deef8280403a221e158f28cf60ef01ca3e532c5d6ec87e",
       "unchanged": false
     },
     {
@@ -545,7 +545,7 @@
       "file": "web-search.js",
       "target": "client/public/web-search.js",
       "sourceSha256": "bc83c03eee529b58ed9a57b972bf48c0c12a8e34b9835edd59131bf3897d8ff5",
-      "sha256": "544549065192fff6a76aa5f5b4c7c5fa0900838a79157202d1f55ca744590323",
+      "sha256": "40a085ea0322167a9b26d798b09cc6e3eaea478bdb2830697e6418837984074b",
       "unchanged": false
     }
   ],
@@ -564,6 +564,41 @@
       "target": "client/public/cafe-theme.css",
       "description": "Cat-cafe light/dark color overrides",
       "sha256": "c36dc68d3e995c3f5968de0ac6cd9b8fdeb438f509e707b5638000abd2e1345a"
+    },
+    {
+      "target": "client/public/runtime.html",
+      "description": "Native runtime management surface",
+      "sha256": "c4e8f53a29a7161496e25a6df8e21654112c521cf2cf644078752842690386ef"
+    },
+    {
+      "target": "client/public/runtime.css",
+      "description": "Styles for native runtime management surface",
+      "sha256": "59c83211fafd62e4a79b217ae6868ddad3acb41fa838bb8887de7c574f9e466c"
+    },
+    {
+      "target": "client/public/runtime.js",
+      "description": "Native queue, session, approval and memory adapters; runtimes and accounts shown read-only",
+      "sha256": "fa4205cd041d61514ceb6b11bc1868c3acb54a20727c4a0eb99b0864b612b08e"
+    },
+    {
+      "target": "client/public/agents.js",
+      "description": "Local Agent access: settings pane, Bot Agent picker and new-Bot Agent field",
+      "sha256": "49ace8cc321ebe2f231c256e4ea25a6ba22828e0d089fdd9747676f381a02596"
+    },
+    {
+      "target": "client/public/agents.css",
+      "description": "Local Agent access styles on existing XBot tokens and components",
+      "sha256": "3e4ac1a10888ceeef944753ebdc865233a75a8bf840baf947e3ca64ddb2491d5"
+    },
+    {
+      "target": "client/public/chat-presentation.js",
+      "description": "Message presentation: speaker identity by native cat ID and folded execution records (presentation_kind activity)",
+      "sha256": "090d2bb0149c2ce9d1c55be7608e1531b827cf0ab6e4036157293ae2e21d660d"
+    },
+    {
+      "target": "client/public/chat-presentation.css",
+      "description": "Single-chat face/name continuation and execution-record line on existing XBot classes and tokens",
+      "sha256": "a18931567181b2b346056c55315132a7e559862dab52bddd7f42e03f2bfd02bf"
     }
   ]
 }

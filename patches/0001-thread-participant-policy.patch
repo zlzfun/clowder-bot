@@ -1,0 +1,41 @@
+--- a/packages/api/src/domains/cats/services/agents/invocation/invoke-single-cat.ts
++++ b/packages/api/src/domains/cats/services/agents/invocation/invoke-single-cat.ts
+@@ -1430,6 +1430,17 @@
+ }
+ 
+ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationParams): AsyncIterable<AgentMessage> {
++  try {
++    const { assertThreadParticipant } = await import('./thread-participant-policy.js');
++    await assertThreadParticipant(deps.threadStore, params.threadId, params.catId);
++  } catch (error) {
++    yield {
++      type: 'error', catId: params.catId, errorCode: 'thread_participant_policy_denied',
++      error: error instanceof Error ? error.message : 'Thread participant policy unavailable', timestamp: Date.now(),
++    };
++    yield { type: 'done', catId: params.catId, timestamp: Date.now() };
++    return;
++  }
+   const services = new InvocationServiceScope();
+   try {
+     const service = params.executionBinding ? params.service : services.pin(params.service);
+--- /dev/null
++++ b/packages/api/src/domains/cats/services/agents/invocation/thread-participant-policy.ts
+@@ -0,0 +1,18 @@
++import type { IThreadStore } from '../../stores/ports/ThreadStore.js';
++
++/** Optional deployment policy. Native Clowder AI behavior is unchanged when disabled.
++ * In a Bot-owned deployment, persisted preferredCats is the execution roster.
++ * This constrains execution, not memory visibility or filesystem permissions.
++ */
++export async function assertThreadParticipant(
++  threadStore: Pick<IThreadStore, 'get'> | null,
++  threadId: string,
++  catId: string,
++  enabled = process.env.CAT_CAFE_ENFORCE_THREAD_PARTICIPANTS === '1',
++): Promise<void> {
++  if (!enabled) return;
++  const thread = await threadStore?.get(threadId);
++  if (!thread?.preferredCats?.includes(catId as never)) {
++    throw new Error(`Member ${catId} is not in the execution roster of thread ${threadId}`);
++  }
++}

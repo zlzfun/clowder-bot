@@ -1,0 +1,3 @@
+[submodule "upstream/clowder-ai"]
+	path = upstream/clowder-ai
+	url = https://github.com/zts212653/clowder-ai.git

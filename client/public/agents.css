@@ -1,0 +1,42 @@
+/* Local Agent access. Builds on the XBot settings shell (setsec, setfoot),
+   the approved neutral radio rows (web-search.css) and the binding dialog
+   (providers.css); only --x-* tokens, no new colors. */
+.setpage:has([data-spane="agents"]:not([hidden])){height:min(760px,90vh)}
+.agent-tools{display:flex;align-items:center;justify-content:flex-end;gap:var(--x-s4);margin:0 0 var(--x-s5)}
+.agent-stamp{font-size:var(--x-fs-sm);color:var(--x-muted)}
+.agent-list{display:flex;flex-direction:column;border-radius:var(--x-r-card);background:var(--x-fill-1);overflow:hidden}
+.agent-row{padding:var(--x-s5) var(--x-s6)}
+.agent-row+.agent-row{border-top:1px solid var(--x-fill-2)}
+.agent-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:var(--x-s2) var(--x-s5)}
+.agent-name{display:flex;align-items:center;gap:var(--x-s3);min-width:0}
+.agent-name b{font-size:var(--x-fs-ui);font-weight:560;color:var(--x-text);overflow-wrap:anywhere}
+.agent-row.off .agent-name b{color:var(--x-text-2)}
+.agent-cmd,.agent-hint code{font-family:var(--x-mono);font-size:var(--x-fs-cap);color:var(--x-text-2);background:var(--x-fill-2);padding:1px var(--x-s2);border-radius:var(--x-r-xs);overflow-wrap:anywhere}
+.agent-state{display:inline-flex;align-items:center;gap:var(--x-s2);font-size:var(--x-fs-sm);color:var(--x-muted);white-space:nowrap}
+.agent-hint{margin:var(--x-s2) 0 0;font-size:12px;line-height:1.55;color:var(--x-muted)}
+.agent-facts{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:var(--x-s1) var(--x-s5);margin:var(--x-s3) 0 0;font-size:var(--x-fs-sm);line-height:1.5}
+.agent-facts dt{color:var(--x-faint)}
+.agent-facts dd{margin:0;color:var(--x-text-2);overflow-wrap:anywhere}
+.agent-none{margin:0 0 var(--x-s5);font-size:var(--x-fs-ui);line-height:1.6;color:var(--x-muted)}
+.agent-foot{margin-top:var(--x-s7)}
+.agent-foot .setfoot{margin:var(--x-s2) 0 0}
+.agent-foot a{color:var(--x-text-link);text-decoration:none;border-radius:var(--x-r-xs)}
+.agent-foot a:hover,.agent-foot a:focus-visible{background:var(--x-text-link-hover)}
+
+/* 更换执行 Agent: the binding dialog with readable Agent names. */
+.agent-option-tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.binding-option.agent-option strong{flex:none;font-family:inherit;font-size:var(--x-fs-ui);letter-spacing:normal}
+.agent-option small{font-size:var(--x-fs-cap);line-height:1.45;color:var(--x-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agent-option .binding-cap{gap:var(--x-s2)}
+.binding-option.agent-option:disabled{opacity:1}
+.binding-option.agent-option:disabled:hover{background:transparent}
+.agent-option:disabled strong{color:var(--x-muted)}
+.binding-trigger .bt-model.agent-label{font-family:inherit;font-size:var(--x-fs-ui)}
+.binding-trigger .bt-model.agent-label.legacy{font-weight:560;color:var(--x-text-2)}
+
+/* 新建 Bot: the same neutral radio rows as 网页搜索. */
+.agent-field .agent-hint{margin:0}
+.agent-choices .agent-none{margin:0;padding:var(--x-s5) var(--x-s6);font-size:var(--x-fs-sm)}
+.agent-choices .agent-none p{margin:0 0 var(--x-s3)}
+.agent-choices .agent-none .btn+.btn{margin-left:var(--x-s2)}
+@media(max-width:600px){.agent-row{padding:var(--x-s4) var(--x-s5)}.agent-tools{justify-content:space-between}}

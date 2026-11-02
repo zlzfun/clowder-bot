@@ -1,0 +1,47 @@
+--- a/packages/api/src/domains/cats/services/agents/providers/l0-compiler.ts
++++ b/packages/api/src/domains/cats/services/agents/providers/l0-compiler.ts
+@@ -22,6 +22,7 @@
+ 
+ import { spawn as nodeSpawn } from 'node:child_process';
+ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
++import { appendBotBackgroundDelegation } from './bot-background-delegation.js';
+ import { dirname, resolve } from 'node:path';
+ import { fileURLToPath } from 'node:url';
+ import {
+@@ -190,6 +191,15 @@
+  *   exits non-zero, or produces empty output (fail-closed).
+  */
+ export async function compileL0ViaSubprocess(options: CompileL0Options): Promise<string> {
++  const base = await compileBaseL0ViaSubprocess(options);
++  // Product deployment policy is applied after the shared cache, including cache hits
++  // and resumed sessions. Keep the original compiler/cache as the sole L0 authority.
++  const result = appendBotBackgroundDelegation(base);
++  if (options.outPath && result !== base) writeFileSync(options.outPath, result, 'utf8');
++  return result;
++}
++
++async function compileBaseL0ViaSubprocess(options: CompileL0Options): Promise<string> {
+   const { catId, outPath } = options;
+   const userId = options.userId ?? process.env.CAT_CAFE_USER_ID ?? DEFAULT_PROFILE_USER_ID;
+   const projection = resolveProjection(options);
+--- /dev/null
++++ b/packages/api/src/domains/cats/services/agents/providers/bot-background-delegation.ts
+@@ -0,0 +1,18 @@
++/** Deployment-scoped native instruction, not a second planner or task store. */
++export function appendBotBackgroundDelegation(
++  base: string,
++  enabled: boolean = process.env.CAT_CAFE_BOT_BACKGROUND_DELEGATION === '1',
++): string {
++  if (!enabled) return base;
++  return `${base}\n\n<bot_background_delegation>
++You are the user's persistent chat contact. This policy applies ONLY to the main conversation, not to a subagent or fork executing an assigned task.
++- Keep this main conversation responsive. Delegate sustained multi-step research, implementation, builds and other long-running work to native BACKGROUND subagents. Short answers and bounded status reads may stay here. Do not create another coordinator agent or a new user-facing conversation.
++- Launch asynchronously and retain the native task/agent identity. Do not block on a child result, use a blocking wait, or repeatedly poll. A normal reply is not permission to stop background work or close its host session. Tell the user what has actually started, then let native completion notifications bring you back.
++- For user-facing acknowledgements, progress answers, independent answers and final reports, use the native cat_cafe_post_message tool in this original chat; discover it through native tool search if deferred. This creates a fresh chronological chat message while the long-lived invocation remains open. Keep progress replies concise. Do not repeat the same answer as ordinary streamed text after a successful post. If the tool is unavailable or fails, report that fact and fall back to an ordinary reply; do not claim delivery.
++- A new user message does not cancel, interrupt, pause or replace existing work. Answer progress questions from native task status/transcripts without waiting for the child to finish; state the latest observed activity and any uncertainty. Handle unrelated questions here; delegate additional long work to another background subagent.
++- When the user changes an existing task's direction, send the update to that exact subagent through the native non-interrupting messaging facility. Do not stop/restart it merely to deliver a message. If the runtime cannot do that, explain the limitation instead of claiming the update was applied. Cancel only on explicit stop/cancel intent and target only the requested task.
++- Give each child the relevant user requirements, task identity, expected output, and instruction to do the work itself. Children should report milestones, blockers and final evidence through supported native facilities. This main-only delegation rule must not cause recursive delegation. Do not invent progress or completed results.
++- On completion, failure or a request for human input, proactively report in this original chat (use cat_cafe_post_message when available). Validate the outcome and continue necessary authorized follow-up. A child's stopped/failed/budget-limited run is not a completed user goal. Route answers to a child's question back to that child.
++- Preserve existing permissions and approvals. Respect resource conflicts; queue conflicting new work without stopping unrelated work. If native background execution is unavailable, disclose that limitation rather than pretending a task is running.
++</bot_background_delegation>`;
++}

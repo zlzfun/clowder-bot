@@ -1,10 +1,10 @@
 {
   "name": "clowder-bot",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22.13"
+    "node": ">=24 <25"
   },
   "scripts": {
     "dev": "concurrently -k -n api,web \"node --watch --env-file-if-exists=.env --import tsx server/index.ts\" \"vite --host 127.0.0.1\"",
@@ -12,17 +12,26 @@
     "build": "tsc --noEmit && vite build",
     "start": "node --env-file-if-exists=.env --import tsx server/index.ts",
     "test": "node --import tsx --test tests/*.test.ts",
-    "smoke": "node --import tsx scripts/check-production.mjs",
+    "smoke": "node --env-file-if-exists=.env --import tsx scripts/check-production.mjs",
     "verify:frontend": "node scripts/verify-xbot-frontend.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "runtime:prepare": "node --env-file-if-exists=.env scripts/prepare-upstream.mjs",
+    "runtime:start": "node --env-file-if-exists=.env scripts/start-runtime.mjs",
+    "test:native": "BOT_NATIVE_TEST=1 node --env-file-if-exists=.env --import tsx --test tests/native-integration.test.ts && node --test scripts/test-native-policy.mjs",
+    "verify:upstream": "node scripts/verify-upstream.mjs",
+    "test:background-policy": "node --test scripts/test-background-policy.mjs",
+    "test:background-output": "node .runtime/clowder-ai/packages/api/scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import ./test/helpers/setup-cat-registry.js --test ../../../../scripts/test-background-output.mjs",
+    "test:background-journey": "node --env-file-if-exists=.env scripts/check-background-journey.mjs"
   },
   "dependencies": {
     "express": "^5.1.0",
-    "zod": "^4.6.7"
+    "zod": "^4.6.7",
+    "socket.io-client": "^4.8.1"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
-    "@types/node": "^22.13.0",
+    "@types/node": "^24.0.0",
+    "pnpm": "9.15.4",
     "concurrently": "^9.1.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",

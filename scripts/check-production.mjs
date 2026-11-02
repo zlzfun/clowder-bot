@@ -19,10 +19,13 @@ try {
   const assets = [...new Set([...html.matchAll(/(?:src|href)="(\/[^\"]+)"/g)].map(match => match[1]))];
   assert.ok(assets.includes('/app.js') && assets.includes('/tokens.css'), 'Original XBot scripts and styles must be present.');
   assert.ok(assets.includes('/cat-avatars.js') && assets.includes('/cafe-theme.css'), 'Cat portraits and café theme must be loaded.');
+  assert.ok(assets.includes('/agents.js') && assets.includes('/agents.css'), 'Local Agent access must be loaded.');
+  assert.ok(assets.includes('/chat-presentation.js') && assets.includes('/chat-presentation.css'), 'Message presentation must be loaded.');
   for (const asset of assets) {
     const result = await fetch(base + asset);
     assert.equal(result.status, 200, asset);
-    assert.doesNotMatch(result.headers.get('content-type'), /text\/html/, asset);
+    if (asset.endsWith('.html')) assert.match(result.headers.get('content-type'), /text\/html/, asset);
+    else assert.doesNotMatch(result.headers.get('content-type'), /text\/html/, asset);
     await result.arrayBuffer();
   }
   const portraits = await fetch(base + '/avatars/clay-cats.png');
@@ -30,10 +33,11 @@ try {
   assert.match(portraits.headers.get('content-type'), /image\/png/);
   assert.equal(Buffer.from(await portraits.arrayBuffer()).subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
   assert.equal((await (await fetch(base + '/api/health')).json()).ok, true);
-  assert.equal((await fetch(base + '/api/missing')).status, 404);
+  assert.equal((await fetch(base + '/api/missing')).status, 410);
   const session = await (await fetch(base + '/xbot-api/session')).json();
   assert.equal(session.authed, true);
-  console.log('Production smoke passed: page, original layout assets, café theme, 3D cat portraits and both APIs served from one process.');
+  assert.equal((await fetch(base + '/runtime.html')).status, 200);
+  console.log('Production smoke passed: Bot assets, runtime panel and the real Clowder AI API bridge.');
 } finally {
   await runtime.close();
   await new Promise(resolve => server.close(resolve));

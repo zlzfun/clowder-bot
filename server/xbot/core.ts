@@ -1,223 +1,130 @@
 import express, { type Response } from 'express';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import type { Bot, Conversation, Message } from '../../shared/types.js';
-import { Store, id, makeBot, makeConversation, now } from '../store.js';
-import { ApiError, Orchestrator } from '../orchestrator.js';
-import { buildContext, estimateTokens, scopedMemories } from '../core/context.js';
-import { applyBotPersona, personaCardSummary, resolveXbotBinding } from './settings.js';
+import { ApiError } from '../errors.js';
+import { BotBridge, encode } from '../native/bridge.js';
+import type { NativeCat } from '../native/types.js';
+import { agentBinding } from '../native/agents.js';
 
-type Meta = Record<string, any>;
 const label = z.string().trim().min(1).max(64).regex(/^[\p{L}\p{N}_ .-]+$/u, '名字包含不支持的字符');
-const seed = z.string().trim().min(1).max(80).regex(/^[^<>\x00-\x1f\x7f]+$/, '无效的头像种子');
-export function xbotMeta(store: Store, bot: Bot): Meta {
-  store.xbot.bots ??= {};
-  return store.xbot.bots[bot.id] ??= {};
-}
-export function xbotBot(store: Store, name: string): Bot {
-  const bot = store.state.bots.find(b => b.name === name);
-  if (!bot) throw new ApiError(404, '找不到这个 Bot');
-  return bot;
-}
-export function directConversation(store: Store, bot: Bot): Conversation {
-  const activeId = store.xbot.bots?.[bot.id]?.activeConversationId;
-  let conversation = store.state.conversations.find(c => c.id === activeId && c.kind === 'direct' && c.botIds[0] === bot.id)
-    ?? store.state.conversations.find(c => c.kind === 'direct' && c.botIds[0] === bot.id);
-  if (!conversation) { conversation = makeConversation(bot.name, 'direct', [bot.id]); store.state.conversations.push(conversation); store.save(); }
-  return conversation;
-}
-
-export function createXbotCoreRouter(store: Store, orchestrator: Orchestrator) {
+const seed = z.string().min(1).max(80).regex(/^[^<>\x00-\x1f\x7f]+$/);
+const botBody = { name: label, persona: z.string().max(32768).optional(), description: z.string().max(500).optional(),
+  avatar_seed: seed.optional(), templateId: z.string().optional(), timezone: z.string().max(80).optional(),
+  runtimeId: z.string().max(100).optional() };
+const sse = (res: Response, event: string, data: unknown) => {
+  if (!res.destroyed && !res.writableEnded) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+};
+export function createXbotCoreRouter(bridge: BotBridge) {
+  const { store, native } = bridge;
   const router = express.Router();
-  const streams = new Map<string, { res: Response; conversationId: string; sent: Set<string> }>();
-  const meta = (bot: Bot) => xbotMeta(store, bot);
-  const avatarSeedOf = (bot: Bot) => meta(bot).avatarSeed ?? `cat:${bot.templateId}`;
-  const conversationMessages = (conversation: Conversation) => store.state.messages.filter(m => m.conversationId === conversation.id);
-  const direct = (bot: Bot) => directConversation(store, bot);
-  const getBot = (name: string) => xbotBot(store, name);
-  const group = (id: string) => {
-    const conversation = store.state.conversations.find(c => c.id === id && c.kind === 'group');
-    if (!conversation) throw new ApiError(404, '找不到这个群聊');
-    return conversation;
+  const streams = new Set<Response>();
+  const bot = (name: string) => bridge.cat(name);
+  const direct = async (name: string) => bridge.direct(await bot(name));
+  const panel = async (cat: NativeCat) => {
+    const thread = await bridge.direct(cat);
+    const [memory, queue, runtimes] = await Promise.all([bridge.notes(thread.id), bridge.queue(thread.id), bridge.runtimes()]);
+    return { ...bridge.botItem(cat), persona: cat.roleDescription, timezone: store.bot(cat.id).timezone ?? 'Asia/Shanghai',
+      agent: agentBinding(cat, runtimes), persona_card: null, memory, routines: [],
+      agents: queue.activeInvocations.map(i => ({ id: i.invocationId ?? i.catId, type: 'agent', status: i.status ?? 'running', task: 'Clowder AI 正在执行', mode: 'chat', steps: 0, started_at: i.startedAt ? new Date(i.startedAt).toISOString() : '', native: i })),
+      native: { cat, thread, queue }, memory_description: '会话共享笔记。长期记忆由 Clowder AI 原生记忆系统管理。' };
   };
-  const idle = (bot: Bot) => {
-    if (store.state.conversations.some(c => c.botIds.includes(bot.id) && orchestrator.busy(c.id))) throw new ApiError(409, '请先停止正在进行的回复');
-  };
-  const ensureName = (name: string, except?: string) => {
-    if (store.state.bots.some(b => b.id !== except && b.name.toLowerCase() === name.toLowerCase())) throw new ApiError(409, '已有同名 Bot');
-  };
-  const botItem = (bot: Bot) => {
-    const m = meta(bot), conversation = direct(bot);
-    return { name: bot.name, templateId: bot.templateId, persona: (m.duty ?? bot.persona).slice(0, 80), description: bot.description,
-      unread: conversationMessages(conversation).length > (m.readCount ?? 0), notes: 0, pinned: conversation.pinned,
-      primary: store.state.bots[0]?.id === bot.id, group: m.group ?? '', avatar: m.avatarData ? 'custom' : 'generated',
-      avatar_seed: avatarSeedOf(bot), avatar_url: m.avatarData ? `/xbot-api/bots/${encodeURIComponent(bot.name)}/avatar?v=${m.avatarUpdated ?? ''}` : '',
-      avatar_bg: '', avatar_ink: '', initial: bot.name.slice(0, 1) };
-  };
-  const groupItem = (conversation: Conversation) => ({ id: conversation.id, name: conversation.title,
-    members: conversation.botIds.map(id => store.state.bots.find(b => b.id === id)?.name).filter(Boolean), created: conversation.createdAt });
-  const agentRows = (bot: Bot) => store.state.conversations.filter(c => c.botIds.includes(bot.id) && c.status === 'running').map(c => {
-    const run = conversationMessages(c).findLast(m => !!m.runId);
-    return { id: run?.runId ?? c.id, type: 'agent', status: 'running', task: conversationMessages(c).findLast(m => m.role === 'user')?.content ?? '整理上下文',
-      mode: 'chat', steps: 0, started_at: run?.createdAt ?? c.updatedAt, current_step: '', notable: [], summary: '' };
+  router.get('/session', async (_req, res) => {
+    await native.request('/api/health');
+    res.json({ authed: true, owner: 'local', owner_name: '你', app: false, version: '0.2.0', tip: '', remote: false, engine: 'clowder-ai' });
   });
-  const botPanel = (bot: Bot) => {
-    const m = meta(bot);
-    const effectiveProvider = m.runtimeProvider ?? (store.state.settings.mode === 'demo' ? 'demo' : bot.provider);
-    return { ...botItem(bot), persona: m.duty ?? bot.persona, timezone: m.timezone ?? 'Asia/Shanghai',
-      provider: effectiveProvider, model: bot.model || (effectiveProvider === 'openai' ? store.state.settings.defaultModel : '') || 'default',
-      persona_card: personaCardSummary(store, bot),
-      memory: scopedMemories(store.state, bot.id, direct(bot).id).map(memory => ({ id: memory.id, scope: memory.scope === 'shared' ? 'person' : memory.scope, text: memory.content })),
-      routines: [], agents: agentRows(bot) };
-  };
-  const transcript = (bot: Bot) => {
-    const rows: Meta[] = [];
-    const conversation = direct(bot);
-    const messages = conversationMessages(conversation);
-    const replyIds = store.xbot.replyTo ?? {};
-    for (const message of messages) {
-      if (message.status === 'streaming') continue;
-      const base = { seq: rows.length + 1, content: message.content, name: bot.name, time: message.createdAt, reply_to: replyIds[message.id] ?? 0, status: message.status };
-      if (message.role === 'user') rows.push({ ...base, role: 'user' });
-      else if (message.content) {
-        // XBot's original renderer deliberately shows only delivered owner-chat
-        // calls. These are delivery receipts for existing messages, not model tools.
-        const callId = `delivery_${message.id}`;
-        rows.push({ ...base, role: 'assistant', tool_calls: [{ id: callId, type: 'function', function: { name: 'send_message_to_user', arguments: JSON.stringify({ text: message.content }) } }] });
-        rows.push({ seq: rows.length + 1, role: 'tool', name: 'send_message_to_user', content: "sent to the owner's chat", tool_call_id: callId, time: message.createdAt });
-      }
-    }
-    return rows;
-  };
-  router.get('/session', (_req, res) => res.json({ authed: true, owner: 'local', owner_name: '你', app: false, version: '0.1.0', tip: '', remote: false, needs_key: false }));
-  router.get('/bots', (_req, res) => res.json({ bots: store.state.bots.map(botItem) }));
-  router.get('/bots/status', (_req, res) => res.json({ bots: store.state.bots.map(bot => {
-    const tasks = agentRows(bot), current = tasks[0];
-    const conversation = store.state.conversations.find(c => c.activeBotId === bot.id && c.status === 'running');
-    return { bot: bot.name, state: conversation ? 'running' : current ? 'running' : 'idle', since: current?.started_at,
-      task: current?.task ?? '', todo: '', tool: '', tool_summary: '', completed_unread: 0 };
-  }), others: [] }));
-  router.get('/groups', (_req, res) => {
-    const names: string[] = store.xbot.folders ?? [];
-    const folders = names.map(name => ({ name, bots: store.state.bots.filter(b => meta(b).group === name).map(b => b.name), ungrouped: false }));
-    const ungrouped = store.state.bots.filter(b => !meta(b).group).map(b => b.name);
-    res.json({ order: names, folders: [...folders.map(f => ({ ...f, count: f.bots.length })), { name: '', bots: ungrouped, count: ungrouped.length, ungrouped: true }], groups: store.state.conversations.filter(c => c.kind === 'group').map(groupItem) });
+  router.get('/bots', async (_req, res) => res.json({ bots: (await bridge.cats()).map(cat => bridge.botItem(cat)) }));
+  router.get('/bots/status', async (_req, res) => res.json(await bridge.statuses()));
+  router.get('/groups', async (_req, res) => {
+    const cats = await bridge.cats();
+    const folders = store.state.folders.map(name => ({ name, bots: cats.filter(c => store.bot(c.id).folder === name).map(c => c.name), ungrouped: false }));
+    const ungrouped = cats.filter(c => !store.bot(c.id).folder).map(c => c.name);
+    const groups = await Promise.all(store.state.groupThreadIds.map(id => bridge.group(id)));
+    res.json({ order: store.state.folders, folders: [...folders.map(f => ({ ...f, count: f.bots.length })), { name: '', bots: ungrouped, count: ungrouped.length, ungrouped: true }], groups: groups.map(t => bridge.groupItem(t, cats)) });
   });
   router.get('/notes', (_req, res) => res.json({ notes: [] }));
-  router.post('/notes/read', (req, res) => { if (req.body?.bot) { const bot = getBot(req.body.bot); meta(bot).readCount = conversationMessages(direct(bot)).length; store.save(); } res.json({ status: 'ok' }); });
-  router.get('/bots/:name/transcript', (req, res) => { const bot = getBot(req.params.name); const messages = transcript(bot); meta(bot).readCount = conversationMessages(direct(bot)).length; store.save(); res.json({ messages }); });
-  router.get('/bots/:name/steps', (req, res) => { const bot = getBot(req.params.name); res.json({ steps: conversationMessages(direct(bot)).filter(m => m.role === 'assistant').slice(-20).map(m => ({ time: m.createdAt, tool: 'reply', summary: m.content.slice(0, 160), status: m.status, duration: 0 })) }); });
-  router.get('/bots/:name/todos', (req, res) => { getBot(req.params.name); res.json({ items: [] }); });
-  router.get('/bots/:name', (req, res) => res.json(botPanel(getBot(req.params.name))));
-  router.get('/groups/:id', (req, res) => {
-    const conversation = group(req.params.id);
-    res.json({ group: groupItem(conversation), messages: conversationMessages(conversation).filter(m => m.status !== 'streaming').map(m => ({ id: m.id, time: m.createdAt, sender: m.role === 'user' ? 'local' : store.state.bots.find(b => b.id === m.botId)?.name ?? '系统', kind: m.role === 'user' ? 'person' : 'bot', text: m.role === 'system' ? `[action] ${m.content}` : m.content })) });
+  router.post('/notes/read', (_req, res) => res.json({ status: 'ok' }));
+  router.get('/bots/:name/transcript', async (req, res) => res.json(await bridge.transcript(await bot(req.params.name), typeof req.query.before === 'string' ? req.query.before : undefined)));
+  router.get('/bots/:name/steps', async (req, res) => {
+    const thread = await direct(req.params.name), page = await bridge.messages(thread.id);
+    res.json({ steps: page.messages.flatMap(m => (m.toolEvents ?? []).map(event => ({ time: new Date(m.timestamp).toISOString(), tool: 'Clowder AI', summary: JSON.stringify(event), native: event }))) });
   });
-  const createBot = (input: { name: string; persona?: string; description?: string; avatar_seed?: string; templateId?: string; timezone?: string }, source?: Bot) => {
-    ensureName(input.name);
-    if (store.state.bots.length >= 100) throw new ApiError(400, '最多创建 100 个 Bot');
-    const templateId = input.templateId ?? source?.templateId ?? 'ragdoll';
-    if (!store.state.templates.some(t => t.id === templateId)) throw new ApiError(400, '未知模板');
-    const bot = { ...makeBot(templateId), name: input.name, description: input.description ?? source?.description ?? '' };
-    if (source) { bot.provider = source.provider; bot.model = source.model; }
-    store.state.bots.push(bot);
-    const info = meta(bot);
-    info.runtimeProvider = source ? meta(source).runtimeProvider ?? (store.state.settings.mode === 'demo' ? 'demo' : source.provider) : 'demo';
-    if (input.avatar_seed) info.avatarSeed = input.avatar_seed;
-    if (input.timezone) info.timezone = input.timezone;
-    if (source) info.personaCard = meta(source).personaCard;
-    applyBotPersona(store, bot, input.persona?.trim() || (source ? meta(source).duty ?? source.persona : bot.persona));
-    store.state.conversations.push(makeConversation(bot.name, 'direct', [bot.id]));
-    return bot;
-  };
-  const botBody = { name: label, persona: z.string().max(32768).optional(), description: z.string().max(500).optional(),
-    avatar_seed: seed.optional(), templateId: z.string().optional(), timezone: z.string().max(80).optional() };
-  router.post('/bots', (req, res) => { const bot = createBot(z.object(botBody).strict().parse(req.body)); orchestrator.broadcast(); res.json({ name: bot.name }); });
-  router.patch('/bots/:name', (req, res) => {
-    const bot = getBot(req.params.name); idle(bot);
-    const input = z.object({ ...botBody, name: label.optional(), group: z.string().trim().max(80).optional() }).strict().parse(req.body);
-    if (input.name) ensureName(input.name, bot.id);
-    if (input.group && !(store.xbot.folders ?? []).includes(input.group)) throw new ApiError(400, '分组不存在');
-    if (input.persona !== undefined && !input.persona.trim()) throw new ApiError(400, '职责不能为空');
-    const m = meta(bot), before = bot.name;
-    if (input.name) bot.name = input.name;
-    if (input.description !== undefined) bot.description = input.description;
-    if (input.persona !== undefined) applyBotPersona(store, bot, input.persona);
-    if (input.timezone !== undefined) m.timezone = input.timezone;
-    if (input.group !== undefined) m.group = input.group;
-    if (input.avatar_seed !== undefined) { m.avatarSeed = input.avatar_seed; delete m.avatarData; delete m.avatarMime; }
-    for (const conversation of store.state.conversations.filter(c => c.botIds.includes(bot.id))) {
-      store.sealSessions(conversation.id, 'profile-updated', bot.id);
-      if (conversation.kind === 'direct' && conversation.title === before) conversation.title = bot.name;
-    }
-    orchestrator.broadcast(); res.json({ name: bot.name });
+  router.get('/bots/:name/todos', async (req, res) => {
+    const thread = await direct(req.params.name);
+    const progress = await native.request(`/api/threads/${encode(thread.id)}/task-progress`);
+    res.json({ items: [], native: progress, supported: false, reason: '任务进展请在原生运行面板查看' });
   });
-  router.put('/bots/:name/binding', (req, res) => {
-    const bot = getBot(req.params.name); idle(bot);
-    const input = z.object({ provider: z.string(), model: z.string().max(200) }).strict().parse(req.body);
-    const binding = resolveXbotBinding(store, input.provider, input.model);
-    Object.assign(bot, binding); meta(bot).runtimeProvider = binding.provider;
-    for (const conversation of store.state.conversations.filter(c => c.botIds.includes(bot.id))) store.sealSessions(conversation.id, 'provider-updated', bot.id);
-    orchestrator.broadcast(); res.json({ name: bot.name, provider: binding.provider, model: binding.model || 'default' });
+  router.get('/bots/:name', async (req, res) => res.json(await panel(await bot(req.params.name))));
+  router.get('/groups/:id', async (req, res) => {
+    const thread = await bridge.group(req.params.id);
+    const [cats, page] = await Promise.all([bridge.cats(), bridge.messages(thread.id, typeof req.query.before === 'string' ? req.query.before : undefined)]);
+    res.json({ group: bridge.groupItem(thread, cats), hasMore: page.hasMore,
+      messages: bridge.presentMessages(page.messages, cats).map(({ message: m, name, ...presentation }) => ({
+        id: m.id, time: new Date(m.timestamp).toISOString(), sender: m.type === 'user' ? 'local' : name,
+        kind: m.type === 'user' ? 'person' : 'bot', text: m.content || (m.isDraft ? '正在处理…' : ''),
+        status: m.lifecycle?.status ?? (m.isDraft ? 'processing' : 'complete'), ...presentation, native: m,
+      })) });
   });
-  router.post('/bots/:name/pin', (req, res) => { const bot = getBot(req.params.name); direct(bot).pinned = z.object({ pinned: z.boolean() }).parse(req.body).pinned; orchestrator.broadcast(); res.json({ status: 'ok' }); });
-  router.post('/bots/:name/fork', (req, res) => {
-    const source = getBot(req.params.name);
-    const input = z.object({ name: label, role: z.string().trim().min(1).max(12000), group: z.string().trim().max(80).optional() }).strict().parse(req.body);
-    if (input.group && !(store.xbot.folders ?? []).includes(input.group)) throw new ApiError(400, '分组不存在');
-    const bot = createBot({ name: input.name, persona: input.role }, source);
-    if (input.group) meta(bot).group = input.group;
-    orchestrator.broadcast(); res.json({ name: bot.name });
+  router.post('/bots', async (req, res) => { const cat = await bridge.createBot(z.object(botBody).strict().parse(req.body)); res.status(201).json({ name: cat.name, native_id: cat.id }); });
+  router.patch('/bots/:name', async (req, res) => {
+    const cat = await bot(req.params.name);
+    const input = z.object({ ...botBody, name: label.optional(), group: z.string().max(80).optional() }).omit({ runtimeId: true, templateId: true }).strict().parse(req.body);
+    if (input.group && !store.state.folders.includes(input.group)) throw new ApiError(400, '分组不存在');
+    if (input.name && (await bridge.cats()).some(c => c.id !== cat.id && c.name.toLowerCase() === input.name!.toLowerCase())) throw new ApiError(409, '已有同名 Bot');
+    const update: Record<string, unknown> = {};
+    if (input.name) Object.assign(update, { name: input.name, displayName: input.name, nickname: input.name, mentionPatterns: [`@${input.name}`, `@${cat.id}`] });
+    if (input.persona !== undefined) update.roleDescription = z.string().trim().min(1).parse(input.persona);
+    if (input.description !== undefined) update.teamStrengths = input.description;
+    if (Object.keys(update).length) await native.request(`/api/cats/${encode(cat.id)}`, { method: 'PATCH', body: { ...update, expectedRevision: cat.configurationRevision } });
+    const meta = store.bot(cat.id);
+    if (input.group !== undefined) meta.folder = input.group;
+    if (input.timezone !== undefined) meta.timezone = input.timezone;
+    if (input.avatar_seed !== undefined) { meta.avatarSeed = input.avatar_seed; delete meta.avatarData; delete meta.avatarMime; }
+    store.save(); res.json({ name: input.name ?? cat.name });
+  });
+  router.post('/bots/:name/pin', async (req, res) => { const cat = await bot(req.params.name); store.bot(cat.id).pinned = z.object({ pinned: z.boolean() }).parse(req.body).pinned; store.save(); res.json({ status: 'ok' }); });
+  router.post('/bots/:name/fork', async (req, res) => {
+    const input = z.object({ name: label, role: z.string().min(1).max(32768), group: z.string().max(80).optional() }).strict().parse(req.body);
+    if (input.group && !store.state.folders.includes(input.group)) throw new ApiError(400, '分组不存在');
+    const cat = await bridge.createBot({ name: input.name, persona: input.role }, await bot(req.params.name));
+    store.bot(cat.id).folder = input.group; store.save(); res.json({ name: cat.name });
   });
   router.delete('/bots/:name', async (req, res) => {
-    const bot = getBot(req.params.name);
-    const affected = store.state.conversations.filter(c => c.botIds.includes(bot.id));
-    for (const conversation of affected) await orchestrator.cancel(conversation.id);
-    const remove = new Set(affected.filter(c => c.kind === 'direct' || c.botIds.length <= 2).map(c => c.id));
-    for (const conversation of affected) if (!remove.has(conversation.id)) conversation.botIds = conversation.botIds.filter(id => id !== bot.id);
-    store.state.bots = store.state.bots.filter(b => b.id !== bot.id);
-    store.state.conversations = store.state.conversations.filter(c => !remove.has(c.id));
-    store.state.messages = store.state.messages.filter(m => !remove.has(m.conversationId));
-    store.state.memories = store.state.memories.filter(m => m.botId !== bot.id && !remove.has(m.conversationId ?? ''));
-    store.sessions = store.sessions.filter(s => s.botId !== bot.id && !remove.has(s.conversationId));
-    delete store.xbot.bots?.[bot.id]; delete store.xbot.contexts?.[bot.id];
-    orchestrator.broadcast(); res.json({ status: 'ok' });
+    const cat = await bot(req.params.name);
+    await native.request(`/api/cats/${encode(cat.id)}`, { method: 'DELETE' });
+    delete store.state.bots[cat.id]; store.save(); res.json({ status: 'ok', history: 'preserved_by_clowder_ai' });
   });
-  router.post('/groups', (req, res) => {
-    const input = z.object({ name: z.string().trim().min(1).max(80), members: z.array(z.string()).min(2).max(12).optional() }).strict().parse(req.body);
+  router.post('/groups', async (req, res) => {
+    const input = z.object({ name: label, members: z.array(z.string()).min(2).max(10).optional() }).strict().parse(req.body);
     if (!input.members) {
-      store.xbot.folders ??= [];
-      if (store.xbot.folders.includes(input.name)) throw new ApiError(409, '分组已存在');
-      store.xbot.folders.push(input.name); orchestrator.broadcast(); res.json({ name: input.name }); return;
+      if (store.state.folders.includes(input.name)) throw new ApiError(409, '分组已存在');
+      store.state.folders.push(input.name); store.save(); return res.json({ name: input.name });
     }
-    if (new Set(input.members).size !== input.members.length) throw new ApiError(400, '成员不能重复');
-    const members = input.members.map(getBot);
-    const conversation = makeConversation(input.name, 'group', members.map(b => b.id));
-    store.state.conversations.push(conversation); orchestrator.broadcast(); res.json(groupItem(conversation));
+    const members = await Promise.all(input.members.map(name => bot(name)));
+    if (new Set(members.map(c => c.id)).size !== members.length) throw new ApiError(400, '成员不能重复');
+    const thread = await bridge.newThread(input.name, members.map(c => c.id));
+    store.state.groupThreadIds.push(thread.id); store.save(); res.status(201).json(bridge.groupItem(thread, members));
   });
-  router.patch('/groups/:name', (req, res) => {
-    const input = z.object({ name: z.string().trim().min(1).max(80) }).strict().parse(req.body);
-    const folders: string[] = store.xbot.folders ?? [];
-    const index = folders.indexOf(req.params.name);
-    if (index < 0) { const conversation = group(req.params.name); conversation.title = input.name; }
-    else {
-      if (folders.some((name, i) => i !== index && name === input.name)) throw new ApiError(409, '已有同名分组');
-      folders[index] = input.name;
-      for (const bot of store.state.bots) if (meta(bot).group === req.params.name) meta(bot).group = input.name;
-    }
-    orchestrator.broadcast(); res.json({ name: input.name });
+  router.patch('/groups/:name', async (req, res) => {
+    const input = z.object({ name: label }).strict().parse(req.body);
+    const index = store.state.folders.indexOf(req.params.name);
+    if (index >= 0) {
+      if (store.state.folders.includes(input.name) && input.name !== req.params.name) throw new ApiError(409, '分组已存在');
+      store.state.folders[index] = input.name;
+      for (const meta of Object.values(store.state.bots)) if (meta.folder === req.params.name) meta.folder = input.name;
+      store.save();
+    } else await native.request(`/api/threads/${encode((await bridge.group(req.params.name)).id)}`, { method: 'PATCH', body: { title: input.name } });
+    res.json({ name: input.name });
   });
   router.delete('/groups/:name', async (req, res) => {
-    if ((store.xbot.folders ?? []).includes(req.params.name)) {
-      store.xbot.folders = store.xbot.folders.filter((name: string) => name !== req.params.name);
-      for (const bot of store.state.bots) if (meta(bot).group === req.params.name) meta(bot).group = '';
+    if (store.state.folders.includes(req.params.name)) {
+      store.state.folders = store.state.folders.filter(n => n !== req.params.name);
+      for (const meta of Object.values(store.state.bots)) if (meta.folder === req.params.name) delete meta.folder;
     } else {
-      const conversation = group(req.params.name); await orchestrator.cancel(conversation.id);
-      store.state.conversations = store.state.conversations.filter(c => c.id !== conversation.id);
-      store.state.messages = store.state.messages.filter(m => m.conversationId !== conversation.id);
-      store.state.memories = store.state.memories.filter(m => m.conversationId !== conversation.id);
-      store.sessions = store.sessions.filter(s => s.conversationId !== conversation.id);
+      const thread = await bridge.group(req.params.name);
+      await native.request(`/api/threads/${encode(thread.id)}`, { method: 'DELETE' });
+      store.state.groupThreadIds = store.state.groupThreadIds.filter(id => id !== thread.id);
     }
-    orchestrator.broadcast(); res.json({ status: 'ok' });
+    store.save(); res.json({ status: 'ok' });
   });
   const validateAvatar = (bytes: Buffer, mime: string) => {
     if (bytes.length > 2 * 1024 * 1024 || bytes.length < 12) throw new ApiError(400, '头像必须是 2 MB 以内的有效图片');
@@ -227,20 +134,19 @@ export function createXbotCoreRouter(store: Store, orchestrator: Orchestrator) {
       || (mime === 'image/webp' && bytes.subarray(0, 4).toString() === 'RIFF' && bytes.subarray(8, 12).toString() === 'WEBP');
     if (!valid) throw new ApiError(415, '只支持 PNG、JPEG、GIF 和 WebP 图片');
   };
-  router.get('/bots/:name/avatar', (req, res) => {
-    const m = meta(getBot(req.params.name));
-    if (!m.avatarData) throw new ApiError(404, '这个 Bot 使用生成的头像');
-    res.set({ 'Content-Type': m.avatarMime, 'X-Content-Type-Options': 'nosniff' }).send(Buffer.from(m.avatarData, 'base64'));
+  router.get('/bots/:name/avatar', async (req, res) => {
+    const meta = store.bot((await bot(req.params.name)).id);
+    if (!meta.avatarData) throw new ApiError(404, '这个 Bot 使用生成的头像');
+    res.set({ 'Content-Type': meta.avatarMime!, 'X-Content-Type-Options': 'nosniff' }).send(Buffer.from(meta.avatarData, 'base64'));
   });
-  router.post('/bots/:name/avatar', express.raw({ type: 'multipart/form-data', limit: '3mb' }), (req, res) => {
-    const bot = getBot(req.params.name);
+  router.post('/bots/:name/avatar', express.raw({ type: 'multipart/form-data', limit: '3mb' }), async (req, res) => {
+    const cat = await bot(req.params.name);
     const boundary = req.headers['content-type']?.match(/boundary=(?:"([^"]+)"|([^;]+))/i)?.slice(1).find(Boolean);
     if (!boundary || boundary.length > 200 || !Buffer.isBuffer(req.body)) throw new ApiError(400, '需要上传头像文件');
     const marker = Buffer.from(`--${boundary}`), bytes = req.body as Buffer;
     let start = bytes.indexOf(marker), avatar: Buffer | undefined, mime = '';
     while (start >= 0) {
-      const headEnd = bytes.indexOf(Buffer.from('\r\n\r\n'), start);
-      const next = bytes.indexOf(marker, start + marker.length);
+      const headEnd = bytes.indexOf(Buffer.from('\r\n\r\n'), start), next = bytes.indexOf(marker, start + marker.length);
       if (headEnd < 0 || next < 0) break;
       const head = bytes.subarray(start + marker.length, headEnd).toString('utf8');
       if (/name="file"/.test(head)) { avatar = bytes.subarray(headEnd + 4, next - 2); mime = head.match(/content-type:\s*([^\r\n]+)/i)?.[1]?.trim() ?? ''; break; }
@@ -248,128 +154,107 @@ export function createXbotCoreRouter(store: Store, orchestrator: Orchestrator) {
     }
     if (!avatar) throw new ApiError(400, '未收到头像文件');
     validateAvatar(avatar, mime);
-    Object.assign(meta(bot), { avatarData: avatar.toString('base64'), avatarMime: mime, avatarUpdated: Date.now() });
-    orchestrator.broadcast(); res.json({ avatar: 'custom', avatar_seed: avatarSeedOf(bot) });
+    Object.assign(store.bot(cat.id), { avatarData: avatar.toString('base64'), avatarMime: mime, avatarUpdated: Date.now() });
+    store.save(); res.json({ avatar: 'custom', avatar_seed: bridge.botItem(cat).avatar_seed });
   });
-  router.delete('/bots/:name/avatar', (req, res) => {
-    const bot = getBot(req.params.name), m = meta(bot);
-    delete m.avatarData; delete m.avatarMime; delete m.avatarUpdated; delete m.avatarSeed;
-    orchestrator.broadcast(); res.json({ avatar: 'generated', avatar_seed: avatarSeedOf(bot) });
+  router.delete('/bots/:name/avatar', async (req, res) => {
+    const cat = await bot(req.params.name), meta = store.bot(cat.id);
+    delete meta.avatarData; delete meta.avatarMime; delete meta.avatarUpdated; delete meta.avatarSeed;
+    store.save(); res.json({ avatar: 'generated', avatar_seed: bridge.botItem(cat).avatar_seed });
   });
-  router.get('/bots/:name/template', (req, res) => {
-    const bot = getBot(req.params.name), m = meta(bot);
-    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(bot.name)}.json`);
-    res.json({ name: bot.name, description: bot.description, persona: m.duty ?? bot.persona, timezone: m.timezone ?? 'Asia/Shanghai',
-      avatar: m.avatarData ?? '', avatar_mime: m.avatarMime ?? '', avatar_seed: avatarSeedOf(bot), routines: [], templateId: bot.templateId });
+  router.get('/bots/:name/template', async (req, res) => {
+    const cat = await bot(req.params.name), meta = store.bot(cat.id);
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encode(cat.name)}.json`);
+    res.json({ name: cat.name, description: cat.teamStrengths ?? '', persona: cat.roleDescription, timezone: meta.timezone ?? 'Asia/Shanghai', avatar: meta.avatarData ?? '', avatar_mime: meta.avatarMime ?? '', avatar_seed: bridge.botItem(cat).avatar_seed, routines: [], templateId: bridge.botItem(cat).templateId });
   });
-  router.post('/bots/import', (req, res) => {
-    const input = z.object({ ...botBody, avatar: z.string().max(3_000_000).optional(), avatar_mime: z.string().max(80).optional(),
-      routines: z.array(z.unknown()).max(100).optional(), style: z.unknown().optional(), proactivity: z.string().optional(), quiet_start: z.string().optional(), quiet_end: z.string().optional() }).strict().parse(req.body);
-    if (input.routines?.length) throw new ApiError(501, '此模板包含暂未接入的定时任务，请移除 routines 后导入');
+  router.post('/bots/import', async (req, res) => {
+    const input = z.object({ ...botBody, avatar: z.string().max(3_000_000).optional(), avatar_mime: z.string().max(80).optional(), routines: z.array(z.unknown()).max(100).optional() }).strict().parse(req.body);
+    if (input.routines?.length) throw new ApiError(422, '定时任务需要通过 Clowder AI 原生调度配置导入');
     if (input.avatar) validateAvatar(Buffer.from(input.avatar, 'base64'), input.avatar_mime ?? '');
-    const bot = createBot(input);
-    if (input.avatar) Object.assign(meta(bot), { avatarData: input.avatar, avatarMime: input.avatar_mime, avatarUpdated: Date.now() });
-    orchestrator.broadcast(); res.json({ name: bot.name });
+    const cat = await bridge.createBot(input);
+    if (input.avatar) Object.assign(store.bot(cat.id), { avatarData: input.avatar, avatarMime: input.avatar_mime, avatarUpdated: Date.now() });
+    store.save(); res.json({ name: cat.name });
   });
-  router.get('/bots/:name/export', (req, res) => {
-    const bot = getBot(req.params.name), rows = transcript(bot);
+  router.get('/bots/:name/export', async (req, res) => {
+    const cat = await bot(req.params.name), thread = await bridge.direct(cat);
     const jsonl = req.query.format === 'jsonl';
-    const selected = req.query.tools === '1' || req.query.tools === 'true' ? rows : rows.filter(row => row.role !== 'tool').map(({ tool_calls, ...row }) => row);
-    res.set({ 'Content-Type': jsonl ? 'application/x-ndjson; charset=utf-8' : 'text/markdown; charset=utf-8',
-      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(bot.name)}.${jsonl ? 'jsonl' : 'md'}` });
-    res.send(jsonl ? selected.map(row => JSON.stringify(row)).join('\n') : `# ${bot.name}\n\n${selected.map(row => `## ${row.role === 'user' ? '你' : bot.name} · ${row.time}\n\n${row.content}`).join('\n\n')}`);
+    const rows = await bridge.allMessages(thread.id);
+    res.type(jsonl ? 'application/x-ndjson' : 'text/markdown');
+    res.send(jsonl ? rows.map(r => JSON.stringify(r)).join('\n') : `# ${cat.name}\n\n${rows.map(r => `## ${r.type} · ${new Date(r.timestamp).toISOString()}\n\n${r.content}`).join('\n\n')}`);
   });
-  const cancel = async (bot: Bot) => { for (const conversation of store.state.conversations.filter(c => c.botIds.includes(bot.id))) if (orchestrator.busy(conversation.id)) await orchestrator.cancel(conversation.id); };
-  router.post('/bots/:name/stop', async (req, res) => { await cancel(getBot(req.params.name)); res.json({ status: 'ok' }); });
-  router.post('/bots/:name/cancel', async (req, res) => { await cancel(getBot(req.params.name)); res.json({ status: 'ok' }); });
+  for (const action of ['stop', 'cancel']) router.post(`/bots/:name/${action}`, async (req, res) => {
+    const cat = await bot(req.params.name), thread = await bridge.direct(cat); res.json(await bridge.stop(thread.id));
+  });
   router.post('/bots/:name/agents/:run/cancel', async (req, res) => {
-    const bot = getBot(req.params.name);
-    const task = agentRows(bot).find(row => row.id === req.params.run);
-    if (!task) throw new ApiError(404, '这个任务已结束或不存在');
-    await cancel(bot); res.json({ status: 'ok' });
+    const cat = await bot(req.params.name), thread = await bridge.direct(cat), queue = await bridge.queue(thread.id);
+    const run = queue.activeInvocations.find(i => i.invocationId === req.params.run || i.catId === req.params.run);
+    if (!run) throw new ApiError(404, '这个任务已结束或不存在');
+    res.json(await bridge.stop(thread.id, run.catId));
   });
-  router.post('/groups/:id/stop', async (req, res) => { await orchestrator.cancel(group(req.params.id).id); res.json({ status: 'ok' }); });
+  router.post('/groups/:id/stop', async (req, res) => res.json(await bridge.stop((await bridge.group(req.params.id)).id)));
   router.post('/bots/:name/new', async (req, res) => {
-    const bot = getBot(req.params.name); await cancel(bot);
-    const old = direct(bot); store.sealSessions(old.id, 'new-conversation');
-    const conversation = makeConversation(bot.name, 'direct', [bot.id]); store.state.conversations.push(conversation);
-    meta(bot).activeConversationId = conversation.id; delete store.xbot.contexts?.[bot.id];
-    orchestrator.broadcast(); res.json({ status: 'ok', conversation_id: conversation.id });
+    const cat = await bot(req.params.name), old = await bridge.direct(cat), queue = await bridge.queue(old.id);
+    if (queue.activeInvocations.length || queue.queue.length) throw new ApiError(409, '请先停止或完成当前会话中的任务');
+    const thread = await bridge.newThread(cat.name, [cat.id]);
+    store.bot(cat.id).activeThreadId = thread.id; store.save(); res.json({ status: 'ok', conversation_id: thread.id });
   });
-  router.post('/bots/:name/compact', async (req, res) => { const bot = getBot(req.params.name); await orchestrator.compact(direct(bot).id); res.json({ status: 'ok' }); });
-  router.get('/bots/:name/memory', (req, res) => { const bot = getBot(req.params.name); res.json({ memory: botPanel(bot).memory }); });
-  router.post('/bots/:name/memory', (req, res) => {
-    const bot = getBot(req.params.name);
-    const input = z.object({ text: z.string().trim().min(1).max(4000), scope: z.enum(['person', 'shared', 'bot', 'conversation']).default('bot') }).strict().parse(req.body);
-    const scope = input.scope === 'person' ? 'shared' : input.scope;
-    const memory = store.remember({ scope, content: input.text, tags: [], source: 'user', ...(scope === 'bot' ? { botId: bot.id } : {}), ...(scope === 'conversation' ? { conversationId: direct(bot).id } : {}) });
-    orchestrator.broadcast(); res.json({ id: memory.id, scope: input.scope, text: memory.content });
+  router.post('/bots/:name/compact', async (req, res) => {
+    const cat = await bot(req.params.name), thread = await bridge.direct(cat);
+    res.json(await native.request(`/api/threads/${encode(thread.id)}/sessions/${encode(cat.id)}/compact-native`, { method: 'POST', body: {} }));
   });
-  router.delete('/bots/:name/memory/:memoryId', (req, res) => {
-    const bot = getBot(req.params.name);
-    if (!scopedMemories(store.state, bot.id, direct(bot).id).some(m => m.id === req.params.memoryId)) throw new ApiError(404, '这条记忆不存在');
-    store.state.memories = store.state.memories.filter(m => m.id !== req.params.memoryId); orchestrator.broadcast(); res.json({ status: 'ok' });
+  router.get('/bots/:name/memory', async (req, res) => res.json({ memory: await bridge.notes((await direct(req.params.name)).id) }));
+  router.post('/bots/:name/memory', async (req, res) => {
+    const input = z.object({ text: z.string().trim().min(1).max(10000), scope: z.literal('conversation').default('conversation') }).strict().parse(req.body);
+    const thread = await direct(req.params.name), key = `note-${randomUUID()}`;
+    await native.request('/api/memory', { method: 'POST', body: { threadId: thread.id, key, value: input.text, updatedBy: 'user' } });
+    res.status(201).json({ id: key, scope: 'conversation', text: input.text });
   });
-  router.get('/bots/:name/context', (req, res) => {
-    const bot = getBot(req.params.name);
-    const recorded: Meta[] = store.xbot.contexts?.[bot.id] ?? [];
-    const snapshots = recorded.map((record, index) => {
-      const layers = record.messages.map((message: { role: string; content: string }, i: number) => ({
-        key: message.role === 'system' ? 'sys' : message.content.includes('历史摘录（') ? 'block' : message.content.includes('相关长期记忆：') ? 'mem' : i === record.messages.length - 1 ? 'turn' : 'hist',
-        tokens: estimateTokens(message.content) }));
-      return { step: index + 1, prompt: record.prompt, tools: 0, layers, turn_steps: 1, time: record.time };
+  router.delete('/bots/:name/memory/:memoryId', async (req, res) => {
+    const thread = await direct(req.params.name);
+    await native.request(`/api/memory?${new URLSearchParams({ threadId: thread.id, key: req.params.memoryId })}`, { method: 'DELETE' });
+    res.json({ status: 'ok' });
+  });
+  router.get('/bots/:name/context', async (req, res) => {
+    const cat = await bot(req.params.name), thread = await bridge.direct(cat);
+    res.json({ ceiling: cat.resolvedContext?.windowTokens ?? 0, target: cat.resolvedContext?.inputCeilingTokens ?? 0, requests: [], detail: null,
+      native: await native.request(`/api/threads/${encode(thread.id)}/sessions?catId=${encode(cat.id)}`), reason: '原生会话与用量请在运行面板查看；未估算或伪造 Token 消耗。' });
+  });
+  router.get('/bots/:name/peers/:peer/messages', async (req, res) => {
+    const [left, right, cats] = await Promise.all([bot(req.params.name), bot(req.params.peer), bridge.cats()]);
+    const threads = await Promise.all(store.state.groupThreadIds.map(id => bridge.group(id)));
+    const pages = await Promise.all(threads.filter(t => t.preferredCats?.includes(left.id) && t.preferredCats.includes(right.id)).map(t => bridge.messages(t.id)));
+    res.json({ messages: pages.flatMap(p => p.messages).filter(m => m.catId === left.id || m.catId === right.id).map(m => ({ id: m.id, time: new Date(m.timestamp).toISOString(), sender: cats.find(c => c.id === m.catId)?.name, kind: 'bot', text: m.content })), more: pages.some(p => p.hasMore) });
+  });
+  const messageBody = z.object({ text: z.string().trim().min(1).max(100000), reply_to: z.number().int().positive().optional(), images: z.array(z.string()).max(4).optional(), idempotencyKey: z.uuid().optional() }).strict();
+  router.post('/bots/:name/messages', async (req, res) => {
+    const input = messageBody.parse(req.body);
+    if (input.images?.length) throw new ApiError(422, '图片请使用 Clowder AI 原生上传与消息内容块接口');
+    const cat = await bot(req.params.name), thread = await bridge.direct(cat);
+    const receipt = await bridge.send(thread, input, cat);
+    // Native HTTP acknowledges durable admission. Do not hold a fake run open or cancel on disconnect.
+    res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
+    sse(res, 'queued', receipt); sse(res, 'done', { background: true, native: receipt }); res.end();
+  });
+  router.post('/groups/:id/messages', async (req, res) => {
+    const input = messageBody.parse(req.body);
+    if (input.images?.length) throw new ApiError(422, '图片请使用原生消息接口');
+    const receipt = await bridge.send(await bridge.group(req.params.id), input);
+    res.status(202).json({ ...receipt, status: 'queued' });
+  });
+  router.get('/runtime/threads/:id/events', async (req, res) => {
+    const id = req.params.id;
+    await bridge.thread(id); // Native ownership read precedes joining the socket room.
+    let ready = false;
+    const release = await native.subscribe(id, event => {
+      if (!ready) return;
+      if (res.writableLength > 1_000_000) { res.end(); return; }
+      sse(res, 'native', event);
     });
-    const last = recorded.at(-1);
-    const conversation = last ? store.state.conversations.find(c => c.id === last.conversationId) ?? direct(bot) : direct(bot);
-    res.json({ ceiling: store.state.settings.contextBudget, target: Math.floor(store.state.settings.contextBudget * 0.6), requests: snapshots,
-      detail: last ? { steps: [{ what: '当前请求', tokens: estimateTokens(last.messages.at(-1)?.content ?? ''), preview: last.messages.at(-1)?.content ?? '' }],
-        turns: last.messages.filter((m: Meta) => m.role !== 'system').slice(0, -1).map((m: Meta) => ({ ask: m.content.slice(0, 100), tokens: estimateTokens(m.content) })),
-        blocks: conversation.summary ? [{ from: 1, to: conversation.compactedMessageCount, tokens: estimateTokens(conversation.summary), preview: conversation.summary }] : [], tool_defs: [] } : null });
+    res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' }); res.flushHeaders();
+    ready = true;
+    streams.add(res); sse(res, 'native', { type: 'resync', threadId: id });
+    const heartbeat = setInterval(() => { if (!res.destroyed) res.write(': heartbeat\n\n'); }, 20_000);
+    res.on('close', () => { clearInterval(heartbeat); release(); streams.delete(res); });
   });
-  router.get('/bots/:name/peers/:peer/messages', (req, res) => {
-    const bot = getBot(req.params.name), peer = getBot(req.params.peer);
-    const shared = new Set(store.state.conversations.filter(c => c.kind === 'group' && c.botIds.includes(bot.id) && c.botIds.includes(peer.id)).map(c => c.id));
-    const messages = store.state.messages.filter(m => shared.has(m.conversationId) && [bot.id, peer.id].includes(m.botId ?? '') && m.role === 'assistant' && m.status === 'complete');
-    res.json({ messages: messages.map(m => ({ id: m.id, time: m.createdAt, sender: store.state.bots.find(b => b.id === m.botId)?.name, kind: 'bot', text: m.content })), more: false });
-  });
-  const sse = (res: Response, event: string, data: unknown) => { if (!res.destroyed && !res.writableEnded) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
-  const send = (conversation: Conversation, input: unknown, res: Response, streaming: boolean) => {
-    const body = z.object({ text: z.string().trim().min(1).max(20000), reply_to: z.number().int().positive().optional(), images: z.array(z.string()).max(4).optional() }).strict().parse(input);
-    if (body.images?.length) throw new ApiError(501, '当前模型适配尚未接入聊天图片，请先发送文字');
-    if (body.reply_to && streaming) {
-      const bot = store.state.bots.find(b => b.id === conversation.botIds[0])!;
-      if (!transcript(bot).some(m => m.seq === body.reply_to)) throw new ApiError(400, '引用的消息不存在');
-    }
-    const runId = orchestrator.start(conversation.id, body.text);
-    if (body.reply_to) {
-      const message = store.state.messages.find(m => m.runId === runId && m.role === 'user');
-      store.xbot.replyTo ??= {}; if (message) store.xbot.replyTo[message.id] = body.reply_to; store.save();
-    }
-    if (!streaming) { res.json({ status: 'sent', run_id: runId }); return; }
-    res.status(200).set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' }); res.flushHeaders();
-    streams.set(runId, { res, conversationId: conversation.id, sent: new Set() });
-    sse(res, 'tool', { name: 'reply', summary: '正在回复' });
-    res.on('close', () => streams.delete(runId));
-  };
-  router.post('/bots/:name/messages', (req, res) => send(direct(getBot(req.params.name)), req.body, res, true));
-  router.post('/groups/:id/messages', (req, res) => send(group(req.params.id), req.body, res, false));
-  const onEvent = (event: string, data: any) => {
-    for (const [runId, stream] of streams) {
-      if (stream.res.destroyed) { streams.delete(runId); continue; }
-      if (event === 'delta' && data.conversationId === stream.conversationId) sse(stream.res, 'part', { type: 'text', text: data.delta });
-      if (event !== 'state') continue;
-      const messages = store.state.messages.filter(m => m.conversationId === stream.conversationId && m.runId === runId);
-      for (const message of messages) if (message.role === 'assistant' && message.status === 'complete' && !stream.sent.has(message.id)) {
-        stream.sent.add(message.id); sse(stream.res, 'result', { name: 'send_message_to_user', text: message.content });
-      }
-      const conversation = store.state.conversations.find(c => c.id === stream.conversationId);
-      if (!conversation || conversation.status !== 'running') {
-        if (conversation?.status === 'error') sse(stream.res, 'error', { error: conversationMessages(conversation).findLast(m => m.role === 'system')?.content ?? '回复失败' });
-        else sse(stream.res, 'done', { text: messages.filter(m => m.role === 'assistant').map(m => m.content).join('\n\n') });
-        stream.res.end(); streams.delete(runId);
-      }
-    }
-  };
-
-  return { router, onEvent, close: () => { for (const stream of streams.values()) stream.res.end(); streams.clear(); } };
+  return { router, close: () => { for (const res of streams) res.end(); streams.clear(); } };
 }

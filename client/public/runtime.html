@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Clowder AI · 运行面板</title><link rel="stylesheet" href="/tokens.css"><link rel="stylesheet" href="/runtime.css"></head>
+<body><main><header><a href="/">← 返回 Bot</a><h1>Clowder AI 运行面板</h1><p>这里直接读取原生队列、会话、审批和记忆。操作结果由 Clowder AI 保存。</p><button id="refresh">刷新状态</button><span id="connection" role="status"></span></header>
+<div id="error" role="alert" hidden></div>
+<section><h2>正在等待你</h2><div id="approvals"></div></section>
+<section><h2>会话与执行</h2><select id="threads" aria-label="选择会话"></select><div id="thread"></div></section>
+<section><h2>本地 Agent 与原生账号（只读）</h2><p>Bot 的执行者请在 Bot「设置 · 本地 Agent」中查看，并在 Bot 详情里选择。这里只读显示 Clowder AI 的原生检测结果与已有账号记录，不在此新增或修改账号。</p>
+<h3>本地 Agent 检测</h3><div id="runtimes"></div><h3>原生账号记录</h3><div id="accounts"></div></section>
+<section><h2>原生长期记忆</h2><p>原生记忆按知识集合、来源与权限管理；会话笔记另存于对应线程。群成员限制不等于长期记忆或文件权限隔离。</p>
+<form id="memory-form"><label>搜索记忆<input name="query" required></label><button>搜索</button></form><div id="memory"></div></section>
+</main><script type="module" src="/runtime.js"></script></body></html>

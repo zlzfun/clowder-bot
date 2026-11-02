@@ -85,7 +85,6 @@
     // tell that the list it was filling is gone.
     attachBatch: 0,
     placeholder: "写一条消息",
-    modelCatalog: null,
     push: null,
     version: "",
     tip: "",
@@ -255,11 +254,11 @@
     const kind = st ? String(st.state || "idle") : "idle";
     let sig = kind;
     const line = el("span", "preview");
-    if (kind === "running") {
+    if (kind === "running" || kind === "queued") {
       line.className = "preview st run click";
       line.append(spinIcon(11));
       const text = el("span");
-      const summary = st.todo || workText(st.tool, st.tool_summary) || "在处理";
+      const summary = st.todo || workText(st.tool, st.tool_summary) || (kind === "queued" ? "等待执行" : "在处理");
       text.append(summary);
       line.title = summary;
       line.append(text);
@@ -1044,6 +1043,19 @@
     return paintOfBot((state.bots || []).find((x) => x.name === name));
   }
 
+  // A transcript line's face and name come from its own speaker
+  // (chat-presentation.js). With no cat known it is the neutral tile, never
+  // the open chat's bot.
+  const presentation = window.ClowderPresentation;
+
+  function speakerFace(who, size) {
+    if (who.paint) return avatar(who.name, who.paint, size);
+    const av = el("span", "avatar" + (size ? " " + size : ""));
+    setTip(av, who.name, "right");
+    drawGlyph(av, who.name);
+    return av;
+  }
+
   function refreshBotFaces() {
     // Existing transcript nodes may be reused when messages have not changed.
     // Refresh their portraits in place without interrupting an active reply.
@@ -1172,7 +1184,7 @@
       if (m.role === "user" && parsed.untrusted && parsed.source === "subagent" && parsed.type === "fork_end") {
         if (normalize(parsed.text)) pending.add(normalize(parsed.text));
       }
-      if (m.role !== "assistant") return;
+      if (m.role !== "assistant" || presentation.isActivity(m)) return;
       if (m.branch) {
         if (finalByBranch.get(m.branch) === i && !(m.tool_calls || []).length && normalize(m.content)) {
           pending.add(normalize(m.content));
@@ -3032,7 +3044,8 @@
       run = [];
     };
     messages.forEach((m, i) => {
-      if (m.role === "assistant") run.push(i);
+      // An execution record is not a reply: it neither speaks nor ends a run.
+      if (m.role === "assistant" && !presentation.isActivity(m)) run.push(i);
       else if (m.role === "user" && !m.internal) close();
     });
     close();
@@ -3046,13 +3059,16 @@
   }
 
   // botBubble draws one bubble: say from spokenLines, or null for a legacy
-  // line drawn from its content.
-  function botBubble(m, say, messages, who) {
-    const row = el("div", "msg bot");
+  // line drawn from its content. who is the line's speaker; the first row of a
+  // group carries its face and name, as in group chats.
+  function botBubble(m, say, messages, who, cont) {
+    const row = el("div", "msg bot with-face");
     if (m.seq) row.dataset.seq = String(m.seq);
     if (m.time) row.dataset.time = String(m.time);
-    row.dataset.sender = "bot:" + (who || "");
+    row.dataset.sender = who.key;
+    if (!cont) row.append(speakerFace(who));
     const body = el("div", "body");
+    if (!cont) body.append(speakerHead(who, m.time));
     const replyTo = say ? say.replyTo : m.reply_to;
     if (replyTo) body.append(quoteBlock(messages, replyTo));
     // Pictures the bot showed with send_message_to_user, stored in paste/ like the
@@ -3069,8 +3085,32 @@
     if (!say) window.XBotProviders.decorate(body, m.parts);
     bindMessageMenu(row, m, said);
     row.append(body);
+    if (cont) markContinuation(row, m.time);
     addBubbleTime(row, m.time);
     return row;
+  }
+
+  // The name line of a bot group: the same .who as group chats.
+  function speakerHead(who, time) {
+    const name = el("div", "who");
+    name.append(el("span", "", who.name));
+    if (time) name.append(el("time", "", when(time)));
+    setTip(name, who.name);
+    return name;
+  }
+
+  // An execution record (presentation_kind "activity") in its writer's name.
+  // Opened ones stay open across redraws, with the routine drawers.
+  function activityRow(m) {
+    return presentation.activityLine(m, {
+      open: openRoutines,
+      face: (who) => speakerFace(who, "xs"),
+      render: (parent, text) => {
+        const prose = el("div", "prose");
+        appendMarkdown(prose, text);
+        parent.append(prose);
+      },
+    });
   }
 
   function skipMessage(m) {
@@ -3092,6 +3132,7 @@
       if (near) thread.scrollTop = thread.scrollHeight;
       return;
     }
+    const anchor = near ? null : readingAnchor();
     const spoken = spokenLines(messages);
     let any = false;
     let lastKey = "";
@@ -3102,6 +3143,7 @@
     const latestCard = {};
     const latestApproval = {};
     messages.forEach((m, i) => {
+      if (presentation.isActivity(m)) return;
       const card = codingCardOf(m && m.content);
       if (card) latestCard[card.id] = i;
       const appr = approvalCardOf(m && m.content);
@@ -3111,6 +3153,14 @@
       if (skipMessage(m) || wakeRuns.hidden.has(i)) return;
       // Background turns have no cards in the chat; the header badge lists them.
       if (m.kind === "fork" || m.kind === "fork_end") return;
+      // A run's execution record sits where the server put it, folded; it is
+      // never one of the bubbles and it ends the bubble group above it.
+      if (presentation.isActivity(m)) {
+        inner.append(activityRow(m));
+        any = true;
+        lastKey = "";
+        return;
+      }
       const routine = routineOf(m);
       if (routine) {
         lastRoutine = routineLine(routine, (state.sel ? state.sel.id : "") + ":" + (m.seq || m.time || i));
@@ -3176,15 +3226,16 @@
       }
       if (relays.has(i) || !spoken.has(i)) return;
       any = true;
-      const key = "bot:" + (who || "");
+      // The row's own speaker, not the open chat's bot: two cats never share a group.
+      const speaker = presentation.speaker(m);
+      const key = speaker.key;
       const says = spoken.get(i);
       if (!says) {
         const visibleParts = (m.parts || []).some(p => !p.hosted || p.hosted.name !== "image_generation");
         if (!(m.content || visibleParts || (m.images || []).length || (!(m.tool_calls || []).length && !(m.parts || []).length))) return;
       }
       for (const say of says || [null]) {
-        const row = botBubble(m, say, messages, who);
-        if (!groupStart(lastMsg, m, lastKey, key)) markContinuation(row, m.time);
+        const row = botBubble(m, say, messages, speaker, !groupStart(lastMsg, m, lastKey, key));
         inner.append(row);
         lastKey = key;
         lastMsg = m;
@@ -3196,6 +3247,34 @@
     thread.replaceChildren(inner);
     state.firstRender = false;
     thread.scrollTop = near ? thread.scrollHeight : Math.min(prevTop, thread.scrollHeight);
+    keepReading(anchor);
+  }
+
+  // A redraw keeps the row the owner is reading where it was, even when an
+  // open execution record above it grew. Rows match by message seq or ID
+  // (and by order, for the several bubbles of one line).
+  function readingRows() {
+    const seen = {};
+    return Array.from(thread.querySelectorAll(":scope > .thread-inner > [data-seq], :scope > .thread-inner > [data-id]"), (row) => {
+      const id = row.dataset.seq ? "seq:" + row.dataset.seq : "id:" + row.dataset.id;
+      seen[id] = (seen[id] || 0) + 1;
+      return { row, key: id + "#" + seen[id] };
+    });
+  }
+
+  function readingAnchor() {
+    const top = thread.getBoundingClientRect().top;
+    for (const { row, key } of readingRows()) {
+      const box = row.getBoundingClientRect();
+      if (box.bottom > top) return { key, offset: box.top - top };
+    }
+    return null;
+  }
+
+  function keepReading(anchor) {
+    if (!anchor) return;
+    const hit = readingRows().find((r) => r.key === anchor.key);
+    if (hit) thread.scrollTop += hit.row.getBoundingClientRect().top - thread.getBoundingClientRect().top - anchor.offset;
   }
 
   function renderGroup(messages, who) {
@@ -3210,6 +3289,7 @@
       if (near) thread.scrollTop = thread.scrollHeight;
       return;
     }
+    const anchor = near ? null : readingAnchor();
     let last = "";
     let lastMsg = null;
     for (const m of messages) {
@@ -3218,14 +3298,24 @@
       if (!mine && m.kind === "bot" && last && last !== m.sender && mine === false) {
         // Bot speaking after another bot stays a bubble; the action line is the tool call.
       }
+      // Each bot row speaks for its own speaker (native cat ID), never by name.
+      const speaker = mine ? null : presentation.speaker(m);
+      if (!mine && presentation.isActivity(m)) {
+        inner.append(activityRow(m));
+        last = "";
+        continue;
+      }
       if (!mine && /^\[action\]/i.test(text)) {
-        inner.append(systemLine(clip(niceName(m.sender || "Bot") + " · " + text.replace(/^\[action\]\s*/i, ""), 96), m.sender));
+        const line = systemLine(clip(speaker.name + " · " + text.replace(/^\[action\]\s*/i, ""), 96));
+        line.prepend(speakerFace(speaker, "xs"));
+        inner.append(line);
         last = "";
         continue;
       }
       const row = el("div", "msg " + (mine ? "user" : "bot"));
-      const key = mine ? "user" : ("bot:" + (m.sender || ""));
+      const key = mine ? "user" : speaker.key;
       row.dataset.sender = key;
+      if (m.id) row.dataset.id = String(m.id);
       if (m.time) row.dataset.time = String(m.time);
       if (!groupStart(lastMsg, m, last, key)) row.classList.add("cont");
       lastMsg = m;
@@ -3242,15 +3332,9 @@
         bindMessageMenu(row, m, text);
         row.append(wrap);
       } else {
-        if (!row.classList.contains("cont")) row.append(avatar(m.sender || "B", paintOf(m.sender)));
+        if (!row.classList.contains("cont")) row.append(speakerFace(speaker));
         const body = el("div", "body");
-        if (!row.classList.contains("cont")) {
-          const name = el("div", "who");
-          name.append(el("span", "", niceName(m.sender || "bot")));
-          if (m.time) name.append(el("time", "", when(m.time)));
-          if (m.sender) setTip(name, m.sender);
-          body.append(name);
-        }
+        if (!row.classList.contains("cont")) body.append(speakerHead(speaker, m.time));
         appendBotContent(body, text);
         bindMessageMenu(row, m, text);
         row.append(body);
@@ -3264,6 +3348,7 @@
     thread.replaceChildren(inner);
     state.firstRender = false;
     thread.scrollTop = near ? thread.scrollHeight : Math.min(prevTop, thread.scrollHeight);
+    keepReading(anchor);
   }
 
   function codingCardOf(content) {
@@ -3597,7 +3682,8 @@
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
       const raw = String(m.text || "").trim();
-      if (!raw || /^\[action\]/i.test(raw)) continue;
+      // An execution record is not a reply, so it is never the preview.
+      if (!raw || /^\[action\]/i.test(raw) || presentation.isActivity(m)) continue;
       const who = m.kind === "person" ? "你" : niceName(m.sender || "");
       const text = clip(plainText(raw), 64);
       return who ? who + "：" + text : text;
@@ -4200,7 +4286,8 @@
       got = await fetchPeerMessages(peer.a, peer.b, before);
     } catch (e) {
       if (e.status === 401) throw e;
-      got = { list: null, mock: true };
+      setStatus(e.message || "无法读取真实协作记录", true);
+      return;
     }
     if (state.peer !== peer) return;
     if (got.mock && peer.remote) {
@@ -4290,6 +4377,7 @@
   }
 
   function resetConversation() {
+    watchNativeThread(null);
     closeMessageMenu();
     // Pasted pictures belong to the bot they were uploaded to.
     clearAttach();
@@ -4402,6 +4490,26 @@
     if (state.sel === selection && panel.classList.contains("open")) await loadPanel();
   }
 
+  let nativeEvents = null;
+  let nativeThreadId = null;
+  let nativeRefreshTimer = null;
+  function watchNativeThread(id) {
+    if (nativeThreadId === id) return;
+    nativeEvents?.close(); nativeEvents = null; nativeThreadId = id;
+    clearTimeout(nativeRefreshTimer); nativeRefreshTimer = null;
+    if (!id) return;
+    nativeEvents = new EventSource("/xbot-api/runtime/threads/" + encodeURIComponent(id) + "/events");
+    nativeEvents.addEventListener("native", () => {
+      if (nativeRefreshTimer) return;
+      nativeRefreshTimer = setTimeout(() => {
+        nativeRefreshTimer = null;
+        if (nativeThreadId !== id) return;
+        loadThread().catch(() => {}); refreshStatus().catch(() => {});
+      }, 180);
+    });
+    // History remains the source of truth; the existing poll also repairs gaps/restarts.
+  }
+
   async function loadThread() {
     if (!state.sel || state.streaming || state.peer) return;
     const selection = state.sel;
@@ -4410,6 +4518,7 @@
       if (selection.type === "bot") {
         const data = await api("/xbot-api/bots/" + encodeURIComponent(selection.id) + "/transcript");
         if (state.sel !== selection || request !== state.threadLoad || state.streaming || state.peer) return;
+        watchNativeThread(data.thread_id);
         const messages = data.messages || [];
         const sig = JSON.stringify(messages);
         state.messages = messages;
@@ -4425,6 +4534,7 @@
       }
       const data = await api("/xbot-api/groups/" + encodeURIComponent(selection.id));
       if (state.sel !== selection || request !== state.threadLoad || state.streaming || state.peer) return;
+      watchNativeThread(data.group?.native_thread_id || data.group?.id);
       const messages = data.messages || [];
       const sig = JSON.stringify(messages);
       state.previewAt["g:" + selection.id] = Date.now();
@@ -4841,7 +4951,7 @@
 
   function confirmDelete(name) {
     openModal("删除 Bot", [
-      { name: "warn", type: "note", label: "「" + niceName(name) + "」和它的对话会一起删掉，不能恢复。" },
+      { name: "warn", type: "note", label: "删除「" + niceName(name) + "」的原生成员配置。历史对话由 Clowder AI 保留。" },
     ], async () => {
       try {
         await api("/xbot-api/bots/" + encodeURIComponent(name), { method: "DELETE" });
@@ -4916,7 +5026,7 @@
       return;
     }
     const data = state.panelData || { name: state.sel.id };
-    const sub = (data.primary ? "主 Bot · " : "") + (data.model || "未绑定模型");
+    const sub = [data.primary ? "主 Bot" : "", data.agent ? window.XBotAgents.headline(data.agent) : ""].filter(Boolean).join(" · ");
     renderPanelHead(data.name || state.sel.id, paintOfBot(data), sub, data.pinned);
     syncPanelChrome();
     const body = el("div", "tab-body");
@@ -5352,15 +5462,17 @@
     host.append(bar);
   }
 
-  function modelHits(data) {
-    const model = String((data && data.model) || "").trim();
-    const provider = String((data && data.provider) || "").trim();
-    if (!model) return [];
-    return (state.modelCatalog || []).filter((m) => m.model === model && (!provider || m.provider === provider));
-  }
-
-  function modelTrigger(data, aside) {
-    return window.XBotProviders.trigger({api, data, info: modelHits(data)[0], aside, manage: () => { if (!modal.hidden) closeModal(); openSettings("providers"); }, onBound: async () => {state.modelCatalog = null; await refreshLists(); await loadPanel();}});
+  // The Bot's local Agent, shared by the details tab and the profile drawer.
+  // Busy is a hint only: the server refuses a switch while work is in flight.
+  function agentTrigger(data, aside) {
+    return window.XBotAgents.trigger({api, data, aside,
+      busy: () => ["running", "queued"].includes(stStatus.map[data.name]?.state),
+      manage: () => { if (!modal.hidden) closeModal(); openSettings("agents"); },
+      onBound: async (agent, picked) => {
+        showToast("已改由 " + ((agent && agent.label) || picked.label) + " 执行");
+        await refreshLists();
+        await loadPanel();
+      }});
   }
 
   function detailsView(data) {
@@ -5383,18 +5495,14 @@
     const meta = [];
     if (snap?.ceiling > 0) meta.push("窗口 " + ctxK(snap.ceiling));
     if (snap?.target > 0) meta.push("后台整理线 " + ctxK(snap.target));
-    let aside = null;
-    if (meta.length) aside = el("span", "v", meta.join(" · "));
-    else if (modelHits(data).some((m) => m.certified)) {
-      aside = el("span", "v cert");
-      aside.append(icon("check"), document.createTextNode("已认证"));
-    }
-    section.append(el("h4", "", "模型"), modelTrigger(data, aside));
+    const aside = meta.length ? el("span", "v", meta.join(" · ")) : null;
+    section.append(el("h4", "", "执行 Agent"), agentTrigger(data, aside));
     wrap.append(section);
     return wrap;
   }
 
   function scopeLabel(scope) {
+    if (scope === "conversation") return "会话共享笔记";
     if (scope === "person") return "关于你";
     if (scope === "bot") return "关于 Bot";
     return scope || "资料";
@@ -5403,7 +5511,10 @@
   function libraryView(data) {
     const wrap = document.createDocumentFragment();
     const facts = data.memory || [];
-    if (!facts.length) wrap.append(panelEmpty("memory", "还没有记忆", "聊着聊着，它会记下关于你的事和你们的约定。"));
+    if (!facts.length) wrap.append(panelEmpty("memory", "还没有会话笔记", "这里显示原生会话共享笔记。长期记忆、召回与审核请打开运行面板。"));
+    const nativeLink = el("a", "btn sec", "打开运行面板");
+    nativeLink.href = "/runtime.html"; nativeLink.target = "_blank"; nativeLink.rel = "noopener";
+    wrap.append(nativeLink);
     for (const f of facts) {
       const card = el("div", "lib-card");
       card.append(el("div", "k", scopeLabel(f.scope)), el("div", "v", f.text || ""));
@@ -5431,7 +5542,7 @@
         if (rt) pending.set(branch, {m, i, rt});
         else if (!unwrap(m.content || "").untrusted && !m.internal) pending.delete(branch);
       }
-      if (m.role !== "assistant" || !m.content || (m.tool_calls || []).length) return;
+      if (m.role !== "assistant" || !m.content || (m.tool_calls || []).length || presentation.isActivity(m)) return;
       const wake = pending.get(branch);
       if (!wake) return;
       const silent = m.content.trim() === "SILENT";
@@ -5778,16 +5889,6 @@
     const root = el("div", "task-view"); root.dataset.bot = data.name; syncTaskView(root, data); return root;
   }
 
-  async function loadModelCatalog() {
-    if (state.modelCatalog) return;
-    try {
-      const data = await api("/xbot-api/models?all=1");
-      state.modelCatalog = (data && data.models) || [];
-    } catch (e) {
-      state.modelCatalog = [];
-    }
-  }
-
   async function loadPanel() {
     if (!state.sel) { paintPanel(); return; }
     if (state.sel.type === "group") { state.panelData = null; paintPanel(); return; }
@@ -5798,7 +5899,6 @@
         fetchBotProfile(selection.id),
         api("/xbot-api/bots/" + encodeURIComponent(selection.id) + "/context").catch(() => ({ requests: [] })),
       ]);
-      await loadModelCatalog();
       if (state.sel !== selection || request !== state.panelLoad) return;
       state.panelData = data;
       state.ctxSnap = snap;
@@ -6076,7 +6176,7 @@
       section("基本", head, labeled("名字", name), labeled("简介", description)),
       section("职责", dutyBox, dutyHint),
       section("人设卡", cardBox, pickHint),
-      section("模型", modelTrigger(data)),
+      section("执行 Agent", agentTrigger(data)),
       err,
     );
     const showErr = (e, fallback) => { err.hidden = false; err.textContent = visibleError(e, fallback); };
@@ -6391,6 +6491,7 @@
 
   function markContinuation(row, time) {
     row.classList.add("cont");
+    row.querySelector(":scope > .avatar")?.remove();
     row.querySelector(".who")?.remove();
   }
 
@@ -6399,12 +6500,18 @@
     const inner = thread.querySelector(".thread-inner") || thread;
     const empty = inner.querySelector(".empty");
     if (empty) empty.remove();
-    const who = state.sel ? state.sel.id : "Bot";
+    // The reply comes from the bot this chat posted to; its identity, as the
+    // transcript will name it (native cat ID).
+    const name = state.sel ? state.sel.id : "Bot";
+    const bot = (state.bots || []).find((b) => b.name === name);
+    const who = presentation.speaker({ speaker: bot || null, native_cat_id: bot && (bot.native_id || bot.id), name: name });
     const now = new Date().toISOString();
-    const row = el("div", "msg bot live");
-    row.dataset.sender = "bot:" + who;
+    const row = el("div", "msg bot live with-face");
+    row.dataset.sender = who.key;
     row.dataset.time = now;
+    row.append(speakerFace(who));
     const body = el("div", "body");
+    body.append(speakerHead(who, now));
     const prose = el("div", "prose bot-bubble");
     const dots = el("span", "typing-dots");
     dots.setAttribute("aria-label", "正在回复");
@@ -6482,7 +6589,9 @@
           if (live && !live.querySelector(".quote-block")) {
             const block = quoteBlock(state.messages, payload.reply_to);
             const bubble = host.querySelector(".bubble");
+            const head = host.querySelector(":scope > .who");
             if (bubble) host.insertBefore(block, bubble);
+            else if (head) head.after(block);
             else host.prepend(block);
           }
         } else if (event === "done" && payload.background && host) {
@@ -6879,13 +6988,16 @@
   function openNewBot() {
     // Creation and preview start from the same template; renaming keeps the cat.
     const av = { seed: "cat:ragdoll", file: null };
+    let agent = null;
     openModal("新建 Bot", [
       { name: "name", label: "标识", placeholder: "ada" },
       { name: "persona", label: "职责", multiline: true },
     ], async (v) => {
       const name = (v.name || "").trim();
       if (!name) throw new Error("需要一个名字");
-      const body = { name: name, persona: (v.persona || "").trim() };
+      const runtimeId = agent ? agent.value() : "";
+      if (!runtimeId) throw new Error("先选一个执行 Agent");
+      const body = { name: name, persona: (v.persona || "").trim(), runtimeId: runtimeId };
       body.avatar_seed = av.seed;
       await api("/xbot-api/bots", { method: "POST", body: body });
       await refreshLists();
@@ -6943,6 +7055,11 @@
       const note = el("p", "avatar-note");
       note.append(icon("info"), el("span", "", "预设 8 只猫猫，点「换一个」切换；也可以上传图片。改名字会保留当前头像。"));
       modalFields.prepend(row, note);
+      // The Agent list loads inside the open dialog; 创建 waits for a choice.
+      agent = window.XBotAgents.field({ api,
+        onChange: (id) => { $("modal-ok").disabled = !id; },
+        manage: () => { closeModal(); openSettings("agents"); } });
+      modalFields.append(agent.element);
       name.addEventListener("input", show);
       show();
     });
@@ -7370,6 +7487,7 @@
     window.XBotSkills?.unmount();
     window.XBotPersonaCards?.unmount();
     window.XBotApps?.unmount();
+    window.XBotAgents?.unmount();
     window.xbotDevices?.unmount();
     settingsLevel = null;
     settingsError(null);
@@ -7389,6 +7507,7 @@
     window.XBotImageGen?.unmount();
     window.XBotSkills?.unmount();
     window.XBotPersonaCards?.unmount();
+    window.XBotAgents?.unmount();
     $("setpage").hidden = $("setscrim").hidden = true;
     settingsLevel = null;
     window.xbotDevices?.unmount();
@@ -7396,7 +7515,7 @@
     if (restore) (settingsOpener?.isConnected && !settingsOpener.hidden ? settingsOpener : $("account")).focus({ preventScroll: true });
     settingsOpener = null;
   }
-  async function openSettings(section = "general", { home = false, provider = "" } = {}) {
+  async function openSettings(section = "general", { home = false } = {}) {
     const page = $("setpage");
     const opening = page.hidden;
     if (opening) settingsOpener = document.activeElement?.closest("#account-menu") ? $("account") : document.activeElement;
@@ -7423,6 +7542,7 @@
     window.XBotSkills?.unmount();
     window.XBotPersonaCards?.unmount();
     window.XBotApps?.unmount();
+    window.XBotAgents?.unmount();
     $("settings-theme").value = themeMode;
     for (const node of page.querySelectorAll("[data-settings-version]")) node.textContent = aboutVersion();
     if (opening) page.focus({ preventScroll: true });
@@ -7436,16 +7556,16 @@
         const data = await api("/xbot-api/permissions");
         if (request === settingsRequest) { paintPermissions(data); $("settings-permissions").disabled = false; }
       } else if (section === "search") {
-        await window.XBotWebSearch.mount({api, host:$("settings-search"), isCurrent:()=>request===settingsRequest});
+        await window.XBotWebSearch.mount({api, host:$("settings-search"), isCurrent:()=>request===settingsRequest, manage:()=>openSettings("agents")});
       } else if (section === "image-gen") {
-        await window.XBotImageGen.mount({api, host:$("settings-image-gen"), isCurrent:()=>request===settingsRequest, manage:id=>openSettings("providers", {provider:id})});
+        await window.XBotImageGen.mount({api, host:$("settings-image-gen"), isCurrent:()=>request===settingsRequest, manage:()=>openSettings("agents")});
       } else if (section === "skills") {
         await window.XBotSkills.mount({api, host:$("settings-skills"), isCurrent:()=>request===settingsRequest, onLevel:level=>{ if (request===settingsRequest) { settingsLevel = level; paintSettingsBar(); } }});
       } else if (section === "persona") {
         await window.XBotPersonaCards.mount({api, host:$("settings-persona"), isCurrent:()=>request===settingsRequest, onLevel:level=>{ if (request===settingsRequest) { settingsLevel = level; paintSettingsBar(); } }});
-      } else if (section === "providers") {
- await window.XBotProviders.settings({api,host:$("settings-providers"),initialProvider:provider,isCurrent:()=>request===settingsRequest});
- } else if (section === "devices") {
+      } else if (section === "agents") {
+        await window.XBotAgents.settings({api, host:$("settings-agents"), isCurrent:()=>request===settingsRequest});
+      } else if (section === "devices") {
         await window.xbotDevices.mount();
       } else if (section === "apps") {
         await window.XBotApps.mount({api, host:$("settings-apps"), isCurrent:()=>request===settingsRequest, connect:connectApp});
@@ -7961,41 +8081,6 @@
     }, 3000);
   }
 
-  // First run of the desktop app: ask for the model key, test it, save it.
-  function showSetup(host) {
-    login.hidden = true;
-    closeSettings(false);
-    shell.hidden = true;
-    $("setup").hidden = false;
-    if (host) $("setup-host").textContent = host;
-    $("setup-key").focus();
-    return new Promise((resolve) => {
-      const form = $("setup-form"), input = $("setup-key"), save = $("setup-save"), err = $("setup-error");
-      let busy = false;
-      input.addEventListener("input", () => { save.disabled = busy || !input.value.trim(); err.hidden = true; });
-      form.addEventListener("submit", async (ev) => {
-        ev.preventDefault();
-        if (busy || !input.value.trim()) return;
-        busy = true;
-        save.disabled = true;
-        save.textContent = "正在测试…";
-        try {
-          await api("/xbot-api/setup/key", { method: "POST", body: { key: input.value.trim() } });
-          input.value = "";
-          $("setup").hidden = true;
-          resolve();
-        } catch (e) {
-          err.textContent = (e && e.message) || "没保存成功，请重试";
-          err.hidden = false;
-        } finally {
-          busy = false;
-          save.disabled = !input.value.trim();
-          save.textContent = "测试并保存";
-        }
-      });
-    });
-  }
-
   // enterOwner opens the main interface for the owner: after an account sign-in,
   // a tap on a Bot in 我的设备 (name), or coming back from an account screen (null).
   let booted = false;
@@ -8034,7 +8119,7 @@
     state.tip = (data && data.tip) || "";
     state.app = !!data.app;
     syncDevicesSession(data);
-    if (data.needs_key) await showSetup(data.key_host || "");
+    // No model key gate: Bots run on local Agents with their own login.
     renderMe();
     showApp();
     await boot();
