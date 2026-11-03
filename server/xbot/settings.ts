@@ -9,6 +9,16 @@ export function createXbotSettingsRouter(bridge: BotBridge) {
   const router = Router(), { native, store } = bridge;
   const unsupported = (reason: string): never => { throw new ApiError(501, reason); };
   router.get('/agents', async (req, res) => res.json(await agentInventory(bridge, req.query.refresh === '1')));
+  router.post('/agents/:id/models', async (req, res) => {
+    const input = z.object({ model: z.string().max(512).optional(), refresh: z.boolean().optional() }).strict().parse(req.body ?? {});
+    res.json(await native.request('/api/cats/runtime-models', { method: 'POST', body: { runtimeId: req.params.id, ...input } }));
+  });
+  // Clowder AI owns seed defaults, revisions, deletions and persistence.
+  router.get('/cat-templates', async (_req, res) => res.json(await native.request('/api/bot-cat-templates')));
+  router.get('/cat-templates/:id', async (req, res) => res.json(await native.request(`/api/bot-cat-templates/${encode(req.params.id)}`)));
+  router.post('/cat-templates', async (req, res) => res.status(201).json(await native.request('/api/bot-cat-templates', { method: 'POST', body: req.body })));
+  router.put('/cat-templates/:id', async (req, res) => res.json(await native.request(`/api/bot-cat-templates/${encode(req.params.id)}`, { method: 'PUT', body: req.body })));
+  router.delete('/cat-templates/:id', async (req, res) => res.json(await native.request(`/api/bot-cat-templates/${encode(req.params.id)}`, { method: 'DELETE', body: req.body })));
   router.put('/bots/:name/agent', async (req, res) => {
     const { runtimeId } = z.object({ runtimeId: z.string().min(1).max(100) }).strict().parse(req.body);
     res.json(await bindAgent(bridge, await bridge.cat(req.params.name), runtimeId));

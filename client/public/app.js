@@ -3946,13 +3946,13 @@
       btn.addEventListener("click", () => pickBot(b.name));
       pins.append(btn);
     }
-    // One 新建 for the sidebar: 新建 Bot or 新建群组 (the 群组 "+" merged in).
+    // One 新建 for the sidebar: 新建猫猫 or 新建群组 (the 群组 "+" merged in).
     const add = el("button", "pin add");
     add.type = "button";
-    add.setAttribute("aria-label", "新建 Bot 或群组");
+    add.setAttribute("aria-label", "新建猫猫或群组");
     add.setAttribute("aria-haspopup", "menu");
     add.setAttribute("aria-expanded", "false");
-    setTip(add, "新建 Bot 或群组", "right");
+    setTip(add, "新建猫猫或群组", "right");
     const face = el("span", "plus-face");
     face.append(icon("plus"));
     add.append(face, el("span", "pin-name pin-label", "新建"));
@@ -4036,7 +4036,7 @@
       });
       menu.append(b);
     };
-    item("plus", "新建 Bot", openNewBot);
+    item("plus", "新建猫猫", () => openNewBot(anchor));
     item("users-plus", "新建群组", openNewGroup);
     anchor.setAttribute("aria-expanded", "true");
     placeMenu(anchor, menu, "below");
@@ -5482,14 +5482,6 @@
       duty.append(el("h4", "", "职责"), el("p", "", data.persona));
       wrap.append(duty);
     }
-    // Only the card's name and first line: the body lives in 设置 · 人设卡, and rebinding is in the drawer.
-    const card = data.persona_card;
-    if (card) {
-      const sec = el("div", "psec");
-      sec.append(el("h4", "", "人设卡"), el("p", "", card.name));
-      if (card.preview) sec.append(el("p", "psec-weak", card.preview));
-      wrap.append(sec);
-    }
     const section = el("div", "psec");
     const snap = state.ctxSnap;
     const meta = [];
@@ -5498,7 +5490,48 @@
     const aside = meta.length ? el("span", "v", meta.join(" · ")) : null;
     section.append(el("h4", "", "执行 Agent"), agentTrigger(data, aside));
     wrap.append(section);
+    const config = catConfigSection(data);
+    if (config) wrap.append(config);
     return wrap;
+  }
+
+  // The configuration copied into this cat when it was created (cat_config from
+  // GET bots/:name; never read back from a template). 职责 and the Agent have
+  // their own sections above, so they are left out; longer portrait text folds.
+  function catConfigSection(data) {
+    const templates = window.ClowderCatTemplates, config = data.cat_config;
+    if (!templates || !config) return null;
+    const rules = templates.rules, presets = window.ClowderAvatars?.presets || [];
+    const agent = data.agent || {};
+    // Names for native breed IDs, keyed by ID (moonshot is drawn as turkish-van).
+    // An ID with no named portrait, such as an older synthetic bot-… ID, gets no
+    // entry, so its 猫种 row is left out rather than showing the ID.
+    const model = config.model?.mode === "explicit" ? config.model.value : agent.configuredModel || "";
+    const ids = new Set(presets.map((p) => p.id));
+    if (config.breed?.mode === "explicit") ids.add(config.breed.breedId);
+    const family = rules.familyBreed(model).breedId;
+    if (family) ids.add(family);
+    const breeds = [...ids].map((id) => ({ id, name: presets.find((p) => p.id === rules.avatarOf(id))?.label || "" })).filter((b) => b.name);
+    const ctx = { agents: agent.id ? [{ id: agent.id, label: agent.label || agent.id }] : [], breeds, defaultModel: agent.configuredModel || "" };
+    const facts = (rows) => {
+      const list = el("dl", "agent-facts ct-facts");
+      for (const [label, value] of rows) list.append(el("dt", "", label), el("dd", "", value));
+      return list;
+    };
+    const sec = el("div", "psec cat-config");
+    sec.append(el("h4", "", "配置"), facts(templates.describe(config, ctx).filter(([label]) => label !== "Agent")));
+    const portrait = config.portrait || {};
+    const more = [["性格", portrait.personality], ["擅长", portrait.teamStrengths], ["提醒", portrait.caution]]
+      .filter(([, value]) => typeof value === "string" && value.trim())
+      .map(([label, value]) => [label, value.trim()]);
+    if (more.length) {
+      const fold = el("details", "task-details cat-portrait");
+      const summary = el("summary", "", "画像");
+      summary.append(icon("chevron"));
+      fold.append(summary, facts(more));
+      sec.append(fold);
+    }
+    return sec;
   }
 
   function scopeLabel(scope) {
@@ -5937,8 +5970,6 @@
   }
 
   let profileReturnFocus = null;
-  // Bumped whenever the modal closes, so work an old profile drawer started can tell it is gone.
-  let profileDrawerGen = 0;
 
   const AVATAR_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
   const AVATAR_MAX = 1024 * 1024;
@@ -6092,7 +6123,6 @@
   }
 
   function profileForm(data) {
-    const drawerGen = profileDrawerGen;
     const wrap = document.createElement("div");
     const head = avatarSection(data.name);
     const name = textInput(data.name, 64);
@@ -6105,60 +6135,17 @@
     duty.setAttribute("aria-label", "职责");
     const dutyBox = el("label", "field", "");
     dutyBox.append(duty);
-    const dutyHint = el("p", "pc-pickhint", "这个 Bot 负责什么、边界在哪。口吻交给下面的人设卡。");
-    // The card is bound the moment the menu changes; the drawer's save only covers the other fields.
-    const cardMenu = document.createElement("select");
-    cardMenu.setAttribute("aria-label", "人设卡");
-    const cardOption = (card) => {
-      const o = document.createElement("option");
-      o.value = card.id;
-      o.textContent = card.name + (card.default ? "（默认）" : "");
-      return o;
-    };
-    const current = data.persona_card;
-    if (current) cardMenu.append(cardOption(current));
-    cardMenu.value = current ? current.id : "";
-    cardMenu.disabled = true;
-    api("/xbot-api/persona-cards").then((res) => {
-      if (drawerGen !== profileDrawerGen) return;
-      const cards = (res && res.cards) || [];
-      cardMenu.replaceChildren(...cards.map(cardOption));
-      const id = data.persona_card ? data.persona_card.id : "";
-      if (id && !cards.some((c) => c.id === id)) cardMenu.prepend(cardOption(data.persona_card));
-      cardMenu.value = id || (cards.find((c) => c.default) || {}).id || "";
-      cardMenu.disabled = false;
-    }).catch((e) => showErr(e, "没能读取人设卡"));
-    cardMenu.addEventListener("change", async () => {
-      err.hidden = true;
-      const prev = data.persona_card ? data.persona_card.id : "";
-      cardMenu.disabled = true;
-      try {
-        const res = await api("/xbot-api/bots/" + encodeURIComponent(data.name) + "/persona-card", { method: "PUT", body: { id: cardMenu.value } });
-        data.persona_card = res && res.persona_card;
-        loadPanel().catch(() => {});
-      } catch (e) {
-        cardMenu.value = prev;
-        showErr(e, "没能选用这张人设卡");
-      } finally {
-        if (drawerGen === profileDrawerGen) cardMenu.disabled = false;
-      }
-    });
-    const cardBox = el("label", "field", "");
-    cardBox.append(cardMenu);
-    const manage = el("button", "text-btn pc-manage", "管理人设卡");
-    manage.type = "button";
-    manage.addEventListener("click", () => { closeModal(); openSettings("persona"); });
-    const pickHint = el("p", "pc-pickhint", "人设卡管口吻和分寸，叠在职责之上，选中马上生效。");
-    pickHint.append(" ", manage);
+    // Templates are copied once at creation, so nothing here binds a cat to one;
+    // the 职责 above is edited directly. The JSON pair below is this cat's 资料.
     const err = el("p", "error", "");
     err.hidden = true;
     const save = $("modal-ok");
     save.textContent = "保存";
     save.hidden = false;
     save.type = "submit";
-    const exp = el("button", "text-btn", "导出模板");
+    const exp = el("button", "text-btn", "导出资料");
     exp.type = "button";
-    const imp = el("button", "text-btn", "导入模板");
+    const imp = el("button", "text-btn", "导入资料");
     imp.type = "button";
     const fileIn = document.createElement("input");
     fileIn.type = "file";
@@ -6174,8 +6161,7 @@
     };
     wrap.append(
       section("基本", head, labeled("名字", name), labeled("简介", description)),
-      section("职责", dutyBox, dutyHint),
-      section("人设卡", cardBox, pickHint),
+      section("职责", dutyBox),
       section("执行 Agent", agentTrigger(data)),
       err,
     );
@@ -6223,7 +6209,6 @@
 
   function openProfile(data) {
     if (!data || !data.name) return;
-    profileDrawerGen++;
     profileReturnFocus = document.activeElement;
     hideTip();
     $("modal-title").textContent = "编辑资料";
@@ -6798,7 +6783,6 @@
   }
 
   function closeModal() {
-    profileDrawerGen++;
     modal.hidden = true;
     modal.classList.remove("profile-drawer");
     modalForm.classList.remove("profile-modal");
@@ -6985,83 +6969,23 @@
     }, "下载");
   }
 
-  function openNewBot() {
-    // Creation and preview start from the same template; renaming keeps the cat.
-    const av = { seed: "cat:ragdoll", file: null };
-    let agent = null;
-    openModal("新建 Bot", [
-      { name: "name", label: "标识", placeholder: "ada" },
-      { name: "persona", label: "职责", multiline: true },
-    ], async (v) => {
-      const name = (v.name || "").trim();
-      if (!name) throw new Error("需要一个名字");
-      const runtimeId = agent ? agent.value() : "";
-      if (!runtimeId) throw new Error("先选一个执行 Agent");
-      const body = { name: name, persona: (v.persona || "").trim(), runtimeId: runtimeId };
-      body.avatar_seed = av.seed;
-      await api("/xbot-api/bots", { method: "POST", body: body });
-      await refreshLists();
-      await selectBot(name);
-      if (av.file) {
-        try { await uploadAvatar(name, av.file); await refreshLists(); await loadPanel(); }
-        catch (e) { setStatus(avatarUploadProblem(e), true); }
-      }
-    }, null, (inputs) => {
-      const name = inputs.name;
-      const file = document.createElement("input");
-      file.type = "file";
-      file.accept = AVATAR_TYPES.join(",");
-      file.hidden = true;
-      const row = el("div", "newbot-avatar");
-      let shot = "";
-      const show = () => {
-        const label = name.value.trim() || "猫猫";
-        const face = av.file ? avatar(label, { url: shot, seed: av.seed }, "xl") : avatar(label, { seed: av.seed }, "xl");
-        const old = row.querySelector(".avatar");
-        if (old) old.replaceWith(face);
-        else row.prepend(face);
-      };
-      const again = el("button", "icon-btn");
-      again.type = "button";
-      again.setAttribute("aria-label", "换一个");
-      setTip(again, "换一个");
-      again.append(icon("refresh"));
-      again.addEventListener("click", () => {
-        if (shot) URL.revokeObjectURL(shot);
-        shot = "";
-        av.file = null;
-        av.seed = catAvatars.nextSeed(av.seed);
-        show();
-      });
-      const up = el("button", "icon-btn");
-      up.type = "button";
-      up.setAttribute("aria-label", "上传图片");
-      setTip(up, "上传图片");
-      up.append(icon("imageUp"));
-      up.addEventListener("click", () => file.click());
-      file.addEventListener("change", () => {
-        const f = file.files && file.files[0];
-        file.value = "";
-        if (!f) return;
-        const bad = avatarFileProblem(f);
-        if (bad) { modalError.hidden = false; modalError.textContent = bad; return; }
-        modalError.hidden = true;
-        if (shot) URL.revokeObjectURL(shot);
-        shot = URL.createObjectURL(f);
-        av.file = f;
-        show();
-      });
-      row.append(again, up, file);
-      const note = el("p", "avatar-note");
-      note.append(icon("info"), el("span", "", "预设 8 只猫猫，点「换一个」切换；也可以上传图片。改名字会保留当前头像。"));
-      modalFields.prepend(row, note);
-      // The Agent list loads inside the open dialog; 创建 waits for a choice.
-      agent = window.XBotAgents.field({ api,
-        onChange: (id) => { $("modal-ok").disabled = !id; },
-        manage: () => { closeModal(); openSettings("agents"); } });
-      modalFields.append(agent.element);
-      name.addEventListener("input", show);
-      show();
+  // 新建猫猫 is the template module's own layer (cat-templates.js): it reads the
+  // templates and Agents, sends the one create request, and keeps a single
+  // layer open. Here it only hands back to the shell once the cat exists.
+  function openNewBot(opener) {
+    closePops();
+    if (!window.ClowderCatTemplates) { setStatus("新建猫猫暂不可用", true); return; }
+    if (!modal.hidden) closeModal();
+    window.ClowderCatTemplates.openCreate({
+      api,
+      opener: opener && opener.isConnected ? opener : document.activeElement,
+      names: () => state.bots.map((b) => b.name),
+      manageAgents: () => openSettings("agents"),
+      onCreated: async (created) => {
+        await refreshLists();
+        await selectBot(created.name);
+      },
+      onError: (e) => setStatus(visibleError(e), true),
     });
   }
 
@@ -7485,7 +7409,7 @@
     window.XBotWebSearch?.unmount();
     window.XBotImageGen?.unmount();
     window.XBotSkills?.unmount();
-    window.XBotPersonaCards?.unmount();
+    window.ClowderCatTemplates?.teardown();
     window.XBotApps?.unmount();
     window.XBotAgents?.unmount();
     window.xbotDevices?.unmount();
@@ -7506,7 +7430,7 @@
     window.XBotWebSearch?.unmount();
     window.XBotImageGen?.unmount();
     window.XBotSkills?.unmount();
-    window.XBotPersonaCards?.unmount();
+    window.ClowderCatTemplates?.teardown();
     window.XBotAgents?.unmount();
     $("setpage").hidden = $("setscrim").hidden = true;
     settingsLevel = null;
@@ -7540,7 +7464,7 @@
     window.XBotWebSearch?.unmount();
     window.XBotImageGen?.unmount();
     window.XBotSkills?.unmount();
-    window.XBotPersonaCards?.unmount();
+    window.ClowderCatTemplates?.teardown();
     window.XBotApps?.unmount();
     window.XBotAgents?.unmount();
     $("settings-theme").value = themeMode;
@@ -7562,9 +7486,10 @@
       } else if (section === "skills") {
         await window.XBotSkills.mount({api, host:$("settings-skills"), isCurrent:()=>request===settingsRequest, onLevel:level=>{ if (request===settingsRequest) { settingsLevel = level; paintSettingsBar(); } }});
       } else if (section === "persona") {
-        await window.XBotPersonaCards.mount({api, host:$("settings-persona"), isCurrent:()=>request===settingsRequest, onLevel:level=>{ if (request===settingsRequest) { settingsLevel = level; paintSettingsBar(); } }});
+        // The pane keeps its persona ID; it now lists 模板 (cat-templates.js).
+        await window.ClowderCatTemplates.mount({api, host:$("settings-persona"), isCurrent:()=>request===settingsRequest, onLevel:level=>{ if (request===settingsRequest) { settingsLevel = level; paintSettingsBar(); } }});
       } else if (section === "agents") {
-        await window.XBotAgents.settings({api, host:$("settings-agents"), isCurrent:()=>request===settingsRequest});
+        await window.XBotAgents.settings({api, host:$("settings-agents"), isCurrent:()=>request===settingsRequest, onLevel:level=>{ if (request===settingsRequest) { settingsLevel = level; paintSettingsBar(); } }});
       } else if (section === "devices") {
         await window.xbotDevices.mount();
       } else if (section === "apps") {

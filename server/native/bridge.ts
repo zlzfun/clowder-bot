@@ -4,6 +4,7 @@ import { ProductStore } from '../product-store.js';
 import type { NativeCat, NativeMessage, NativeThread, NativeTransport } from './types.js';
 import { runtimeUnavailable, supportsRuntime } from './agents.js';
 import { messagePresentation } from './message-presentation.js';
+import { avatarBreed, type CatConfig, type SourceTemplate } from './cat-templates.js';
 
 export const encode = encodeURIComponent;
 export interface NativeRuntime {
@@ -18,7 +19,8 @@ export interface QueueView {
   queueRevision?: number;
 }
 export interface RoleTemplate { id: string; name: string; nickname?: string; roleDescription: string; personality?: string; teamStrengths?: string; color: { primary: string; secondary: string } }
-export interface CreateBot { name: string; persona?: string; description?: string; avatar_seed?: string; templateId?: string; timezone?: string; runtimeId?: string }
+export interface CreateBot { name: string; persona?: string; description?: string; avatar_seed?: string; templateId?: string; timezone?: string; runtimeId?: string;
+  catConfig?: CatConfig; sourceTemplate?: { id: string; revision: number }; idempotencyKey?: string }
 
 export class BotBridge {
   private directCreates = new Map<string, Promise<NativeThread>>();
@@ -135,6 +137,22 @@ export class BotBridge {
     }), others: [] };
   }
   async createBot(input: CreateBot, source?: NativeCat) {
+    if (input.catConfig) {
+      if (source || input.runtimeId || input.templateId || input.persona !== undefined || input.description !== undefined)
+        throw new ApiError(400, '创建配置不能与旧版字段混用');
+      const result = await this.native.request<{ cat: NativeCat; sourceTemplate: SourceTemplate | null }>('/api/bot-cat-templates/instantiate', {
+        method: 'POST', body: { name: input.name, catConfig: input.catConfig,
+          ...(input.sourceTemplate ? { sourceTemplate: input.sourceTemplate } : {}), idempotencyKey: input.idempotencyKey ?? randomUUID() },
+      });
+      const cat = result.cat;
+      if (!cat?.id || !cat.breedId) throw new ApiError(502, '原生创建结果缺少猫猫身份');
+      const identity = avatarBreed(cat.breedId);
+      Object.assign(this.store.bot(cat.id), { templateId: identity, avatarSeed: input.avatar_seed || `cat:${identity}`,
+        timezone: input.timezone, ...(result.sourceTemplate ? { sourceTemplate: result.sourceTemplate } : {}) });
+      this.store.save();
+      return cat;
+    }
+    if (input.sourceTemplate) throw new ApiError(400, '缺少创建配置');
     if ((await this.cats()).some(c => c.name.toLowerCase() === input.name.toLowerCase())) throw new ApiError(409, '已有同名 Bot');
     const templates = await this.templates();
     const requestedTemplate = input.templateId ?? (source ? this.store.bot(source.id).templateId : undefined) ?? 'ragdoll';

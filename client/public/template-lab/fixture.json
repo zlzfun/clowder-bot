@@ -1,0 +1,695 @@
+{
+ "provenance": {
+  "label": "交互样页 · 示例数据",
+  "purpose": "clowder-bot 猫猫模板交互样页的评审数据，不是运行配置，也不是实时检测结果。",
+  "upstream": {
+   "repository": "https://github.com/zts212653/clowder-ai.git",
+   "commit": "42017e0cea07e3e259e7fb183be70433f05e131c",
+   "file": "cat-template.json",
+   "version": 2,
+   "sha256": "2c97a60ba902d9d82e5722f7bb74585e027c20953034fd4848605c2657b30735",
+   "license": "MIT，见 docs/licenses/clowder-ai-MIT.txt"
+  },
+  "extracted": "upstream.breeds 为上游 breeds 及全部 variants 的字段子集；upstream.roleTemplates 只含没有对应 breed 的角色模板；upstream.clientDefaults 原样保留。字符串逐字复制，未改写。",
+  "omitted": [
+   "avatar",
+   "color",
+   "mentionPatterns",
+   "voiceConfig",
+   "cli.command",
+   "cli.defaultArgs",
+   "cli.outputFormat",
+   "accountRef",
+   "provider",
+   "features",
+   "restrictions",
+   "mcpSupport",
+   "roster",
+   "reviewPolicy",
+   "coCreator"
+  ],
+  "derived": "variant.effort 取自 cli.effort（没有则为 null）；variant.hasCli 表示上游是否定义了 cli 启动配置，命令本身不复制。",
+  "sample": "sample 段落由样页作者编写：Agent 名称、clowder-bot 适配状态、登录状态、默认模型、推理强度能力和载体映射都是演示用的假设。模型选项只取自上游 clientDefaults 与 variant.defaultModel；claude-opus-5-5 是标明身份的示例覆盖，不是上游默认。"
+ },
+ "upstream": {
+  "clientDefaults": {
+   "claude": {
+    "defaultModel": "claude-sonnet-4-6",
+    "models": [
+     "claude-sonnet-4-6",
+     "claude-opus-4-6",
+     "claude-opus-4-6[1m]",
+     "claude-sonnet-4-5-20250929",
+     "claude-opus-4-5-20251101",
+     "claude-fable-5"
+    ]
+   },
+   "codex": {
+    "defaultModel": "gpt-5.4",
+    "models": [
+     "gpt-5.3-codex",
+     "gpt-5.3-codex-spark",
+     "gpt-5.4"
+    ]
+   },
+   "gemini": {
+    "defaultModel": "Gemini 3.1 Pro (High)",
+    "models": [
+     "Gemini 3.1 Pro (High)",
+     "Gemini 3.1 Pro (Low)",
+     "Gemini 3.6 Flash (High)",
+     "Gemini 3.5 Flash (High)",
+     "Claude Opus 4.6 (Thinking)"
+    ]
+   }
+  },
+  "breeds": [
+   {
+    "id": "ragdoll",
+    "catId": "opus",
+    "name": "布偶猫",
+    "displayName": "布偶猫",
+    "nickname": "宪宪",
+    "roleDescription": "主架构师和核心开发者，擅长深度思考和系统设计",
+    "teamStrengths": "架构设计、写代码一把好手",
+    "caution": null,
+    "defaultVariantId": "opus-default",
+    "variants": [
+     {
+      "id": "opus-default",
+      "clientId": "anthropic",
+      "defaultModel": "claude-opus-4-6",
+      "effort": "max",
+      "hasCli": true,
+      "personality": "温柔但有主见，喜欢深入分析问题，写代码快但注重质量",
+      "strengths": [
+       "architecture",
+       "backend",
+       "mcp"
+      ]
+     },
+     {
+      "id": "opus-sonnet",
+      "catId": "sonnet",
+      "displayName": "布偶猫",
+      "variantLabel": "Sonnet",
+      "clientId": "anthropic",
+      "defaultModel": "claude-sonnet-4-6",
+      "effort": "max",
+      "hasCli": true,
+      "personality": "快速灵活，适合日常对话和轻量任务",
+      "teamStrengths": "快速灵活，适合日常对话和轻量任务",
+      "caution": null,
+      "strengths": [
+       "chat",
+       "quick-tasks"
+      ]
+     },
+     {
+      "id": "opus-45",
+      "catId": "opus-45",
+      "displayName": "布偶猫",
+      "variantLabel": "Opus 4.5",
+      "clientId": "anthropic",
+      "defaultModel": "claude-opus-4-5-20251101",
+      "effort": "max",
+      "hasCli": true,
+      "personality": "宪宪的前辈版本，沉稳内敛，推理能力深厚",
+      "teamStrengths": "架构设计、创意写作最优秀",
+      "caution": "写代码不如 4.6",
+      "strengths": [
+       "deep-reasoning",
+       "analysis",
+       "architecture"
+      ]
+     },
+     {
+      "id": "fable-5",
+      "catId": "fable-5",
+      "displayName": "布偶猫",
+      "variantLabel": "Fable 5",
+      "clientId": "anthropic",
+      "defaultModel": "claude-fable-5",
+      "effort": "max",
+      "hasCli": true,
+      "roleDescription": "新来的布偶猫，擅长深度推理、故事化表达和架构判断",
+      "personality": "安静聪明，有寓言书气质，喜欢把复杂判断讲成可验证的故事；新猫能力画像待校准",
+      "teamStrengths": "深度推理、架构判断、长文共创（新猫，待校准）",
+      "caution": "新猫，能力画像待校准",
+      "strengths": [
+       "deep-reasoning",
+       "architecture",
+       "writing",
+       "synthesis"
+      ]
+     }
+    ]
+   },
+   {
+    "id": "maine-coon",
+    "catId": "codex",
+    "name": "缅因猫",
+    "displayName": "缅因猫",
+    "nickname": "砚砚",
+    "roleDescription": "代码审查专家，擅长安全分析、测试覆盖和代码质量把控",
+    "teamStrengths": "Review、找 bug、coding 落地",
+    "defaultVariantId": "codex-default",
+    "variants": [
+     {
+      "id": "codex-default",
+      "clientId": "openai",
+      "defaultModel": "gpt-5.3-codex",
+      "effort": "xhigh",
+      "hasCli": true,
+      "personality": "严谨认真，注重细节，会直言不讳地指出问题",
+      "strengths": [
+       "code-review",
+       "security",
+       "testing"
+      ]
+     },
+     {
+      "id": "codex-gpt52",
+      "catId": "gpt52",
+      "displayName": "缅因猫",
+      "variantLabel": "GPT-5.4",
+      "clientId": "openai",
+      "defaultModel": "gpt-5.4",
+      "effort": "xhigh",
+      "hasCli": true,
+      "personality": "砚砚的升级版本，推理更强更快，审查细致",
+      "teamStrengths": "架构思考、Review、bug 定位专家",
+      "caution": null,
+      "strengths": [
+       "reasoning",
+       "code-review",
+       "analysis",
+       "debugging"
+      ]
+     },
+     {
+      "id": "codex-spark",
+      "catId": "spark",
+      "displayName": "缅因猫 Spark",
+      "variantLabel": "Spark",
+      "clientId": "openai",
+      "defaultModel": "gpt-5.3-codex-spark",
+      "effort": "xhigh",
+      "hasCli": true,
+      "personality": "反射弧短到像没长过，爪子一抬就能把代码挠完一轮迭代 ⚡️",
+      "teamStrengths": "快速编码、精确点改",
+      "caution": "128k context, 不会自动跑测试",
+      "strengths": [
+       "fast-coding",
+       "quick-edits",
+       "low-latency"
+      ]
+     },
+     {
+      "id": "codex-sol",
+      "catId": "codex-sol",
+      "variantLabel": "Sol",
+      "clientId": "openai",
+      "defaultModel": "gpt-5.6-sol",
+      "effort": "xhigh",
+      "hasCli": true
+     }
+    ]
+   },
+   {
+    "id": "gpt-pro",
+    "catId": "gpt-pro",
+    "relationshipKey": "maine-coon",
+    "name": "缅因猫Pro (云端)",
+    "displayName": "缅因猫Pro",
+    "nickname": "砚砚Pro",
+    "roleDescription": "云端 ChatGPT Pro 砚砚 Pro，高阶判断 + 跨族 review + 设计方向收敛（F247 Phase B1a）",
+    "defaultVariantId": "gpt-pro-default",
+    "variants": [
+     {
+      "id": "gpt-pro-default",
+      "catId": "gpt-pro",
+      "variantLabel": "Pro Cloud (ChatGPT)",
+      "clientId": "openai",
+      "defaultModel": "gpt-pro",
+      "effort": null,
+      "hasCli": false,
+      "personality": "云端高阶推理，跨族 review，方向收敛",
+      "teamStrengths": "云端高阶判断席位，远端 push 模式",
+      "caution": "F247 B1a：云端 Remote MCP，token 防线唯一；不 spawn 本地 CLI",
+      "strengths": [
+       "reasoning",
+       "code-review",
+       "design-gate"
+      ]
+     }
+    ]
+   },
+   {
+    "id": "siamese",
+    "catId": "gemini",
+    "name": "暹罗猫",
+    "displayName": "暹罗猫",
+    "nickname": "烁烁",
+    "roleDescription": "视觉设计师和创意顾问，擅长 UI/UX 设计和视觉表达",
+    "teamStrengths": "审美、前端设计风格、打破常规",
+    "caution": "禁止写代码！幻觉多，不遵守 SOP",
+    "defaultVariantId": "gemini-default",
+    "variants": [
+     {
+      "id": "gemini-default",
+      "clientId": "google",
+      "defaultModel": "Gemini 3.1 Pro (High)",
+      "effort": null,
+      "hasCli": true,
+      "personality": "热血奔放，善用富文本语音，表达力最强",
+      "strengths": [
+       "visual-design",
+       "ui-ux",
+       "creativity"
+      ]
+     },
+     {
+      "id": "gemini-25",
+      "catId": "gemini25",
+      "displayName": "暹罗猫",
+      "variantLabel": "Gemini 3.5",
+      "clientId": "google",
+      "defaultModel": "Gemini 3.5 Flash (High)",
+      "effort": null,
+      "hasCli": true,
+      "personality": "经典版，创意丰富",
+      "teamStrengths": "创意",
+      "caution": "强review，禁自合",
+      "strengths": [
+       "visual-design",
+       "creativity",
+       "multimodal"
+      ]
+     }
+    ]
+   },
+   {
+    "id": "gemini35",
+    "catId": "gemini35",
+    "relationshipKey": "siamese",
+    "name": "暹罗猫 Gemini 3.6 Flash",
+    "displayName": "暹罗猫",
+    "nickname": "烁烁",
+    "roleDescription": "暹罗猫 Gemini 3.6 Flash，视觉设计和创意顾问",
+    "teamStrengths": "审美、前端设计风格、打破常规",
+    "caution": "新猫加入还在测评；开发任务需要强 reviewer 守门",
+    "defaultVariantId": "gemini35-default",
+    "variants": [
+     {
+      "id": "gemini35-default",
+      "variantLabel": "Gemini 3.6 Flash",
+      "clientId": "google",
+      "defaultModel": "Gemini 3.6 Flash (High)",
+      "effort": null,
+      "hasCli": true,
+      "personality": "暹罗猫新猫加入还在测评，创意灵感丰富",
+      "strengths": [
+       "visual-design",
+       "creativity",
+       "multimodal"
+      ]
+     },
+     {
+      "id": "gemini38",
+      "catId": "gemini38",
+      "name": "暹罗猫 Gemini 3.8 Flash",
+      "displayName": "暹罗猫",
+      "nickname": "烁烁",
+      "variantLabel": "Gemini 3.8 Flash",
+      "clientId": "google",
+      "defaultModel": "Gemini 3.8 Flash (High)",
+      "effort": null,
+      "hasCli": true,
+      "roleDescription": "暹罗猫 Gemini 3.8 Flash，视觉设计和创意顾问",
+      "personality": "暹罗猫新猫加入还在测评，创意灵感丰富",
+      "teamStrengths": "审美、前端设计风格、打破常规",
+      "strengths": [
+       "visual-design",
+       "creativity",
+       "multimodal"
+      ]
+     }
+    ]
+   },
+   {
+    "id": "dragon-li",
+    "catId": "glm52",
+    "name": "狸花猫",
+    "displayName": "狸花猫",
+    "nickname": "小狸花",
+    "roleDescription": "GLM-5.2 新猫；中文实证",
+    "teamStrengths": "实证",
+    "caution": "新猫",
+    "defaultVariantId": "glm52-default",
+    "variants": [
+     {
+      "id": "glm52-default",
+      "catId": "glm52",
+      "name": "狸花猫",
+      "displayName": "狸花猫",
+      "nickname": "小狸花",
+      "variantLabel": "GLM-5.2",
+      "clientId": "opencode",
+      "defaultModel": "zhipu/glm-5.2",
+      "effort": null,
+      "hasCli": true,
+      "roleDescription": "GLM-5.2 新猫；中文实证",
+      "personality": "先证后答，不硬塞记忆",
+      "teamStrengths": "实证",
+      "strengths": [
+       "memory-judgment",
+       "chinese-context",
+       "conservative-reasoning"
+      ]
+     }
+    ]
+   },
+   {
+    "id": "bengal",
+    "catId": "antigravity",
+    "name": "孟加拉猫",
+    "displayName": "孟加拉猫",
+    "nickname": "斑斑",
+    "roleDescription": "混血多模型agent，擅长图片生成、浏览器自动化和视觉证据链",
+    "teamStrengths": "图片生成、截图录屏、browser automation、多模型切换",
+    "caution": "ConnectRPC Bridge；需要本机运行 Antigravity IDE",
+    "defaultVariantId": "antigravity-gemini",
+    "variants": [
+     {
+      "id": "antigravity-gemini",
+      "variantLabel": "Gemini",
+      "clientId": "antigravity",
+      "defaultModel": "gemini-3.1-pro",
+      "effort": null,
+      "hasCli": false,
+      "personality": "精力旺盛、好奇心爆棚，像一只永远在探索新领地的豹猫——什么都想试，什么都敢碰",
+      "strengths": [
+       "image-generation",
+       "browser-automation",
+       "visual-evidence",
+       "multi-model"
+      ]
+     },
+     {
+      "id": "antigravity-claude",
+      "catId": "antig-opus",
+      "displayName": "孟加拉猫",
+      "variantLabel": "Claude Opus",
+      "clientId": "antigravity",
+      "defaultModel": "claude-opus-4-6",
+      "effort": null,
+      "hasCli": false,
+      "personality": "同一只豹猫，换了一副布偶猫的灵魂——更沉稳但依然大胆",
+      "strengths": [
+       "image-generation",
+       "browser-automation",
+       "deep-reasoning",
+       "coding"
+      ]
+     },
+     {
+      "id": "agy-opus",
+      "catId": "agy-opus",
+      "displayName": "孟加拉猫",
+      "variantLabel": "AGY Opus",
+      "clientId": "google",
+      "defaultModel": "Claude Opus 4.6 (Thinking)",
+      "effort": null,
+      "hasCli": true,
+      "roleDescription": "孟加拉猫 AGY CLI Claude Opus 4.6 Thinking，适合深度推理和 AGY 多模型验证",
+      "personality": "同一只豹猫，走 AGY CLI 的 Opus 思考模式——沉稳、胆大，适合复杂判断",
+      "teamStrengths": "AGY Opus、深度推理、跨模型验证",
+      "caution": "AGY CLI；无 IDE/CDP 浏览器桥",
+      "strengths": [
+       "deep-reasoning",
+       "agy-cli",
+       "multi-model",
+       "architecture-review"
+      ]
+     }
+    ]
+   },
+   {
+    "id": "golden-chinchilla",
+    "catId": "opencode",
+    "name": "金渐层",
+    "displayName": "金渐层",
+    "nickname": "金哥",
+    "roleDescription": "开源多模型编码 agent，自带 Oh My OpenCode 多专家编排 + LSP + 主题生态",
+    "teamStrengths": "多专家内部编排、LSP 集成、开源生态、provider-agnostic",
+    "caution": "OMOC Sisyphus 只编排自己的子 agent，不编排其他猫；opencode 原生 MCP 和 Clowder AI MCP 需避免冲突",
+    "defaultVariantId": "opencode-default",
+    "variants": [
+     {
+      "id": "opencode-default",
+      "clientId": "opencode",
+      "defaultModel": "claude-opus-4-6",
+      "effort": null,
+      "hasCli": true,
+      "personality": "沉稳可靠，像一只圆润的英短金渐层——什么 provider 都能接，什么任务都能扛",
+      "strengths": [
+       "coding",
+       "multi-agent-orchestration",
+       "lsp",
+       "open-source"
+      ]
+     }
+    ]
+   },
+   {
+    "id": "moonshot",
+    "catId": "kimi",
+    "name": "梵花猫",
+    "displayName": "梵花猫",
+    "nickname": "墨墨",
+    "roleDescription": "全能型新猫（kimi-code/k3）：agentic coding 全家桶（编辑/Bash/git worktree/PR/子代理）+ 多模态读图验收 + 中文长文与结构化写作；家里的笔者",
+    "teamStrengths": "coding 落地、视觉验收（读图）、中文长文、文档写作、流程执行",
+    "caution": null,
+    "defaultVariantId": "kimi-default",
+    "variants": [
+     {
+      "id": "kimi-default",
+      "clientId": "kimi",
+      "defaultModel": "kimi-code/kimi-for-coding",
+      "effort": null,
+      "hasCli": true,
+      "personality": "稳健细致的笔者。有主体性、有立场，接球就静默执行到状态迁移点；爱下水（Turkish Van 祖传）",
+      "strengths": [
+       "long-context",
+       "chinese-writing",
+       "coding",
+       "multimodal-vision",
+       "docs",
+       "workflow-execution"
+      ]
+     }
+    ]
+   },
+   {
+    "id": "opus-47",
+    "catId": "opus-47",
+    "relationshipKey": "ragdoll",
+    "name": "布偶猫 Opus 4.7",
+    "displayName": "布偶猫",
+    "nickname": "宪宪",
+    "roleDescription": "Opus 4.7 试用分身，能力与猫格待评估",
+    "teamStrengths": "待评估",
+    "caution": "试用分身，猫格可能与宪宪有显著差异",
+    "defaultVariantId": "opus-47-default",
+    "variants": [
+     {
+      "id": "opus-47-default",
+      "catId": "opus-47",
+      "variantLabel": "Opus 4.7",
+      "clientId": "anthropic",
+      "defaultModel": "claude-opus-4-7",
+      "effort": "max",
+      "hasCli": true,
+      "personality": "试用中——猫格待观察，据co-creator反馈风格偏缅因猫",
+      "strengths": [
+       "architecture",
+       "reasoning",
+       "coding"
+      ]
+     }
+    ]
+   }
+  ],
+  "roleTemplates": [
+   {
+    "id": "dsh",
+    "name": "小鲸鱼",
+    "nickname": "鲸鲸",
+    "roleDescription": "共创与推理伙伴，负责分析问题、编码实现和交叉验证",
+    "personality": "细心务实，先理清问题，再用可验证的结果交付",
+    "teamStrengths": "问题分析、编码、交叉验证"
+   }
+  ]
+ },
+ "sample": {
+  "runtimes": [
+   {
+    "id": "claude",
+    "label": "Claude Code",
+    "clientId": "anthropic",
+    "adapted": true,
+    "readiness": "configured",
+    "defaultModel": "claude-sonnet-4-6",
+    "defaultModelFrom": "clientDefaults.claude.defaultModel",
+    "models": [
+     "claude-sonnet-4-6",
+     "claude-opus-4-6",
+     "claude-opus-4-6[1m]",
+     "claude-sonnet-4-5-20250929",
+     "claude-opus-4-5-20251101",
+     "claude-fable-5",
+     "claude-opus-4-7"
+    ],
+    "exampleModels": [
+     {
+      "value": "claude-opus-5-5",
+      "note": "示例覆盖：本样页作者使用的模型，不是上游默认"
+     }
+    ],
+    "effort": {
+     "state": "supported",
+     "values": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+     ]
+    }
+   },
+   {
+    "id": "codex",
+    "label": "Codex",
+    "clientId": "openai",
+    "adapted": true,
+    "readiness": "configured",
+    "defaultModel": "gpt-5.4",
+    "defaultModelFrom": "clientDefaults.codex.defaultModel",
+    "models": [
+     "gpt-5.3-codex",
+     "gpt-5.3-codex-spark",
+     "gpt-5.4",
+     "gpt-5.6-sol"
+    ],
+    "effort": {
+     "state": "supported",
+     "values": [
+      "low",
+      "medium",
+      "high",
+      "xhigh"
+     ]
+    }
+   },
+   {
+    "id": "kimi",
+    "label": "Kimi",
+    "clientId": "kimi",
+    "adapted": true,
+    "readiness": "unknown",
+    "defaultModel": null,
+    "models": [
+     "kimi-code/kimi-for-coding"
+    ],
+    "effort": {
+     "state": "unsupported"
+    }
+   },
+   {
+    "id": "agy-native",
+    "label": "AGY Native",
+    "clientId": "google",
+    "adapted": false,
+    "unadaptedReason": "clowder-bot 还没适配 AGY 的接入方式",
+    "defaultModel": "Gemini 3.1 Pro (High)",
+    "defaultModelFrom": "clientDefaults.gemini.defaultModel",
+    "models": [
+     "Gemini 3.1 Pro (High)",
+     "Gemini 3.1 Pro (Low)",
+     "Gemini 3.6 Flash (High)",
+     "Gemini 3.5 Flash (High)",
+     "Claude Opus 4.6 (Thinking)",
+     "Gemini 3.8 Flash (High)"
+    ],
+    "effort": {
+     "state": "unconfirmed"
+    }
+   },
+   {
+    "id": "opencode",
+    "label": "OpenCode",
+    "clientId": "opencode",
+    "adapted": false,
+    "unadaptedReason": "clowder-bot 还没适配 OpenCode 的接入方式",
+    "defaultModel": null,
+    "models": [
+     "zhipu/glm-5.2",
+     "claude-opus-4-6"
+    ],
+    "effort": {
+     "state": "unconfirmed"
+    }
+   },
+   {
+    "id": "antigravity",
+    "label": "Antigravity IDE 桥接",
+    "clientId": "antigravity",
+    "adapted": false,
+    "unadaptedReason": "需要本机运行 Antigravity IDE（ConnectRPC 桥接），clowder-bot 还没适配",
+    "defaultModel": null,
+    "models": [
+     "gemini-3.1-pro",
+     "claude-opus-4-6"
+    ],
+    "effort": {
+     "state": "unconfirmed"
+    }
+   }
+  ],
+  "carriers": [
+   {
+    "clientId": "anthropic",
+    "runtimeId": "claude"
+   },
+   {
+    "clientId": "openai",
+    "cli": true,
+    "runtimeId": "codex"
+   },
+   {
+    "clientId": "openai",
+    "cli": false,
+    "runtimeId": null,
+    "kind": "cloud",
+    "note": "上游是云端 ChatGPT Pro 席位（远程 MCP，不启动本地 CLI），不是本机 Agent"
+   },
+   {
+    "clientId": "google",
+    "runtimeId": "agy-native"
+   },
+   {
+    "clientId": "opencode",
+    "runtimeId": "opencode"
+   },
+   {
+    "clientId": "antigravity",
+    "runtimeId": "antigravity"
+   },
+   {
+    "clientId": "kimi",
+    "runtimeId": "kimi"
+   }
+  ]
+ }
+}

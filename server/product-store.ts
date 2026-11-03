@@ -13,6 +13,8 @@ export interface BotPresentation {
   timezone?: string;
   pinned?: boolean;
   lastReadMessageId?: string;
+  /** Provenance only; executable configuration lives on the native member. */
+  sourceTemplate?: { id: string; revision: number; name: string };
 }
 interface ProductState {
   version: 1;
@@ -30,6 +32,7 @@ const presentationSchema = z.object({
     avatarSeed: z.string().optional(), avatarData: z.string().optional(), avatarMime: z.string().optional(),
     avatarUpdated: z.number().optional(), timezone: z.string().optional(), pinned: z.boolean().optional(),
     lastReadMessageId: z.string().optional(),
+    sourceTemplate: z.object({ id: z.string(), revision: z.number().int().nonnegative(), name: z.string() }).strict().optional(),
   }).strict()),
   groupThreadIds: z.array(z.string()), folders: z.array(z.string()), deviceName: z.string().optional(),
   messageRefs: z.record(z.string(), z.record(z.string(), z.number().int().positive())),

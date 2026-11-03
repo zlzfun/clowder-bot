@@ -5,12 +5,14 @@ import { ApiError } from '../errors.js';
 import { BotBridge, encode } from '../native/bridge.js';
 import type { NativeCat } from '../native/types.js';
 import { agentBinding } from '../native/agents.js';
+import { catConfigSchema, catConfiguration, sourceTemplateSchema } from '../native/cat-templates.js';
 
 const label = z.string().trim().min(1).max(64).regex(/^[\p{L}\p{N}_ .-]+$/u, '名字包含不支持的字符');
 const seed = z.string().min(1).max(80).regex(/^[^<>\x00-\x1f\x7f]+$/);
 const botBody = { name: label, persona: z.string().max(32768).optional(), description: z.string().max(500).optional(),
   avatar_seed: seed.optional(), templateId: z.string().optional(), timezone: z.string().max(80).optional(),
-  runtimeId: z.string().max(100).optional() };
+  runtimeId: z.string().max(100).optional(), catConfig: catConfigSchema.optional(),
+  sourceTemplate: sourceTemplateSchema.optional(), idempotencyKey: z.string().uuid().optional() };
 const sse = (res: Response, event: string, data: unknown) => {
   if (!res.destroyed && !res.writableEnded) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 };
@@ -25,6 +27,7 @@ export function createXbotCoreRouter(bridge: BotBridge) {
     const [memory, queue, runtimes] = await Promise.all([bridge.notes(thread.id), bridge.queue(thread.id), bridge.runtimes()]);
     return { ...bridge.botItem(cat), persona: cat.roleDescription, timezone: store.bot(cat.id).timezone ?? 'Asia/Shanghai',
       agent: agentBinding(cat, runtimes), persona_card: null, memory, routines: [],
+      cat_config: catConfiguration(cat, runtimes), source_template: store.bot(cat.id).sourceTemplate ?? null,
       agents: queue.activeInvocations.map(i => ({ id: i.invocationId ?? i.catId, type: 'agent', status: i.status ?? 'running', task: 'Clowder AI 正在执行', mode: 'chat', steps: 0, started_at: i.startedAt ? new Date(i.startedAt).toISOString() : '', native: i })),
       native: { cat, thread, queue }, memory_description: '会话共享笔记。长期记忆由 Clowder AI 原生记忆系统管理。' };
   };
@@ -64,10 +67,16 @@ export function createXbotCoreRouter(bridge: BotBridge) {
         status: m.lifecycle?.status ?? (m.isDraft ? 'processing' : 'complete'), ...presentation, native: m,
       })) });
   });
-  router.post('/bots', async (req, res) => { const cat = await bridge.createBot(z.object(botBody).strict().parse(req.body)); res.status(201).json({ name: cat.name, native_id: cat.id }); });
+  router.post('/bots', async (req, res) => {
+    const input = z.object(botBody).strict().superRefine((value, ctx) => {
+      if (value.catConfig && !value.idempotencyKey) ctx.addIssue({ code: 'custom', path: ['idempotencyKey'], message: '创建猫猫需要请求标识' });
+    }).parse(req.body);
+    const cat = await bridge.createBot(input);
+    res.status(201).json({ name: cat.name, native_id: cat.id });
+  });
   router.patch('/bots/:name', async (req, res) => {
     const cat = await bot(req.params.name);
-    const input = z.object({ ...botBody, name: label.optional(), group: z.string().max(80).optional() }).omit({ runtimeId: true, templateId: true }).strict().parse(req.body);
+    const input = z.object({ ...botBody, name: label.optional(), group: z.string().max(80).optional() }).omit({ runtimeId: true, templateId: true, catConfig: true, sourceTemplate: true, idempotencyKey: true }).strict().parse(req.body);
     if (input.group && !store.state.folders.includes(input.group)) throw new ApiError(400, '分组不存在');
     if (input.name && (await bridge.cats()).some(c => c.id !== cat.id && c.name.toLowerCase() === input.name!.toLowerCase())) throw new ApiError(409, '已有同名 Bot');
     const update: Record<string, unknown> = {};

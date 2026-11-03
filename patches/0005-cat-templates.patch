@@ -1,0 +1,380 @@
+diff --git a/packages/api/src/config/bot-cat-templates.ts b/packages/api/src/config/bot-cat-templates.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/api/src/config/bot-cat-templates.ts
+@@ -0,0 +1,197 @@
++import { createHash, randomUUID } from 'node:crypto';
++import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
++import { dirname, join } from 'node:path';
++import { z } from 'zod';
++
++// Reusable creation defaults. Live members, execution and model discovery remain native.
++const choice = z.discriminatedUnion('mode', [
++  z.object({ mode: z.literal('inherit') }).strict(),
++  z.object({ mode: z.literal('explicit'), value: z.string().trim().min(1).max(512) }).strict(),
++]);
++export const botCatConfigSchema = z.object({
++  runtimeId: z.string().min(1).max(160).nullable(),
++  breed: z.discriminatedUnion('mode', [
++    z.object({ mode: z.literal('auto') }).strict(),
++    z.object({ mode: z.literal('explicit'), breedId: z.string().min(1).max(64) }).strict(),
++  ]),
++  model: choice,
++  effort: choice,
++  portrait: z.object({
++    roleDescription: z.string().max(32768), personality: z.string().max(32768).optional(),
++    teamStrengths: z.string().max(4096).optional(), strengths: z.array(z.string().max(200)).max(50).optional(),
++    caution: z.string().max(4096).nullable().optional(),
++  }).strict(),
++}).strict();
++export const botCatTemplateInputSchema = botCatConfigSchema.extend({
++  name: z.string().trim().min(1).max(64), nameHint: z.string().trim().max(64).default(''),
++});
++const revision = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER - 1);
++export const botCatTemplateUpdateSchema = botCatTemplateInputSchema.extend({ expectedRevision: revision });
++export const botCatTemplateDeleteSchema = z.object({ expectedRevision: revision }).strict();
++const templateSchema = botCatTemplateInputSchema.extend({
++  id: z.string().min(1).max(160), revision,
++  source: z.object({ kind: z.enum(['native-seed', 'user']), breedId: z.string().optional(), variantId: z.string().optional() }).strict(),
++}).strict();
++export const botCatInstantiateSchema = z.object({
++  name: z.string().trim().min(1).max(64).regex(/^[\p{L}\p{N}_ .-]+$/u),
++  catConfig: botCatConfigSchema,
++  sourceTemplate: z.object({ id: z.string().min(1).max(160), revision }).strict().optional(),
++  idempotencyKey: z.string().uuid(),
++}).strict();
++export type BotCatConfig = z.infer<typeof botCatConfigSchema>;
++export type BotCatTemplate = z.infer<typeof templateSchema>;
++export type BotCatCreation = z.infer<typeof botCatInstantiateSchema>;
++export interface BotCatBreed { id: string; name: string; color: { primary: string; secondary: string } }
++const referenceSchema = z.object({ id: z.string(), revision, name: z.string() }).strict();
++const reservationSchema = z.object({
++  requestHash: z.string(), payload: z.record(z.string(), z.unknown()), sourceTemplate: referenceSchema.nullable(),
++}).strict();
++const stateSchema = z.object({
++  version: z.literal(1),
++  entries: z.record(z.string(), z.union([templateSchema, z.object({ deleted: z.literal(true), revision }).strict()])),
++  creations: z.record(z.string(), reservationSchema),
++}).strict();
++type State = z.infer<typeof stateSchema>;
++export class BotCatTemplateError extends Error {
++  constructor(readonly status: number, message: string) { super(message); }
++}
++const record = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
++const rows = (value: unknown): Record<string, any>[] => Array.isArray(value) ? value.map(record) : [];
++const str = (value: unknown, fallback = '') => typeof value === 'string' ? value : fallback;
++const selected = (value: unknown): BotCatConfig['model'] => str(value).trim() ? { mode: 'explicit', value: str(value).trim() } : { mode: 'inherit' };
++const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object'
++  ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonical(item)])) : value;
++export const botCatRequestHash = (value: unknown) => createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
++
++export function mergeBotCatTemplateSource(base: unknown, project: unknown) {
++  const shipped = record(base), local = record(project);
++  const overrides = rows(local.breeds), known = new Set(rows(shipped.breeds).map(b => b.id));
++  // Empty bootstrap member breeds do not erase the shipped creation menu.
++  // User template deletions live in this library's tombstones, not the member roster.
++  return { ...shipped, ...local,
++    breeds: [...rows(shipped.breeds).map(b => overrides.find(o => o.id === b.id) || b), ...overrides.filter(b => !known.has(b.id))],
++    roleTemplates: rows(local.roleTemplates).length ? local.roleTemplates : shipped.roleTemplates,
++  };
++}
++
++export function botCatTemplateSeeds(source: unknown): { templates: BotCatTemplate[]; breeds: BotCatBreed[] } {
++  const raw = record(source), nativeBreeds = rows(raw.breeds), roles = rows(raw.roleTemplates);
++  const identities = roles.length ? roles : nativeBreeds.filter(b => !b.relationshipKey || b.relationshipKey === b.id);
++  const templates: BotCatTemplate[] = [], breeds: BotCatBreed[] = [];
++  const seen = new Set<string>();
++  for (const role of identities) {
++    const id = role.id === 'turkish-van' ? 'moonshot' : str(role.relationshipKey || role.id);
++    if (!id || seen.has(id)) continue;
++    seen.add(id);
++    const breed = nativeBreeds.find(b => b.id === id) || {};
++    const variant = rows(breed.variants).find(v => v.id === breed.defaultVariantId) || rows(breed.variants)[0] || {};
++    const client = str(variant.clientId);
++    const runtimeId = ({ anthropic: 'claude', openai: 'codex', google: 'agy-native', kimi: 'kimi', opencode: 'opencode', antigravity: 'antigravity' } as Record<string, string>)[client] || null;
++    const color = record(role.color || breed.color);
++    const title = str(role.name, str(breed.displayName, id));
++    breeds.push({ id, name: title, color: { primary: str(color.primary, '#888888'), secondary: str(color.secondary, '#eeeeee') } });
++    const portrait = {
++      roleDescription: str(variant.roleDescription, str(breed.roleDescription, str(role.roleDescription))),
++      personality: str(variant.personality, str(breed.personality, str(role.personality))),
++      teamStrengths: str(variant.teamStrengths, str(breed.teamStrengths, str(role.teamStrengths))),
++      ...(Array.isArray(variant.strengths) ? { strengths: variant.strengths.filter((s: unknown) => typeof s === 'string') } : {}),
++      ...(typeof variant.caution === 'string' ? { caution: variant.caution } : {}),
++    };
++    const value = {
++      id: `seed:${id}`, name: title, nameHint: str(role.nickname, str(breed.nickname)), runtimeId,
++      breed: ['bengal', 'golden-chinchilla', 'dsh'].includes(id) || !runtimeId
++        ? { mode: 'explicit' as const, breedId: id } : { mode: 'auto' as const },
++      model: selected(variant.defaultModel), effort: selected(record(variant.cli).effort), portrait,
++      source: { kind: 'native-seed' as const, breedId: id, ...(variant.id ? { variantId: str(variant.id) } : {}) },
++    };
++    // A changed shipped default has a new CAS revision, even before a user override exists.
++    templates.push(templateSchema.parse({ ...value, revision: parseInt(botCatRequestHash(value).slice(0, 12), 16) }));
++  }
++  return { templates, breeds };
++}
++
++export function inferBotCatBreed(model: string): string | null {
++  const value = model.toLowerCase().trim();
++  const families: [string, RegExp][] = [
++    ['ragdoll', /(?:claude|\bopus\b|\bsonnet\b|\bhaiku\b|\bfable\b)/],
++    ['maine-coon', /(?:\bgpt(?:-|\b)|\bcodex\b|^o[134](?:-|$))/],
++    ['siamese', /gemini/],
++    ['dragon-li', /(?:\bglm(?:-|\b)|zhipu\/)/],
++    ['moonshot', /(?:kimi|moonshot)/],
++    ['dsh', /(?:deepseek|\bdsh\b)/],
++  ];
++  const matches = families.filter(([, pattern]) => pattern.test(value));
++  return matches.length === 1 ? matches[0][0] : null;
++}
++
++/** Mutations run under Clowder's existing catalog/file lock, never a Bot-side store. */
++export class BotCatTemplateStore {
++  readonly file: string;
++  constructor(readonly root: string, readonly source: () => unknown) { this.file = join(root, '.cat-cafe', 'bot-cat-templates.json'); }
++  private read(): State {
++    if (!existsSync(this.file)) return { version: 1, entries: {}, creations: {} };
++    // Invalid state is never replaced by fresh defaults.
++    return stateSchema.parse(JSON.parse(readFileSync(this.file, 'utf8')));
++  }
++  private write(state: State) {
++    stateSchema.parse(state);
++    mkdirSync(dirname(this.file), { recursive: true, mode: 0o700 });
++    const tmp = `${this.file}.${process.pid}.${randomUUID()}.tmp`;
++    writeFileSync(tmp, JSON.stringify(state, null, 2) + '\n', { mode: 0o600 });
++    renameSync(tmp, this.file);
++  }
++  private merged(state: State) {
++    const { templates, breeds } = botCatTemplateSeeds(this.source());
++    const known = new Set(templates.map(t => t.id));
++    const effective = templates.flatMap(t => {
++      const saved = state.entries[t.id];
++      return saved && 'deleted' in saved ? [] : [saved || t];
++    });
++    for (const [id, saved] of Object.entries(state.entries)) if (!known.has(id) && !('deleted' in saved)) effective.push(saved);
++    return { templates: effective, breeds };
++  }
++  list() { return this.merged(this.read()); }
++  get(id: string) {
++    const template = this.list().templates.find(t => t.id === id);
++    if (!template) throw new BotCatTemplateError(404, '模板不存在或已删除');
++    return template;
++  }
++  save(input: z.infer<typeof botCatTemplateInputSchema>, id?: string, expectedRevision?: number) {
++    const value = botCatTemplateInputSchema.parse(input), state = this.read();
++    const current = id ? this.merged(state).templates.find(t => t.id === id) : undefined;
++    if (id && !current) throw new BotCatTemplateError(404, '模板不存在或已删除');
++    if (current && current.revision !== expectedRevision) throw new BotCatTemplateError(409, '模板已更新，请重新打开');
++    const template = templateSchema.parse({ ...value, id: current?.id || `custom:${randomUUID()}`, revision: current ? current.revision + 1 : 1, source: current?.source || { kind: 'user' } });
++    this.validateBreed(value);
++    state.entries[template.id] = template; this.write(state);
++    return template;
++  }
++  remove(id: string, expectedRevision: number) {
++    const state = this.read(), current = this.merged(state).templates.find(t => t.id === id);
++    if (!current) throw new BotCatTemplateError(404, '模板不存在或已删除');
++    if (current.revision !== expectedRevision) throw new BotCatTemplateError(409, '模板已更新，请重新打开');
++    state.entries[id] = { deleted: true, revision: current.revision + 1 }; this.write(state);
++  }
++  validateBreed(config: BotCatConfig) {
++    if (config.breed.mode === 'explicit' && !this.list().breeds.some(b => b.id === (config.breed as { breedId: string }).breedId))
++      throw new BotCatTemplateError(422, '请选择有效猫种');
++  }
++  previous(input: BotCatCreation) {
++    const previous = this.read().creations[input.idempotencyKey];
++    if (previous && previous.requestHash !== botCatRequestHash(input)) throw new BotCatTemplateError(409, '创建请求的配置已改变，请重新创建');
++    return previous;
++  }
++  reserve(input: BotCatCreation, payload: Record<string, unknown>) {
++    const state = this.read(), previous = state.creations[input.idempotencyKey];
++    const requestHash = botCatRequestHash(input);
++    if (previous) {
++      if (previous.requestHash !== requestHash) throw new BotCatTemplateError(409, '创建请求的配置已改变，请重新创建');
++      return previous;
++    }
++    const template = input.sourceTemplate ? this.merged(state).templates.find(t => t.id === input.sourceTemplate!.id) : undefined;
++    if (input.sourceTemplate && (!template || template.revision !== input.sourceTemplate.revision)) throw new BotCatTemplateError(409, '模板已更新或删除，请重新选择');
++    const saved = { requestHash, payload, sourceTemplate: template ? { id: template.id, revision: template.revision, name: template.name } : null };
++    state.creations[input.idempotencyKey] = saved; this.write(state);
++    return saved;
++  }
++}
+diff --git a/packages/api/src/routes/bot-cat-template-routes.ts b/packages/api/src/routes/bot-cat-template-routes.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/api/src/routes/bot-cat-template-routes.ts
+@@ -0,0 +1,120 @@
++import { createHash } from 'node:crypto';
++import { readFileSync } from 'node:fs';
++import { fileURLToPath } from 'node:url';
++import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
++import { ZodError } from 'zod';
++import { readResolvedTemplateSource } from '../config/cat-config-loader.js';
++import {
++  BotCatTemplateError, BotCatTemplateStore, botCatInstantiateSchema, botCatTemplateInputSchema,
++  botCatTemplateUpdateSchema, botCatTemplateDeleteSchema, inferBotCatBreed, mergeBotCatTemplateSource,
++} from '../config/bot-cat-templates.js';
++import { resolveProjectTemplatePath } from '../config/project-template-path.js';
++import { withRuntimeCatMutationLock } from '../config/runtime-cat-catalog.js';
++import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
++import { resolveHeaderUserId } from '../utils/request-identity.js';
++import { discoverNativeRuntimesWithReadiness } from './native-runtimes.js';
++import type { RuntimeModelCatalog } from './runtime-model-catalog.js';
++
++const creationTails = new Map<string, Promise<unknown>>();
++async function serializeCreation<T>(root: string, operation: () => Promise<T>): Promise<T> {
++  const previous = creationTails.get(root) || Promise.resolve();
++  const next = previous.catch(() => {}).then(operation);
++  creationTails.set(root, next);
++  try { return await next; } finally { if (creationTails.get(root) === next) creationTails.delete(root); }
++}
++
++export function registerBotCatTemplateRoutes(app: FastifyInstance) {
++  const store = () => {
++    const root = resolveActiveProjectRoot();
++    return new BotCatTemplateStore(root, () => mergeBotCatTemplateSource(
++      JSON.parse(readFileSync(process.env.CAT_TEMPLATE_BASE_PATH || fileURLToPath(new URL('../../../../cat-template.json', import.meta.url)), 'utf8')),
++      JSON.parse(readResolvedTemplateSource(resolveProjectTemplatePath(root))),
++    ));
++  };
++  const handle = (operation: (request: FastifyRequest, reply: FastifyReply) => unknown) => async (request: FastifyRequest, reply: FastifyReply) => {
++    if (!resolveHeaderUserId(request)) return reply.code(401).send({ error: '需要登录' });
++    try { return await operation(request, reply); }
++    catch (error) {
++      if (error instanceof BotCatTemplateError) return reply.code(error.status).send({ error: error.message });
++      if (error instanceof ZodError) return reply.code(400).send({ error: '模板配置无效', fields: error.issues.map(i => i.path.join('.')) });
++      app.log.error({ err: error }, 'Bot cat template operation failed');
++      return reply.code(500).send({ error: '无法读取或保存模板' });
++    }
++  };
++  const id = (request: FastifyRequest) => (request.params as { id: string }).id;
++  const inject = async (request: FastifyRequest, url: string, payload?: object, extra: Record<string, string> = {}) => {
++    // Reuse native authentication, model capability and member creation validation.
++    const headers = { ...request.headers, ...extra };
++    delete headers['content-length']; delete headers['transfer-encoding'];
++    const response = await app.inject({ method: payload ? 'POST' : 'GET', url, headers, ...(payload ? { payload } : {}) });
++    let result: any;
++    try { result = response.json(); } catch { throw new BotCatTemplateError(502, '原生接口返回异常'); }
++    if (response.statusCode >= 400) throw new BotCatTemplateError(response.statusCode, typeof result.error === 'string' ? result.error : '原生配置校验失败');
++    return result;
++  };
++  app.get('/api/bot-cat-templates', handle(() => store().list()));
++  app.get('/api/bot-cat-templates/:id', handle(request => ({ template: store().get(id(request)) })));
++  app.post('/api/bot-cat-templates', handle(async (request, reply) => {
++    const input = botCatTemplateInputSchema.parse(request.body), library = store();
++    const template = await withRuntimeCatMutationLock(library.root, () => library.save(input));
++    return reply.code(201).send({ template });
++  }));
++  app.put('/api/bot-cat-templates/:id', handle(async request => {
++    const { expectedRevision, ...input } = botCatTemplateUpdateSchema.parse(request.body), library = store();
++    return { template: await withRuntimeCatMutationLock(library.root, () => library.save(input, id(request), expectedRevision)) };
++  }));
++  app.delete('/api/bot-cat-templates/:id', handle(async request => {
++    const { expectedRevision } = botCatTemplateDeleteSchema.parse(request.body), library = store();
++    await withRuntimeCatMutationLock(library.root, () => library.remove(id(request), expectedRevision));
++    return { status: 'ok' };
++  }));
++  app.post('/api/bot-cat-templates/instantiate', handle(async (request, reply) => {
++    const input = botCatInstantiateSchema.parse(request.body), library = store();
++    return serializeCreation(library.root, async () => {
++      let reservation = library.previous(input);
++      if (!reservation) {
++        const config = input.catConfig;
++        if (!config.portrait.roleDescription.trim()) throw new BotCatTemplateError(422, '请填写职责');
++        library.validateBreed(config);
++        const { runtimes } = await discoverNativeRuntimesWithReadiness(library.root, true);
++        const runtime = runtimes.find(r => r.id === config.runtimeId);
++        if (!runtime || !runtime.installed) throw new BotCatTemplateError(422, '未检测到所选 Agent');
++        const supported: Record<string, string> = { claude: 'anthropic', codex: 'openai', kimi: 'kimi' };
++        if (supported[runtime.id] !== runtime.clientId || ('acp' in runtime && runtime.acp) || 'agyCarrier' in runtime)
++          throw new BotCatTemplateError(422, '所选 Agent 尚未适配');
++        if (runtime.readiness.status === 'login_required' || runtime.readiness.status === 'not_installed')
++          throw new BotCatTemplateError(422, '请先配置所选 Agent');
++        const existing = await inject(request, '/api/cats');
++        if (existing.cats.some((cat: { name: string }) => cat.name.toLowerCase() === input.name.toLowerCase()))
++          throw new BotCatTemplateError(409, '已有同名猫猫');
++        const model = config.model.mode === 'explicit' ? config.model.value : '';
++        const catalog: RuntimeModelCatalog = await inject(request, '/api/cats/runtime-models', { runtimeId: runtime.id, ...(model ? { model } : {}) });
++        const effectiveModel = model || catalog.defaultModel || ('configuredModel' in runtime ? runtime.configuredModel : '') || '';
++        const breedId = config.breed.mode === 'explicit' ? config.breed.breedId : inferBotCatBreed(effectiveModel);
++        const breed = library.list().breeds.find(b => b.id === breedId);
++        if (!breed) throw new BotCatTemplateError(422, '无法判断猫种，请手动选择');
++        const efforts = catalog.models.find(m => m.value === effectiveModel)?.efforts
++          ?? (catalog.selectedModel === effectiveModel ? catalog.effortOptions : undefined);
++        const explicitEffort = config.effort.mode === 'explicit' ? config.effort.value : null;
++        if (explicitEffort !== null && efforts !== undefined && !efforts.some(e => e.value === explicitEffort))
++          throw new BotCatTemplateError(422, efforts.length ? '该模型不支持所选推理强度' : '该模型不支持设置推理强度');
++        const catId = `bot-${createHash('sha256').update(input.idempotencyKey).digest('hex').slice(0, 24)}`;
++        const payload = {
++          catId, name: input.name, displayName: input.name, nickname: input.name, breedId: breed.id,
++          color: breed.color, mentionPatterns: [`@${input.name}`, `@${catId}`],
++          clientId: runtime.clientId, configurationSource: 'native_tool', defaultModel: model,
++          cli: { ...(runtime.command ? { command: runtime.command } : {}), effort: config.effort.mode === 'explicit' ? config.effort.value : null, defaultArgs: [] },
++          ...config.portrait,
++        };
++        // Recheck source revision inside the native file lock after asynchronous discovery.
++        reservation = await withRuntimeCatMutationLock(library.root, () => library.reserve(input, payload));
++      }
++      const journey = 'clowder-bot-template';
++      const result = await inject(request, '/api/cats', reservation.payload, {
++        'x-cat-cafe-onboarding-journey': journey,
++        'idempotency-key': `onboarding:${journey}:cat:${input.idempotencyKey}`,
++      });
++      return reply.code(201).send({ cat: result.cat, sourceTemplate: reservation.sourceTemplate });
++    });
++  }));
++}
+diff --git a/packages/api/src/config/runtime-cat-catalog.ts b/packages/api/src/config/runtime-cat-catalog.ts
+--- a/packages/api/src/config/runtime-cat-catalog.ts
++++ b/packages/api/src/config/runtime-cat-catalog.ts
+@@ -17,7 +17,7 @@
+ import { clearBudgetCache } from './cat-budgets.js';
+ import { bootstrapCatCatalog, readCatCatalog, resolveCatCatalogPath } from './cat-catalog-store.js';
+ import type { AcpVariantConfig } from './cat-config-loader.js';
+-import { _resetCachedConfig, loadCatConfig, parseRawCatConfig, toAllCatConfigs } from './cat-config-loader.js';
++import { _resetCachedConfig, loadCatConfig, parseRawCatConfig, toAllCatConfigs, readResolvedTemplateSource } from './cat-config-loader.js';
+ import { clearVoiceCache } from './cat-voices.js';
+ import { planClaudeAccountBinding } from './claude-account-binding.js';
+ import { coCreatorMentionInputSchema } from './co-creator-mention.js';
+@@ -474,8 +474,19 @@
+   const nextBreed = createBreedFromInput(input) as unknown as Record<string, any>;
+   const targetBreedId = input.breedId?.trim();
+   if (targetBreedId && targetBreedId !== input.catId) {
+-    const targetBreed = catalog.breeds.find((breed: { id: string }) => breed.id === targetBreedId);
+-    if (!targetBreed) throw new Error(`Unknown breedId "${targetBreedId}"; choose an existing breed`);
++    let targetBreed = catalog.breeds.find((breed: { id: string }) => breed.id === targetBreedId);
++    if (!targetBreed) {
++      // A native-owned first member may establish a shipped template family.
++      // Only this member is added; never activate the other shipped variants.
++      const source = JSON.parse(readResolvedTemplateSource(resolveProjectTemplatePath(projectRoot))) as {
++        roleTemplates?: Array<{ id: string; name?: string }>;
++      };
++      const identity = source.roleTemplates?.find(role => (role.id === 'turkish-van' ? 'moonshot' : role.id) === targetBreedId);
++      if (!input.creationReceipt || input.configurationSource !== 'native_tool' || !identity)
++        throw new Error(`Unknown breedId "${targetBreedId}"; choose an existing breed`);
++      targetBreed = { ...nextBreed, name: identity.name || nextBreed.name, displayName: identity.name || nextBreed.displayName, variants: [] };
++      catalog.breeds.push(targetBreed);
++    }
+     const variant = nextBreed.variants[0];
+     if (targetBreed.variants.some((member: { id: string }) => member.id === variant.id)) {
+       throw new Error(`Variant "${variant.id}" already exists in breed "${targetBreedId}"`);
+diff --git a/packages/api/src/routes/cats.ts b/packages/api/src/routes/cats.ts
+--- a/packages/api/src/routes/cats.ts
++++ b/packages/api/src/routes/cats.ts
+@@ -4,6 +4,7 @@
+ import { dshLauncherProfileState, InvalidDshProfile } from './native-dsh-profile.js';
+ import { discoverNativeRuntimesWithReadiness } from './native-runtimes.js';
+ import { registerRuntimeCatalogRoute } from './runtime-catalog-route.js';
++import { registerBotCatTemplateRoutes } from './bot-cat-template-routes.js';
+ /**
+  * Cats API Routes
+  * GET /api/cats - 获取所有猫猫信息
+@@ -940,6 +941,7 @@
+ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opts) => {
+   if (opts.memberAssets) registerMemberCanonResponse(app, opts.memberAssets);
+   registerRuntimeCatalogRoute(app);
++  registerBotCatTemplateRoutes(app);
+   registerDshSetupRoutes(app);
+   app.get('/api/cats/native-runtimes', async (request, reply) => {
+     if (!resolveHeaderUserId(request)) return reply.code(401).send({ error: '需要登录后检查本机工具' });

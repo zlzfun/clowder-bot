@@ -27,7 +27,7 @@
       "file": "app.js",
       "target": "client/public/app.js",
       "sourceSha256": "1248f793493826bf044359c71e7d8772ccc3472d6021d6abb979dff9b6cb29bc",
-      "sha256": "6a91e2db6ca74c8efae2dd42424e152a5ef7627f5dccd2ba61954e818af786d7",
+      "sha256": "2cb246be497c4681bd185beb88a0534d8d35808d4251522e53d224620571837b",
       "unchanged": false
     },
     {
@@ -153,7 +153,7 @@
       "file": "index.html",
       "target": "client/index.html",
       "sourceSha256": "a4160c18e23489fbc6a9e21fe494e1ac52840a67b2e138997400a0b42835b556",
-      "sha256": "a35cee73a3938436f16646e7b92a6687cb6f3644b6e0ae836c708b1fe636e7a2",
+      "sha256": "dc11974e85953dc7bdb92ff51bcbab21ee724510443b4b55d3dbf97d70034a75",
       "unchanged": false
     },
     {
@@ -587,13 +587,13 @@
     },
     {
       "target": "client/public/agents.js",
-      "description": "Local Agent access: settings pane, Bot Agent picker and new-Bot Agent field",
-      "sha256": "49ace8cc321ebe2f231c256e4ea25a6ba22828e0d089fdd9747676f381a02596"
+      "description": "Local Agent access: settings list grouped by installation with search and one status line per Agent, per-Agent detail level (status, Bots, defaults, folded detection evidence) wired to the settings bar via onLevel; Bot Agent trigger and switch dialog that names only the carrier, model or effort a switch really clears (new-cat Agent choice moved to cat-templates.js)",
+      "sha256": "b4859c61a8825865997f2d8ed1b5faa5c6f261160908511da07324e75790ca5a"
     },
     {
       "target": "client/public/agents.css",
-      "description": "Local Agent access styles on existing XBot tokens and components",
-      "sha256": "3e4ac1a10888ceeef944753ebdc865233a75a8bf840baf947e3ca64ddb2491d5"
+      "description": "Local Agent access styles on existing XBot tokens and components: settings list/detail on the skills list shell and bico marks, earlier row layout kept for the template review page, agent-facts reused for a cat's copied configuration in its drawer",
+      "sha256": "d01a8c9c584eafb092944c676c0756431d608bfa0734720e90dd4c5f4c1b63cb"
     },
     {
       "target": "client/public/chat-presentation.js",
@@ -604,6 +604,54 @@
       "target": "client/public/chat-presentation.css",
       "description": "Single-chat face/name continuation and execution-record line on existing XBot classes and tokens",
       "sha256": "a18931567181b2b346056c55315132a7e559862dab52bddd7f42e03f2bfd02bf"
+    },
+    {
+      "target": "client/public/template-lab/index.html",
+      "description": "Cat template review prototype (second version after user correction): the current shell markup from client/index.html with sample cats, top pin-row plus for creation, full settings navigation with 模板 and 本地 Agent; reads only template-lab/fixture.json; state in a namespaced sessionStorage key",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-03; review prototype, not loaded by production pages",
+      "sha256": "b1d2acdd01489e99166176fb1057eaf7e41178c138cce9aeba9bc4124c5d8eff"
+    },
+    {
+      "target": "client/public/template-lab/lab.css",
+      "description": "Cat template prototype additions on existing --x-* tokens and XBot components: template fields, create dialog body, drawer configuration blocks, sample badge; no new colors, original CSS unchanged",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-03; review prototype, not loaded by production pages",
+      "sha256": "e8c36061ba3c701d85ecd6713321782927c7a2132e5802313e2410bdc3b00958"
+    },
+    {
+      "target": "client/public/template-lab/model.js",
+      "description": "Cat template prototype rules without DOM: model-family breed inference, effort capability states, runtime/model change reconciliation, validation, seed import and cat snapshots",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-03; review prototype, not loaded by production pages",
+      "sha256": "ec5299a5a4db019026781f733fa38f6cbe7bd86f8cbd511f6873e0d4160a8bb4"
+    },
+    {
+      "target": "client/public/template-lab/lab.js",
+      "description": "Cat template prototype UI on the app shell: pin-row plus menu, roster, empty chat, info drawer, settings panes, template library/editor, template-first and from-scratch creation with collapsed customization, sample cat snapshots; textContent only, composer never sends, no API calls",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-03; review prototype, not loaded by production pages",
+      "sha256": "5441e004bd73a83ae531d9dbb3349b8d0d2144d4da2062c2e303143b1b27e214"
+    },
+    {
+      "target": "client/public/template-lab/fixture.json",
+      "description": "Cat template prototype data: read-only field subset of upstream/clowder-ai cat-template.json (commit and source sha256 inside) plus labelled sample Agent capabilities",
+      "attribution": "Upstream fields from Clowder AI (MIT, docs/licenses/clowder-ai-MIT.txt) at commit 42017e0cea07e3e259e7fb183be70433f05e131c, copied verbatim; sample section authored by local Claude Code (claude-opus-5-5) on 2026-11-03",
+      "sha256": "d337b69b0c302c27d10e88181b8db5d6c528e27d5c8f63b9e676532092e809bb"
+    },
+    {
+      "target": "client/public/cat-template-rules.js",
+      "description": "Cat template rules without DOM or network: CatConfig/CatTemplate normalisation, Agent usability, runtime-models effort capability, model-family breed, validation, request bodies and short summaries; shared by cat-templates.js and tests",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-03",
+      "sha256": "dcf60374fe04be5d7547f847ae0e4ce96f6a307a2864ec78b8d2c2f3bcd34c03"
+    },
+    {
+      "target": "client/public/cat-templates.js",
+      "description": "Cat templates: settings 模板 pane (flat list, search, editor, delete) mounted in the persona slot, the single 新建猫猫 layer opened from the shell's 新建 menu, and the copied-configuration rows for a cat's drawer; reads /xbot-api/cat-templates, /xbot-api/agents and /xbot-api/agents/:id/models, no sample data",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-03",
+      "sha256": "3fe08c5c20460dac5726c60b67f59a42c53f10933c1ceabd74cce40405eb02af"
+    },
+    {
+      "target": "client/public/cat-templates.css",
+      "description": "Cat template styles on the skills/persona settings shell, the original modal card and the 3D cat portraits; only existing tokens, original CSS unchanged",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-03",
+      "sha256": "b10d2845d218cba3f34a2f1f6bc1d07bf62a8dd00b65e6a818d55fec9d8ab674"
     }
   ]
 }

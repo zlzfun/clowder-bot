@@ -26,7 +26,9 @@
     "test:task-sdk": "node scripts/run-native-check.mjs check-task-background-sdk.mjs",
     "test:task-http": "node scripts/check-task-http-journey.mjs",
     "test:task-mcp": "node scripts/run-native-check.mjs test-native-mcp-bridge.mjs",
-    "test:multi-agent": "node scripts/check-multi-agent-journey.mjs"
+    "test:multi-agent": "node scripts/check-multi-agent-journey.mjs",
+    "test:cat-templates-native": "node --test scripts/test-cat-templates-native.mjs",
+    "test:cat-templates-http": "node --env-file-if-exists=.env --import tsx scripts/check-cat-templates-http.ts"
   },
   "dependencies": {
     "express": "^5.1.0",
