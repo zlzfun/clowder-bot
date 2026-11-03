@@ -20,8 +20,13 @@
     "test:native": "BOT_NATIVE_TEST=1 node --env-file-if-exists=.env --import tsx --test tests/native-integration.test.ts && node --test scripts/test-native-policy.mjs",
     "verify:upstream": "node scripts/verify-upstream.mjs",
     "test:background-policy": "node --test scripts/test-background-policy.mjs",
-    "test:background-output": "node .runtime/clowder-ai/packages/api/scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import ./test/helpers/setup-cat-registry.js --test ../../../../scripts/test-background-output.mjs",
-    "test:background-journey": "node --env-file-if-exists=.env scripts/check-background-journey.mjs"
+    "test:background-output": "node scripts/run-native-check.mjs test-background-output.mjs",
+    "test:background-journey": "node --env-file-if-exists=.env scripts/check-background-journey.mjs",
+    "test:task-background": "node scripts/run-native-check.mjs test-task-background.mjs",
+    "test:task-sdk": "node scripts/run-native-check.mjs check-task-background-sdk.mjs",
+    "test:task-http": "node scripts/check-task-http-journey.mjs",
+    "test:task-mcp": "node scripts/run-native-check.mjs test-native-mcp-bridge.mjs",
+    "test:multi-agent": "node scripts/check-multi-agent-journey.mjs"
   },
   "dependencies": {
     "express": "^5.1.0",

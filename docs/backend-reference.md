@@ -100,3 +100,47 @@ SDK 的一次 `result` 不等于整个 invocation 结束。上游已经持续消
 `server/native/message-presentation.ts` 按同一成员与精确 turn 身份关联 stream/callback，在已有显式发言时将累计记录标记为 `activity`，前端以可展开的执行过程呈现。正式回复仍按原生顺序展示。单聊和群聊均携带每条消息的真实 `speaker`，避免当前选中的猫覆盖其他发送者身份。分类只作用于读取投影，不删除或改写原生记录；没有关联证据、错误和取消的回复保留普通消息呈现。当前关联限定在返回页内，跨分页时保守保留普通回复。
 
 本次验证：常规测试 43 通过、2 个按需原生集成项跳过；构建、生产 smoke、前端完整性和上游完整性通过。浏览器检查了原验收对话的首条正式回复、默认折叠与展开内容；隔离夹具检查了单聊/群聊不同猫与已移除成员的身份，以及 SSE 更新后保留展开状态、阅读过程中不跳到底部。原验收对话 14 条原生消息的修复前后 SHA-256 完全一致，投影为 5 条用户输入、1 条执行过程、8 条正式回复，顺序保持。证据保存在 `.runtime/chat-presentation-fix/live-evidence.json`，截图为同目录的 `chat-fixed.jpg` 和 `multi-cat-verified.jpg`。本次没有重新触发真实长程模型任务，验证范围是呈现修复。
+
+## 原生 Task 与后台执行绑定（2026-11-02）
+
+最小原型继续使用主 Agent + Claude SDK 后台 subagent。Clowder AI 是 Task、执行、消息、球权、队列与记忆的唯一权威；Bot 只代理 HTTP、订阅事件和显示状态，不保存第二套任务账本或调度状态。
+
+| 概念 | 权威与边界 |
+| --- | --- |
+| Task | 原生普通 Task，保存业务目标、ownerCatId、ownerRevision、执行引用及父 Task 引用。 |
+| 球权与传球 | 复用原生消息 action、Task-backed handoff、Queue 和 custody。聊天中提及另一成员不等于完成负责人交接。 |
+| 主 Agent | 接收新消息、选择负责人、原子认领、委派、检查结果及最终报告。保持原生 invocation，不另设 router Agent。 |
+| 后台执行 | Task 当前一次 attempt；绑定 invocation、session、tool_use_id 与 SDK task_id。它的 completed 只是执行结果，不自动把业务 Task 标为 done。 |
+| 多层委派 | 每层创建独立原生子 Task，持久化 delegatedFromTaskId，再由该层主 Agent 通过原生 A2A 委派。后台子代理不递归创建新的未绑定执行。 |
+
+自动抢单复用原生成员画像/能力资料与路由上下文。Bot 开关启用时，现有 get_thread_cats 增加 memberProfiles，只读投影线程 preferredCats 名册对应的原生 roleDescription/teamStrengths；这些字段不代表活跃状态、授权或机器评分。由主 Agent 结合原生可路由信息判断候选，再调用 `update_task(status=doing, expectedOwnerRevision)` 原子认领。竞争失败时不启动；没有另写常驻竞价或扫描机器人。新工作适合另一成员时可直接创建以其为 owner 的 Task 并原生派发。成员白名单仍在执行入口、后台准入和交接目标处校验。画像参与判断不等于路由质量已经量化验证。
+
+P004 为原生 Task 增加可选的后台执行字段，仍序列化在原有 Redis Task hash；内存表仅持有当前 SDK 控制句柄。宿主在 Agent 工具执行前预留 attempt；只有可信 SDK 生命周期事件才能绑定 SDK task_id 和确认终态。模型提供的 `[task:ID]` 仅是分配请求，不是权限凭据。旧 attempt、旧 ownerRevision、错误 session、来源消息撤回均不能覆盖新执行。
+
+停止与交接规则：
+
+- `stop` 持久化停止意图，精确停止该 Task 及其子树的执行。不会取消共享主 invocation 或无关兄弟任务；`stopping` 不表示已经停止。
+- `cancel` 还记录业务撤销标志，禁止新的执行和后代准入。已完成的外部副作用不会被“撤销”按钮回滚。
+- `resume` 仅解除停止/撤销标志；不自动启动新 attempt。原生记录尚无终态证明时拒绝恢复。HTTP 控制使用原生 session，Agent 回调仅能 stop/cancel 自己当前负责的 Task。
+- 交接使用原生 post_message 的结构化 Task action。旧执行及已关联后代的终态确认后才释放精确 Task 引用、在负责人变化时递增 ownerRevision，并派发给接手者；不写父 invocation 的 teardown 来伪造子任务结束。
+- 交接内部的停止与用户停止分别记录来源，并绑定精确的交接消息。交接成功（包括同一负责人接续）只解除本次交接的停止标志；用户后来单独停止或撤销的子任务不会被顺带恢复，原有业务 blocked 状态保持不变。交接被拒时将清理意图持久化于原生 Task，待整棵相关树的停止得到证明后，由终态回执或原生读取恢复路径清理该次交接标记；不会自动重启。
+- 已认领但尚未启动后台执行的任务，由当前主 Agent 显式 update 为 todo/blocked 让出绑定，再交接。禁止为了转移一个尚未绑定的 Task 取消整个共享会话。
+- 跨猫子 Task 若是独立 invocation，复用原生精确 invocation 停止；若处于共享 invocation 但缺少子执行绑定，记录未确认状态并拒绝扩大停止范围。返回 `unconfirmedTaskIds`，界面不能宣称全部已停。非 SDK 的 invocation 若同时承载子树之外的 Task，也按共享执行处理。宿主已丢失时同样明确返回未确认。
+- 重启/宿主丢失先投影为 unknown。只有原生 exact provider teardown/进程所有权证明，或同一 session、SDK task 的 worker_restart 终态回执，才能解除未知状态；没有证明时保留等待，不自动重试造成重复副作用。
+- 结果迟到只更新仍匹配的 attempt；取消不变成业务完成。结果必须由当前主 Agent 检查，用户新消息本身不会停止原任务。
+
+主 Agent 可以向仍在运行的精确 subagent 投递方向调整；投递成功不代表子执行已经采纳。已结束的 SDK child 不能用 SendMessage 隐式恢复，必须建立新的受管 attempt。命令应在 child 内以前台方式完成，不能留下脱离 SDK 的后台进程。
+
+同一主 invocation 可以同时持有树内 Task 和独立 Task。由交接消息启动的主 Agent 只能在任务确由当前 invocation 创建、仍保留精确绑定且负责人从未变化时，继续更新自己的新独立 Task；它不能因此获得任意已有 Task 的权限。停止树内任务不会停止这个独立 Task。
+
+后台运行期间的普通用户追问继续使用原生 `continue_current`。在 Bot 开关下，它可通过现有精确 append 事务越过等待下一轮的 A2A `next_work`，不会另启主 Agent 或强制中断子执行。未来工作仍留在原生 Queue；较早的追问（包括因旧 parent 结束而 fallback 的追问）、追加失败恢复及未知目标屏障仍维持顺序，旧 parent 绑定不能送给新 parent。
+
+原生 MCP 通过 API 宿主的 SDK MCP 代理提供，回调凭据不放进模型 CLI 环境或其 MCP 配置；子代理工具 hook 禁止使用主 Agent 的原生回调、直接 TaskStop 和递归 Agent。代理保持显式工具超时并传递取消信号与进度；连接失败后仅在下一次显式请求重连，不自动重放工具。此部署仍是同一用户、共享文件系统的可信本地运行环境，不提供对恶意 shell 的操作系统隔离，也不把子任务终态当作所有外部系统副作用的证明。
+
+当前精确后台停止适配并验收的 provider 为 Claude Agent SDK。其他原生 Agent 可参与普通 Task/A2A；不将“本机已安装”或“已配置”视为具有相同子执行控制能力。并行群聊输出也使用原生每轮输出检查点，避免后台工作尚在运行时把短答复一直留在草稿尾部。
+
+可重复验收入口：`npm run test:task-mcp`（真实 stdio 的进度、取消与重连）、`npm run test:task-background`（真实 Redis 另设 `BOT_TASK_TEST_REDIS_URL`，禁止默认/生产 Redis 端口）、`BOT_TASK_SDK_ACCEPTANCE=1 npm run test:task-sdk`、`BOT_TASK_HTTP_ACCEPTANCE=1 PORT=3211 BOT_RUNTIME_DATA_DIR=.runtime/task-control-data node scripts/check-task-http-journey.mjs`。真实模型验收保留独立 Bot、transcript、计时文件和证据，不清空数据。单元及契约测试覆盖竞争认领、停止前启动回执、交接、三级子树、宿主丢失、来源和身份检查；真实模型观察的结果另见维护说明。
+
+本轮最小范围为同一原生线程中的 Task 委派树（最多十层，受原生预算限制）。跨线程批准委派仍由上游管理，但尚未接入这套后台子树控制的等价验收。多个资源的锁定、统一 gate、无人值守抢单扫描与调度质量评估留作后续；已实现的是消息驱动的画像判断、原子认领与原生派发。
+
+真实多 Agent 验收入口为 `BOT_MULTI_AGENT_ACCEPTANCE=1 PORT=3211 BOT_RUNTIME_DATA_DIR=.runtime/task-control-data npm run test:multi-agent`，只使用隔离候选；`BOT_MULTI_PHASE=profile-tree,claim-race,handoff,tree-stop` 可选阶段，`BOT_MULTI_NEUTRAL_NAMES=1` 使用中性成员名验证画像分工。每次新运行创建独立验收文件目录与群聊，重试失败阶段须新运行，不能复用旧计时文件。原始 SDK 归档核验：`node scripts/audit-multi-agent-evidence.mjs <验收ID>`；原生 Task、消息、会话、并发认领冲突及子执行生命周期共同构成证据。

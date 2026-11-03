@@ -80,7 +80,7 @@ export class NativeClient implements NativeTransport {
         }
         this.listeners.emit(event.threadId, event);
       });
-      for (const name of ['queue_updated', 'thread_updated', 'approval_requested', 'approval_resolved', 'connector_message', 'message_updated', 'runtime_interaction_updated']) {
+      for (const name of ['task_created', 'task_updated', 'queue_updated', 'thread_updated', 'approval_requested', 'approval_resolved', 'connector_message', 'message_updated', 'runtime_interaction_updated']) {
         socket.on(name, (event: NativeEvent) => {
           if (event.threadId) this.listeners.emit(event.threadId, { ...event, type: name });
           else for (const id of this.rooms.keys()) this.listeners.emit(id, { type: 'resync', threadId: id });

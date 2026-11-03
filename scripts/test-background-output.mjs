@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test, { after } from 'node:test';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { root, lock } from './upstream-source.mjs';
 
 // Route tests must not create fallback configuration in the generated runtime,
 // which the real launcher deliberately requires to be a persistent-data symlink.
@@ -11,8 +13,9 @@ mkdirSync(join(sandbox, '.cat-cafe'));
 writeFileSync(join(sandbox, '.cat-cafe/capabilities.json'), JSON.stringify({ version: 2, capabilities: [] }));
 for (const key of ['CAT_CAFE_CONFIG_ROOT', 'CAT_CAFE_GLOBAL_CONFIG_ROOT', 'CAT_CAFE_WORKSPACE_ROOT', 'CAT_CAFE_DATA_DIR']) process.env[key] = sandbox;
 after(() => rmSync(sandbox, { recursive: true, force: true }));
-const { ClaudeSdkAgentService } = await import('../.runtime/clowder-ai/packages/api/dist/domains/cats/services/agents/providers/ClaudeSdkAgentService.js');
-const { routeSerial } = await import('../.runtime/clowder-ai/packages/api/dist/domains/cats/services/agents/routing/route-serial.js');
+const { ClaudeSdkAgentService } = await import(pathToFileURL(resolve(root, lock.build, 'packages/api/dist/domains/cats/services/agents/providers/ClaudeSdkAgentService.js')).href);
+const { routeSerial } = await import(pathToFileURL(resolve(root, lock.build, 'packages/api/dist/domains/cats/services/agents/routing/route-serial.js')).href);
+const { routeParallel } = await import(pathToFileURL(resolve(root, lock.build, 'packages/api/dist/domains/cats/services/agents/routing/route-parallel.js')).href);
 
 test('a provider reply checkpoints its output while the background host remains alive', async () => {
   const previous = process.env.CAT_CAFE_BOT_BACKGROUND_DELEGATION;
@@ -56,7 +59,7 @@ test('a provider reply checkpoints its output while the background host remains 
   }
 });
 
-test('a short trailing reply is persisted at the checkpoint before the next event', async () => {
+for (const [label, route] of [['serial', routeSerial], ['parallel', routeParallel]]) test(`${label}: short trailing reply persists at checkpoint before the next event`, async () => {
   const drafts = [], stored = new Map();
   const service = {
     async *invoke() {
@@ -82,7 +85,7 @@ test('a short trailing reply is persisted at the checkpoint before the next even
     draftStore: { delete: async () => {}, upsert: async d => { drafts.push(d); } },
   };
   const events = [];
-  for await (const event of routeSerial(deps, ['opus'], 'status', 'checkpoint-owner', 'checkpoint-thread', { parentInvocationId: 'checkpoint-parent' })) events.push(event);
+  for await (const event of route(deps, ['opus'], 'status', 'checkpoint-owner', 'checkpoint-thread', { parentInvocationId: 'checkpoint-parent' })) events.push(event);
   assert.ok(events.some(e => e.outputCheckpoint === 'turn_complete'));
   assert.equal(events.some(e => e.type === 'error'), false);
 });

@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-const binary = resolve(import.meta.dirname, '../.runtime/clowder-ai/packages/api/dist/domains/cats/services/agents/invocation');
+import { root, lock } from './upstream-source.mjs';
+const binary = resolve(root, lock.build, 'packages/api/dist/domains/cats/services/agents/invocation');
 const { assertThreadParticipant } = await import(pathToFileURL(resolve(binary, 'thread-participant-policy.js')));
 const { invokeSingleCat } = await import(pathToFileURL(resolve(binary, 'invoke-single-cat.js')));
 

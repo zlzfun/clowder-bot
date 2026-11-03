@@ -1,10 +1,9 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, renameSync, copyFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { fingerprint } from './upstream-source.mjs';
+import { fingerprint, lock } from './upstream-source.mjs';
 
 const root = resolve(import.meta.dirname, '..');
-const lock = JSON.parse(readFileSync(resolve(root, 'upstream.lock.json'), 'utf8'));
 if (Number(process.versions.node.split('.')[0]) !== lock.nodeMajor) throw new Error(`Use Node ${lock.nodeMajor}. Current: ${process.version}`);
 function command(exe, args, cwd = root, options = {}) {
   const result = spawnSync(exe, args, { cwd, stdio: 'inherit', ...options });
@@ -21,9 +20,12 @@ if (git('status', '--porcelain')) throw new Error('Upstream checkout must remain
 const digest = fingerprint();
 const marker = resolve(build, '.bot-build-source');
 const runtimeLock = resolve(process.env.BOT_RUNTIME_DATA_DIR || resolve(root, 'data/native'), 'runtime.lock');
-for (const file of [runtimeLock, resolve(root, '.runtime/native-runtime.lock')]) {
+for (const file of [runtimeLock, resolve(build, '.bot-runtime.lock'), resolve(root, '.runtime/native-runtime.lock')]) {
   if (!existsSync(file)) continue;
   const owner = JSON.parse(readFileSync(file, 'utf8'));
+  // Legacy launchers owned .runtime/clowder-ai. Never rebuild that live path,
+  // while allowing an independent candidate to use another build and data directory.
+  if (file === resolve(root, '.runtime/native-runtime.lock') && resolve(owner.build || resolve(root, '.runtime/clowder-ai')) !== build) continue;
   let alive = true;
   try { process.kill(owner.pid, 0); } catch (e) { if (e.code === 'ESRCH') alive = false; else if (e.code !== 'EPERM') throw e; }
   if (alive) throw new Error('Stop the native runtime before rebuilding. Its persistent data is preserved.');

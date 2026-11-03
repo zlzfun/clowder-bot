@@ -1,13 +1,14 @@
 {
   "repository": "https://github.com/zts212653/clowder-ai.git",
-  "commit": "b2c9952f27d31480191ff6fd120789405c97238c",
+  "commit": "42017e0cea07e3e259e7fb183be70433f05e131c",
   "source": "upstream/clowder-ai",
-  "build": ".runtime/clowder-ai",
+  "build": ".runtime/clowder-ai-task-control",
   "nodeMajor": 24,
   "pnpm": "9.15.4",
   "patches": [
     "patches/0001-thread-participant-policy.patch",
     "patches/0002-background-delegation-policy.patch",
-    "patches/0003-background-output-checkpoint.patch"
+    "patches/0003-background-output-checkpoint.patch",
+    "patches/0004-task-background-control.patch"
   ]
 }

@@ -14,7 +14,7 @@ export function createApp(options: { dataFile?: string; native?: NativeTransport
   const port = Number(process.env.PORT || 3210);
   const origins = new Set(options.allowedOrigins ?? [`http://127.0.0.1:${port}`, `http://localhost:${port}`, 'http://127.0.0.1:5173', 'http://localhost:5173']);
   const native = options.native ?? new NativeClient(`http://127.0.0.1:${process.env.BOT_NATIVE_PORT || 4331}`, `http://127.0.0.1:${port}`);
-  const store = new ProductStore(options.dataFile);
+  const store = new ProductStore(options.dataFile ?? process.env.BOT_PRODUCT_DATA_FILE);
   const bridge = new BotBridge(native, store, options.workspace ?? resolve(process.env.BOT_RUNTIME_DATA_DIR || 'data/native', 'workspace'));
   const app = express();
   app.disable('x-powered-by');
@@ -35,14 +35,14 @@ export function createApp(options: { dataFile?: string; native?: NativeTransport
   app.get('/api/health', async (_req, res) => res.json({ ok: true, engine: 'clowder-ai', upstream: await native.request('/api/health') }));
   app.get('/api/state', async (_req, res) => res.json({ engine: 'clowder-ai', cats: await bridge.cats(), presentation: store.state }));
   // A small, explicit owner API surface for native concepts that XBot cannot represent.
-  const ownerPaths = /^\/api\/(?:cats(?:\/[^/]+)?|cats\/native-runtimes|cat-templates|threads(?:\/[^/]+(?:\/(?:queue(?:\/[^/]+)?|sessions(?:\/[^/]+\/compact-native)?|task-progress|cancel\/[^/]+))?)?|messages|accounts(?:\/[^/]+)?|memory(?:\/(?:catalog|recall|recall\/stats|search|search\/document|library-feed|maintenance))?|evidence\/(?:status|search)|approval-hub\/(?:pending|settled)|runtime-interactions\/[^/]+(?:\/(?:respond|reject))?|(?:proposals|session-handoff|dispatch-proposals|taste-proposals|profile-updates|person-memory-proposals|entity-proposals|event-memory-corrections|schedule-proposals|eval-repair-proposals|dossier\/distillations)\/[^/]+\/(?:approve|reject)|config\/(?:capabilities|session-strategy))$/;
+  const ownerPaths = /^\/api\/(?:tasks(?:\/[^/]+(?:\/background-control)?)?|cats(?:\/[^/]+)?|cats\/native-runtimes|cat-templates|threads(?:\/[^/]+(?:\/(?:queue(?:\/[^/]+)?|sessions(?:\/[^/]+\/compact-native)?|task-progress|cancel\/[^/]+))?)?|messages|accounts(?:\/[^/]+)?|memory(?:\/(?:catalog|recall|recall\/stats|search|search\/document|library-feed|maintenance))?|evidence\/(?:status|search)|approval-hub\/(?:pending|settled)|runtime-interactions\/[^/]+(?:\/(?:respond|reject))?|(?:proposals|session-handoff|dispatch-proposals|taste-proposals|profile-updates|person-memory-proposals|entity-proposals|event-memory-corrections|schedule-proposals|eval-repair-proposals|dossier\/distillations)\/[^/]+\/(?:approve|reject)|config\/(?:capabilities|session-strategy))$/;
   app.use('/native-api', async (req, res) => {
     const path = req.url;
     if (!ownerPaths.test(path.split('?')[0]!) || !['GET', 'POST', 'PATCH', 'PUT', 'DELETE'].includes(req.method)) throw new ApiError(404, '此原生接口未开放到 Bot 适配层');
     res.json(await native.request(path, { method: req.method, ...(req.body !== undefined ? { body: req.body } : {}) }));
   });
   app.use('/api', (_req, res) => res.status(410).json({ error: '旧自研引擎 API 已退出。请使用 /xbot-api 或 /native-api/api。' }));
-  const staticDir = options.staticDir ?? resolve('dist/client');
+  const staticDir = options.staticDir ?? resolve(process.env.BOT_STATIC_DIR || 'dist/client');
   if (existsSync(staticDir)) {
     app.use(express.static(staticDir));
     app.get('/{*splat}', (_req, res) => res.sendFile(resolve(staticDir, 'index.html')));

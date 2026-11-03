@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { root, lock } from './upstream-source.mjs';
 import test from 'node:test';
-import { compileL0ViaSubprocess, clearL0Cache } from '../.runtime/clowder-ai/packages/api/dist/domains/cats/services/agents/providers/l0-compiler.js';
+const { compileL0ViaSubprocess, clearL0Cache } = await import(pathToFileURL(resolve(root, lock.build, 'packages/api/dist/domains/cats/services/agents/providers/l0-compiler.js')).href);
 
 test('background policy preserves native identity and works on stdout, file and cached compilation without polluting the cache', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'bot-policy-'));

@@ -1,12 +1,14 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Clowder AI · 运行面板</title><link rel="stylesheet" href="/tokens.css"><link rel="stylesheet" href="/runtime.css"></head>
-<body><main><header><a href="/">← 返回 Bot</a><h1>Clowder AI 运行面板</h1><p>这里直接读取原生队列、会话、审批和记忆。操作结果由 Clowder AI 保存。</p><button id="refresh">刷新状态</button><span id="connection" role="status"></span></header>
+<body><main><header><a href="/">← 返回 Bot</a><h1>Clowder AI 运行面板</h1><p>这里直接读取原生任务、队列、会话、审批和记忆。操作结果由 Clowder AI 保存。</p><button id="refresh">刷新状态</button><span id="connection" role="status"></span></header>
 <div id="error" role="alert" hidden></div>
 <section><h2>正在等待你</h2><div id="approvals"></div></section>
-<section><h2>会话与执行</h2><select id="threads" aria-label="选择会话"></select><div id="thread"></div></section>
+<section><h2>会话与执行</h2><select id="threads" aria-label="选择会话"></select>
+<h3>原生任务</h3><p class="muted">任务、负责成员和后台执行都以 Clowder AI 原生记录为准。普通进度与后台执行分开显示：后台执行完成不等于任务完成，没有后台执行记录也不代表空闲。「停止」请求结束当前后台执行，「允许继续」前不会开始新的执行；「撤销」收回整个任务及其所属子任务，「恢复任务」前不会开始新的执行。两者都只记录意图，执行是否已停止以原生执行记录为准；恢复只解除禁止，不会自动重新开始，也不会撤回已经产生的外部影响。上一位负责成员或另一次执行留下的记录显示为「上次后台执行」。</p><div id="tasks"></div>
+<h3>执行、队列与记录</h3><div id="thread"></div></section>
 <section><h2>本地 Agent 与原生账号（只读）</h2><p>Bot 的执行者请在 Bot「设置 · 本地 Agent」中查看，并在 Bot 详情里选择。这里只读显示 Clowder AI 的原生检测结果与已有账号记录，不在此新增或修改账号。</p>
 <h3>本地 Agent 检测</h3><div id="runtimes"></div><h3>原生账号记录</h3><div id="accounts"></div></section>
 <section><h2>原生长期记忆</h2><p>原生记忆按知识集合、来源与权限管理；会话笔记另存于对应线程。群成员限制不等于长期记忆或文件权限隔离。</p>
 <form id="memory-form"><label>搜索记忆<input name="query" required></label><button>搜索</button></form><div id="memory"></div></section>
-</main><script type="module" src="/runtime.js"></script></body></html>
+</main><script src="/runtime-tasks.js"></script><script type="module" src="/runtime.js"></script></body></html>

@@ -567,8 +567,8 @@
     },
     {
       "target": "client/public/runtime.html",
-      "description": "Native runtime management surface",
-      "sha256": "c4e8f53a29a7161496e25a6df8e21654112c521cf2cf644078752842690386ef"
+      "description": "Native runtime management surface; native Task block under the conversation selector",
+      "sha256": "b55cc4f61de5ff74092a3399fa308431940a4565e07c2024cdfc3a17bb402e9a"
     },
     {
       "target": "client/public/runtime.css",
@@ -577,8 +577,13 @@
     },
     {
       "target": "client/public/runtime.js",
-      "description": "Native queue, session, approval and memory adapters; runtimes and accounts shown read-only",
-      "sha256": "fa4205cd041d61514ceb6b11bc1868c3acb54a20727c4a0eb99b0864b612b08e"
+      "description": "Native queue, session, approval and memory adapters; runtimes and accounts shown read-only; views load and fail independently",
+      "sha256": "c8f17348132fef912fc4cd714211cef20621f67e9847370c6527e62e780138ec"
+    },
+    {
+      "target": "client/public/runtime-tasks.js",
+      "description": "Native Task list: ordinary progress, current and previous background execution, stop/cancel markers shown separately; background-control and handoff requests only, no local task engine or poller",
+      "sha256": "14ec2482184c10c8f03c7feaacf075834a3fbaee9c42c447e3fc0b1c2529d6b4"
     },
     {
       "target": "client/public/agents.js",

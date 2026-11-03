@@ -5,10 +5,9 @@ import { once } from 'node:events';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, symlinkSync, lstatSync, realpathSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { fingerprint } from './upstream-source.mjs';
+import { fingerprint, lock } from './upstream-source.mjs';
 
 const root = resolve(import.meta.dirname, '..');
-const lock = JSON.parse(readFileSync(join(root, 'upstream.lock.json'), 'utf8'));
 if (Number(process.versions.node.split('.')[0]) !== lock.nodeMajor) throw new Error('Clowder AI requires Node 24.');
 const binary = resolve(root, lock.build);
 if (!existsSync(join(binary, 'packages/api/dist/index.js'))) throw new Error('Run npm run runtime:prepare first.');
@@ -23,11 +22,13 @@ for (const port of [apiPort, redisPort, botPort, metricsPort]) if (!Number.isInt
 if (new Set([apiPort, redisPort, botPort, metricsPort]).size !== 4) throw new Error('Service ports must be distinct');
 mkdirSync(data, { recursive: true, mode: 0o700 });
 const mutex = join(data, 'runtime.lock');
-const buildMutex = join(root, '.runtime/native-runtime.lock');
+const buildMutex = join(binary, '.bot-runtime.lock');
 const acquiredLocks = [];
-for (const file of [mutex, buildMutex]) {
+const legacyMutex = join(root, '.runtime/native-runtime.lock');
+for (const file of [mutex, buildMutex, legacyMutex]) {
   if (!existsSync(file)) continue;
   const owner = JSON.parse(readFileSync(file, 'utf8'));
+  if (file === legacyMutex && resolve(owner.build || join(root, '.runtime/clowder-ai')) !== binary) continue;
   let alive = true;
   try { process.kill(owner.pid, 0); } catch (e) { if (e.code === 'ESRCH') alive = false; else if (e.code !== 'EPERM') throw e; }
   if (alive) throw new Error(`Runtime already owned by PID ${owner.pid}; stop that instance first.`);
@@ -35,7 +36,7 @@ for (const file of [mutex, buildMutex]) {
 }
 try {
   for (const file of [mutex, buildMutex]) {
-    writeFileSync(file, JSON.stringify({ pid: process.pid, apiPort, redisPort, data }), { flag: 'wx', mode: 0o600 });
+    writeFileSync(file, JSON.stringify({ pid: process.pid, apiPort, redisPort, data, build: binary }), { flag: 'wx', mode: 0o600 });
     acquiredLocks.push(file);
   }
 } catch (error) { for (const file of acquiredLocks) unlinkSync(file); throw error; }
@@ -98,6 +99,7 @@ try {
     CAT_CAFE_API_URL: `http://127.0.0.1:${apiPort}`, FRONTEND_URL: `http://127.0.0.1:${botPort}`,
     CAT_CAFE_ENFORCE_THREAD_PARTICIPANTS: '1',
     CAT_CAFE_BOT_BACKGROUND_DELEGATION: '1',
+    CAT_CAFE_BOT_TASK_CONTROL: '1',
     CAT_CAFE_CLAUDE_CARRIER: 'agent_sdk',
     EVIDENCE_DB: join(data, 'evidence.sqlite'), WORLD_DB: join(data, 'world.sqlite'),
     TASK_OUTCOME_DB: join(data, 'task-outcome-episodes.sqlite'),

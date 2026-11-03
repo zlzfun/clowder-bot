@@ -3,7 +3,9 @@ const enc = encodeURIComponent;
 const node = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; };
 async function api(path, method = 'GET', body) {
   const r = await fetch('/native-api' + path, { method, headers: body === undefined ? {} : { 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-  const result = await r.json(); if (!r.ok) throw new Error(result.error || '原生请求失败'); return result;
+  // The HTTP status lets a view tell an absent API (404) or a stale write (409) from other failures.
+  const result = await r.json().catch(error => { if (r.ok) throw error; return {}; });
+  if (!r.ok) throw Object.assign(new Error(result.error || '原生请求失败'), { status: r.status }); return result;
 }
 function fail(error) { $('error').textContent = error.message; $('error').hidden = false; }
 function details(title, value) { const d = node('details'); d.append(node('summary', title), node('pre', JSON.stringify(value, null, 2))); return d; }
@@ -11,7 +13,7 @@ function button(title, action) {
   const b = node('button', title); b.type = 'button';
   b.onclick = async () => { b.disabled = true; $('error').hidden = true; try { await action(); } catch(e) { fail(e); } finally { b.disabled = false; } }; return b;
 }
-let activeThread, events, revision = 0;
+let activeThread, events, revision = 0, threadIndex = new Map();
 async function interaction(id, target) {
   const { interaction: record } = await api('/api/runtime-interactions/' + enc(id));
   const req = record.request;
@@ -75,10 +77,16 @@ async function approvals() {
     $('approvals').append(box);
   }
 }
+// Native Tasks load on their own (runtime-tasks.js): a backend without them
+// (404) or a failed read changes only that block, never the rest of the view.
+function tasks(id, current) {
+  if (!window.ClowderTasks) { $('tasks').replaceChildren(node('p', '原生任务模块没有加载；其余面板照常显示。', 'muted')); return; }
+  return window.ClowderTasks.load({ api, host: $('tasks'), threadId: id, thread: threadIndex.get(id), isCurrent: () => current === revision });
+}
 async function thread() {
-  const id = $('threads').value;
-  if (!id) { $('thread').replaceChildren(node('p', '还没有会话。创建 Bot 并打开聊天后，会话会出现在这里。')); return; }
-  const current = ++revision;
+  const id = $('threads').value, current = ++revision;
+  if (!id) { $('tasks').replaceChildren(node('p', '选择会话后显示它的原生任务。', 'muted')); $('thread').replaceChildren(node('p', '还没有会话。创建 Bot 并打开聊天后，会话会出现在这里。')); return; }
+  const taskView = tasks(id, current);
   const [queue, sessions, messages] = await Promise.all([api(`/api/threads/${enc(id)}/queue`), api(`/api/threads/${enc(id)}/sessions`), api(`/api/messages?threadId=${enc(id)}&limit=200`)]);
   if (current !== revision) return;
   const view = $('thread'); view.replaceChildren(node('p', `${queue.activeInvocations.length} 个执行中 · ${queue.queue.length} 个队列项`));
@@ -112,19 +120,28 @@ async function thread() {
     // Do not replace a form while the user is answering it. Refresh is explicit.
     events.addEventListener('native', () => { $('connection').textContent = '原生状态有更新 · 点击刷新查看'; });
   }
+  await taskView;
 }
 async function refresh() {
   $('error').hidden = true;
   const selected = $('threads').value;
-  const [threads, runtimes, accounts, catalog] = await Promise.all([api('/api/threads'), api('/api/cats/native-runtimes'), api('/api/accounts'), api('/api/memory/catalog')]);
-  $('threads').replaceChildren(...threads.threads.map(t => { const option = node('option', t.title || t.id); option.value = t.id; return option; }));
-  if ([...$('threads').options].some(o => o.value === selected)) $('threads').value = selected;
+  // Each native view reads and fails on its own; #error still reports the first failure.
+  const [threads, runtimes, accounts, catalog] = await Promise.allSettled([api('/api/threads'), api('/api/cats/native-runtimes'), api('/api/accounts'), api('/api/memory/catalog')]);
+  const view = (result, target, render) => { if (result.status === 'fulfilled') render(result.value); else target.replaceChildren(node('p', '没能读取：' + result.reason.message, 'muted')); };
+  if (threads.status === 'fulfilled') {
+    threadIndex = new Map(threads.value.threads.map(t => [t.id, t]));
+    $('threads').replaceChildren(...threads.value.threads.map(t => { const option = node('option', t.title || t.id); option.value = t.id; return option; }));
+    if ([...$('threads').options].some(o => o.value === selected)) $('threads').value = selected;
+  }
   // Read-only: readiness is login/config evidence, not a running or reachable Agent.
   const ready = { configured: '已有登录或配置记录', login_required: '需要先登录', not_installed: '未检测到' };
-  $('runtimes').replaceChildren(...runtimes.runtimes.map(r => node('p', `${r.label} · ${r.installed ? '已安装' : '未安装'} · ${ready[r.readiness?.status] || '未确认登录状态'}`)));
-  $('accounts').replaceChildren(...(accounts.providers.length ? accounts.providers.map(a => node('p', `${a.name} · ${a.clientId || '原生'} · ${a.authType}`)) : [node('p', '没有原生账号记录。', 'muted')]));
-  $('memory').replaceChildren(details('原生记忆集合', catalog));
-  await approvals(); await thread(); $('connection').textContent = '已连接 Clowder AI';
+  view(runtimes, $('runtimes'), value => $('runtimes').replaceChildren(...value.runtimes.map(r => node('p', `${r.label} · ${r.installed ? '已安装' : '未安装'} · ${ready[r.readiness?.status] || '未确认登录状态'}`))));
+  view(accounts, $('accounts'), value => $('accounts').replaceChildren(...(value.providers.length ? value.providers.map(a => node('p', `${a.name} · ${a.clientId || '原生'} · ${a.authType}`)) : [node('p', '没有原生账号记录。', 'muted')])));
+  view(catalog, $('memory'), value => $('memory').replaceChildren(details('原生记忆集合', value)));
+  const views = await Promise.allSettled([approvals(), threads.status === 'fulfilled' || $('threads').value ? thread() : undefined]);
+  const failed = [threads, runtimes, accounts, catalog, ...views].find(r => r.status === 'rejected');
+  if (failed) throw failed.reason;
+  $('connection').textContent = '已连接 Clowder AI';
 }
 $('refresh').onclick = () => refresh().catch(fail);
 $('threads').onchange = () => thread().catch(fail);

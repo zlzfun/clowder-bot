@@ -2,12 +2,13 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { createApp } from '../server/app.ts';
 
-assert.ok(existsSync('dist/client/index.html'), 'Run npm run build first.');
+const staticDir = resolve(process.env.BOT_STATIC_DIR || 'dist/client');
+assert.ok(existsSync(join(staticDir, 'index.html')), 'Run npm run build first.');
 const dir = mkdtempSync(join(tmpdir(), 'clowder-production-'));
-const runtime = createApp({ dataFile: join(dir, 'state.json') });
+const runtime = createApp({ dataFile: join(dir, 'state.json'), staticDir });
 const server = runtime.app.listen(0, '127.0.0.1');
 try {
   await once(server, 'listening');
@@ -36,7 +37,12 @@ try {
   assert.equal((await fetch(base + '/api/missing')).status, 410);
   const session = await (await fetch(base + '/xbot-api/session')).json();
   assert.equal(session.authed, true);
-  assert.equal((await fetch(base + '/runtime.html')).status, 200);
+  const panel = await fetch(base + '/runtime.html');
+  assert.equal(panel.status, 200);
+  assert.match(await panel.text(), /runtime-tasks\.js/);
+  const tasksModule = await fetch(base + '/runtime-tasks.js');
+  assert.equal(tasksModule.status, 200);
+  assert.doesNotMatch(tasksModule.headers.get('content-type'), /text\/html/);
   console.log('Production smoke passed: Bot assets, runtime panel and the real Clowder AI API bridge.');
 } finally {
   await runtime.close();
