@@ -27,7 +27,7 @@
       "file": "app.js",
       "target": "client/public/app.js",
       "sourceSha256": "1248f793493826bf044359c71e7d8772ccc3472d6021d6abb979dff9b6cb29bc",
-      "sha256": "2cb246be497c4681bd185beb88a0534d8d35808d4251522e53d224620571837b",
+      "sha256": "934133260b9ad4dbf48623ac1192fcc533703bf38fd8eaff4e096d164076c609",
       "unchanged": false
     },
     {
@@ -153,7 +153,7 @@
       "file": "index.html",
       "target": "client/index.html",
       "sourceSha256": "a4160c18e23489fbc6a9e21fe494e1ac52840a67b2e138997400a0b42835b556",
-      "sha256": "dc11974e85953dc7bdb92ff51bcbab21ee724510443b4b55d3dbf97d70034a75",
+      "sha256": "66b32ff5c95fdfb6f52f0d8a9be113bd75031a3b28e66746c05377fac741481d",
       "unchanged": false
     },
     {
@@ -562,8 +562,8 @@
     },
     {
       "target": "client/public/cafe-theme.css",
-      "description": "Cat-cafe light/dark color overrides",
-      "sha256": "c36dc68d3e995c3f5968de0ac6cd9b8fdeb438f509e707b5638000abd2e1345a"
+      "description": "Cat-cafe light/dark color overrides; restores app.css's single right-aligned .field select chevron on focus (light chevron copied byte-for-byte), original CSS unchanged",
+      "sha256": "8081eb565a30f99807ec76276a7c9991e70ee9736e93d8bffd9967cb81aff3f9"
     },
     {
       "target": "client/public/runtime.html",

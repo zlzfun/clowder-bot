@@ -85,7 +85,6 @@
     // tell that the list it was filling is gone.
     attachBatch: 0,
     placeholder: "写一条消息",
-    push: null,
     version: "",
     tip: "",
   };
@@ -7405,14 +7404,8 @@
   function showSettingsHome() {
     const page = $("setpage");
     ++settingsRequest;
-    window.XBotAccount?.unmountSettings();
-    window.XBotWebSearch?.unmount();
-    window.XBotImageGen?.unmount();
-    window.XBotSkills?.unmount();
     window.ClowderCatTemplates?.teardown();
-    window.XBotApps?.unmount();
     window.XBotAgents?.unmount();
-    window.xbotDevices?.unmount();
     settingsLevel = null;
     settingsError(null);
     page.dataset.nav = "home";
@@ -7426,21 +7419,18 @@
   }
   function closeSettings(restore = true) {
     ++settingsRequest;
-    window.XBotAccount?.unmountSettings();
-    window.XBotWebSearch?.unmount();
-    window.XBotImageGen?.unmount();
-    window.XBotSkills?.unmount();
     window.ClowderCatTemplates?.teardown();
     window.XBotAgents?.unmount();
     $("setpage").hidden = $("setscrim").hidden = true;
     settingsLevel = null;
-    window.xbotDevices?.unmount();
     shell.inert = false;
     if (restore) (settingsOpener?.isConnected && !settingsOpener.hidden ? settingsOpener : $("account")).focus({ preventScroll: true });
     settingsOpener = null;
   }
   async function openSettings(section = "general", { home = false } = {}) {
     const page = $("setpage");
+    // Only sections in the nav open; a retired one (devices.js still asks for 设备) lands on 通用.
+    if (![...page.querySelectorAll("[data-set]")].some((tab) => tab.dataset.set === section)) section = "general";
     const opening = page.hidden;
     if (opening) settingsOpener = document.activeElement?.closest("#account-menu") ? $("account") : document.activeElement;
     closePops();
@@ -7459,13 +7449,7 @@
       tab.setAttribute("aria-current", on ? "page" : "false");
     }
     for (const pane of page.querySelectorAll("[data-spane]")) pane.hidden = pane.dataset.spane !== section;
-    if (section !== "devices") window.xbotDevices?.unmount();
-    window.XBotAccount?.unmountSettings();
-    window.XBotWebSearch?.unmount();
-    window.XBotImageGen?.unmount();
-    window.XBotSkills?.unmount();
     window.ClowderCatTemplates?.teardown();
-    window.XBotApps?.unmount();
     window.XBotAgents?.unmount();
     $("settings-theme").value = themeMode;
     for (const node of page.querySelectorAll("[data-settings-version]")) node.textContent = aboutVersion();
@@ -7473,52 +7457,15 @@
     else if (settingsNarrow.matches && !home) $("settings-back").focus({ preventScroll: true });
     if (home) return;
     try {
-      if (section === "account") {
-        await window.XBotAccount.mountSettings($("settings-account"), () => request === settingsRequest);
-      } else if (section === "perm") {
-        $("settings-permissions").disabled = true;
-        const data = await api("/xbot-api/permissions");
-        if (request === settingsRequest) { paintPermissions(data); $("settings-permissions").disabled = false; }
-      } else if (section === "search") {
-        await window.XBotWebSearch.mount({api, host:$("settings-search"), isCurrent:()=>request===settingsRequest, manage:()=>openSettings("agents")});
-      } else if (section === "image-gen") {
-        await window.XBotImageGen.mount({api, host:$("settings-image-gen"), isCurrent:()=>request===settingsRequest, manage:()=>openSettings("agents")});
-      } else if (section === "skills") {
-        await window.XBotSkills.mount({api, host:$("settings-skills"), isCurrent:()=>request===settingsRequest, onLevel:level=>{ if (request===settingsRequest) { settingsLevel = level; paintSettingsBar(); } }});
-      } else if (section === "persona") {
+      if (section === "persona") {
         // The pane keeps its persona ID; it now lists 模板 (cat-templates.js).
         await window.ClowderCatTemplates.mount({api, host:$("settings-persona"), isCurrent:()=>request===settingsRequest, onLevel:level=>{ if (request===settingsRequest) { settingsLevel = level; paintSettingsBar(); } }});
       } else if (section === "agents") {
         await window.XBotAgents.settings({api, host:$("settings-agents"), isCurrent:()=>request===settingsRequest, onLevel:level=>{ if (request===settingsRequest) { settingsLevel = level; paintSettingsBar(); } }});
-      } else if (section === "devices") {
-        await window.xbotDevices.mount();
-      } else if (section === "apps") {
-        await window.XBotApps.mount({api, host:$("settings-apps"), isCurrent:()=>request===settingsRequest, connect:connectApp});
-      } else if (section === "general") {
-        await loadPush();
       }
     } catch (err) { if (request === settingsRequest) settingsError(err); }
   }
   window.XBotSettings = { open: openSettings, close: closeSettings, isOpen: () => !$("setpage").hidden };
-  function paintPermissions(data) {
-    const on = data.confirm === "table";
-    const btn = $("settings-permissions");
-    btn.classList.toggle("on", on);
-    btn.setAttribute("aria-checked", String(on));
-    document.querySelector("[data-perm-on]").hidden = !on;
-    document.querySelector("[data-perm-hint]").textContent = on
-      ? "下面几类会先弹出确认卡，你点了才继续。"
-      : "Bot 删除、对外发消息等会直接做，做完在对话里告诉你。";
-  }
-  $("settings-permissions").addEventListener("click", async () => {
-    const btn = $("settings-permissions");
-    const confirm = btn.getAttribute("aria-checked") === "true" ? "off" : "table";
-    btn.disabled = true;
-    settingsError(null);
-    try { paintPermissions(await api("/xbot-api/permissions", { method: "PUT", body: { confirm } })); }
-    catch (err) { settingsError(err); }
-    finally { btn.disabled = false; }
-  });
   $("settings-theme").addEventListener("change", (ev) => applyTheme(ev.target.value));
   $("account-settings").prepend(icon("settings"));
   $("account-settings").addEventListener("click", () => openSettings("general", { home: settingsNarrow.matches }));
@@ -7553,99 +7500,6 @@
       setTimeout(() => { status.textContent = ""; }, 2000);
     }
   });
-  $("push-icon").append(icon("phone"));
-
-  // A connector that needs a key asks for it on a confirmation card in chat. The card needs some Bot to
-  // host it, so the owner's primary Bot (else the first) takes the request; the app itself stays global.
-  async function connectApp(app) {
-    const host = state.bots.find(b => b.primary) || state.bots[0];
-    if (!host) { settingsError(new Error("先新建一个 Bot，才能在对话里填写密钥。")); return; }
-    closeSettings(false);
-    window.xbotRemoteChat?.close();
-    await selectBot(host.name);
-    sendText("请帮我安装 " + app.title + " 连接器，需要的密钥请用确认卡让我填写。");
-  }
-
-  function urlBase64ToUint8Array(s) {
-    const pad = "=".repeat((4 - (s.length % 4)) % 4);
-    const b64 = (s + pad).replace(/-/g, "+").replace(/_/g, "/");
-    const raw = atob(b64);
-    const out = new Uint8Array(raw.length);
-    for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
-    return out;
-  }
-
-  function paintPush(data) {
-    state.push = data;
-    const btn = $("phone-push");
-    const hint = $("phone-push-hint");
-    const on = !!(data && data.subscribed);
-    if (btn) {
-      btn.classList.toggle("on", on);
-      btn.setAttribute("aria-checked", on ? "true" : "false");
-      btn.setAttribute("aria-label", on ? "关闭手机推送" : "开启手机推送");
-    }
-    if (hint) {
-      hint.classList.remove("bad");
-      hint.hidden = false;
-      hint.textContent = "Bot 有话找你时，推送到这台设备";
-    }
-  }
-
-  function showPushErr(text) {
-    const hint = $("phone-push-hint");
-    if (!hint) return;
-    hint.hidden = false;
-    hint.classList.add("bad");
-    hint.textContent = text;
-  }
-
-  async function loadPush() {
-    const data = await api("/xbot-api/push");
-    paintPush(data);
-    return data;
-  }
-
-  async function togglePush() {
-    try {
-      const data = state.push || await loadPush();
-      if (data.subscribed) {
-        await api("/xbot-api/push/subscribe", { method: "DELETE", body: {} });
-        await loadPush();
-        return;
-      }
-      if (!("serviceWorker" in navigator) || !("PushManager" in window) || typeof Notification === "undefined") {
-        showPushErr("这台浏览器不支持后台推送。");
-        return;
-      }
-      let perm = Notification.permission;
-      if (perm === "default") perm = await Notification.requestPermission();
-      if (perm !== "granted") {
-        showPushErr("需要允许通知，手机才能在后台收到。");
-        return;
-      }
-      const reg = await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(data.public_key),
-      });
-      const json = sub.toJSON();
-      await api("/xbot-api/push/subscribe", {
-        method: "POST",
-        body: {
-          endpoint: json.endpoint,
-          p256dh: json.keys && json.keys.p256dh,
-          auth: json.keys && json.keys.auth,
-        },
-      });
-      await loadPush();
-    } catch (e) {
-      showPushErr(visibleError(e, "开启失败"));
-    }
-  }
-
-  const phonePush = $("phone-push");
-  if (phonePush) phonePush.addEventListener("click", () => { togglePush().catch(() => {}); });
 
   const tipEl = el("div", "tip");
   tipEl.setAttribute("role", "tooltip");
@@ -7955,7 +7809,6 @@
     await refreshStatus().catch(() => {});
     await refreshNotes();
     await refreshUpdate().catch(() => {});
-    await loadPush().catch(() => {});
     renderMe();
     let remembered = "";
     try { remembered = sessionStorage.getItem("xbot-selected-bot") || ""; } catch (e) {}
@@ -8049,6 +7902,7 @@
     showApp();
     await boot();
     startPoll();
-    if (new URLSearchParams(location.search).get("s") === "account") openSettings("account");
+    // The 账号 pane is retired: its old link (?s=account) opens 通用.
+    if (new URLSearchParams(location.search).get("s") === "account") openSettings("general");
   }
 })();

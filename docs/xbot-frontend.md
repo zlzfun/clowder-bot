@@ -67,6 +67,7 @@ Clowder Bot 的前端复用 XBot 的静态页面与浏览器脚本，保留其�
      - `onError` 只在创建之后刷新失败时显示状态。
      - 创建请求只由模块发送：`cat-templates.js` 的 `submit()` 在 `createBody` 之后附上稳定的 UUID `idempotencyKey`，同一请求重试复用同一个值。壳层不再 `POST /xbot-api/bots`。弹层只保留一个，Escape、Tab 和其余按键都在弹层内处理、不再冒泡；打开前先关闭菜单和原 `#modal`，所以设置、抽屉和原弹层不会被这次 Escape 关掉。
      - 原「新建 Bot」表单、头像换一张/上传和 `XBotAgents.field` 一并删除；头像随猫种决定，之后仍可在编辑资料里更换或上传。
+14. 2026-11-03 下拉框聚焦箭头修正（用户反馈：深色主题下点开模板的 Agent 下拉，箭头铺满整个控件）。`app.css` 的 `.field select:focus { background: var(--hover) }` 用简写重置了全部 background 子属性，深色箭头规则的优先级更高、图片保留下来，于是平铺；浅色的箭头则在聚焦时消失。`cafe-theme.css` 末尾的一条 `.field select:focus` 规则补回 `app.css` 原有的 `no-repeat`、`right 10px center` 和浅色箭头（逐字节复制），深色箭头仍由原规则生效。覆盖所有 `.field` 内的下拉框，包括模板与新建猫猫的 Agent、模型、推理强度、猫种和编辑资料里的选项；聚焦底色 `--hover`、输入框和文本框不变，原 CSS 字节不变。
    - `app.js` 编辑资料：删除「人设卡」小节，包括下拉框、「管理人设卡」入口、`GET /xbot-api/persona-cards`、`PUT /xbot-api/bots/:name/persona-card`，以及只给它用的抽屉代次计数。模板只在创建时复制一次，这里不再出现会持续绑定的控件。职责仍直接编辑，删去了指向人设卡的提示。资料 JSON 的「导出模板/导入模板」改名为「导出资料/导入资料」，行为不变。
    - `app.js` 信息抽屉：删除已经不会出现的人设卡小节（服务端 `persona_card` 恒为 `null`）。在「执行 Agent」后新增「配置」（`catConfigSection`），用模块的 `describe` 显示服务端 `cat_config` 的模型、推理强度、猫种。Agent 行和职责已有各自的小节，不重复显示。性格、擅长、提醒放在默认收起的「画像」里。不显示 `source_template`、修订号或内部 ID。
      - 猫种只显示能查到名称的 ID：`describe()` 只取目录里的名称，查不到时不出「猫种」行。抽屉的名称表也只收有名称的 ID。旧原生猫的合成猫种 ID（如 `bot-f4eb9bcb-844`）因此不会显示出来，也不会按头像推断；存储的 ID 不变。这是对 `cat-template-rules.js` 的小改，`tests/cat-templates.test.ts` 补了 ragdoll、moonshot、合成 ID、没有目录四种情况。
@@ -77,10 +78,17 @@ Clowder Bot 的前端复用 XBot 的静态页面与浏览器脚本，保留其�
      - 成功更换后，入口按 PUT 的约定把本地副本的推理强度置为跟随。
      - 删除 `field()` 及其样式（`.agent-field`、`.agent-choices`、`.agent-none`、`.agent-tools`），新增抽屉「画像」折叠内的一条间距规则。
    - 测试：`tests/frontend-agents.test.ts` 按新文案更新断言，新增两项。一项检查猫猫自己的推理强度会让「重新选当前 Agent」成为实际更换，并在之后显示已清除；另一项静态检查接线，覆盖导航名、脚本与样式顺序、三处卸载、新建入口与回调、壳层不发创建请求、资料改名、抽屉不显示来源。模块自身的行为测试在 `tests/cat-templates.test.ts`。
+15. 2026-11-03 设置精简（用户要求：先去掉预留、未实现的设置项，从能用的最小产品逐步扩展）。设置只保留四项，相对顺序不变：通用（只有主题）、模板、本地 Agent、关于。不加「即将推出」、禁用占位或说明页，也不新增功能。服务端兼容路由不变，未实现的接口照旧返回或拒绝；原生审批、技能/插件、排程和数据不受影响。
+   - `index.html`：删除账号、权限、网页搜索、技能、图片生成、设备、连接应用七个导航按钮及面板；「通用」删除「通知 · 手机推送」一节。「关于」保留运行面板链接，原生队列、审批和记忆仍从这里进入；页脚改为「版本来自当前运行的 clowder-bot。」，因为服务端只报 `0.2.0`，不再写「短号用于核对构建」。
+   - 不再加载只服务这些面板的 `web-search.js`、`image-gen.js`、`skills.js`、`apps.js`、`pairing.js`（设备页的配对弹层），以及 `web-search.css`、`image-gen.css`、`apps.css`；原文件与来源摘要保留。共用样式照常加载：`skills.css`（模板与本地 Agent 的列表外壳）、`persona-cards.css`（模板编辑）、`providers.css`（更换 Agent 弹层与消息引用）、`account.css`（登录前的账号界面）、`devices.css` 与 `remotechat.css`（侧栏远端分组与远端对话）。
+   - `account.js`、`devices.js`、`remotechat.js` 照常加载，分别负责登录前的账号界面、侧栏底部的本机名与远端分组、远端对话。它们的设置页代码（`XBotAccount.mountSettings`、`xbotDevices.mount` 等）不再被调用，原样保留；本机名暂时不能在页面里改。
+   - `app.js`：设置只挂载模板与本地 Agent；回到首页、切换面板、关闭设置三处只卸载这两个模块。删除账号、网页搜索、图片生成、技能、设备、连接应用的挂载与卸载，权限读写（`GET/PUT /xbot-api/permissions`），手机推送（启动时和打开「通用」时的 `GET /xbot-api/push`、订阅与退订），以及在对话里安装连接器的 `connectApp`。
+   - `openSettings` 只打开导航里有的面板，其他一律落到「通用」，不会出现空白页。例如 `devices.js` 的 `XBotSettings.open("devices")`，来自远端对话的「在『设备』里查看」。旧入口 `?s=account` 直接打开「通用」。桌面与手机端的导航、模板与 Agent 的二级详情、Escape 与焦点归还、主题切换不变。
+   - 测试未改：`tests/frontend-agents.test.ts` 的接线检查仍覆盖保留的模板与本地 Agent 面板；网页搜索、图片生成两个模块的测试针对保留的原文件，照常通过。
 
 头像候选保留 N 手绘墨稿、G 3D 玩偶肖像、I 水彩绘本。`/avatar-lab/` 展示当前候选，首轮和第二轮完整样页均归档保留；应用暂不提供这三种画风的主题切换控件。
 
-不再运行之前的 `client/src/` React 应用。原始 persona、memory、新建 Bot、群聊、详情抽屉与设置界面保留；providers 的模型目录、密钥/OAuth 与模型绑定界面按第 8 项移除，`providers.css` 原样保留供消息引用与弹层复用。账号登录和跨设备界面保留原结构；本地兼容层以已认证的 session 进入主界面，不要求用户登录账号。
+不再运行之前的 `client/src/` React 应用。原始 persona、memory、新建 Bot、群聊、详情抽屉与设置界面保留（设置按第 15 项精简为四项）；providers 的模型目录、密钥/OAuth 与模型绑定界面按第 8 项移除，`providers.css` 原样保留供消息引用与弹层复用。账号登录界面和侧栏的跨设备分组保留原结构，设置里的账号、设备页按第 15 项移除；本地兼容层以已认证的 session 进入主界面，不要求用户登录账号。
 
 ## 接口原则
 

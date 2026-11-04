@@ -1,5 +1,6 @@
-/* Clowder Café: color overrides only. Load after the original XBot styles.
-   Layout, typography, spacing, and interaction remain owned by app.css. */
+/* Clowder Café: color overrides, plus one repair of an upstream select rule
+   (end of file). Load after the original XBot styles. Layout, typography,
+   spacing, and interaction remain owned by app.css. */
 :root {
   --x-win: #f0e5d6;
   --x-card: #fffbf5;
@@ -178,4 +179,15 @@ html[data-theme="dark"] .bubble .code-block {
   --syn-num: #5e3514;
   --syn-fn: #214660;
   --syn-lit: #224951;
+}
+
+/* app.css `.field select:focus { background: var(--hover) }` resets every
+   background longhand: the light chevron is lost and the dark one (a more
+   specific rule) tiles. Put back app.css's own repeat, position and light
+   chevron (copied byte-for-byte); the dark chevron still wins on specificity.
+   The --hover fill and inputs/textareas are untouched. */
+.field select:focus {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b6b70' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
 }
