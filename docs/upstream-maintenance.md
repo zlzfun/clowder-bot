@@ -15,6 +15,7 @@
 | P003 | `patches/0003-background-output-checkpoint.patch` | Claude SDK 每轮 result 发出类型化输出检查点，route-serial 刷新尾部草稿，不发 done、不终止有子任务的 query。带 parent_tool_use_id 的子执行事件只保留原始审计，不污染主会话文本/状态。沿用原生投影和存储，共 3 文件。 | 上游支持多轮长驻 invocation 的答复检查点和子执行输出隔离后删除。 |
 | P004 | `patches/0004-task-background-control.patch` | 原生 Task 与 SDK attempt 绑定、精确停止/恢复、原生交接与子树边界、宿主 MCP 凭据传递、群聊输出检查点；另调整候选上游启动顺序，先恢复回调认证再启动可选插件。Bot 开启 Task 控制开关。 | 上游正式具备 Task 到 provider 子执行的生命周期接口及等价停止/交接证明后，逐项删除补丁；启动顺序修复可独立先退出。 |
 | A001 | `server/native/`、`server/xbot/` | Bot 名称/单聊/群聊/显示回执映射原生概念。无自研上下文、队列或 A2A。 | 将来官方插件可提供同等 HTTP/事件扩展时，替换宿主连接。 |
+| P006 | `patches/0006-bot-schedules.patch` | 由 `CAT_CAFE_BOT_SCHEDULES=1` 启用：schedule 列表补充 reminder 归属、正文、版本与调度器就绪状态；owner 创建接受 UUID 并在原生定义表及审计事务去重；Bot 一次任务结束/错过后保留 disabled 定义和线程账本，拒绝恢复过期计划；通过原生原子 private input 投递完整任务正文；核心调度器启动后再等待可选插件激活。未新增调度器或存储。 | 上游提供同等字段、幂等、历史保留、正文投递及启动就绪保证后删除。 |
 | A002 | `server/product-store.ts` | 只保存 UI 元数据和原生引用；单进程原子写。 | 官方插件提供产品配置持久化时替换此存储。 |
 | D001 | `scripts/start-runtime.mjs` | 独立配置/数据/workspace/Redis/API/指标端口、专属 cookie/userId；用上游 bootstrap 生成 MCP。避免与用户现有 Clowder 实例串线。 | 官方嵌入部署或插件生命周期接管时移除本启动器。 |
 | U001 | `client/public/app.js`、`runtime.*` | UI 显示原生排队状态、订阅事件、选择原生执行工具；独立面板承接原生特有概念。 | 随 Bot 产品迭代，不向核心反向渗透。 |

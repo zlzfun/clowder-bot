@@ -144,3 +144,17 @@ P004 为原生 Task 增加可选的后台执行字段，仍序列化在原有 Re
 本轮最小范围为同一原生线程中的 Task 委派树（最多十层，受原生预算限制）。跨线程批准委派仍由上游管理，但尚未接入这套后台子树控制的等价验收。多个资源的锁定、统一 gate、无人值守抢单扫描与调度质量评估留作后续；已实现的是消息驱动的画像判断、原子认领与原生派发。
 
 真实多 Agent 验收入口为 `BOT_MULTI_AGENT_ACCEPTANCE=1 PORT=3211 BOT_RUNTIME_DATA_DIR=.runtime/task-control-data npm run test:multi-agent`，只使用隔离候选；`BOT_MULTI_PHASE=profile-tree,claim-race,handoff,tree-stop` 可选阶段，`BOT_MULTI_NEUTRAL_NAMES=1` 使用中性成员名验证画像分工。每次新运行创建独立验收文件目录与群聊，重试失败阶段须新运行，不能复用旧计时文件。原始 SDK 归档核验：`node scripts/audit-multi-agent-evidence.mjs <验收ID>`；原生 Task、消息、会话、并发认领冲突及子执行生命周期共同构成证据。
+
+## 定时任务接入（2026-11-04）
+
+每猫 `/xbot-api/bots/:name/routines` 通过 `server/native/schedules.ts` 对接 Clowder AI 原生 `reminder` 模板。Bot 校验时间、时区、频率和目标成员范围；原生 SQLite 保存任务与触发记录，TaskRunnerV2 负责计时、重启恢复、队列投递和审计。ProductStore 不增加计划或运行状态。
+
+创建时绑定当前单聊和原生成员 ID，新会话不会自动迁移计划。只展示和管理目标成员匹配的动态 reminder，排除内置任务及 hold-ball。暂停/删除阻止后续触发，已投递的工作仍需按原生执行控制处理。一次任务在运行时离线期间错过时间，会按原生规则记录 `SKIP_MISSED_WINDOW`，不会补跑。`RUN_DELIVERED` 只表示已触发/入队，不代表工作完成。
+
+P006 使用原生任务定义的确定性 ID 处理 owner 的创建重试，重试内容不同返回 409；重新读取和重试不会把已暂停的计划恢复。Bot 创建的一次任务结束/错过后，原生定义保留为 disabled，并保留绑定线程的 ledger；过期任务原生恢复接口也拒绝重新执行。其他原生一次任务仍沿用原行为。原生列表增加能力标志，Bot 连接旧构建会明确返回 503，避免误显示为可用的空列表。接口、状态及输入格式见 [schedules-api.md](schedules-api.md)。
+
+升级后需按维护流程重新准备和启动运行时：新构建目录为 `.runtime/clowder-ai-schedules`，数据目录保持原配置。不得同时启动两个进程占用同一数据目录。独立工作树的验收使用独立数据及端口，不自动切换现有部署。
+
+全链路验收发现可选插件激活会拖住统一调度器启动，尽管 HTTP 已监听。P006 在 Bot 开关启用时把可选插件激活移到核心调度和退出处理器就绪之后，保留插件校验；列表显式投影 scheduler ready，尚未启动时不显示有效启用，创建请求返回 503。没有用 HTTP 可访问性推断调度就绪。
+
+真实 Codex 验收同时发现 hidden system History 不会自动进入模型上下文。Bot reminder 因此复用原生 `deliverVisibleWithPrivateInput`，在同一准入事务里保存可见触发记录并投递完整任务正文；不修改全局消息可见性或 owner 权限。修复后的真实定时调用已返回正文中的随机验收标记。

@@ -100,6 +100,7 @@ try {
     CAT_CAFE_ENFORCE_THREAD_PARTICIPANTS: '1',
     CAT_CAFE_BOT_BACKGROUND_DELEGATION: '1',
     CAT_CAFE_BOT_TASK_CONTROL: '1',
+    CAT_CAFE_BOT_SCHEDULES: '1',
     CAT_CAFE_CLAUDE_CARRIER: 'agent_sdk',
     EVIDENCE_DB: join(data, 'evidence.sqlite'), WORLD_DB: join(data, 'world.sqlite'),
     TASK_OUTCOME_DB: join(data, 'task-outcome-episodes.sqlite'),

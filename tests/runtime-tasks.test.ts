@@ -611,7 +611,7 @@ const nativePanel: Record<string, unknown> = {
 };
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Request = { method: string; url: string; body?: any; type?: string };
-function panel(replies: Record<string, unknown>) {
+function panel(replies: Record<string, unknown>, search = '') {
   const tags: Record<string, string> = { refresh: 'button', connection: 'span', error: 'div', approvals: 'div', threads: 'select', tasks: 'div',
     thread: 'div', runtimes: 'div', accounts: 'div', memory: 'div', 'memory-form': 'form' };
   const page: Record<string, El> = Object.fromEntries(Object.entries(tags).map(([id, tag]) => [id, new El(tag)]));
@@ -627,8 +627,8 @@ function panel(replies: Record<string, unknown>) {
     const body = reply === undefined ? { error: `unexpected ${method} ${url}` } : status === 200 ? reply : reply.body;
     return { ok: status < 400, status, json: async () => plain(body) };
   };
-  const window: Module = {};
-  const context = vm.createContext({ window, fetch, crypto: { randomUUID: () => 'uuid-panel' },
+  const window: Module = search ? { location: { search } } : {};
+  const context = vm.createContext({ window, fetch, URLSearchParams, crypto: { randomUUID: () => 'uuid-panel' },
     document: { createElement: (tag: string) => new El(tag), getElementById: (id: string) => page[id] ?? null },
     EventSource: class { addEventListener() {} close() {} } });
   vm.runInContext(read('client/public/runtime-tasks.js'), context);
@@ -677,6 +677,33 @@ test('a Task control goes through the panel\'s native API wrapper; a 409 re-read
   assert.equal(requests.filter(r => r.url === '/native-api/api/tasks?threadId=thread-1').length, 2);
   assert.ok(requests.every(r => !/\/cancel\/|\/queue\//.test(r.url)), 'no thread or member cancel');
   assert.equal(page.error.hidden, true, 'a stale Task answer is not a panel failure');
+});
+
+// A scheduled task's chat links here as ?thread=<id> (schedules.js); it picks the first view only.
+test('a ?thread= link opens that conversation, and a missing one is named instead of silently replaced', async () => {
+  const other = { id: 'thread-2', title: '旧聊天', preferredCats: ['cat-a'] };
+  const replies = { ...nativePanel, '/native-api/api/threads': { threads: [room, other] },
+    '/native-api/api/threads/thread-2/queue': { activeInvocations: [], queue: [] },
+    '/native-api/api/threads/thread-2/sessions': { sessions: [] },
+    '/native-api/api/messages?threadId=thread-2&limit=200': { messages: [], hasMore: false },
+    '/native-api/api/tasks?threadId=thread-2': { tasks: [] } };
+  const linked = panel(replies, '?thread=thread-2');
+  await settle();
+  assert.equal(linked.page.threads.value, 'thread-2');
+  assert.ok(linked.requests.some(r => r.url === '/native-api/api/tasks?threadId=thread-2'));
+  assert.ok(!linked.requests.some(r => r.url === '/native-api/api/tasks?threadId=thread-1'), 'the linked chat is the one read');
+  assert.equal(linked.page.error.hidden, true);
+
+  const missing = panel(replies, '?thread=thread-gone');
+  await settle();
+  assert.equal(missing.page.threads.value, 'thread-1');
+  assert.equal(missing.page.error.hidden, false);
+  assert.equal(missing.page.error.textContent, '没有找到链接里的会话 thread-gone，它可能已被删除；请在会话列表里选择。');
+
+  const plainPage = panel(replies);
+  await settle();
+  assert.equal(plainPage.page.threads.value, 'thread-1', 'without a link the first conversation shows, as before');
+  assert.equal(plainPage.page.error.hidden, true);
 });
 
 test('with no conversation yet, the Task block says what it waits for', async () => {

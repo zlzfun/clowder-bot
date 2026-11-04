@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { root, lock } from './upstream-source.mjs';
 
-const checks = new Set(['test-background-output.mjs', 'test-task-background.mjs', 'test-native-mcp-bridge.mjs', 'check-task-background-sdk.mjs']);
+const checks = new Set(['test-background-output.mjs', 'test-task-background.mjs', 'test-native-mcp-bridge.mjs', 'check-task-background-sdk.mjs', 'test-schedules-native.mjs']);
 const check = process.argv[2];
 if (!checks.has(check)) throw new Error('Unknown native regression check');
 const api = resolve(root, process.env.BOT_TASK_TEST_RUNTIME || lock.build, 'packages/api');

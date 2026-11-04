@@ -164,11 +164,12 @@
     return raw ? msg : fallback || "操作失败，稍后再试";
   }
 
-  async function apiFetch(path, opt) {
+  // serverError keeps the server's own words for a 5xx (see scheduleApi).
+  async function apiFetch(path, opt, serverError) {
     let res;
     try { res = await fetch(path, opt); } catch (e) { throw new Error("连不上 clowder-bot"); }
     if (res.status === 401 && authenticated) showLogin(true);
-    if (res.status >= 500) {
+    if (res.status >= 500 && !serverError) {
       const err = new Error("服务出了点问题，请稍后再试。");
       err.status = res.status;
       throw err;
@@ -184,7 +185,7 @@
       signal: opt.signal,
       headers: opt.body ? { "Content-Type": "application/json" } : undefined,
       body: opt.body ? JSON.stringify(opt.body) : undefined,
-    });
+    }, opt.serverError);
     const text = await res.text();
     let data = {};
     if (text) {
@@ -760,39 +761,6 @@
     const a = Date.parse(prev.time || prev.ts || prev.at || "");
     const b = Date.parse(cur.time || cur.ts || cur.at || "");
     return !Number.isFinite(a) || !Number.isFinite(b) || b < a || b - a > GROUP_GAP_MS;
-  }
-
-  function cronText(cron, enabled) {
-    const raw = String(cron || "").trim();
-    const parts = raw.split(/\s+/);
-    let label = "自定义时间";
-    const number = (s, max, min = 0) => /^\d+$/.test(s) && Number(s) >= min && Number(s) <= max;
-    if (parts.length === 5) {
-      const [min, hour, dom, mon, dow] = parts;
-      const daily = dom === "*" && mon === "*" && dow === "*";
-      const step = (s, max) => /^\*\/\d+$/.test(s) && number(s.slice(2), max, 1);
-      if (daily && hour === "*" && step(min, 59)) label = "每 " + Number(min.slice(2)) + " 分钟";
-      else if (daily && min === "0" && step(hour, 23)) label = "每 " + Number(hour.slice(2)) + " 小时";
-      else if (number(min, 59)) {
-        const hours = hour.split(",");
-        const range = hour.split("-");
-        if (daily && min === "0" && hours.length > 1 && hours.every((h) => number(h, 23))) {
-          label = "每天 " + hours.map(Number).join("、") + " 点";
-        } else if (daily && min === "0" && range.length === 2 && range.every((h) => number(h, 23)) && Number(range[0]) <= Number(range[1])) {
-          label = "每天 " + Number(range[0]) + "–" + Number(range[1]) + " 点每小时";
-        } else if (number(hour, 23)) {
-          const hm = String(Number(hour)).padStart(2, "0") + ":" + String(Number(min)).padStart(2, "0");
-          const days = dow.split(",");
-          const week = ["日", "一", "二", "三", "四", "五", "六", "日"];
-          if (daily) label = "每天 " + hm;
-          else if (mon === "*" && dom === "*" && (dow === "1-5" || dow === "1,2,3,4,5")) label = "工作日 " + hm;
-          else if (mon === "*" && dom === "*" && days.every((d) => number(d, 7))) label = "每周" + days.map((d) => week[Number(d)]).join("、") + " " + hm;
-          else if (mon === "*" && dow === "*" && number(dom, 31, 1)) label = "每月 " + Number(dom) + " 日 " + hm;
-        }
-      }
-    }
-    if (enabled === false) label += (label ? " · " : "") + "停用";
-    return label;
   }
 
   function niceName(slug) {
@@ -1979,8 +1947,9 @@
   }
 
   // Empty chat (window review P2 #7): the bot's face, its name, one line and
-  // up to three starters made from its routines and persona. A starter only
-  // fills the composer; sending still takes Enter or the send button.
+  // up to three starters made from its persona. A starter only fills the
+  // composer; sending still takes Enter or the send button. Scheduled tasks
+  // live in the drawer's 任务 tab (schedules.js), never in the profile.
   const EMPTY_LINE = "有什么事，直接说就行。";
   const EMPTY_REPLY = "这次没有收到回复，请再试一次。";
   const GENERIC_STARTERS = [
@@ -1995,9 +1964,6 @@
       text = String(text || "").replace(/\s+/g, " ").trim();
       if (text && text.length <= 30 && !out.some(item => item.text === text) && out.length < 3) out.push({text, icon});
     };
-    for (const rt of (profile && profile.routines) || []) {
-      if (rt && rt.enabled !== false && rt.name) push("现在跑一次「" + rt.name + "」", "alarm-clock");
-    }
     // What the persona or description says the bot does, asked as a request:
     // 「负责整理日记」 becomes 「帮我整理日记」.
     const said = [profile && profile.persona, profile && profile.description].join("\n");
@@ -4387,6 +4353,8 @@
     state.firstRender = true;
     state.messages = [];
     state.panelData = null;
+    // The scheduled-task section, its dialog and its pending answers belong to the cat left behind.
+    window.ClowderSchedules?.teardown();
     state.traceOpen = {};
     state.traceOut = {};
     state.traceThink = {};
@@ -4998,6 +4966,7 @@
     panelBody.replaceChildren();
     paintContextBar();
     if (!state.sel) {
+      window.ClowderSchedules?.teardown();
       $("panel-ident").hidden = true;
       $("panel-tabs").replaceChildren();
       syncPanelChrome();
@@ -5708,12 +5677,12 @@
     if (!selection || selection.type !== "bot" || state.peer) { paintWorkStatus(); return; }
     const data = await fetchBotProfile(selection.id);
     if (state.sel !== selection) return;
-    const prior = state.panelData;
     state.panelData = data;
     paintWorkStatus();
+    // Only the task view drawn for this cat: a view still showing the cat left
+    // behind waits for its own repaint and never takes this cat's cards.
     const root = panelBody.querySelector(".task-view");
-    if (root && state.tab === "computer") syncTaskView(root, data);
-    else if (prior && state.tab === "details" && JSON.stringify(prior.routines) !== JSON.stringify(data.routines)) paintPanel();
+    if (root && state.tab === "computer" && root.dataset.bot === data.name) syncTaskView(root, data);
     updateWorkTimes();
   }
 
@@ -5847,74 +5816,54 @@
     card.querySelector(".task-fold").hidden = hot;
   }
 
-  const routineChanges = new Set();
-  function routineCard(data, rt) {
-    const card = el("div", "routine task-routine"); card.dataset.routine = rt.id;
-    const copy = el("div", "ct"); copy.append(el("b", "routine-name"), el("span", "s2 routine-time"));
-    const toggle = el("button", "tog"); toggle.type = "button"; toggle.setAttribute("role", "switch");
-    const notice = el("span", "routine-error"); notice.hidden = true; notice.setAttribute("role", "status");
-    toggle.addEventListener("click", async () => {
-      const before = card.routine.enabled !== false; const desired = !before;
-      clearTimeout(card.failureTimer); notice.getAnimations().forEach(a => a.cancel()); notice.hidden = true;
-      routineChanges.add(rt.id); toggle.disabled = true; toggle.classList.toggle("on", desired); toggle.setAttribute("aria-checked", String(desired));
-      try {
-        const changed = await api("/xbot-api/bots/" + encodeURIComponent(data.name) + "/routines/" + encodeURIComponent(rt.id), {method: "PATCH", body: {enabled: desired}});
-        card.routine.enabled = changed.enabled;
-      } catch (e) {
-        card.routine.enabled = before;
-        notice.style.opacity = "1"; notice.hidden = false;
-        notice.textContent = "没改成，已恢复为" + (before ? "开启。" : "关闭。");
-        card.failureTimer = setTimeout(() => { if (matchMedia("(prefers-reduced-motion: reduce)").matches) { notice.hidden = true; return; } const a = notice.animate([{opacity:1},{opacity:0}], {duration:120,fill:"forwards"}); a.finished.then(() => { notice.hidden = true; }).catch(() => {}); }, 4000);
-      }
-      finally { routineChanges.delete(rt.id); toggle.disabled = false; updateRoutineCard(card, card.routine); }
-    });
-    card.append(icon("alarm-clock"), copy, toggle, notice); updateRoutineCard(card, rt); return card;
-  }
+  // Scheduled tasks show the server's own words for every failure, a 5xx
+  // included: it says when the runtime needs preparing, or when a create could
+  // not be confirmed and the list should be checked before trying again.
+  const scheduleApi = (path, opt) => api(path, Object.assign({}, opt, { serverError: true }));
 
-  function updateRoutineCard(card, rt) {
-    card.routine = rt;
-    taskValue(card.querySelector(".routine-name"), rt.name || "例程");
-    taskValue(card.querySelector(".routine-time"), rt.at ? when(rt.at) : cronText(rt.cron, true) + (rt.zone === "UTC" ? " · UTC" : ""));
-    if (routineChanges.has(rt.id)) return;
-    const toggle = card.querySelector(".tog"), enabled = rt.enabled !== false;
-    toggle.classList.toggle("on", enabled); toggle.setAttribute("aria-checked", String(enabled)); toggle.setAttribute("aria-label", (enabled ? "停用" : "启用") + "「" + (rt.name || "例程") + "」");
+  // The cat's own scheduled tasks are a module (schedules.js) kept as the last
+  // section. It reads /xbot-api/bots/:name/routines itself (the profile carries
+  // none), so this frequent sync only keeps it in place: an open form, a
+  // history or a dialog survives every repaint of the cards above it.
+  function scheduleSection(root, name) {
+    if (!window.ClowderSchedules || !name || root.dataset.bot !== name) return null;
+    return window.ClowderSchedules.mount(root, { api: scheduleApi, bot: name, icon });
   }
 
   function syncTaskView(root, data) {
+    const schedules = scheduleSection(root, data.name);
+    const before = schedules && schedules.parentNode === root ? schedules : null;
     const agents = [...(data.agents || []), ...routineRuns(state.messages || []).recent];
     const sections = [
-      ["进行中", agents.filter(a => ["running", "awaiting"].includes(a.status)), "agent"],
-      ["排队中", agents.filter(a => a.status === "queued"), "agent"],
-      ["最近结束", agents.filter(a => !["running", "awaiting", "queued"].includes(a.status)).sort((a,b) => Date.parse(b.finished_at || 0) - Date.parse(a.finished_at || 0)).slice(0,20), "agent"],
-      ["例程", data.routines || [], "routine"],
+      ["进行中", agents.filter(a => ["running", "awaiting"].includes(a.status))],
+      ["排队中", agents.filter(a => a.status === "queued")],
+      ["最近结束", agents.filter(a => !["running", "awaiting", "queued"].includes(a.status)).sort((a,b) => Date.parse(b.finished_at || 0) - Date.parse(a.finished_at || 0)).slice(0,20)],
     ];
-    if (!agents.length && !sections[3][1].length) { if (!root.querySelector(".panel-empty")) root.replaceChildren(panelEmpty("tasks", "没有任务", "让它「每天 8 点提醒我」，这里就会有一个例程。")); return; }
-    root.querySelector(".panel-empty")?.remove();
-    const cards = new Map([...root.querySelectorAll("[data-agent], [data-routine]")].map(n => [n.dataset.agent ? "agent:" + n.dataset.agent : "routine:" + n.dataset.routine, n]));
+    const cards = new Map([...root.querySelectorAll("[data-agent]")].map(n => [n.dataset.agent, n]));
     const emptyActive = !sections[0][1].length && !sections[1][1].length;
     let idle = root.querySelector(".task-idle");
     if (emptyActive && !idle) { idle = el("div", "task-idle", "现在没有在跑或排队的任务。"); root.prepend(idle); }
     else if (!emptyActive) idle?.remove();
     const keep = new Set();
-    for (const [label, items, kind] of sections) {
+    for (const [label, items] of sections) {
       let section = [...root.children].find(n => n.dataset.section === label);
-      if (!section) { section = el("section", "task-section"); section.dataset.section = label; section.append(el("h4"), el("div", "task-items")); root.append(section); }
+      if (!section) { section = el("section", "task-section"); section.dataset.section = label; section.append(el("h4"), el("div", "task-items")); root.insertBefore(section, before); }
       section.hidden = emptyActive && ["进行中", "排队中"].includes(label);
       taskValue(section.querySelector("h4"), label + " · " + items.length);
       const list = section.querySelector(".task-items");
       let hint = list.querySelector(".pnone");
       if (items.length) hint?.remove();
-      else if (!hint) list.append(el("div", "pnone", label === "进行中" ? "现在没有在跑的任务。" : label === "排队中" ? "现在没有排队的任务。" : label === "例程" ? "还没有例程。" : "还没有结束的任务。"));
+      else if (!hint) list.append(el("div", "pnone", label === "进行中" ? "现在没有在跑的任务。" : label === "排队中" ? "现在没有排队的任务。" : "还没有结束的任务。"));
       let next = list.firstElementChild;
       for (const item of items) {
-        const key = kind + ":" + item.id; keep.add(key);
-        const card = cards.get(key) || (kind === "agent" ? taskCard(item) : routineCard(data, item));
-        if (kind === "agent") updateTaskCard(card, item); else updateRoutineCard(card, item);
+        keep.add(item.id);
+        const card = cards.get(item.id) || taskCard(item);
+        updateTaskCard(card, item);
         if (card !== next) list.insertBefore(card, next);
         next = card.nextElementSibling;
       }
     }
-    for (const [key, card] of cards) if (!keep.has(key)) card.remove();
+    for (const [id, card] of cards) if (!keep.has(id)) card.remove();
   }
 
   function computerView(data) {
@@ -7353,6 +7302,8 @@
 
   const isMac = /Mac|iPhone|iPad/.test(navigator.platform || "");
   function panelOpen(open) {
+    // Opening again over a scheduled-task section still in place reads its list again.
+    if (open && !panel.classList.contains("open")) window.ClowderSchedules?.reopened();
     panel.classList.toggle("open", open);
     $("head-chip").classList.toggle("on", open);
     $("head-chip").setAttribute("aria-expanded", open ? "true" : "false");

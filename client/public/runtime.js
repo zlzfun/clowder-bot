@@ -14,6 +14,9 @@ function button(title, action) {
   b.onclick = async () => { b.disabled = true; $('error').hidden = true; try { await action(); } catch(e) { fail(e); } finally { b.disabled = false; } }; return b;
 }
 let activeThread, events, revision = 0, threadIndex = new Map();
+// A link may name the conversation to show first (?thread=<id>), e.g. a scheduled
+// task's chat from the Bot drawer. It applies to the first list read only.
+let linkedThread = (() => { try { return new URLSearchParams(window.location.search).get('thread') || ''; } catch { return ''; } })();
 async function interaction(id, target) {
   const { interaction: record } = await api('/api/runtime-interactions/' + enc(id));
   const req = record.request;
@@ -124,14 +127,17 @@ async function thread() {
 }
 async function refresh() {
   $('error').hidden = true;
-  const selected = $('threads').value;
+  const selected = linkedThread || $('threads').value;
   // Each native view reads and fails on its own; #error still reports the first failure.
   const [threads, runtimes, accounts, catalog] = await Promise.allSettled([api('/api/threads'), api('/api/cats/native-runtimes'), api('/api/accounts'), api('/api/memory/catalog')]);
   const view = (result, target, render) => { if (result.status === 'fulfilled') render(result.value); else target.replaceChildren(node('p', '没能读取：' + result.reason.message, 'muted')); };
   if (threads.status === 'fulfilled') {
     threadIndex = new Map(threads.value.threads.map(t => [t.id, t]));
     $('threads').replaceChildren(...threads.value.threads.map(t => { const option = node('option', t.title || t.id); option.value = t.id; return option; }));
-    if ([...$('threads').options].some(o => o.value === selected)) $('threads').value = selected;
+    const found = [...$('threads').options].some(o => o.value === selected);
+    if (found) $('threads').value = selected;
+    else if (linkedThread) fail(new Error(`没有找到链接里的会话 ${linkedThread}，它可能已被删除；请在会话列表里选择。`));
+    linkedThread = '';
   }
   // Read-only: readiness is login/config evidence, not a running or reachable Agent.
   const ready = { configured: '已有登录或配置记录', login_required: '需要先登录', not_installed: '未检测到' };

@@ -1,0 +1,247 @@
+diff --git a/packages/api/src/routes/bot-schedule-adapter.ts b/packages/api/src/routes/bot-schedule-adapter.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/api/src/routes/bot-schedule-adapter.ts
+@@ -0,0 +1,37 @@
++import { createHash } from 'node:crypto';
++import { isDeepStrictEqual } from 'node:util';
++import type { DynamicTaskStore } from '../infrastructure/scheduler/DynamicTaskStore.js';
++import type { ScheduleTaskSummary } from '../infrastructure/scheduler/types.js';
++import type { ScheduleMutationPrincipal } from './schedule-mutation-principal.js';
++
++export const botSchedulesEnabled = () => process.env.CAT_CAFE_BOT_SCHEDULES === '1';
++
++/** Expose only reminder attribution, never arbitrary template params or private authorization. */
++export function projectBotSchedules(tasks: ScheduleTaskSummary[], store?: DynamicTaskStore) {
++  if (!botSchedulesEnabled() || !store) return tasks;
++  return tasks.map(task => {
++    const def = store.getById(task.dynamicTaskId ?? task.id);
++    if (!def || def.templateId !== 'reminder' || !def.id.startsWith('dyn-')) return task;
++    return { ...task, templateId: def.templateId,
++      ...(typeof def.params.targetCatId === 'string' ? { targetCatId: def.params.targetCatId } : {}),
++      ...(typeof def.params.message === 'string' ? { prompt: def.params.message } : {}) };
++  });
++}
++
++/** Stable native identity uses the native SQLite definition and audit transaction; no extra store. */
++export function botScheduleRequestId(key: unknown, principal: ScheduleMutationPrincipal, templateId: string): string | null {
++  if (key === undefined) return null;
++  if (!botSchedulesEnabled() || principal.kind !== 'cvo' || templateId !== 'reminder') {
++    throw new Error('Bot schedule retry identity requires the configured owner and reminder template');
++  }
++  if (typeof key !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(key)) {
++    throw new Error('Invalid botIdempotencyKey');
++  }
++  return `dyn-bot-${createHash('sha256').update(principal.userId + ':' + key).digest('hex')}`;
++}
++
++type Definition = { templateId: string; trigger: unknown; params: unknown; display: unknown; deliveryThreadId: unknown };
++export function sameBotScheduleRequest(a: Definition, b: Definition): boolean {
++  return ['templateId', 'trigger', 'params', 'display', 'deliveryThreadId'].every(key =>
++    isDeepStrictEqual(a[key as keyof Definition], b[key as keyof Definition]));
++}
+diff --git a/packages/api/src/routes/schedule.ts b/packages/api/src/routes/schedule.ts
+--- a/packages/api/src/routes/schedule.ts
++++ b/packages/api/src/routes/schedule.ts
+@@ -1,3 +1,4 @@
++import { botSchedulesEnabled, projectBotSchedules } from './bot-schedule-adapter.js';
+ /**
+  * Schedule Panel API Routes (F139 Phase 2 + Phase 3A + Phase 3B)
+  *
+@@ -65,15 +66,15 @@
+   // #320: Optional ?threadId= filter — resolves thread's task subjectKeys for cross-match
+   app.get('/api/schedule/tasks', async (request) => {
+     const { threadId } = request.query as { threadId?: string };
+-    const summaries = mergeUnregisteredDynamicTasks(
++    const summaries = projectBotSchedules(mergeUnregisteredDynamicTasks(
+       taskRunner.getTaskSummaries(),
+       taskRunner,
+       dynamicTaskStore,
+       templateRegistry,
+-    );
++    ), dynamicTaskStore).map(task => botSchedulesEnabled() && !taskRunner.isStarted() ? { ...task, effectiveEnabled: false } : task);
+ 
+     if (!threadId || !taskStore) {
+-      return { tasks: summaries };
++      return { tasks: summaries, ...(botSchedulesEnabled() ? { botScheduleVersion: 1, botSchedulerReady: taskRunner.isStarted() } : {}) };
+     }
+ 
+     // Build set of subjectKeys for tasks in this thread
+@@ -117,7 +118,7 @@
+       return [];
+     });
+ 
+-    return { tasks: filtered };
++    return { tasks: filtered, ...(botSchedulesEnabled() ? { botScheduleVersion: 1, botSchedulerReady: taskRunner.isStarted() } : {}) };
+   });
+ 
+   // GET /api/schedule/tasks/:id/runs
+diff --git a/packages/api/src/routes/schedule-task-create-route.ts b/packages/api/src/routes/schedule-task-create-route.ts
+--- a/packages/api/src/routes/schedule-task-create-route.ts
++++ b/packages/api/src/routes/schedule-task-create-route.ts
+@@ -1,3 +1,4 @@
++import { botScheduleRequestId, sameBotScheduleRequest } from './bot-schedule-adapter.js';
+ import {
+   DEVELOPMENT_RETURN_TEMPLATE_ID,
+   type ProducerAttentionReevaluationLinkV1,
+@@ -69,6 +70,7 @@
+ 
+     const body = (request.body ?? {}) as {
+       templateId?: string;
++      botIdempotencyKey?: unknown;
+       trigger?: TriggerSpec;
+       params?: Record<string, unknown>;
+       display?: { label: string; category: string; description?: string };
+@@ -147,9 +149,13 @@
+       reply.status(400);
+       return { error: 'entrustedWorkReevaluation is reserved for its typed F310 template' };
+     }
+-    const id = entrustedWorkReevaluation
++    let botId: string | null;
++    try { botId = botScheduleRequestId(body.botIdempotencyKey, mutationPrincipal, body.templateId); }
++    catch (error) { return reply.code(400).send({ error: error instanceof Error ? error.message : 'Invalid retry identity' }); }
++    if (botId && !taskRunner.isStarted()) return reply.code(503).send({ error: 'Scheduler is still starting; retry after it is ready' });
++    const id = botId ?? (entrustedWorkReevaluation
+       ? producerAttentionReevaluationTaskId(entrustedWorkReevaluation)
+-      : `dyn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
++      : `dyn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+     const display = body.display
+       ? {
+           label: body.display.label,
+@@ -190,6 +196,18 @@
+     };
+     const existing = dynamicTaskStore.getById(id);
+     if (existing) {
++      if (botId) {
++        if (!sameBotScheduleRequest(existing, def)) {
++          return reply.code(409).send({ error: 'Retry identity already belongs to a different scheduled task' });
++        }
++        // A retry can recover a persisted definition after registration failed, but cannot unpause it.
++        if (existing.enabled && !taskRunner.getRegisteredTasks().includes(id)) {
++          const retrySpec = template.createSpec(id, { trigger: existing.trigger, params: existing.params, deliveryThreadId: existing.deliveryThreadId });
++          retrySpec.display = existing.display;
++          taskRunner.registerDynamic(retrySpec, id);
++        }
++        return { success: true, proposed: false, coalesced: true, task: { id, ...existing.display, trigger: existing.trigger } };
++      }
+       if (
+         existing.templateId === ENTRUSTED_WORK_REEVALUATION_TEMPLATE_ID &&
+         existing.entrustedWorkReevaluation &&
+diff --git a/packages/api/src/infrastructure/scheduler/bot-reminder-record.ts b/packages/api/src/infrastructure/scheduler/bot-reminder-record.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/api/src/infrastructure/scheduler/bot-reminder-record.ts
+@@ -0,0 +1,6 @@
++import type { DynamicTaskDef } from './DynamicTaskStore.js';
++
++/** Bot-owned one-shot history remains in the same native definition table, disabled. */
++export function retainBotReminderRecord(def: Pick<DynamicTaskDef, 'id' | 'templateId'> | null | undefined): boolean {
++  return process.env.CAT_CAFE_BOT_SCHEDULES === '1' && !!def && def.id.startsWith('dyn-bot-') && def.templateId === 'reminder';
++}
+diff --git a/packages/api/src/infrastructure/scheduler/TaskRunnerV2.ts b/packages/api/src/infrastructure/scheduler/TaskRunnerV2.ts
+--- a/packages/api/src/infrastructure/scheduler/TaskRunnerV2.ts
++++ b/packages/api/src/infrastructure/scheduler/TaskRunnerV2.ts
+@@ -1,3 +1,4 @@
++import { retainBotReminderRecord } from './bot-reminder-record.js';
+ import type { IBallCustodyIngest } from '../../domains/ball-custody/BallCustodyIngest.js';
+ import { holdStaleWakeSuppressedTotal } from '../telemetry/instruments.js';
+ import { computeNextCronSlot, countAdditionalDueCronSlots } from './cron-utils.js';
+@@ -407,6 +408,8 @@
+     }
+     return loaded;
+   }
++
++  isStarted(): boolean { return this.started; }
+ 
+   start(): void {
+     this.started = true;
+@@ -684,6 +687,8 @@
+       const lifecycle = this.tasks.find((task) => task.id === taskId)?.onceLifecycle;
+       if (lifecycle) {
+         lifecycle.retire();
++      } else if (retainBotReminderRecord(def)) {
++        this.dynamicTaskStore.setEnabled(taskId, false);
+       } else {
+         this.dynamicTaskStore.remove(taskId);
+       }
+@@ -701,7 +706,7 @@
+     // Record in ledger for audit trail
+     this.ledger.record({
+       task_id: def.id,
+-      subject_key: def.id,
++      subject_key: retainBotReminderRecord(def) && def.deliveryThreadId ? `thread-${def.deliveryThreadId}` : def.id,
+       outcome: 'SKIP_MISSED_WINDOW',
+       signal_summary: `Execution window missed: fireAt=${fireAtIso}`,
+       duration_ms: 0,
+@@ -760,8 +765,9 @@
+         reason: timerHold.kind === 'expired' ? 'sla_elapsed' : timerHold.reason,
+       });
+     } else {
+-      // Ordinary once tasks retain their existing missed-window deletion semantics.
+-      store.remove(def.id);
++      // Bot-owned definitions keep their native audit history visible; other once tasks keep deletion semantics.
++      if (retainBotReminderRecord(def)) store.setEnabled(def.id, false);
++      else store.remove(def.id);
+     }
+   }
+ 
+diff --git a/packages/api/src/routes/schedule-mutation-routes.ts b/packages/api/src/routes/schedule-mutation-routes.ts
+--- a/packages/api/src/routes/schedule-mutation-routes.ts
++++ b/packages/api/src/routes/schedule-mutation-routes.ts
+@@ -1,3 +1,4 @@
++import { retainBotReminderRecord } from '../infrastructure/scheduler/bot-reminder-record.js';
+ import type { FastifyPluginAsync } from 'fastify';
+ import { fingerprintDynamicTaskDef } from '../infrastructure/scheduler/ScheduleMutationProposalStore.js';
+ import { notifyTaskDeleted, notifyTaskPaused, notifyTaskResumed } from '../infrastructure/scheduler/schedule-notify.js';
+@@ -126,6 +127,9 @@
+     }
+     let resumeSpec: TaskSpec_P1 | null = null;
+     if (body.enabled) {
++      if (retainBotReminderRecord(defBeforeUpdate) && defBeforeUpdate.trigger.type === 'once' && defBeforeUpdate.trigger.fireAt <= Date.now()) {
++        return reply.code(409).send({ error: 'Expired one-shot schedule cannot resume; create a new schedule' });
++      }
+       const template = templateRegistry.get(defBeforeUpdate.templateId);
+       if (!template) {
+         reply.status(500);
+diff --git a/packages/api/src/index.ts b/packages/api/src/index.ts
+--- a/packages/api/src/index.ts
++++ b/packages/api/src/index.ts
+@@ -7640,8 +7640,8 @@
+     await apiInstanceLease?.release().catch(() => {});
+     throw err;
+   }
+-  // Callback recovery owns core admission; optional plugin startup must not delay it.
+-  await initialPlugins?.activate();
++  // Core Bot scheduling must not wait for optional plugin package activation.
++  if (process.env.CAT_CAFE_BOT_SCHEDULES !== '1') await initialPlugins?.activate();
+   if (runtimeDeploymentContext) {
+     try {
+       const readiness = await checkReadiness();
+@@ -8563,6 +8563,7 @@
+     void shutdown('SIGINT');
+   });
+   recordRuntimeStartupFailure = null;
++  if (process.env.CAT_CAFE_BOT_SCHEDULES === '1') await initialPlugins?.activate();
+ }
+ 
+ main().catch(async (err) => {
+diff --git a/packages/api/src/infrastructure/scheduler/templates/reminder.ts b/packages/api/src/infrastructure/scheduler/templates/reminder.ts
+--- a/packages/api/src/infrastructure/scheduler/templates/reminder.ts
++++ b/packages/api/src/infrastructure/scheduler/templates/reminder.ts
+@@ -58,6 +58,8 @@
+     const triggerUserId = (p.params.triggerUserId as string) || 'default-user';
+     const ownerAuthProvenance = instanceId.startsWith('hold-ball-') ? p.ownerAuthProvenance : undefined;
+     const toolExecutionPolicy = instanceId.startsWith('hold-ball-') ? p.toolExecutionPolicy : undefined;
++    // Bot reminders use the native exact-input queue lane: hidden system History is not model input.
++    const botReminder = process.env.CAT_CAFE_BOT_SCHEDULES === '1' && instanceId.startsWith('dyn-bot-');
+     const threadId = p.deliveryThreadId;
+     const managedCommandWake = instanceId.startsWith('hold-ball-') && isManagedCommandWake(p.params);
+     const managedHoldWake = isManagedHoldWake(instanceId, p.params);
+@@ -108,6 +110,7 @@
+             await ctx.deliver({
+               threadId: tid,
+               content,
++              ...(botReminder ? { privateContent: content } : {}),
+               // F117 ADR-043 D.4: stored userId is the verified trigger owner (tenant), not the
+               // author — scheduler authorship is expressed via from: system:scheduler.
+               userId: triggerUserId,

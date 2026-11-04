@@ -28,6 +28,8 @@
     "test:task-mcp": "node scripts/run-native-check.mjs test-native-mcp-bridge.mjs",
     "test:multi-agent": "node scripts/check-multi-agent-journey.mjs",
     "test:cat-templates-native": "node --test scripts/test-cat-templates-native.mjs",
+    "test:schedules-native": "node scripts/run-native-check.mjs test-schedules-native.mjs",
+    "test:schedules-http": "node --import tsx scripts/check-schedules-http.ts",
     "test:cat-templates-http": "node --env-file-if-exists=.env --import tsx scripts/check-cat-templates-http.ts"
   },
   "dependencies": {
