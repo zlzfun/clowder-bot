@@ -20,6 +20,8 @@ export interface NativeMessage {
 export interface NativeEvent { threadId?: string; type?: string; seq?: number; seqEpoch?: string; [key: string]: unknown }
 export interface NativeTransport {
   request<T = Record<string, unknown>>(path: string, options?: { method?: string; body?: unknown }): Promise<T>;
+  /** Authorized source messages must be checked by the caller before reading native upload bytes. */
+  readFile?(path: string, maxBytes: number): Promise<Buffer>;
   subscribe(threadId: string, listener: (event: NativeEvent) => void): Promise<() => void>;
   close(): Promise<void>;
 }

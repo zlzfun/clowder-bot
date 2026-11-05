@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { io, type Socket } from 'socket.io-client';
 import { ApiError } from '../errors.js';
 import type { NativeEvent, NativeTransport } from './types.js';
+import { nativeUploadPath } from './file-path.js';
 
 export class NativeClient implements NativeTransport {
   private cookie = '';
@@ -58,6 +59,33 @@ export class NativeClient implements NativeTransport {
     const data = response.status === 204 ? {} : await response.json().catch(() => { throw new ApiError(502, 'Clowder AI 返回了无效的 JSON'); });
     if (!response.ok) throw new ApiError(response.status, data.error ?? `Clowder AI HTTP ${response.status}`, data);
     return data as T;
+  }
+  async readFile(path: string, maxBytes: number): Promise<Buffer> {
+    if (!nativeUploadPath(path) || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 20 * 1024 * 1024)
+      throw new ApiError(400, '文件来源不可访问');
+    await this.authenticate();
+    let response: Response;
+    try {
+      response = await this.fetcher(this.baseUrl + path, { headers: { Cookie: this.cookie, Origin: this.origin },
+        redirect: 'error', signal: AbortSignal.timeout(30_000) });
+    } catch { throw new ApiError(503, '暂时读不到这个文件'); }
+    if (!response.ok) { await response.body?.cancel(); throw new ApiError(response.status === 404 ? 404 : 502, response.status === 404 ? '文件已不存在' : '暂时读不到这个文件'); }
+    if (Number(response.headers.get('content-length')) > maxBytes) { await response.body?.cancel(); throw new ApiError(413, '单个文件最多 20 MB'); }
+    if (!response.body) throw new ApiError(502, '文件内容不可读');
+    const reader = response.body.getReader(), chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read(); if (done) break;
+        size += value.byteLength;
+        if (size > maxBytes) { await reader.cancel(); throw new ApiError(413, '单个文件最多 20 MB'); }
+        chunks.push(value);
+      }
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(503, '文件读取中断，请重试');
+    } finally { reader.releaseLock(); }
+    return Buffer.concat(chunks, size);
   }
   private async connect(): Promise<void> {
     if (this.socket?.connected) return;

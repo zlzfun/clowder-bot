@@ -1,0 +1,61 @@
+/* The chat's status line, read position and read-only memory
+   (chat-experience.js). Builds on the dock's wrow line, the drawer's psec,
+   task-details folds, lib-card cards and .field controls, workspace.css's
+   short-state notes (ws-note, ws-bad, ws-link) and the --x-* tokens of
+   tokens.css and the café layer. No new colors, fonts or motion. */
+
+/* ---- One status line: while it is in charge, the earlier execution and Task lines step aside. */
+.dock.cx-on > #work-status, .dock.cx-on > .ws-strip { display: none; }
+.cx-status { width: min(680px, 100% - 64px); margin: 0 auto; }
+.main.peer .cx-status { display: none; }
+.cx-row > .avatar { width: 18px; height: 18px; flex: none; }
+.cx-row > .icon:first-child { width: 14px; height: 14px; color: var(--x-muted); flex: none; }
+.cx-row .cx-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.cx-row :is(.cx-rest, .cx-partial) { flex: none; color: var(--x-faint); }
+.cx-row[data-kind="approval"] .cx-lead { color: var(--x-text); }
+.cx-row[data-kind="failure"] .cx-lead, .cx-row[data-kind="failure"] > .icon:first-child { color: var(--x-danger); }
+.cx-row[aria-expanded="true"] > .cx-chev { transform: rotate(90deg); }
+
+/* In place under the line: a short list, each row pointing at its message or
+   Task; 查看其余 N 项 / 收起 opens the rest in the same list. */
+.cx-list { display: grid; gap: 2px; margin: 0 0 var(--x-s3); padding: var(--x-s1); border-radius: var(--x-r-card); background: var(--x-panel-card); }
+.cx-item { display: flex; align-items: center; gap: var(--x-s3); min-width: 0; min-height: 32px; padding: 2px var(--x-s3); font-size: var(--x-fs-sm); color: var(--x-text-2); }
+.cx-item > .avatar { width: 18px; height: 18px; flex: none; }
+.cx-item > .icon { width: 15px; height: 15px; flex: none; color: var(--x-muted); }
+.cx-tag { flex: none; font-size: var(--x-fs-cap); color: var(--x-faint); }
+.cx-item[data-kind="approval"] .cx-tag { color: var(--x-text); font-weight: 600; }
+.cx-item[data-kind="failure"] .cx-tag { color: var(--x-danger); }
+.cx-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cx-acts { flex: none; display: flex; align-items: center; gap: var(--x-s2); font-size: 12px; }
+.cx-list > .ws-note { padding: 2px var(--x-s3); font-size: 12px; }
+.cx-list > .cx-err { color: var(--x-faint); }
+
+/* A message found from the line flashes like a quoted one. */
+.msg.cx-hit .bubble, .msg.cx-hit > .body { border-radius: var(--x-r-card); animation: quote-flash 1.5s linear; }
+.msg.cx-hit:focus { outline: none; }
+
+/* ---- Sidebar second line: a failure and an unconfirmable state. */
+.item .preview.st.fail { color: var(--x-danger); }
+.item .preview.st.unknown { color: var(--x-faint); }
+
+/* ---- 记忆, read only throughout: 关于你 / 你的偏好 folded; then this conversation's notes. */
+.cx-fold { margin-top: var(--x-s4); }
+.cx-fold > summary { min-height: 28px; font-size: 12px; font-weight: 600; }
+.cx-fold-body { margin-top: var(--x-s1); }
+.cx-fold-body > .ws-note { margin: var(--x-s1) 0 var(--x-s2); }
+.cx-entries > .lib-card:first-child { margin-top: var(--x-s1); }
+.cx-entry .cx-content { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--x-text); }
+.cx-flag { margin-left: var(--x-s2); color: var(--x-faint); }
+.cx-meta { margin: var(--x-s2) 0 0; font-size: var(--x-fs-cap); line-height: 1.5; color: var(--x-faint); }
+.cx-meta.cx-pending { color: var(--warn); }
+.cx-src { margin-top: var(--x-s2); }
+.cx-src-body { margin-top: var(--x-s1); }
+.cx-src-body > .ws-note { font-size: 12px; }
+.cx-src-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: 12px; color: var(--x-muted); }
+.cx-src-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--x-s3); }
+.cx-src-time { color: var(--x-faint); font-variant-numeric: tabular-nums; }
+.psec.cx-notes { margin-top: var(--x-s5); }
+.cx-notes h4 .ws-count { font-weight: 500; }
+.cx-note > .v { margin-top: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.cx-note-list > .ws-note { margin: var(--x-s1) 0 var(--x-s2); font-size: 12px; }
+.hint.cx-note-hint { margin-top: var(--x-s2); }

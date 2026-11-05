@@ -78,12 +78,7 @@
     ctxRaw: "",
     peer: null,
     replyTo: null,
-    // Pictures pasted or dropped into the composer, waiting for send. Each
-    // entry is {id, uploading, url}; id is empty until the upload lands.
-    attach: [],
-    // Bumped whenever the list is abandoned, so an upload still in flight can
-    // tell that the list it was filling is gone.
-    attachBatch: 0,
+    // Files waiting in the composer live in workspace.js (see attachReady).
     placeholder: "写一条消息",
     version: "",
     tip: "",
@@ -227,7 +222,7 @@
   }
 
   // ---- Bot status: sidebar second line + step-flow popover (bot-status prototype) ----
-  const stStatus = { map: {} };
+  const stStatus = { map: {}, groups: {} };
   const stpState = { ready: false, open: false, bot: "", row: null, steps: null };
 
   function tsOf(v) {
@@ -251,9 +246,15 @@
   // unchanged line is never rewritten and no row is touched without a change.
   function stDesc(name) {
     const st = stStatus.map[name] || null;
-    const kind = st ? String(st.state || "idle") : "idle";
+    // awaiting, failure and unknown come from the native activity the status carries.
+    const side = st ? experienceRules.side(st) : null;
+    const kind = side ? side.kind : "idle";
     let sig = kind;
     const line = el("span", "preview");
+    if (kind === "awaiting" || kind === "failure" || kind === "unknown") {
+      const sel = { type: "bot", id: name };
+      return { sig: sig + side.text, node: attentionLine(kind, side.text, sel), off: false };
+    }
     if (kind === "running" || kind === "queued") {
       line.className = "preview st run click";
       line.append(spinIcon(11));
@@ -264,11 +265,6 @@
       line.append(text);
       line.addEventListener("click", (ev) => { ev.stopPropagation(); toggleStp(name, line); });
       sig += summary;
-    } else if (kind === "awaiting") {
-      line.className = "preview st wait click";
-      line.append(el("i", "wd"));
-      line.append(el("span", "", "等你确认"));
-      line.addEventListener("click", (ev) => { ev.stopPropagation(); jumpToApproval(name); });
     } else if (kind === "offline") {
       line.className = "preview st off";
       const mins = Math.round(Number(st && st.stale_seconds) / 60) || 1;
@@ -284,6 +280,40 @@
     }
     return { sig: sig, node: line, off: kind === "offline" };
   }
+
+  // The second line for what needs the owner (等你确认), a failure, or a state
+  // that cannot be told (never shown as idle). Clicking one opens that
+  // conversation at the item, by its native message coordinate when there is one.
+  function attentionLine(kind, text, sel) {
+    const line = el("span", "preview st " + (kind === "awaiting" ? "wait" : kind === "failure" ? "fail" : "unknown") + (kind === "unknown" ? "" : " click"));
+    if (kind === "awaiting") line.append(el("i", "wd"));
+    line.append(el("span", "", text));
+    line.title = text;
+    if (kind !== "unknown") line.addEventListener("click", (ev) => { ev.stopPropagation(); jumpToAttention(sel); });
+    return line;
+  }
+
+  // A group's second line, from its entry in the status (groups have no
+  // server state of their own; the activity counts say it).
+  function groupDesc(g) {
+    const st = stStatus.groups[g.id] || null;
+    const side = st ? experienceRules.side(st) : null;
+    const kind = side ? side.kind : "idle";
+    const sel = { type: "group", id: g.id };
+    if (kind === "awaiting" || kind === "failure" || kind === "unknown") return { sig: kind + side.text, node: attentionLine(kind, side.text, sel) };
+    if (kind === "running" || kind === "queued") {
+      const line = el("span", "preview st run");
+      const text = kind === "queued" ? "等待执行" : "在处理";
+      line.append(spinIcon(11), el("span", "", text));
+      return { sig: kind, node: line };
+    }
+    const text = lineForGroup(g);
+    return { sig: "idle" + text, node: el("span", "preview", text) };
+  }
+
+  // New replies the server counted for a conversation (visible cat messages
+  // after the read position). The open conversation never shows a dot.
+  const unreadOf = (st) => (st ? experienceRules.side(st).unread : 0);
 
   function otherLabel(o) {
     const s = String((o && o.state) || "");
@@ -342,6 +372,15 @@
       if (row.dataset.stsig === d.sig) return;
       row.dataset.stsig = d.sig;
       row.classList.toggle("off", d.off);
+      const old = row.querySelector(".preview");
+      if (old) old.replaceWith(d.node);
+    });
+    roster.querySelectorAll(".item[data-group]").forEach((row) => {
+      const g = state.groups.find((x) => x.id === row.dataset.group);
+      if (!g) return;
+      const d = groupDesc(g);
+      if (row.dataset.stsig === d.sig) return;
+      row.dataset.stsig = d.sig;
       const old = row.querySelector(".preview");
       if (old) old.replaceWith(d.node);
     });
@@ -408,6 +447,10 @@
     const map = {};
     for (const b of (data && data.bots) || []) if (b && b.bot) map[b.bot] = b;
     stStatus.map = map;
+    // Group chats' activity (GET …/status groups: {id, thread_id, activity}).
+    const groups = {};
+    for (const g of (data && Array.isArray(data.groups) ? data.groups : [])) if (g && g.id) groups[g.id] = g;
+    stStatus.groups = groups;
     state.others = data && Array.isArray(data.others) ? data.others : null;
     renderLists();
     paintStatus();
@@ -415,27 +458,20 @@
     if (stpState.open) stpRefresh().catch(() => {});
   }
 
-  async function jumpToApproval(name, branch) {
+  // From a sidebar 等你确认 / failure line: open that conversation (a bot or a
+  // group) and let the status line go to the item by its native message
+  // coordinate; without one it opens on its list. Nothing is located by guess,
+  // and nothing is approved from here.
+  async function jumpToAttention(sel) {
     closeStp();
     try {
-      if (state.sel && state.sel.type === "bot" && state.sel.id === name) await loadThread();
-      else await selectBot(name);
+      const open = state.sel && state.sel.type === sel.type && state.sel.id === sel.id && !state.peer;
+      if (open) await loadThread();
+      else if (sel.type === "group") await selectGroup(sel.id);
+      else await selectBot(sel.id);
     } catch (e) {}
-    const find = () => Array.from(document.querySelectorAll("#thread .approval"))
-      .find((card) => !branch || card.dataset.branch === branch);
-    let card = find();
-    if (!card) {
-      await new Promise((r) => setTimeout(r, 50));
-      card = find();
-    }
-    if (card) {
-      card.scrollIntoView({ block: "center", behavior: "instant" });
-      const primary = card.querySelector("button.primary:not(:disabled)");
-      if (primary) primary.focus({ preventScroll: true });
-      return;
-    }
-    const lines = thread.querySelectorAll(".approval-line");
-    if (lines.length) lines[lines.length - 1].scrollIntoView({ block: "center", behavior: "smooth" });
+    if (!state.sel || state.sel.type !== sel.type || state.sel.id !== sel.id) return;
+    await experience.attend();
   }
 
   function stpSetup() {
@@ -1014,6 +1050,12 @@
   // (chat-presentation.js). With no cat known it is the neutral tile, never
   // the open chat's bot.
   const presentation = window.ClowderPresentation;
+  // Files, saved conversations and chat Tasks (workspace.js); init() is near the end.
+  const workspace = window.ClowderWorkspace;
+  // The status line, read position and read-only memory (chat-experience.js);
+  // init() is near the end, after workspace.init.
+  const experience = window.ClowderExperience;
+  const experienceRules = window.ClowderExperienceRules;
 
   function speakerFace(who, size) {
     if (who.paint) return avatar(who.name, who.paint, size);
@@ -2931,6 +2973,8 @@
     const parsed = unwrap(m.content || "");
     const row = el("div", "msg user");
     if (m.seq) row.dataset.seq = String(m.seq);
+    // The native message ID: the status line and the read position find rows by it.
+    if (m.native_message_id || m.id) row.dataset.mid = String(m.native_message_id || m.id);
     if (m.time) row.dataset.time = String(m.time);
     row.dataset.sender = "user";
     const wrap = el("div", "bubble-col");
@@ -2944,7 +2988,10 @@
     }
     const images = [...pulled.images, ...pasted];
     if (images.length) wrap.append(gallery(images));
-    if (!pulled.text && !pulled.images.length && !pasted.length) {
+    // Files the message carried (native workspace_file blocks), as cards.
+    const files = m.attachments || [];
+    if (files.length) wrap.append(workspace.cards(files));
+    if (!pulled.text && !pulled.images.length && !pasted.length && !files.length) {
       const bubble = el("div", "bubble");
       bubble.textContent = parsed.text;
       wrap.append(bubble);
@@ -2966,6 +3013,13 @@
   // and show in its last bubble.
   const SAY_TOOLS = ["send_message_to_user", "notify_owner"];
   const TOOL_CHAT_SINCE = Date.parse("2026-10-27T11:00:00+08:00");
+
+  // SILENT is a cat saying it has nothing to say: never shown as words. A
+  // reply that is only that, with no picture or file, is not drawn; one that
+  // brought pictures or files keeps them.
+  const isSilent = (text) => String(text || "").trim() === "SILENT";
+  const hasMedia = (m) => !!((m.images || []).length || (m.attachments || []).length);
+  const silentOnly = (m) => isSilent(m.content) && !hasMedia(m);
 
   function sayLanded(result) {
     const out = String((result && result.content) || "");
@@ -3026,9 +3080,10 @@
   // botBubble draws one bubble: say from spokenLines, or null for a legacy
   // line drawn from its content. who is the line's speaker; the first row of a
   // group carries its face and name, as in group chats.
-  function botBubble(m, say, messages, who, cont) {
+  function botBubble(m, say, messages, who, cont, last = true) {
     const row = el("div", "msg bot with-face");
     if (m.seq) row.dataset.seq = String(m.seq);
+    if (m.native_message_id || m.id) row.dataset.mid = String(m.native_message_id || m.id);
     if (m.time) row.dataset.time = String(m.time);
     row.dataset.sender = who.key;
     if (!cont) row.append(speakerFace(who));
@@ -3039,14 +3094,18 @@
     // Pictures the bot showed with send_message_to_user, stored in paste/ like the
     // owner's own; the same gallery as userBubble.
     const pasted = pastedURLs(state.sel, say ? say.images : m.images);
-    const said = say ? say.text : String(m.content || "").trim();
+    // A line's files show once, under its last bubble.
+    const files = last ? m.attachments || [] : [];
+    const told = say ? say.text : String(m.content || "").trim();
+    const said = isSilent(told) ? "" : told;
     if (say) {
       if (said) appendBotContent(body, displayText(said));
-    } else if (said && said !== "SILENT") appendBotContent(body, displayText(window.XBotProviders.citedText(m.content,m.parts)));
-    else if (!pasted.length && !(m.parts || []).length && !(m.tool_calls || []).length) {
+    } else if (said) appendBotContent(body, displayText(window.XBotProviders.citedText(m.content,m.parts)));
+    else if (!pasted.length && !files.length && !(m.parts || []).length && !(m.tool_calls || []).length) {
       appendBotContent(body, EMPTY_REPLY);
     }
     if (pasted.length) body.append(gallery(pasted));
+    if (files.length) body.append(workspace.cards(files));
     if (!say) window.XBotProviders.decorate(body, m.parts);
     bindMessageMenu(row, m, said);
     row.append(body);
@@ -3095,6 +3154,7 @@
       thread.replaceChildren(inner);
       state.firstRender = false;
       if (near) thread.scrollTop = thread.scrollHeight;
+      experience.rendered();
       return;
     }
     const anchor = near ? null : readingAnchor();
@@ -3136,7 +3196,7 @@
         lastKey = "";
         return;
       }
-      if (m.role === "assistant" && String(m.content || "").trim() === "SILENT" && !(m.images || []).length) return;
+      if (m.role === "assistant" && silentOnly(m)) return;
       const appr = approvalCardOf(m.content);
       if (appr) {
         if (latestApproval[appr.id] !== i) return;
@@ -3197,14 +3257,15 @@
       const says = spoken.get(i);
       if (!says) {
         const visibleParts = (m.parts || []).some(p => !p.hosted || p.hosted.name !== "image_generation");
-        if (!(m.content || visibleParts || (m.images || []).length || (!(m.tool_calls || []).length && !(m.parts || []).length))) return;
+        if (!(m.content || visibleParts || (m.images || []).length || (m.attachments || []).length || (!(m.tool_calls || []).length && !(m.parts || []).length))) return;
       }
-      for (const say of says || [null]) {
-        const row = botBubble(m, say, messages, speaker, !groupStart(lastMsg, m, lastKey, key));
+      const bubbles = says || [null];
+      bubbles.forEach((say, k) => {
+        const row = botBubble(m, say, messages, speaker, !groupStart(lastMsg, m, lastKey, key), k === bubbles.length - 1);
         inner.append(row);
         lastKey = key;
         lastMsg = m;
-      }
+      });
     });
     if (!any) inner.append(emptyState(niceName(who) || "clowder-bot", EMPTY_LINE, who, true));
     addTimeDividers(inner);
@@ -3213,6 +3274,7 @@
     state.firstRender = false;
     thread.scrollTop = near ? thread.scrollHeight : Math.min(prevTop, thread.scrollHeight);
     keepReading(anchor);
+    experience.rendered();
   }
 
   // A redraw keeps the row the owner is reading where it was, even when an
@@ -3252,6 +3314,7 @@
       thread.replaceChildren(inner);
       state.firstRender = false;
       if (near) thread.scrollTop = thread.scrollHeight;
+      experience.rendered();
       return;
     }
     const anchor = near ? null : readingAnchor();
@@ -3277,13 +3340,16 @@
         last = "";
         continue;
       }
+      // As in single chats: a cat's bare SILENT is not drawn; with files it keeps them.
+      if (!mine && isSilent(text) && !(m.attachments || []).length) continue;
       const row = el("div", "msg " + (mine ? "user" : "bot"));
       const key = mine ? "user" : speaker.key;
       row.dataset.sender = key;
-      if (m.id) row.dataset.id = String(m.id);
+      if (m.id) { row.dataset.id = String(m.id); row.dataset.mid = String(m.id); }
       if (m.time) row.dataset.time = String(m.time);
       if (!groupStart(lastMsg, m, last, key)) row.classList.add("cont");
       lastMsg = m;
+      const files = m.attachments || [];
       if (mine) {
         const wrap = el("div", "bubble-col");
         const pulled = pullImages(text);
@@ -3293,15 +3359,18 @@
           wrap.append(bubble);
         }
         if (pulled.images.length) wrap.append(gallery(pulled.images));
-        if (!pulled.text && !pulled.images.length) wrap.append(el("div", "bubble", text));
+        if (files.length) wrap.append(workspace.cards(files));
+        if (!pulled.text && !pulled.images.length && !files.length) wrap.append(el("div", "bubble", text));
         bindMessageMenu(row, m, text);
         row.append(wrap);
       } else {
         if (!row.classList.contains("cont")) row.append(speakerFace(speaker));
         const body = el("div", "body");
         if (!row.classList.contains("cont")) body.append(speakerHead(speaker, m.time));
-        appendBotContent(body, text);
-        bindMessageMenu(row, m, text);
+        const said = isSilent(text) ? "" : text;
+        if (said || !files.length) appendBotContent(body, said);
+        if (files.length) body.append(workspace.cards(files));
+        bindMessageMenu(row, m, said);
         row.append(body);
         if (row.classList.contains("cont")) markContinuation(row, m.time);
       }
@@ -3314,6 +3383,7 @@
     state.firstRender = false;
     thread.scrollTop = near ? thread.scrollHeight : Math.min(prevTop, thread.scrollHeight);
     keepReading(anchor);
+    experience.rendered();
   }
 
   function codingCardOf(content) {
@@ -3648,7 +3718,7 @@
       const m = messages[i];
       const raw = String(m.text || "").trim();
       // An execution record is not a reply, so it is never the preview.
-      if (!raw || /^\[action\]/i.test(raw) || presentation.isActivity(m)) continue;
+      if (!raw || (m.kind !== "person" && isSilent(raw)) || /^\[action\]/i.test(raw) || presentation.isActivity(m)) continue;
       const who = m.kind === "person" ? "你" : niceName(m.sender || "");
       const text = clip(plainText(raw), 64);
       return who ? who + "：" + text : text;
@@ -3796,8 +3866,8 @@
   function botRow(b) {
     const d = stDesc(b.name);
     const active = state.sel && state.sel.type === "bot" && state.sel.id === b.name;
-    // A dot for a new message or an unread note; the open bot never shows one.
-    const unread = !active && (!!b.unread || (b.notes || 0) > 0);
+    // A dot for a new reply or an unread note; the open bot never shows one.
+    const unread = !active && (!!b.unread || (b.notes || 0) > 0 || unreadOf(stStatus.map[b.name]) > 0);
     const btn = listButton(b.name, d.node, active, unread, paintOfBot(b), !!b.primary);
     btn.dataset.bot = b.name;
     btn.dataset.botMenu = "true";
@@ -3879,9 +3949,9 @@
   function renderLists() {
     const collapsed = folderStore();
     const sig = JSON.stringify({
-      bots: state.bots.map((b) => [b.name, !!b.pinned, !!b.primary, !!b.unread, (b.notes || 0) > 0, b.group || "", b.description, b.avatar, b.avatar_seed, b.avatar_url, b.templateId, lineForBot(b)]),
+      bots: state.bots.map((b) => [b.name, !!b.pinned, !!b.primary, !!b.unread, (b.notes || 0) > 0, unreadOf(stStatus.map[b.name]) > 0, b.group || "", b.description, b.avatar, b.avatar_seed, b.avatar_url, b.templateId, lineForBot(b)]),
       folders: state.folders.map((f) => [f.name, f.count, !!f.ungrouped, (f.bots || []).join("\n"), !!collapsed[f.name]]),
-      groups: state.groups.map((g) => [g.id, g.name, lineForGroup(g)]),
+      groups: state.groups.map((g) => [g.id, g.name, lineForGroup(g), unreadOf(stStatus.groups[g.id]) > 0]),
       others: (state.others || []).map((o) => [(o && o.bot) || "", (o && o.name) || ""]),
       sel: state.sel,
     });
@@ -3902,7 +3972,7 @@
       btn.setAttribute("aria-label", niceName(b.name));
       const av = avatar(b.name, paintOfBot(b), "pin");
       const pinActive = state.sel && state.sel.type === "bot" && state.sel.id === b.name;
-      if (!pinActive && (!!b.unread || (b.notes || 0) > 0)) av.append(el("i", "unread"));
+      if (!pinActive && (!!b.unread || (b.notes || 0) > 0 || unreadOf(stStatus.map[b.name]) > 0)) av.append(el("i", "unread"));
       // A pinned bot shows its name under the face; the primary bot keeps its pin.
       const label = el("span", "pin-name");
       label.append(el("span", "pin-label", niceName(b.name)));
@@ -3947,7 +4017,11 @@
     // No groups, no header: 新建 already offers 新建群组.
     if (state.groups.length) roster.append(sectionLabel("群组"));
     for (const g of state.groups) {
-      const btn = listButton(g.id, lineForGroup(g), state.sel && state.sel.type === "group" && state.sel.id === g.id, false, null, false, niceName(g.name || g.id));
+      const open = state.sel && state.sel.type === "group" && state.sel.id === g.id;
+      const d = groupDesc(g);
+      const btn = listButton(g.id, d.node, open, !open && unreadOf(stStatus.groups[g.id]) > 0, null, false, niceName(g.name || g.id));
+      btn.dataset.group = g.id;
+      btn.dataset.stsig = d.sig;
       btn.addEventListener("click", () => {
         if (state.sel && state.sel.type === "group" && state.sel.id === g.id && !state.peer) return;
         selectGroup(g.id);
@@ -4344,8 +4418,11 @@
   function resetConversation() {
     watchNativeThread(null);
     closeMessageMenu();
-    // Pasted pictures belong to the bot they were uploaded to.
-    clearAttach();
+    // Pending files belong to the thread they were uploaded to: workspace.js
+    // aborts their uploads and drops the old conversation's workspace view.
+    workspace.select(state.sel);
+    // The status line and read position start over for this conversation.
+    experience.select(state.sel);
     state.streaming = 0;
     state.pendingSends = [];
     paintWorkStatus();
@@ -4471,6 +4548,8 @@
       nativeRefreshTimer = setTimeout(() => {
         nativeRefreshTimer = null;
         if (nativeThreadId !== id) return;
+        workspace.touch(); // a Task update need not change the transcript
+        experience.touch(); // nor an approval or a run: the status line reads again too
         loadThread().catch(() => {}); refreshStatus().catch(() => {});
       }, 180);
     });
@@ -4490,6 +4569,8 @@
         const sig = JSON.stringify(messages);
         state.messages = messages;
         state.previewAt["b:" + selection.id] = Date.now();
+        workspace.observe(selection, data.thread_id, sig !== state.sig);
+        experience.observe(selection, data.thread_id, sig !== state.sig);
         if (sig === state.sig) return;
         state.sig = sig;
         state.preview["b:" + selection.id] = previewFromMessages(messages);
@@ -4505,6 +4586,8 @@
       const messages = data.messages || [];
       const sig = JSON.stringify(messages);
       state.previewAt["g:" + selection.id] = Date.now();
+      workspace.observe(selection, data.group?.native_thread_id || data.group?.id, sig !== state.sig);
+      experience.observe(selection, data.group?.native_thread_id || data.group?.id, sig !== state.sig);
       if (sig === state.sig) return;
       state.sig = sig;
       state.preview["g:" + selection.id] = previewFromGroup(messages);
@@ -4527,7 +4610,7 @@
     return row;
   }
 
-  const TABS = [["details", "详情"], ["library", "记忆"], ["computer", "任务"], ["trace", "轨迹"], ["context", "上下文"]];
+  const TABS = [["details", "详情"], ["library", "记忆"], ["computer", "任务"], ["files", "文件"], ["trace", "轨迹"], ["context", "上下文"]];
 
   function tabBar() {
     const bar = el("div", "tabs");
@@ -4963,6 +5046,11 @@
       syncTaskView(tasks, state.panelData || {name: state.sel.id});
       paintContextBar(); syncPanelChrome(); return;
     }
+    // workspace.js pages keep their own live state (folder, open forms, focus) across redraws.
+    const own = panelBody.querySelector(".ws-pane");
+    if (own && state.sel && state.tab === own.dataset.tab && workspace.current(own) && !(state.sel.type === "bot" && state.tab === "computer")) {
+      paintContextBar(); syncPanelChrome(); return;
+    }
     panelBody.replaceChildren();
     paintContextBar();
     if (!state.sel) {
@@ -4977,9 +5065,12 @@
       renderPanelHead(g.name || g.id, null, (g.members || []).length + " 个成员");
       const body = el("div", "tab-body");
       if (state.tab === "library") {
-        body.append(el("p", "hint", "还没有记住任何事。对它说「记住……」就会出现在这里"));
+        // No owner-private records in a group, and no promise about what will be kept.
+        body.append(experience.memoryView(state.sel));
       } else if (state.tab === "computer") {
-        body.append(el("p", "hint", "没有任务"));
+        body.append(workspace.tasksView(state.sel));
+      } else if (state.tab === "files") {
+        body.append(workspace.filesView(state.sel));
       } else if (state.tab === "trace") {
         body.append(el("p", "hint", "没有轨迹"));
       } else if (state.tab === "context") {
@@ -4998,8 +5089,10 @@
     renderPanelHead(data.name || state.sel.id, paintOfBot(data), sub, data.pinned);
     syncPanelChrome();
     const body = el("div", "tab-body");
-    if (state.tab === "library") body.append(libraryView(data));
-    else if (state.tab === "computer") body.append(computerView(data));
+    if (state.tab === "library") body.append(experience.memoryView(state.sel, data));
+    // Task cards first; then executions and, last, the cat's scheduled tasks (schedules.js).
+    else if (state.tab === "computer") body.append(workspace.tasksView(state.sel), el("h4", "ws-exec-head", "执行与定时任务"), computerView(data));
+    else if (state.tab === "files") body.append(workspace.filesView(state.sel));
     else if (state.tab === "trace") body.append(traceView());
     else if (state.tab === "context") body.append(contextView(data));
     else body.append(detailsView(data));
@@ -5460,6 +5553,10 @@
     wrap.append(section);
     const config = catConfigSection(data);
     if (config) wrap.append(config);
+    // 历史对话: folded, and only when the cat has more than one saved
+    // conversation (workspace.js keeps the same node across redraws).
+    const history = workspace.conversationsView(state.sel);
+    if (history) wrap.append(history);
     return wrap;
   }
 
@@ -5502,27 +5599,8 @@
     return sec;
   }
 
-  function scopeLabel(scope) {
-    if (scope === "conversation") return "会话共享笔记";
-    if (scope === "person") return "关于你";
-    if (scope === "bot") return "关于 Bot";
-    return scope || "资料";
-  }
-
-  function libraryView(data) {
-    const wrap = document.createDocumentFragment();
-    const facts = data.memory || [];
-    if (!facts.length) wrap.append(panelEmpty("memory", "还没有会话笔记", "这里显示原生会话共享笔记。长期记忆、召回与审核请打开运行面板。"));
-    const nativeLink = el("a", "btn sec", "打开运行面板");
-    nativeLink.href = "/runtime.html"; nativeLink.target = "_blank"; nativeLink.rel = "noopener";
-    wrap.append(nativeLink);
-    for (const f of facts) {
-      const card = el("div", "lib-card");
-      card.append(el("div", "k", scopeLabel(f.scope)), el("div", "v", f.text || ""));
-      wrap.append(card);
-    }
-    return wrap;
-  }
+  // 记忆 is chat-experience.js's memoryView: 关于你 and 你的偏好 read only on
+  // demand, then 这个对话的便笺 (the conversation's native notes).
 
   function elapsedWork(started, now = Date.now()) {
     const at = Date.parse(started);
@@ -5546,8 +5624,9 @@
       if (m.role !== "assistant" || !m.content || (m.tool_calls || []).length || presentation.isActivity(m)) return;
       const wake = pending.get(branch);
       if (!wake) return;
-      const silent = m.content.trim() === "SILENT";
-      if (silent) { hidden.add(wake.i); hidden.add(i); }
+      const silent = isSilent(m.content);
+      // A routine that said nothing is folded away, unless it brought files.
+      if (silentOnly(m)) { hidden.add(wake.i); hidden.add(i); }
       recent.push({id: "routine:" + (wake.m.seq || wake.i), type: "routine", task: wake.rt.label, status: "done", summary: silent ? "没什么要说的" : m.content, finished_at: m.time, started_at: wake.m.time});
       pending.delete(branch);
     });
@@ -5633,7 +5712,8 @@
     host.replaceChildren();
     if (!agents.length) return;
     const row = el("button", "wrow"); row.type = "button"; row.title = "打开任务";
-    row.addEventListener("click", () => { state.tab = "computer"; rememberPanel(true); panelOpen(true); paintPanel(); });
+    // Running executions sit below the Task cards on the 任务 page: land on them.
+    row.addEventListener("click", () => { state.tab = "computer"; rememberPanel(true); panelOpen(true); paintPanel(); panelBody.querySelector(".ws-exec-head")?.scrollIntoView({ block: "start" }); });
     const stack = el("span", "work-stack");
     for (const ag of agents.slice(0, 3)) stack.append(taskAvatar(ag, "xs"));
     if (agents.length > 3) stack.append(el("span", "", "+" + (agents.length - 3)));
@@ -5643,7 +5723,7 @@
       const ag = agents[0];
       const name = el("b"), step = el("span", "work-step"); taskText(name, taskTitle(ag)); taskText(step, taskProgress(ag)); step.hidden = !taskProgress(ag);
       row.append(name, step, el("span", "sep", "·"), el("span", "", "第 " + Math.max(1, ag.steps || 0) + " 步"));
-    } else { const many = el("span", "work-many"); many.append(el("b", "", agents.length + " 个子代理"), el("span", "", "在跑")); row.append(many); }
+    } else { const many = el("span", "work-many"); many.append(el("b", "", agents.length + " 项"), el("span", "", "在处理")); row.append(many); }
     if (started) { const duration = el("span", "el"); duration.dataset.workSince = started; duration.dataset.longest = agents.length > 1 ? "true" : ""; row.append(el("span", "sep", "·"), duration); }
     row.append(icon("chevron")); host.append(row); updateWorkTimes();
   }
@@ -6537,7 +6617,7 @@
     }
   }
 
-  function optimisticMessage(text, images) {
+  function optimisticMessage(text, images, files) {
     let inner = thread.querySelector(".thread-inner:not(.thread-skeleton)");
     if (!inner) {
       inner = el("div", "thread-inner");
@@ -6553,6 +6633,8 @@
     // optimistic row points at it directly. Nothing local to revoke, and the
     // row after the repaint looks exactly the same.
     if (images && images.length) body.append(gallery(pastedURLs(state.sel, images)));
+    // Uploaded files are on the server too; their cards wait for the send.
+    if (files && files.files.length) body.append(workspace.cards(files.files, { sending: true }));
     body.append(el("div", "send-state", "发送中"));
     row.append(body);
     markLiveGroup(inner, row);
@@ -6564,23 +6646,45 @@
     return row;
   }
 
-  async function sendText(text, pending, images) {
+  // A UUID for an idempotent request (randomUUID needs a secure context).
+  function requestKey() {
+    try { if (crypto.randomUUID) return crypto.randomUUID(); } catch (e) { /* insecure context */ }
+    const b = new Uint8Array(16);
+    crypto.getRandomValues(b);
+    b[6] = (b[6] & 15) | 64;
+    b[8] = (b[8] & 63) | 128;
+    const h = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+    return h.slice(0, 8) + "-" + h.slice(8, 12) + "-" + h.slice(12, 16) + "-" + h.slice(16, 20) + "-" + h.slice(20);
+  }
+
+  // files: the composer's uploaded attachments ({ids, threadId, files}) from
+  // workspace.takeAttachments(); a send that does not go out hands them back.
+  async function sendText(text, pending, images, files) {
     text = (text || "").trim();
     images = images || [];
+    files = files && files.ids && files.ids.length ? files : null;
     // A message sent while a reply is streaming interrupts it: the server forks the
     // running turn to the background and answers this one at once.
-    if ((!text && !images.length) || !state.sel) return;
+    if ((!text && !images.length && !files) || !state.sel) return;
     const selection = state.sel;
     ++state.threadLoad;
+    // One key per message: resending the same words and files after an
+    // unknown outcome reuses it, so a send that did land is not repeated.
+    const sendSig = JSON.stringify([text, files ? files.ids : []]);
+    let sendKey = "";
     if (!pending) {
       // Resending a failed text from the composer replaces its failed row.
       state.pendingSends = state.pendingSends.filter((row) => {
         const stale = !row.accepted && row.querySelector(".send-failed") && row.dataset.sendText === text;
-        if (stale) row.remove();
+        if (stale) {
+          if (row.retryKey && row.retrySig === sendSig) sendKey = row.retryKey;
+          row.remove();
+        }
         return !stale;
       });
     }
-    pending = pending || optimisticMessage(text, images);
+    sendKey = sendKey || requestKey();
+    pending = pending || optimisticMessage(text, images, files);
     pending.dataset.sendText = text;
     pending.baseline = ownerSends(text);
     const marker = pending.querySelector(".send-state");
@@ -6627,8 +6731,13 @@
     };
     setStatus("正在回复");
     try {
-      const payload = { text: text };
+      const payload = { text: text, idempotencyKey: sendKey };
       if (images.length) payload.images = images;
+      if (files) payload.attachments = files.ids;
+      // The thread this conversation was read from: a send never lands in a
+      // conversation that changed (another saved conversation) in the meantime.
+      const threadId = files ? files.threadId : workspace.threadId();
+      if (threadId) payload.expectedThreadId = threadId;
       if (state.replyTo && state.replyTo.seq > 0) payload.reply_to = state.replyTo.seq;
       const res = await apiFetch("/xbot-api/" + (selection.type === "group" ? "groups/" : "bots/") + encodeURIComponent(selection.id) + "/messages", {
         method: "POST",
@@ -6636,7 +6745,12 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error("发送失败");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const err = new Error(data.error || "发送失败");
+        err.status = res.status;
+        throw err;
+      }
       markSent();
       const ct = res.headers.get("content-type") || "";
       if (ct.includes("application/json")) {
@@ -6662,6 +6776,9 @@
         const key = "xbot-draft:" + (selection.type === "group" ? "group:" : "") + selection.id;
         try { sessionStorage.setItem(key, text); } catch (err) {}
       }
+      // The files of a send that did not go out return to the composer, or
+      // wait for this conversation to open again.
+      const filesBack = !accepted && files ? workspace.giveBack(files) : false;
       if (state.sel !== selection) return;
       setStatus("");
       if (accepted) {
@@ -6694,18 +6811,27 @@
       live?.remove();
       if (!marker.isConnected) pending.querySelector(".bubble-col")?.append(marker);
       marker.className = "send-state send-failed";
+      // An unknown outcome (no answer, or a server fault) may still have
+      // landed: resending the same message keeps its key. A refusal does not.
+      pending.retryKey = !accepted && (!e.status || e.status >= 500) ? sendKey : "";
+      pending.retrySig = sendSig;
+      // The server's own reason for a refusal (a changed conversation, a
+      // file that no longer belongs to it), when it gives one in Chinese.
+      const reason = !accepted && e.status >= 400 && e.status < 500 && /\p{Script=Han}/u.test(e.message || "") ? "：" + e.message.replace(/[。.]+$/, "") : "";
+      const failed = accepted ? "没送到" : "没发出去" + reason;
       // A picture cannot go back into the textarea, but its words can: the
       // send cleared the input, so the text is restored whether or not a
       // picture came with it, and the row says what the picture needs.
       const pictureNote = images.length ? "；图片要重新贴一次" : "";
+      const fileNote = files && !accepted ? (filesBack ? "，附件已放回" : "；附件需要重新添加") : "";
       if (!composerText(input).trim() && text) {
         composerSet(text);
         composerRefreshHeight();
-        marker.replaceChildren(el("span", "", (accepted ? "没送到，原文还在输入框里" : "没发出去，原文还在输入框里") + pictureNote));
-        announceSend("没发出去，原文还在输入框里" + (images.length ? "，图片要重新贴一次" : ""));
-      } else if (!text && images.length) {
-        marker.replaceChildren(el("span", "", accepted ? "没送到；图片要重新贴一次" : "没发出去；图片要重新贴一次"));
-        announceSend("没发出去，图片要重新贴一次");
+        marker.replaceChildren(el("span", "", failed + "，原文还在输入框里" + fileNote + pictureNote));
+        announceSend("没发出去，原文还在输入框里" + (fileNote ? "，" + fileNote.replace(/^[，；]/, "") : "") + (images.length ? "，图片要重新贴一次" : ""));
+      } else if (!text && (images.length || files)) {
+        marker.replaceChildren(el("span", "", failed + (files ? (accepted ? "" : filesBack ? "，附件已放回输入框" : "；附件需要重新添加") : "") + pictureNote));
+        announceSend("没发出去" + (files && filesBack ? "，附件已放回输入框" : "") + (images.length ? "，图片要重新贴一次" : ""));
       } else {
         // A newer draft is in the composer: keep it, and let the owner bring this text back.
         const back = el("button", "secondary", "放回输入框");
@@ -6718,10 +6844,12 @@
           input.focus();
           composerCaretTo(Infinity);
         });
-        marker.replaceChildren(el("span", "", (accepted ? "没送到" : "没发出去") + pictureNote), back);
+        marker.replaceChildren(el("span", "", failed + fileNote + pictureNote), back);
         announceSend("没发出去，可以放回输入框" + (images.length ? "，图片要重新贴一次" : ""));
       }
       syncComposer();
+      // A refusal because the conversation moved: read where it is now.
+      if (!accepted && e.status === 409) setTimeout(() => { state.sig = ""; loadThread().catch(() => {}); }, 0);
     } finally {
       live?.querySelector(".typing-dots")?.remove();
       live?.querySelector(".live-status")?.remove();
@@ -6950,190 +7078,16 @@
     });
   }
 
-  // Pictures pasted or dropped into the composer. Each one is uploaded the
-  // moment it arrives, so sending a message is the same request as before plus
-  // a list of ids; a picture the server refused never gets an id, and the note
-  // above the text says why in the server's words.
-  const ATTACH_MAX = 4;
-  const ATTACH_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
-  let attachSeq = 0;
-
-  function attachState() {
-    if (!state.attach) state.attach = [];
-    return state.attach;
-  }
-
-  function attachNote(text) {
-    const note = $("attach-note");
-    note.textContent = text || "";
-    note.hidden = !text;
-    // A refusal can arrive with no thumbnail to sit under, so the bar follows
-    // the note as well as the list. It is revealed here, not only in
-    // paintAttach, because the caller may not repaint.
-    const has = attachState().length > 0 || !!text;
-    $("attach-bar").hidden = !has;
-    composer.classList.toggle("has-attach", has);
-  }
-
-  function attachKey(sel) {
-    return sel ? (sel.type === "group" ? "group:" : "") + sel.id : "";
-  }
-
-  function paintAttach() {
-    const list = $("attach-list");
-    const rows = attachState();
-    list.replaceChildren();
-    for (const row of rows) {
-      const cell = el("div", "attach-thumb");
-      cell.dataset.id = row.id || "";
-      if (row.uploading) cell.classList.add("sending");
-      const img = document.createElement("img");
-      img.alt = "";
-      if (row.url) img.src = row.url;
-      cell.append(img);
-      const drop = el("button", "attach-drop");
-      drop.type = "button";
-      drop.setAttribute("aria-label", "去掉这张图");
-      drop.append(icon("x"));
-      drop.addEventListener("click", (ev) => {
-        ev.preventDefault();
-        ev.stopPropagation();
-        removeAttach(row);
-      });
-      cell.append(drop);
-      list.append(cell);
-    }
-    // The bar stays visible while it has something to say: a refusal has no
-    // thumbnail to sit under, and hiding the whole bar would hide the reason.
-    const has = rows.length > 0 || !$("attach-note").hidden;
-    $("attach-bar").hidden = !has;
-    composer.classList.toggle("has-attach", has);
-    syncComposer();
-  }
-
-  function removeAttach(row) {
-    const rows = attachState();
-    const at = rows.indexOf(row);
-    if (at >= 0) rows.splice(at, 1);
-    if (row.url) URL.revokeObjectURL(row.url);
-    // With nothing left to explain, an older refusal no longer applies. A
-    // caller that has a fresh reason sets it right after this call.
-    if (!rows.length) attachNote("");
-    paintAttach();
-  }
-
-  // clearAttach drops every pending picture. It runs after a send and when the
-  // conversation changes, because an id belongs to the bot it was uploaded to.
-  function clearAttach() {
-    for (const row of attachState()) if (row.url) URL.revokeObjectURL(row.url);
-    state.attach = [];
-    // Anything still uploading belongs to the run that just ended.
-    state.attachBatch = (state.attachBatch || 0) + 1;
-    attachNote("");
-    paintAttach();
-  }
-
-  function attachReady() {
-    return attachState().filter((row) => row.id);
-  }
-
-  function attachBusy() {
-    return attachState().some((row) => row.uploading);
-  }
-
-  async function uploadAttach(files) {
-    if (!state.sel || state.sel.type !== "bot") {
-      attachNote("图片先发到一个 Bot 的对话里，群组还不支持。");
-      return;
-    }
-    // One batch belongs to the conversation it was started in, and to the run
-    // of that conversation. The owner may switch bots while the first upload is
-    // still in flight, and switching away and back must not let the rest of the
-    // batch land in a list that was cleared in between, so a batch number is
-    // taken here and the list is abandoned the moment it changes.
-    const owner = state.sel;
-    const batch = state.attachBatch;
-    for (const file of files) {
-      if (state.attachBatch !== batch || attachKey(state.sel) !== attachKey(owner)) return;
-      const rows = attachState();
-      if (rows.length >= ATTACH_MAX) {
-        attachNote("一次最多 " + ATTACH_MAX + " 张图。");
-        return;
-      }
-      const type = String(file.type || "").toLowerCase();
-      if (ATTACH_TYPES.indexOf(type) < 0 && !/\.(png|jpe?g|gif|webp)$/i.test(file.name || "")) {
-        attachNote("只认 PNG、JPEG、GIF、WebP。");
-        continue;
-      }
-      if (file.size > 10 * 1024 * 1024) {
-        attachNote("图片超过 10 MB。");
-        continue;
-      }
-      // The server caps the pictures of one message together as well, so a
-      // batch that would be refused is stopped here, before any upload.
-      const total = rows.reduce((n, r) => n + (r.bytes || 0), 0) + file.size;
-      if (total > 10 * 1024 * 1024) {
-        attachNote("这几张图加起来超过 10 MB，去掉几张再发。");
-        return;
-      }
-      attachNote("");
-      const row = { seq: ++attachSeq, id: "", bytes: file.size, uploading: true, url: URL.createObjectURL(file) };
-      rows.push(row);
-      paintAttach();
-      // stillWanted is the one question every later step asks: is this row
-      // still on screen in the conversation the batch started in? A picture
-      // the owner removed, a switch to another bot, and a list cleared by a
-      // send all make it false, and none of them may be answered by the upload
-      // that was already in flight.
-      const stillWanted = () =>
-        state.attachBatch === batch && attachKey(state.sel) === attachKey(owner) && attachState().indexOf(row) >= 0;
-      try {
-        const res = await apiFetch("/xbot-api/bots/" + encodeURIComponent(owner.id) + "/paste", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: { "Content-Type": file.type || "application/octet-stream" },
-          body: file,
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || "这图片没传上来");
-        if (!data.image) throw new Error("这图片没传上来");
-        if (stillWanted()) {
-          row.id = data.image;
-          row.uploading = false;
-          paintAttach();
-        }
-      } catch (e) {
-        if (stillWanted()) {
-          removeAttach(row);
-          attachNote(visibleError(e, "这图片没传上来"));
-        }
-        continue;
-      }
-    }
-  }
-
-  // imagesFrom pulls the pictures out of a paste or a drop, ignoring everything
-  // else, so a pasted screenshot never arrives as a broken text paste.
-  function imagesFrom(data) {
-    if (!data) return [];
-    const out = [];
-    for (const item of data.items || []) {
-      if (item.kind !== "file") continue;
-      const file = item.getAsFile();
-      if (file && /^image\//i.test(file.type)) out.push(file);
-    }
-    if (!out.length) {
-      for (const file of data.files || []) {
-        if (/^image\//i.test(file.type)) out.push(file);
-      }
-    }
-    return out;
-  }
+  // Files waiting in the composer belong to workspace.js: any file from the
+  // picker, a paste or a drop is uploaded at once to this conversation's
+  // thread, and a send carries the ids. These two answer the send button.
+  function attachReady() { return workspace.attachReady(); }
+  function attachBusy() { return workspace.attachBusy(); }
 
   function syncComposer() {
     const hasText = composerText(input).trim().length > 0;
     input.classList.toggle("is-empty", !hasText);
-    const ready = attachReady().length > 0;
+    const ready = attachReady() > 0;
     const canSend = hasText || ready;
     composer.classList.toggle("has-text", hasText);
     $("send").disabled = !canSend || attachBusy();
@@ -7608,24 +7562,25 @@
   composer.addEventListener("submit", (ev) => {
     ev.preventDefault();
     const text = composerText(input);
-    const images = attachReady().map((row) => row.id);
-    if (attachBusy()) { attachNote("图片还在上传，等一下再发。"); return; }
-    if ((!text.trim() && !images.length) || !state.sel) return;
+    if (attachBusy()) { workspace.note("附件还在上传，等一下再发。"); return; }
+    if ((!text.trim() && !attachReady()) || !state.sel) return;
     composerSet("");
     composerRefreshHeight();
-    clearAttach();
+    // The ready files leave the composer with this send; a failure hands them back.
+    const files = workspace.takeAttachments();
     syncComposer();
-    sendText(text, null, images);
+    sendText(text, null, [], files);
   });
 
-  // A screenshot pasted from the clipboard arrives here, not as text. The
-  // browser gives the picture in clipboardData; anything else falls through to
-  // the plain-text handler below.
+  // A file pasted from the clipboard (a screenshot, a copied file) arrives
+  // here, not as text: it becomes an attachment, and its file name is not
+  // pasted as well. Anything else falls through to the plain-text handler.
   input.addEventListener("paste", (ev) => {
-    const files = imagesFrom(ev.clipboardData);
+    const files = workspace.filesFrom(ev.clipboardData);
     if (!files.length) return;
     ev.preventDefault();
-    uploadAttach(files);
+    ev.stopImmediatePropagation();
+    workspace.addFiles(files);
   });
 
   // Rich pastes stay plain: the draft is text, and the cap still applies at
@@ -7667,17 +7622,12 @@
   // During dragenter and dragover the browser hides the dragged files: only
   // the item types are readable. Accepting the drag must happen here anyway,
   // or the browser navigates to the dropped file instead of firing drop.
-  const carriesImage = (data) => {
-    if (!data) return false;
-    const items = [...(data.items || [])];
-    if (items.length) return items.some((it) => it.kind === "file" && /^image\//i.test(it.type));
-    return [...(data.files || [])].some((f) => /^image\//i.test(f.type));
-  };
+  // Any file is accepted: it becomes an attachment of the open conversation.
   for (const type of ["dragenter", "dragover"]) {
     dropZone.addEventListener(type, (ev) => {
-      if (!carriesImage(ev.dataTransfer)) return;
+      if (!workspace.carriesFiles(ev.dataTransfer)) return;
       ev.preventDefault();
-      composer.classList.add("dropping");
+      if (!state.peer && state.sel) composer.classList.add("dropping");
     });
   }
   dropZone.addEventListener("dragleave", (ev) => {
@@ -7686,11 +7636,11 @@
   });
   dropZone.addEventListener("drop", (ev) => {
     if (!ev.dataTransfer) return;
-    const files = imagesFrom(ev.dataTransfer);
+    const files = workspace.filesFrom(ev.dataTransfer);
     composer.classList.remove("dropping");
     if (!files.length) return;
     ev.preventDefault();
-    uploadAttach(files);
+    workspace.addFiles(files);
   });
 
   input.addEventListener("keydown", (ev) => {
@@ -7787,6 +7737,54 @@
     if (wide && !was) loadPanel().catch(() => {});
   }
 
+  // workspace.js draws with the shell's own helpers and reports back through these.
+  workspace.init({
+    api, apiFetch, icon, visibleError, syncComposer,
+    face: (catId, name, size) => {
+      const bot = (state.bots || []).find((b) => b.native_id === catId || b.id === catId);
+      return bot ? avatar(bot.name, paintOfBot(bot), size) : speakerFace({ name: name || catId, paint: null }, size);
+    },
+    catName: (catId) => ((state.bots || []).find((b) => b.native_id === catId || b.id === catId) || {}).name || "",
+    openImage: (url, trigger) => openShots([url], 0, trigger),
+    toast: showToast,
+    status: setStatus,
+    copy: (text) => copyText(text),
+    peer: () => !!state.peer,
+    busy: () => !!state.streaming,
+    // After switching to another saved conversation the cat talks in that thread: open it afresh.
+    reselect: (sel) => (sel.type === "group" ? selectGroup(sel.id) : selectBot(sel.id)),
+    reload: () => { state.sig = ""; return loadThread().catch(() => {}); },
+    repaintPanel: () => { if (panel.classList.contains("open")) paintPanel(); },
+    openTab: async (tab) => {
+      closePops();
+      state.tab = tab;
+      rememberPanel(true);
+      panelOpen(true);
+      if (window.innerWidth < 768) { sidebar.classList.remove("open"); syncBackdrop(); }
+      await loadPanel();
+    },
+  });
+  // The status line, read position and 记忆 (chat-experience.js).
+  experience.init({
+    api, icon, visibleError, thread,
+    face: (catId, name, size) => {
+      const bot = (state.bots || []).find((b) => b.native_id === catId || b.id === catId);
+      return bot ? avatar(bot.name, paintOfBot(bot), size) : speakerFace({ name: name || catId, paint: null }, size);
+    },
+    peer: () => !!state.peer,
+    // The history is covered: settings, the picture viewer, or a drawer over a narrow window.
+    obscured: () => !$("setpage").hidden || !lightbox.hidden
+      || (window.innerWidth < 768 && (panel.classList.contains("open") || sidebar.classList.contains("open"))),
+    focusTask: (id) => workspace.focusTask(id),
+    // A confirmed read clears that conversation's dot at once; the next status poll agrees.
+    onRead: (sel, threadId) => {
+      const st = sel.type === "group" ? stStatus.groups[sel.id] : stStatus.map[sel.id];
+      if (st && st.activity && (!st.thread_id || st.thread_id === threadId)) {
+        st.activity = { ...st.activity, unread: 0, unreadHasMore: false };
+        renderLists();
+      }
+    },
+  });
   syncSidebar();
   initTheme(); // in the app this also tells the window which theme to use
   syncComposer();

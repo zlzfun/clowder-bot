@@ -1,5 +1,14 @@
 import type { NativeMessage } from './types.js';
 
+/** Display-only fallback, shared by direct and group chats. Native records stay untouched. */
+export function messageDisplayText(message: NativeMessage): string {
+  const content = message.type === 'assistant' && message.content.trim() === 'SILENT' ? '' : message.content;
+  if (content) return content;
+  if (message.isDraft || ['queued', 'processing'].includes(message.lifecycle?.status ?? '')) return '正在等待或处理…';
+  if (['canceled', 'cancelled'].includes(message.lifecycle?.status ?? '')) return '已停止';
+  return message.lifecycle?.status === 'failed' ? '这次没完成，请查看详情' : '';
+}
+
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }

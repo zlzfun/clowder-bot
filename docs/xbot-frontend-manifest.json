@@ -27,7 +27,7 @@
       "file": "app.js",
       "target": "client/public/app.js",
       "sourceSha256": "1248f793493826bf044359c71e7d8772ccc3472d6021d6abb979dff9b6cb29bc",
-      "sha256": "ded671aecc4d2d728d985634b7285b141af924d2b8d564c7bf64af9d3e3d3ae1",
+      "sha256": "0162c28cae3e3be3c92b7a6444b6b4a0b6dff126ae114b288f128e59e9cf5153",
       "unchanged": false
     },
     {
@@ -153,7 +153,7 @@
       "file": "index.html",
       "target": "client/index.html",
       "sourceSha256": "a4160c18e23489fbc6a9e21fe494e1ac52840a67b2e138997400a0b42835b556",
-      "sha256": "15a681a3065a17c5aa1cc14bfd529956439e4226ef5930f18e7fb43affa674de",
+      "sha256": "5dcf6a7d6e81ffeda4a036ff516cde70b0b2548bfeacb13d19c5703a1853089c",
       "unchanged": false
     },
     {
@@ -597,13 +597,13 @@
     },
     {
       "target": "client/public/chat-presentation.js",
-      "description": "Message presentation: speaker identity by native cat ID and folded execution records (presentation_kind activity)",
-      "sha256": "090d2bb0149c2ce9d1c55be7608e1531b827cf0ab6e4036157293ae2e21d660d"
+      "description": "Message presentation: speaker identity by native cat ID and folded execution records (presentation_kind activity) that open onto their prose and their native toolEvents as literal text, one entry per event in stored order with each result's own status; a record with neither is a plain, non-expandable status line",
+      "sha256": "019f7cecea00d717a58e72803cb50f3f4e0cefb84c95e39fc591368e44bd1529"
     },
     {
       "target": "client/public/chat-presentation.css",
-      "description": "Single-chat face/name continuation and execution-record line on existing XBot classes and tokens",
-      "sha256": "a18931567181b2b346056c55315132a7e559862dab52bddd7f42e03f2bfd02bf"
+      "description": "Single-chat face/name continuation, execution-record line (expandable or plain) and its tool-event entries on existing XBot trace-call classes and tokens",
+      "sha256": "8e869779a732526eb25cf5cadf68029e736ea6af6a915df8cc04223f307dd132"
     },
     {
       "target": "client/public/template-lab/index.html",
@@ -664,6 +664,42 @@
       "description": "Scheduled-task section styles on the task tab's compact rows and panel cards, the original .field/.choice/.modal-card and the .task-details fold; only existing tokens, original CSS unchanged",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-04",
       "sha256": "a9f65f5b3494b236851cf1b4b73afd4dfbb609fe5c4303aabc9315c42307b652"
+    },
+    {
+      "target": "client/public/workspace-rules.js",
+      "description": "File, saved-conversation and chat-task rules without DOM or network: conversation scope, sizes and badges, per-message attachment limits and refusal text, restoring files of a send that did not go out, Task order and dock summary, 请求传球 targets and gate, native ownership history (流转记录: newest first, handoff/human_update/claim named apart, nothing invented), saved-conversation list normalisation and refusal wording; shared by workspace.js and tests; native file views: a size not given is left out (never 0 B), availability gates download and preview (anything but an explicit available is not fetchable, with the server's reason), 成果 for a native result kept apart from the 交付物 snapshot name",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-04; interaction organization informed by OpenBot at acccbce543a59e8806ed3b60a74b11123b0ce5d2 (file cards with an in-place missing state, per-task resume/reassign/stop), no OpenBot code, text or assets copied; simplified by local Claude Code (claude-opus-5-5) on 2026-11-05 after user review: project/workspace management and manual Task creation/assignment removed, the working directory folded under 更多文件, 历史对话 added; chat experience 1/3/5 by local Claude Code (claude-opus-5-5) on 2026-11-05: native file availability, size null and 成果 naming",
+      "sha256": "3e81a4737411326729a047b7f4cfd9f5e07aa4748e6464c773220629dd0bf580"
+    },
+    {
+      "target": "client/public/workspace.js",
+      "description": "Files, saved conversations and chat Tasks for the chat shell: composer attachments uploaded to the exact native thread (picker, paste, drop; abort on switch; files handed back after a send that did not go out), file cards with download, server-offered preview and an honest missing state, the drawer 文件 page (deliverables and attachments; working-directory path, read-only browsing and mark-as-deliverable folded under 更多文件 and read only once opened; no file-policy claims), the cat 详情 page's folded 历史对话 (switches only between server-known threads with expectedThreadId, pending-attachment confirmation, late answers dropped), 任务 cards on the 任务 page (负责人 from the read Task, progress, background run, 请求传球 as an asynchronous request, stop/cancel/resume via runtime-tasks.js rules, 流转记录) and the dock Task line; no project or workspace management and no Task creation or assignment; reads follow the chat poll and native events, stale answers dropped; owner feedback and pass receipts hold only at the owner revision they were said at, and a late control/pass answer never replaces or repaints a newer read (ownerRevision, then updatedAt); native file cards (成果, unavailable reason in place, no download, preview or picture request while unavailable; URLs built from the encoded ID only), a 成果 section on the 文件 page once the server reads the native record, whose failed read (nativeReadStatus unavailable) keeps the saved snapshots and attachments and offers 重试; focusTask(id) opens 任务 at one Task's card for the status line",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-04; interaction organization informed by OpenBot at acccbce543a59e8806ed3b60a74b11123b0ce5d2 (file cards with an in-place missing state, per-task resume/reassign/stop), no OpenBot code, text or assets copied; simplified by local Claude Code (claude-opus-5-5) on 2026-11-05 after user review: project/workspace management and manual Task creation/assignment removed, the working directory folded under 更多文件, 历史对话 added; chat experience 1/3/5 by local Claude Code (claude-opus-5-5) on 2026-11-05: native file views on the existing cards, partial native reads, focusTask",
+      "sha256": "70c525933d5db8814dd363f3e721b65db393ff17b9d7f1f25201253beb769103"
+    },
+    {
+      "target": "client/public/workspace.css",
+      "description": "File, saved-conversation and chat-task styles on the composer attach row and plus column, drawer tab body, psec, task-record/task-details/ty cards, wrow, .modal-card and .field controls; drawer tab spacing for six tabs; the 更多文件 and 历史对话 folds; only existing tokens, original CSS unchanged; the unavailable native file card",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-04; interaction organization informed by OpenBot at acccbce543a59e8806ed3b60a74b11123b0ce5d2 (file cards with an in-place missing state, per-task resume/reassign/stop), no OpenBot code, text or assets copied; simplified by local Claude Code (claude-opus-5-5) on 2026-11-05 after user review: project/workspace management and manual Task creation/assignment removed, the working directory folded under 更多文件, 历史对话 added; chat experience 1/3/5 by local Claude Code (claude-opus-5-5) on 2026-11-05: unavailable card state",
+      "sha256": "31cfbf72f79e509fb5ce8c0a6b5550fdf4ce83efd8ebdfa913d6b08a5e151753"
+    },
+    {
+      "target": "client/public/chat-experience-rules.js",
+      "description": "Status-line, read-position and read-only memory rules without DOM or network: GET <scope>/activity checked (native order approval > failure > running > queued > task, counts never below the items, unknown kinds dropped, a missing read status is not ready), the one status line (the most urgent kind leads, every other kind keeps its count, partial or failed reads say they cannot tell, new replies only from the server's unread count), sidebar state for bots and groups (awaiting from approvals, unknown never idle, failure, unread), the read target gate (newest visible reply, something unread, same thread, visible uncovered page, in sight, once), Profile/Taste entries with pendingCount kept apart from saved content, sources and memory read failures by kind",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-05 for chat experience 1/3/5 (docs/chat-experience-api.md)",
+      "sha256": "81589415e320cdc3599a92f8d6dd0fe0b29713bc13e55cd819224e01f11d9d8d"
+    },
+    {
+      "target": "client/public/chat-experience.js",
+      "description": "The chat's one status line (in place of the separate execution and Task lines while GET <scope>/activity answers; the earlier lines stay on a server without it), opening in place onto a short list whose rows find the real message by native message ID or the Task by ID; past six rows 查看其余 N 项 / 收起 shows every listed approval and concurrent item in place, kept open across refreshes of the same conversation; approvals pointing to the existing runtime-panel controls and never approved here; read confirmation by POST <scope>/read only for the newest visible cat reply after it stays in sight on a visible, uncovered page, once, one request at a time; a 404 or 409 refuses that one reply (conversation + thread + message) only, so a newer reply is still confirmed, and 409 reads the activity again; a late answer for a conversation or thread the chat has left leaves no refusal, wait or reload; the cat's 记忆, read only throughout: 关于你 and 你的偏好 folded and read only when opened (GET /xbot-api/memory/profile|taste), loading, failure, no permission, partial, empty and an absent route told apart, each entry's source on demand with its revision (409 asks to read the list again), no editing, confirming or forgetting; 这个对话的便笺 read only as before (no add or delete; a failed read says so with 重试, never as no notes); a group's 记忆 shows no owner records and no promise",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-05 for chat experience 1/3/5 (docs/chat-experience-api.md); review fixes by local Claude Code (claude-opus-5-5) on 2026-11-05: note add/delete removed (memory read only), the status list made fully reachable, read refusals scoped to one reply",
+      "sha256": "cad94cdf8c362e17739aeaa66ee4d0f2488b2b3e083f90d1b3ca04ce10715988"
+    },
+    {
+      "target": "client/public/chat-experience.css",
+      "description": "Status line on the dock's wrow (the earlier execution and Task lines hidden while it is in charge), its in-place list on the panel card surface with the 查看其余 N 项 / 收起 row, the found-message flash on the existing quote-flash keyframes, sidebar failure and unknown lines, 记忆 folds, entries on lib-card, sources and the read-only conversation notes; only existing tokens, original CSS unchanged",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-05 for chat experience 1/3/5 (docs/chat-experience-api.md); review fixes by local Claude Code (claude-opus-5-5) on 2026-11-05: note form and delete styles removed",
+      "sha256": "1d64cbcbbf47fc9fa6486a032b724e561d90c3720d2d208f9a867650793ecfb5"
     }
   ]
 }

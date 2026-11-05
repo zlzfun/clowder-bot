@@ -2,6 +2,10 @@
 
 本地运行的多成员聊天产品：界面沿用 XBot，执行引擎直接运行 [Clowder AI](https://github.com/zts212653/clowder-ai) 的原始代码。Bot 层只负责界面、产品元数据与协议适配。
 
+后续产品方向见 [可探索特性清单](docs/feature-exploration.md)，包含复用边界、聊天体验原则与探索顺序。
+
+首批聊天体验支持发资料与收文件、查看协作提醒，以及只读查看已保存的资料与偏好；实现范围与限制见 [1、3、5 实施记录](docs/chat-files-collaboration-memory.md#首批实施)。
+
 ## 启动
 
 需要 **Node.js 24、npm、Git、redis-server**。pnpm 9.15.4 随项目开发依赖安装。成员接入本机已安装并配置的 Agent，沿用它的登录与默认配置。没有演示引擎，也不会在原生服务不可用时生成模拟回复。
@@ -39,15 +43,15 @@ flowchart LR
 ```
 
 - `upstream/clowder-ai/`：Git 子模块，固定完整提交，源码保持干净。
-- `.runtime/clowder-ai/`：从固定版本生成的独立构建目录，自动应用外置补丁。
+- `.runtime/`：按 `upstream.lock.json` 生成的独立构建目录，自动应用已登记的外置补丁。
 - `server/native/`：原生会话认证、消息/成员映射和实时事件转接，不实现第二套推理或调度。
 - `server/xbot/`：XBot 协议适配；`client/` 保留聊天布局、猫猫头像与猫咖配色。
-- `data/bot/presentation.json`：仅保存头像、文件夹、置顶、活动原生 Thread ID、消息序号引用。
+- `data/bot/presentation.json`：保存头像、文件夹、置顶、原生 Thread／消息引用、会话已读游标和文件元数据；文件快照保存在 Bot 文件目录，长期记忆和运行状态仍由原生管理。
 - `data/native/`：原生配置、Redis AOF、SQLite、transcripts、工具与账号数据。可通过 `BOT_RUNTIME_DATA_DIR` 调整。
 
 原自研 Orchestrator、Provider、上下文拼接、JSON 消息/记忆存储和演示路径已经移除。规划、工具执行、A2A、持久化队列、会话恢复、上下文和长期记忆由上游实现。
 
-当前有 **3 个外置运行时补丁、涉及 7 个文件**：原生执行入口的成员检查、原生 L0 编译后的后台委派指令、后台会话仍在运行时的答复落盘检查点。源码子模块保持干净，详细差异与退出条件见维护台账。成员检查属于执行准入，不是文件或长期记忆的保密隔离。
+当前锁文件有 **6 个历史外置运行时补丁、涉及 39 个文件**，包含已合入的定时任务补丁；文件、协作状态和只读记忆这一轮未增加或修改补丁。源码子模块保持干净，详细差异与退出条件见维护台账。已有补丁不是继续修改底层的依据；成员检查属于执行准入，不是文件或长期记忆的保密隔离。
 
 轻量后台方案保留一个 Bot 的主 Agent/session：长任务交给原生后台 subagent，进度询问和独立问题由主会话处理，调整方向通过原生消息送给对应子任务。普通新消息使用原生 `continue_current` 准入，不主动中断已有执行。本部署的 Claude 使用原生 Agent SDK carrier；其他 runtime 的同等体验尚未完成真实验收。
 

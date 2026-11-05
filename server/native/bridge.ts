@@ -3,8 +3,11 @@ import { ApiError } from '../errors.js';
 import { ProductStore } from '../product-store.js';
 import type { NativeCat, NativeMessage, NativeThread, NativeTransport } from './types.js';
 import { runtimeUnavailable, supportsRuntime } from './agents.js';
-import { messagePresentation } from './message-presentation.js';
+import { messageDisplayText, messagePresentation } from './message-presentation.js';
 import { avatarBreed, type CatConfig, type SourceTemplate } from './cat-templates.js';
+import { Workspaces } from '../workspaces.js';
+import { NativeFiles } from './files.js';
+import { Activity } from './activity.js';
 
 export const encode = encodeURIComponent;
 export interface NativeRuntime {
@@ -24,7 +27,12 @@ export interface CreateBot { name: string; persona?: string; description?: strin
 
 export class BotBridge {
   private directCreates = new Map<string, Promise<NativeThread>>();
-  constructor(readonly native: NativeTransport, readonly store: ProductStore, readonly workspace: string) {}
+  readonly workspaces: Workspaces;
+  readonly nativeFiles: NativeFiles;
+  readonly activity: Activity;
+  constructor(readonly native: NativeTransport, readonly store: ProductStore, readonly workspace: string) {
+    this.workspaces = new Workspaces(this); this.nativeFiles = new NativeFiles(this); this.activity = new Activity(this);
+  }
   cats(): Promise<NativeCat[]> { return this.native.request<{ cats: NativeCat[] }>('/api/cats').then(r => r.cats); }
   templates(): Promise<{ templates: RoleTemplate[]; clientDefaults: Record<string, { defaultModel: string; models: string[] }> }> { return this.native.request('/api/cat-templates'); }
   runtimes(refresh = false): Promise<NativeRuntime[]> { return this.native.request<{ runtimes: NativeRuntime[] }>(`/api/cats/native-runtimes${refresh ? '?refresh=1' : ''}`).then(r => r.runtimes); }
@@ -40,7 +48,7 @@ export class BotBridge {
       primary: cat.isDefaultResponder === true, group: meta.folder ?? '', avatar: meta.avatarData ? 'custom' : 'generated',
       avatar_seed: meta.avatarSeed ?? `cat:${meta.templateId ?? cat.breedId ?? 'ragdoll'}`,
       avatar_url: meta.avatarData ? `/xbot-api/bots/${encode(cat.name)}/avatar?v=${meta.avatarUpdated}` : '',
-      thread_id: meta.activeThreadId, native_id: cat.id };
+      thread_id: meta.activeThreadId, native_id: cat.id, project_id: meta.projectId ?? null };
   }
   thread(id: string): Promise<NativeThread> { return this.native.request(`/api/threads/${encode(id)}`); }
   async direct(cat: NativeCat): Promise<NativeThread> {
@@ -50,14 +58,16 @@ export class BotBridge {
     if (pending) return pending;
     const uuid = createHash('sha256').update(`bot-initial-thread:${cat.id}`).digest('hex').slice(0, 32);
     const key = `${uuid.slice(0, 8)}-${uuid.slice(8, 12)}-4${uuid.slice(13, 16)}-8${uuid.slice(17, 20)}-${uuid.slice(20)}`;
-    const create = this.newThread(cat.name, [cat.id], key).then(thread => {
-      this.store.bot(cat.id).activeThreadId = thread.id; this.store.save(); return thread;
+    const create = this.workspaces.catPath(cat.id).then(path => this.newThread(cat.name, [cat.id], key, path)).then(thread => {
+      const meta = this.store.bot(cat.id);
+      meta.activeThreadId = thread.id; meta.conversationIds = [...new Set([...(meta.conversationIds ?? []), thread.id])];
+      this.store.save(); return thread;
     });
     this.directCreates.set(cat.id, create);
     try { return await create; } finally { this.directCreates.delete(cat.id); }
   }
-  newThread(title: string, members: string[], idempotencyKey: string = randomUUID()): Promise<NativeThread> {
-    return this.native.request('/api/threads', { method: 'POST', body: { title, preferredCats: members, projectPath: this.workspace, idempotencyKey } });
+  newThread(title: string, members: string[], idempotencyKey: string = randomUUID(), projectPath = this.workspace): Promise<NativeThread> {
+    return this.native.request('/api/threads', { method: 'POST', body: { title, preferredCats: members, projectPath, idempotencyKey } });
   }
   async group(id: string): Promise<NativeThread> {
     if (!this.store.state.groupThreadIds.includes(id)) throw new ApiError(404, '找不到这个群聊');
@@ -92,21 +102,19 @@ export class BotBridge {
     for (const message of page.messages) this.store.sequence(thread.id, message.id);
     for (const { message, ...presentation } of this.presentMessages(page.messages, cats)) {
       const seq = this.store.sequence(thread.id, message.id);
-      const pending = message.isDraft || ['queued', 'processing'].includes(message.lifecycle?.status ?? '');
-      const text = message.content || (pending ? '正在等待或处理…' : message.lifecycle?.status === 'canceled' ? '已停止' : '');
+      const text = messageDisplayText(message);
       const base = { seq, id: message.id, native_message_id: message.id, role: message.type === 'user' ? 'user' : 'assistant',
         content: text, ...presentation, time: new Date(message.timestamp).toISOString(),
         reply_to: message.replyTo ? this.store.state.messageRefs[thread.id]?.[message.replyTo] ?? 0 : 0,
-        status: message.lifecycle?.status ?? (message.isDraft ? 'processing' : 'complete'), native: message };
+        status: message.lifecycle?.status ?? (message.isDraft ? 'processing' : 'complete'), attachments: this.workspaces.messageFiles(thread.id, message), native: message };
       if (message.type === 'user' || presentation.presentation_kind === 'activity') rows.push(base);
-      else if (text) {
+      else if (text || base.attachments.length) {
         // XBot's delivery view. These receipts describe rendering, never model tool execution.
         const callId = `delivery_${message.id}`;
         rows.push({ ...base, presentation_receipt: true, tool_calls: [{ id: callId, type: 'function', function: { name: 'send_message_to_user', arguments: JSON.stringify({ text }) } }] });
         rows.push({ seq: seq + 1, role: 'tool', name: 'send_message_to_user', content: "sent to the owner's chat", tool_call_id: callId, presentation_receipt: true, time: base.time });
       }
     }
-    this.store.bot(cat.id).lastReadMessageId = page.messages.at(-1)?.id;
     this.store.save();
     const first = page.messages[0];
     return { messages: rows, hasMore: page.hasMore, before: first ? `${first.timelineOrderAt ?? first.timestamp}:${first.id}` : null, thread_id: thread.id };
@@ -125,16 +133,26 @@ export class BotBridge {
   queue(threadId: string): Promise<QueueView> { return this.native.request(`/api/threads/${encode(threadId)}/queue`); }
   async statuses() {
     const cats = await this.cats();
-    const ids = new Set([...this.store.state.groupThreadIds, ...Object.values(this.store.state.bots).flatMap(b => b.activeThreadId ? [b.activeThreadId] : [])]);
-    const queues = await Promise.all([...ids].map(async id => ({ threadId: id, ...(await this.queue(id)) })));
+    const ids = new Set([...this.store.state.groupThreadIds, ...Object.values(this.store.state.bots).flatMap(b => [...(b.activeThreadId ? [b.activeThreadId] : []), ...(b.conversationIds ?? []), ...Object.values(b.workspaceThreads ?? {})])]);
+    // One owner approval read per status refresh, shared across the thread projections.
+    const pending = this.activity.approvals(); void pending.catch(() => {});
+    const views = await Promise.all([...ids].map(async id => {
+      try { return await this.activity.read(id, cats, pending); }
+      catch { return this.activity.unavailable(id); }
+    }));
     return { bots: cats.map(cat => {
-      const active = queues.flatMap(q => q.activeInvocations.filter(i => i.catId === cat.id).map(i => ({ ...i, threadId: q.threadId })));
-      const queued = queues.flatMap(q => q.queue.filter(e => e.targetCatId === cat.id || e.targetCats?.includes(cat.id)).map(e => ({ ...e, threadId: q.threadId })));
-      return { bot: cat.name, native_id: cat.id, state: active.length ? 'running' : queued.length ? 'queued' : 'idle',
+      const threadId = this.store.bot(cat.id).activeThreadId;
+      const activity = threadId ? views.find(view => view.threadId === threadId) ?? this.activity.unavailable(threadId) : undefined;
+      const active = views.flatMap(view => view.active.filter(i => i.catId === cat.id).map(i => ({ ...i, threadId: view.threadId })));
+      const queued = views.flatMap(view => view.queued.filter(e => e.targetCatId === cat.id || e.targetCats?.includes(cat.id)).map(e => ({ ...e, threadId: view.threadId })));
+      return { bot: cat.name, native_id: cat.id, thread_id: threadId, activity,
+        executionReadStatus: views.some(view => view.errors.some(error => error.source === 'queue' || error.source === 'thread')) ? 'unavailable' : 'ready',
+        state: activity?.counts.approval ? 'awaiting' : active.length ? 'running' : queued.some(q => ['queued','pending'].includes(q.status)) ? 'queued' : activity && activity.readStatus !== 'ready' ? 'unknown' : 'idle',
         since: active[0]?.startedAt ? new Date(active[0].startedAt).toISOString() : undefined,
-        task: active.length ? 'Clowder AI 正在执行' : queued.length ? 'Clowder AI 队列等待中' : '', todo: '', tool: '', tool_summary: '', completed_unread: 0,
+        task: active.length ? '正在处理' : queued.length ? '消息排队中' : '', todo: '', tool: '', tool_summary: '',
+        unread: activity?.unread ?? null, completed_unread: activity?.unread ?? null,
         active, queued };
-    }), others: [] };
+    }), groups: this.store.state.groupThreadIds.map(id => ({id,thread_id:id,activity:views.find(view => view.threadId === id) ?? this.activity.unavailable(id)})), others: [] };
   }
   async createBot(input: CreateBot, source?: NativeCat) {
     if (input.catConfig) {
@@ -177,7 +195,10 @@ export class BotBridge {
     this.store.save();
     return cat;
   }
-  async send(thread: NativeThread, body: { text: string; reply_to?: number; idempotencyKey?: string }, directCat?: NativeCat) {
+  async send(thread: NativeThread, body: { text: string; reply_to?: number; idempotencyKey?: string; attachments?: string[]; expectedThreadId?: string }, directCat?: NativeCat) {
+    if (body.expectedThreadId && body.expectedThreadId !== thread.id) throw new ApiError(409, '会话已变化，请核对后重试');
+    if (body.attachments?.length && !body.expectedThreadId) throw new ApiError(400, '发送附件需要当前会话标识');
+    const attachments = body.attachments?.length ? await this.workspaces.attachments(thread.id, body.attachments) : [];
     const replyTo = body.reply_to ? this.store.messageId(thread.id, body.reply_to) : undefined;
     if (body.reply_to && !replyTo) throw new ApiError(400, '引用的消息不存在，请刷新会话');
     return this.native.request('/api/messages', { method: 'POST', body: {
@@ -186,6 +207,7 @@ export class BotBridge {
       // If the carrier cannot append (or is idle), native Queue safely starts the next turn.
       // Do not inspect a stale busy snapshot or issue a second force/steer request here.
       messageDisposition: 'continue_current',
+      ...(attachments.length ? { contextAttachments: attachments } : {}),
       ...(directCat ? { mentions: [directCat.id] } : {}), ...(replyTo ? { replyTo } : {}),
     } });
   }

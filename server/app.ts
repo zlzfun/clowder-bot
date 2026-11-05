@@ -10,6 +10,9 @@ import type { NativeTransport } from './native/types.js';
 import { createXbotCoreRouter } from './xbot/core.js';
 import { createXbotSettingsRouter } from './xbot/settings.js';
 import { createXbotSchedulesRouter } from './xbot/schedules.js';
+import { createWorkspaceRouter } from './xbot/workspaces.js';
+import { createMemoryRouter } from './xbot/memory.js';
+import { createActivityRouter } from './xbot/activity.js';
 
 export function createApp(options: { dataFile?: string; native?: NativeTransport; staticDir?: string; workspace?: string; allowedOrigins?: string[] } = {}) {
   const port = Number(process.env.PORT || 3210);
@@ -26,12 +29,13 @@ export function createApp(options: { dataFile?: string; native?: NativeTransport
     if (!/^\/(?:xbot-api|api|native-api)(?:\/|$)/.test(req.path)) return next();
     const hasBody = Number(req.headers['content-length'] ?? 0) > 0 || !!req.headers['transfer-encoding'];
     const avatar = req.method === 'POST' && /^\/xbot-api\/bots\/[^/]+\/avatar$/.test(req.path) && req.is('multipart/form-data');
-    if (hasBody && !req.is('application/json') && !avatar) return res.status(415).json({ error: '请求必须为 application/json' });
+    const file = req.method === 'POST' && /^\/xbot-api\/(bots|groups)\/[^/]+\/files$/.test(req.path) && req.is('application/octet-stream');
+    if (hasBody && !req.is('application/json') && !avatar && !file) return res.status(415).json({ error: '请求必须为 application/json' });
     res.setHeader('Cache-Control', 'no-store'); next();
   });
   app.use(express.json({ limit: '4mb' }));
   const core = createXbotCoreRouter(bridge);
-  app.use('/xbot-api', core.router, createXbotSchedulesRouter(bridge), createXbotSettingsRouter(bridge));
+  app.use('/xbot-api', createMemoryRouter(native), createActivityRouter(bridge), createWorkspaceRouter(bridge), core.router, createXbotSchedulesRouter(bridge), createXbotSettingsRouter(bridge));
   app.use('/xbot-api', (_req, res) => res.status(404).json({ error: '此 XBot 接口尚无原生适配；请使用运行面板' }));
   app.get('/api/health', async (_req, res) => res.json({ ok: true, engine: 'clowder-ai', upstream: await native.request('/api/health') }));
   app.get('/api/state', async (_req, res) => res.json({ engine: 'clowder-ai', cats: await bridge.cats(), presentation: store.state }));

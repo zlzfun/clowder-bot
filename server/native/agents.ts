@@ -40,8 +40,9 @@ export async function agentInventory(bridge: BotBridge, refresh = false) {
       const bound = cats.filter(cat => runtimeForCat(cat, runtimes)?.id === runtime.id);
       const ids = new Set(bound.map(cat => cat.id));
       const activity = statuses?.bots.filter(b => ids.has(b.native_id));
-      const active = activity ? activity.reduce((n, b) => n + b.active.length, 0) : null;
-      const queued = activity ? activity.reduce((n, b) => n + b.queued.length, 0) : null;
+      const readable = activity && activity.every(b => b.executionReadStatus === 'ready');
+      const active = readable ? activity.reduce((n, b) => n + b.active.length, 0) : null;
+      const queued = readable ? activity.reduce((n, b) => n + b.queued.length, 0) : null;
       const unavailableReason = runtimeUnavailable(runtime);
       return {
         id: runtime.id, label: runtime.label, clientId: runtime.clientId,
@@ -65,6 +66,7 @@ export async function bindAgent(bridge: BotBridge, cat: NativeCat, runtimeId: st
   const unavailable = runtimeUnavailable(runtime);
   if (unavailable) throw new ApiError(422, unavailable);
   const status = (await bridge.statuses()).bots.find(b => b.native_id === cat.id);
+  if (status?.executionReadStatus !== 'ready') throw new ApiError(503, '暂时无法确认执行状态，请稍后再更换 Agent');
   if (status?.active.length || status?.queued.length) throw new ApiError(409, '请先完成或停止这个 Bot 的任务，再更换 Agent');
   const { cat: updated } = await bridge.native.request<{ cat: NativeCat }>(`/api/cats/${encodeURIComponent(cat.id)}`, {
     method: 'PATCH', body: {

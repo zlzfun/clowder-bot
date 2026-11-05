@@ -1,0 +1,227 @@
+/* Files, saved conversations and chat Tasks (workspace.js). Builds on the
+   composer's attach row and empty plus column, the drawer's tab body and
+   psec sections, task cards (task-record, task-details, ty, wrow,
+   work-stack), .modal/.modal-card, .field controls and the --x-* tokens of
+   tokens.css and the café layer. No new colors, fonts or motion; separators
+   are surfaces and spacing, as elsewhere. */
+
+/* Drawer tabs: six fit the 340px drawer; a narrower one scrolls them. */
+.panel-tabs .tabs { overflow-x: auto; scrollbar-width: none; }
+.panel-tabs .tabs::-webkit-scrollbar { display: none; }
+@media (max-width: 959px) {
+  .panel-tabs .tabs { gap: 2px; padding-inline: 12px; }
+  .panel-tabs .tabs button { padding-inline: 9px; }
+}
+
+/* ---- Composer: the attach button in the plus column, pending files above the text. */
+.ws-plus { display: flex; align-items: flex-end; padding-bottom: 10px; }
+.composer .ws-attach { width: 32px; height: 32px; min-width: 32px; min-height: 32px; color: var(--x-muted); }
+.composer .ws-attach svg { width: 19px; height: 19px; }
+.composer .ws-attach:disabled { opacity: .4; }
+.wsf-chip {
+  display: flex; align-items: center; gap: 8px; min-width: 0; max-width: min(260px, 100%);
+  height: 48px; padding: 6px 4px 6px 6px; border-radius: var(--x-r-card); background: var(--x-panel-card);
+}
+.wsf-chip .wsf-copy { flex: 1; }
+.wsf-chip:is([data-status="waiting"], [data-status="uploading"]) .wsf-tile { opacity: .55; }
+.wsf-chip[data-status="failed"] .wsf-tile { opacity: .7; }
+
+/* ---- File cards: tile, name and one line, then the card's own actions. */
+.wsf-cards { display: flex; flex-direction: column; gap: var(--x-s2); width: min(300px, 100%); min-width: 0; }
+.wsf-cards.wide { width: 100%; }
+.msg.user .wsf-cards { align-self: flex-end; }
+.wsf-card {
+  display: flex; align-items: center; gap: var(--x-s4); min-width: 0;
+  padding: var(--x-s3) var(--x-s2) var(--x-s3) var(--x-s3); border-radius: var(--x-r-card); background: var(--x-fill-1);
+}
+.wsf-cards.wide .wsf-card { background: var(--x-panel-card); }
+.wsf-tile {
+  flex: none; width: 36px; height: 36px; padding: 0; border: 0; border-radius: var(--x-r-sm);
+  overflow: hidden; display: grid; place-items: center; background: var(--x-fill-2); color: var(--x-muted);
+}
+button.wsf-tile { cursor: zoom-in; }
+button.wsf-tile:disabled { cursor: default; }
+.wsf-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.wsf-tile .icon { width: 18px; height: 18px; }
+.wsf-ext { font-family: var(--x-mono); font-size: 10px; font-weight: 650; letter-spacing: .02em; color: var(--x-muted); }
+.wsf-card.deliverable .wsf-tile { background: var(--x-type-dev-bg); color: var(--x-type-dev); }
+.wsf-card.deliverable .wsf-ext { color: var(--x-type-dev); }
+.wsf-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.wsf-name, .wsf-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.35; }
+.wsf-name { font-size: 13px; font-weight: 560; color: var(--x-text); }
+.wsf-meta { font-size: var(--x-fs-cap); color: var(--x-muted); font-variant-numeric: tabular-nums; }
+.wsf-meta.bad { color: var(--x-danger); }
+.wsf-card[data-state="missing"] .wsf-tile { opacity: .5; }
+.wsf-card[data-state="missing"] .wsf-name { color: var(--x-muted); }
+/* A native file the server cannot hand over now: the reason in place, no download. */
+.wsf-card[data-state="unavailable"] .wsf-tile { opacity: .5; }
+.wsf-card[data-state="unavailable"] .wsf-name { color: var(--x-muted); }
+.wsf-acts { flex: none; display: flex; align-items: center; gap: 2px; }
+.ghost.ws-ib { width: 28px; height: 28px; min-width: 28px; min-height: 28px; }
+.ghost.ws-ib svg { width: 16px; height: 16px; }
+.ghost.ws-ib:disabled { opacity: .4; }
+.ghost.ws-ib:disabled:hover { background: transparent; color: var(--x-muted); }
+.main.peer .ws-strip { display: none; }
+
+/* ---- Dialogs (the original .modal-card): text preview, confirmations. */
+.ws-modal .modal-card { width: min(440px, 100%); }
+.ws-modal.wide .modal-card { width: min(720px, 100%); }
+.ws-card:focus { outline: none; }
+.ws-dialog-body > .ws-note { margin-top: var(--x-s4); }
+pre.ws-preview {
+  margin: var(--x-s3) 0 0; max-height: min(60vh, 520px); overflow: auto; padding: var(--x-s5) 14px;
+  border-radius: var(--x-r-sm); background: var(--x-code); color: var(--x-text);
+  font-family: var(--x-mono); font-size: var(--x-fs-sm); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+pre.ws-preview:focus-visible { outline: 2px solid var(--x-muted); outline-offset: 2px; }
+
+/* Short states: loading, empty, failed. */
+.ws-note { margin: 0; font-size: var(--x-fs-sm); line-height: 1.6; color: var(--x-muted); }
+.ws-note.ws-bad { color: var(--x-danger); }
+.text-btn.ws-link { min-height: 22px; padding: 0 var(--x-s1); font-size: inherit; color: var(--x-text-link); }
+.text-btn.ws-link:hover { background: var(--x-text-link-hover); color: var(--x-text-link); }
+a.ws-link { color: var(--x-text-link); font-size: 12px; text-decoration: none; border-radius: var(--x-r-xs); }
+a.ws-link:hover, a.ws-link:focus-visible { background: var(--x-text-link-hover); }
+
+/* ---- Drawer 文件: deliverables and attachments; the working directory folded below
+   (更多文件, the original task-details fold). */
+.tab-body:has(> .ws-files) { padding: 6px var(--x-s6) 0; }
+.ws-sec { margin-top: var(--x-s6); }
+.ws-files > .ws-sec:first-child { margin-top: var(--x-s3); }
+.ws-sec-head { display: flex; align-items: center; gap: var(--x-s1); min-height: 28px; margin-bottom: var(--x-s2); }
+.ws-sec-head h4 { flex: 1; min-width: 0; margin: 0; font-size: 12px; font-weight: 600; color: var(--x-faint); }
+.ws-sec-head h4:focus { outline: none; }
+.ws-count { font-weight: 500; }
+.ws-sec-head .ghost.ws-ib svg { width: 15px; height: 15px; }
+.ws-sec-body > .ws-bad + .wsf-cards { margin-top: var(--x-s2); }
+.ws-more-all { margin-top: var(--x-s2); }
+.task-details.ws-more { margin-top: var(--x-s6); padding-bottom: var(--x-s5); }
+.ws-more > summary { min-height: 28px; font-size: 12px; font-weight: 600; }
+.ws-more-body { margin-top: var(--x-s2); }
+.ws-paths { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 0 var(--x-s4); margin: 0 0 var(--x-s3); font-size: 12px; }
+.ws-paths dt { color: var(--x-faint); }
+.ws-paths dd { margin: 0; min-width: 0; display: flex; align-items: center; gap: 2px; }
+.ws-path { flex: 1; min-width: 0; font-family: var(--x-mono); font-size: var(--x-fs-cap); color: var(--x-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-paths .ghost.ws-ib { width: 26px; height: 26px; min-width: 26px; min-height: 26px; }
+.ws-paths .ghost.ws-ib svg { width: 14px; height: 14px; }
+
+/* Read-only browsing: area switch (older project conversations), where you are, one folder at a time. */
+.ws-seg { display: inline-flex; gap: 2px; max-width: 100%; margin-bottom: var(--x-s3); padding: 2px; border-radius: var(--x-r-pill); background: var(--x-fill-1); }
+.ws-seg button {
+  border: 0; border-radius: var(--x-r-pill); padding: 4px 11px; background: transparent; color: var(--x-muted);
+  font: inherit; font-size: var(--x-fs-sm); line-height: 18px; white-space: nowrap; cursor: pointer;
+}
+.ws-seg button:hover:not(.on) { background: var(--x-fill-2); color: var(--x-text); }
+.ws-seg button.on { background: var(--x-fill-3); color: var(--x-text); font-weight: 600; }
+.ws-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 0 1px; min-width: 0; margin: 0 0 var(--x-s2); font-size: var(--x-fs-sm); }
+.ws-crumbs .ws-crumb { max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--x-fs-sm); }
+.ws-crumb.here { padding: 0 var(--x-s2); border-radius: var(--x-r-xs); color: var(--x-text); font-weight: 560; }
+.ws-crumb.here:focus { outline: none; }
+.ws-crumb.here:focus-visible { outline: 2px solid var(--x-muted); outline-offset: 1px; }
+.ws-crumbs > .ws-crumb-sep { width: 12px; height: 12px; color: var(--x-faint); }
+.ws-tree { list-style: none; margin: 0; padding: var(--x-s1); border-radius: var(--x-r-card); background: var(--x-panel-card); }
+.ws-row {
+  display: flex; align-items: center; gap: var(--x-s3); width: 100%; min-height: 36px; padding: var(--x-s1) var(--x-s3);
+  border: 0; border-radius: var(--x-r-sm); background: transparent; color: var(--x-text); font: inherit; font-size: 13px; text-align: left;
+}
+.ws-row > .icon { width: 16px; height: 16px; color: var(--x-muted); }
+.ws-row > .ws-row-chev { width: 14px; height: 14px; color: var(--x-faint); }
+.ws-row.dir { cursor: pointer; }
+.ws-row.dir:hover { background: var(--x-fill-2); }
+.ws-row.file { flex-wrap: wrap; }
+.ws-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-size { flex: none; font-size: var(--x-fs-cap); color: var(--x-faint); font-variant-numeric: tabular-nums; }
+.secondary.ws-mark { flex: none; min-height: 26px; padding: 3px 8px; font-size: var(--x-fs-cap); }
+.secondary.ws-mark[aria-disabled="true"] { opacity: .6; cursor: progress; }
+.ws-row-err { flex-basis: 100%; padding-left: 24px; font-size: 12px; line-height: 1.5; color: var(--x-danger); }
+.ws-more-body > .ws-note + .ws-tree, .ws-tree + .ws-note { margin-top: var(--x-s2); }
+
+/* ---- Drawer 详情: a cat's saved conversations (历史对话, a task-details fold); the current one marked. */
+.psec.ws-convs { padding-top: var(--x-s1); }
+.ws-conv-fold > summary { min-height: 24px; }
+.ws-conv-list { list-style: none; margin: var(--x-s2) 0 0; padding: var(--x-s1); border-radius: var(--x-r-card); background: var(--x-panel-card); }
+.ws-row.ws-conv { min-height: 40px; }
+button.ws-row.ws-conv { cursor: pointer; }
+button.ws-row.ws-conv:hover:not(:disabled) { background: var(--x-fill-2); }
+button.ws-row.ws-conv:disabled { cursor: progress; }
+.ws-row.ws-conv.here:focus { outline: none; }
+.ws-row.ws-conv.here:focus-visible { outline: 2px solid var(--x-muted); outline-offset: 1px; }
+.ws-conv-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.ws-conv-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--x-text-2); }
+.ws-conv.here .ws-conv-title { font-weight: 600; color: var(--x-text); }
+.ws-conv-meta { font-size: var(--x-fs-cap); line-height: 1.4; color: var(--x-faint); }
+.ws-conv.here .ws-conv-meta { color: var(--x-muted); }
+.ws-note.ws-conv-line { margin-top: var(--x-s2); font-size: 12px; }
+
+/* ---- 任务: one card per native Task, its own owner and controls. */
+.tab-body:has(> .wst) { padding: 0 var(--x-s5); }
+.wst { padding: var(--x-s4) var(--x-s3) var(--x-s1); }
+.wst .ws-sec-head { margin-bottom: var(--x-s1); }
+.wst-body > .ws-note { margin: 2px 0 var(--x-s2); }
+.wst-list { display: flex; flex-direction: column; gap: var(--x-s3); }
+.ws-exec-head { margin: 14px var(--x-s3) 0; font-size: 12px; font-weight: 600; color: var(--x-faint); }
+.wst-card { --task-control-fill: var(--x-fill-1); padding: var(--x-s5) 14px; border-radius: var(--x-r-card); background: var(--x-panel-card); }
+html[data-theme="dark"] .wst-card { --task-control-fill: var(--x-popover-hover); }
+.wst-card:focus { outline: none; }
+.wst-card:focus-visible { outline: 2px solid var(--x-muted); outline-offset: 2px; }
+.wst-card[aria-busy="true"] { cursor: progress; }
+.wst-head { display: flex; align-items: flex-start; gap: var(--x-s3); }
+.wst-title {
+  flex: 1; min-width: 0; margin: 0; font-size: 13.5px; font-weight: 620; line-height: 1.45; color: var(--x-text);
+  overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.wst-state { margin-top: 1px; }
+.wst-state.is-doing { color: var(--x-type-res); background: var(--x-type-res-bg); }
+.wst-state.is-blocked { color: var(--warn); background: var(--warn-bg); }
+.wst-state:is(.is-todo, .is-unknown) { color: var(--x-type-gen); background: var(--x-type-gen-bg); }
+.wst-state.is-done { color: var(--x-type-dev); background: var(--x-type-dev-bg); }
+.wst-owner { display: flex; align-items: center; gap: var(--x-s2); min-width: 0; margin-top: var(--x-s2); font-size: var(--x-fs-sm); color: var(--x-muted); }
+.wst-owner-k { flex: none; color: var(--x-faint); }
+.wst-owner > .avatar { width: 18px; height: 18px; flex: none; }
+.wst-owner > .icon { width: 15px; height: 15px; }
+.wst-owner b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--x-text-2); }
+.wst-away { color: var(--x-faint); white-space: nowrap; }
+.wst-run { margin: var(--x-s1) 0 0; font-size: 12px; line-height: 1.5; color: var(--x-muted); }
+.wst-why {
+  margin: var(--x-s2) 0 0; font-size: var(--x-fs-sm); line-height: 1.6; color: var(--x-text-2); white-space: pre-wrap; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
+}
+.wst-flags { display: grid; gap: 2px; margin-top: var(--x-s2); font-size: 12px; line-height: 1.55; color: var(--x-muted); }
+.wst-flags p { margin: 0; }
+.wst-flags a.ws-link { justify-self: start; }
+.wst-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--x-s2); margin-top: var(--x-s4); }
+.wst-actions .secondary { min-height: 28px; padding: 4px 9px; font-size: 12px; background: var(--task-control-fill); }
+.wst-actions .secondary:hover:not(:disabled) { background: var(--x-fill-3); }
+.wst-actions .secondary[aria-expanded="true"] { background: var(--x-fill-3); }
+.wst-actions .text-btn.wst-quiet { min-height: 28px; font-size: 12px; color: var(--x-muted); }
+.wst-actions button:disabled { opacity: .5; cursor: default; }
+.wst-line { margin: var(--x-s3) 0 0; font-size: 12px; line-height: 1.55; color: var(--x-muted); }
+
+/* Inline form: 请求传球. */
+.wst-form { display: grid; gap: var(--x-s3); margin-top: var(--x-s4); padding: var(--x-s4); border-radius: var(--x-r-sm); background: var(--task-control-fill, var(--x-fill-1)); }
+.wst-form .field { margin: 0; gap: var(--x-s1); font-size: 12px; }
+.wst-form .field :is(input, select, textarea) { min-height: 34px; padding: 6px 10px; font-size: 13px; }
+.wst-form .field select { padding-right: 30px; }
+.wst-form .field textarea { min-height: 56px; }
+.wst-form .ws-note { font-size: 12px; }
+.wst-form-acts { display: flex; justify-content: flex-end; align-items: center; gap: var(--x-s2); }
+.wst-form-acts .primary { min-height: 30px; padding: 5px 12px; font-size: 12.5px; }
+.wst-form-acts .text-btn { min-height: 30px; font-size: 12.5px; }
+
+/* 流转记录: when, from whom to whom, how. */
+.wst-hist { margin-top: var(--x-s4); }
+.wst-hist-body { margin-top: var(--x-s2); }
+.wst-hist-body > .ws-note { font-size: 12px; }
+.wst-hist-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--x-s2); }
+.wst-hist-list li { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0 var(--x-s3); font-size: 12px; line-height: 1.5; }
+.wst-hist-list time { color: var(--x-faint); font-variant-numeric: tabular-nums; }
+.wst-move { min-width: 0; color: var(--x-text-2); overflow-wrap: anywhere; }
+.wst-kind { grid-column: 2; color: var(--x-faint); }
+.wst-done { margin-top: var(--x-s4); }
+.wst-done > .wst-list { margin-top: var(--x-s3); }
+
+/* ---- One line above the composer: open Tasks and who has them. */
+.ws-strip { width: min(680px, 100% - 64px); margin: 0 auto; }
+.ws-strip-row > .icon:first-child { width: 14px; height: 14px; color: var(--x-muted); }
+.ws-strip-counts { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ws-strip-row.blocked .ws-strip-counts { color: var(--warn); }

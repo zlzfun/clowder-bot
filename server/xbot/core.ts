@@ -1,4 +1,5 @@
 import express, { type Response } from 'express';
+import { messageDisplayText } from '../native/message-presentation.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { ApiError } from '../errors.js';
@@ -37,6 +38,7 @@ export function createXbotCoreRouter(bridge: BotBridge) {
   });
   router.get('/bots', async (_req, res) => res.json({ bots: (await bridge.cats()).map(cat => bridge.botItem(cat)) }));
   router.get('/bots/status', async (_req, res) => res.json(await bridge.statuses()));
+  router.get('/status', async (_req, res) => res.json(await bridge.statuses()));
   router.get('/groups', async (_req, res) => {
     const cats = await bridge.cats();
     const folders = store.state.folders.map(name => ({ name, bots: cats.filter(c => store.bot(c.id).folder === name).map(c => c.name), ungrouped: false }));
@@ -63,9 +65,9 @@ export function createXbotCoreRouter(bridge: BotBridge) {
     res.json({ group: bridge.groupItem(thread, cats), hasMore: page.hasMore,
       messages: bridge.presentMessages(page.messages, cats).map(({ message: m, name, ...presentation }) => ({
         id: m.id, time: new Date(m.timestamp).toISOString(), sender: m.type === 'user' ? 'local' : name,
-        kind: m.type === 'user' ? 'person' : 'bot', text: m.content || (m.isDraft ? '正在处理…' : ''),
-        status: m.lifecycle?.status ?? (m.isDraft ? 'processing' : 'complete'), ...presentation, native: m,
-      })) });
+        kind: m.type === 'user' ? 'person' : 'bot', text: messageDisplayText(m),
+        status: m.lifecycle?.status ?? (m.isDraft ? 'processing' : 'complete'), attachments: bridge.workspaces.messageFiles(thread.id, m), ...presentation, native: m,
+      })).filter(m => m.native.type !== 'assistant' || m.native.content.trim() !== 'SILENT' || !!m.text || m.attachments.length > 0) });
   });
   router.post('/bots', async (req, res) => {
     const input = z.object(botBody).strict().superRefine((value, ctx) => {
@@ -103,14 +105,16 @@ export function createXbotCoreRouter(bridge: BotBridge) {
     delete store.state.bots[cat.id]; store.save(); res.json({ status: 'ok', history: 'preserved_by_clowder_ai' });
   });
   router.post('/groups', async (req, res) => {
-    const input = z.object({ name: label, members: z.array(z.string()).min(2).max(10).optional() }).strict().parse(req.body);
+    const input = z.object({ name: label, members: z.array(z.string()).min(2).max(10).optional(), projectId: z.string().optional() }).strict().parse(req.body);
+    if (input.projectId) throw new ApiError(410, '新群聊会自动分配文件目录，无需关联项目');
     if (!input.members) {
       if (store.state.folders.includes(input.name)) throw new ApiError(409, '分组已存在');
       store.state.folders.push(input.name); store.save(); return res.json({ name: input.name });
     }
     const members = await Promise.all(input.members.map(name => bot(name)));
     if (new Set(members.map(c => c.id)).size !== members.length) throw new ApiError(400, '成员不能重复');
-    const thread = await bridge.newThread(input.name, members.map(c => c.id));
+    const directoryKey = randomUUID();
+    const thread = await bridge.newThread(input.name, members.map(c => c.id), directoryKey, await bridge.workspaces.groupPath(directoryKey));
     store.state.groupThreadIds.push(thread.id); store.save(); res.status(201).json(bridge.groupItem(thread, members));
   });
   router.patch('/groups/:name', async (req, res) => {
@@ -202,10 +206,8 @@ export function createXbotCoreRouter(bridge: BotBridge) {
   });
   router.post('/groups/:id/stop', async (req, res) => res.json(await bridge.stop((await bridge.group(req.params.id)).id)));
   router.post('/bots/:name/new', async (req, res) => {
-    const cat = await bot(req.params.name), old = await bridge.direct(cat), queue = await bridge.queue(old.id);
-    if (queue.activeInvocations.length || queue.queue.length) throw new ApiError(409, '请先停止或完成当前会话中的任务');
-    const thread = await bridge.newThread(cat.name, [cat.id]);
-    store.bot(cat.id).activeThreadId = thread.id; store.save(); res.json({ status: 'ok', conversation_id: thread.id });
+    const cat = await bot(req.params.name), thread = await bridge.workspaces.newConversation(cat);
+    res.json({ status: 'ok', conversation_id: thread.id });
   });
   router.post('/bots/:name/compact', async (req, res) => {
     const cat = await bot(req.params.name), thread = await bridge.direct(cat);
@@ -234,7 +236,9 @@ export function createXbotCoreRouter(bridge: BotBridge) {
     const pages = await Promise.all(threads.filter(t => t.preferredCats?.includes(left.id) && t.preferredCats.includes(right.id)).map(t => bridge.messages(t.id)));
     res.json({ messages: pages.flatMap(p => p.messages).filter(m => m.catId === left.id || m.catId === right.id).map(m => ({ id: m.id, time: new Date(m.timestamp).toISOString(), sender: cats.find(c => c.id === m.catId)?.name, kind: 'bot', text: m.content })), more: pages.some(p => p.hasMore) });
   });
-  const messageBody = z.object({ text: z.string().trim().min(1).max(100000), reply_to: z.number().int().positive().optional(), images: z.array(z.string()).max(4).optional(), idempotencyKey: z.uuid().optional() }).strict();
+  const messageBody = z.object({ text: z.string().trim().max(100000), reply_to: z.number().int().positive().optional(), images: z.array(z.string()).max(4).optional(),
+    attachments: z.array(z.uuid()).max(8).optional(), expectedThreadId: z.string().min(1).optional(), idempotencyKey: z.uuid().optional(),
+  }).strict().refine(v => v.text.length > 0 || !!v.attachments?.length, { message: '请填写消息或选择附件' });
   router.post('/bots/:name/messages', async (req, res) => {
     const input = messageBody.parse(req.body);
     if (input.images?.length) throw new ApiError(422, '图片请使用 Clowder AI 原生上传与消息内容块接口');
