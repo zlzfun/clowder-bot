@@ -24,3 +24,7 @@ UI 保留 Bot 名称和文件夹概念，实际成员、执行和历史以 Clowd
 未迁移的跨设备、云账号、语音、应用、完整 skills/plugins 配置、定时任务编辑器返回 supported=false 或明确 4xx/501。未读数量目前尚未从原生 read cursor 完整映射，不应将列表零值用于业务统计。
 
 旧 `/models`、`/providers`、`/providers/*`、`/setup/key`、`/bots/:name/binding` 已退役为 410。Bot 新建和更新不再接受模型配置；更换 Agent 走专用绑定接口，避免普通资料更新意外改变接入。原生管理 API 中的账号能力不随 XBot 旧逻辑删除。
+
+附件/交付物和聊天任务沿用原生 Thread，见 [文件与会话契约](workspaces.md)。消息发送支持原生文件引用。新单聊自动使用猫猫默认目录，已有 Thread 保留原目录和历史。
+
+2026-11-05：项目创建与项目切换退役；历史对话改用 `GET /bots/:name/conversations` 和 `PUT /bots/:name/conversation`，只打开已知原生会话。新群聊自动分配目录。附件、交付物与任务接口保持原生语义；详见 [默认文件策略](default-files.md)。

@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, symlink
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { fingerprint, lock } from './upstream-source.mjs';
+import { directoryList } from './file-guard.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 if (Number(process.versions.node.split('.')[0]) !== lock.nodeMajor) throw new Error('Clowder AI requires Node 24.');
@@ -13,6 +14,9 @@ const binary = resolve(root, lock.build);
 if (!existsSync(join(binary, 'packages/api/dist/index.js'))) throw new Error('Run npm run runtime:prepare first.');
 if (!existsSync(join(binary, '.bot-build-complete')) || readFileSync(join(binary, '.bot-build-complete'), 'utf8').trim() !== fingerprint()) throw new Error('Native build is incomplete or stale. Run npm run runtime:prepare.');
 const data = resolve(process.env.BOT_RUNTIME_DATA_DIR || join(root, 'data/native'));
+// Refuse an unprotected platform or invalid grants before launching any runtime process.
+if (process.platform !== 'darwin' || !existsSync('/usr/bin/sandbox-exec')) throw new Error('文件保护尚未支持此平台；拒绝无保护启动。本版需要 macOS。');
+const readOnlyDirectories = directoryList(process.env.BOT_READ_ONLY_DIRS || '[]');
 const workspace = join(data, 'workspace');
 const apiPort = Number(process.env.BOT_NATIVE_PORT || 4331);
 const redisPort = Number(process.env.BOT_REDIS_PORT || 6392);
@@ -100,6 +104,9 @@ try {
     CAT_CAFE_ENFORCE_THREAD_PARTICIPANTS: '1',
     CAT_CAFE_BOT_BACKGROUND_DELEGATION: '1',
     CAT_CAFE_BOT_TASK_CONTROL: '1',
+    CAT_CAFE_BOT_TASK_HISTORY: '1',
+    CAT_CAFE_BOT_FILE_GUARD: '1', CAT_CAFE_BOT_GUARD_DATA: data,
+    CAT_CAFE_BOT_READ_ONLY_DIRS: JSON.stringify(readOnlyDirectories),
     CAT_CAFE_CLAUDE_CARRIER: 'agent_sdk',
     EVIDENCE_DB: join(data, 'evidence.sqlite'), WORLD_DB: join(data, 'world.sqlite'),
     TASK_OUTCOME_DB: join(data, 'task-outcome-episodes.sqlite'),
@@ -136,6 +143,9 @@ try {
     if (stopping || attempt >= 40) throw new Error('Dedicated Redis did not become ready');
     await new Promise(ok => setTimeout(ok, 100));
   }
-  child(process.execPath, [join(binary, 'packages/api/dist/index.js')], binary, env);
+  // The whole native host is guarded, so SDK file tools, native MCP handlers and
+  // their descendants cannot escape merely by taking a different execution path.
+  child(process.execPath, [join(root, 'scripts/file-guard.mjs'), 'native', binary, '--',
+    process.execPath, join(binary, 'packages/api/dist/index.js')], binary, env);
   console.log(`Native Clowder AI: http://127.0.0.1:${apiPort}; dedicated Redis ${redisPort}; data ${data}`);
 } catch (error) { console.error(error); await stop(); process.exitCode = 1; }

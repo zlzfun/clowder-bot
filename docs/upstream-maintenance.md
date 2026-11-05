@@ -146,3 +146,15 @@ P004 在原生 QueueProcessor 中仅为 Bot 开关启用当前主会话追加例
 最终候选实际产物：38 项 Task 契约含专属 Redis、155 项队列/追加边界测试通过；相关 26 项原生交接回归、76 项 Bot 常规测试通过（2 项按需集成默认跳过）。类型检查、上游完整性及前端来源完整性通过。本轮没有新增前端改动；仍保留主 Agent + subagent 与原生 Task/Queue 权威，新增行为均为外部补丁。
 
 范围仍是同线程、三位真实 Claude Opus 5.5 Agent 及可信本机 SDK 子执行；异构 Agent、跨线程后台子树、无人值守任务扫描和画像路由质量统计没有在本轮验证。候选 3211/4332 健康，未进行生产切换。最后只读检查发现旧 3210/4331 未监听，旧 PID 56112 的锁仍保留；未清锁、删除数据或擅自将候选接到旧数据目录，停止原因未由本轮证据确认。
+
+## P006：任务负责人历史（2026-11-04）
+
+`patches/0006-task-assignment-history.patch` 为 Bot 聊天任务提供原生成功变更记录。只在 `CAT_CAFE_BOT_TASK_HISTORY=1` 下，由 `mutateOrdinaryTask` 在负责人实际变化的同一聚合写入中追加 `assignmentHistory`。人工分配、Agent 认领和正式交接共用此边界，失败或重放不追加；Redis codec 保存并校验序列。原生列表通过 `assignmentHistoryVersion:1` 报告能力。旧历史不回填；此记录不替代原生执行身份、审批或全局审计。
+
+候选构建目录改为 `.runtime/clowder-ai-projects`，避免覆盖已有运行构建。子模块仍固定 `42017e0cea07e3e259e7fb183be70433f05e131c` 且保持干净。新增 `test:workspace-history`；真实 Redis 验证使用独立候选端口和独立测试 key 前缀，不清空数据库。产品 API 与文件范围见 [工作区契约](workspaces.md)。
+
+## 2026-11-05 默认目录与文件边界
+
+项目创建/切换入口退役，旧会话通过历史对话保留。目录自动分配；任务负责人、请求传球仍复用原生 Task，不新增协助模式或责任状态。附件与交付物保留。
+
+P007 仅在宿主文件保护启用时追加原生 L0 的副本编辑及来源记录约束；操作系统约束在 `scripts/file-guard.mjs` 中由宿主启动器落实，完整范围、平台限制、原生运行状态例外见 [默认文件策略](default-files.md)。没有修改上游子模块；独立候选构建改为 `.runtime/clowder-ai-default-files`，已有运行构建与数据保留。

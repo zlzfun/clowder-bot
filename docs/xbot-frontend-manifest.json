@@ -27,7 +27,7 @@
       "file": "app.js",
       "target": "client/public/app.js",
       "sourceSha256": "1248f793493826bf044359c71e7d8772ccc3472d6021d6abb979dff9b6cb29bc",
-      "sha256": "934133260b9ad4dbf48623ac1192fcc533703bf38fd8eaff4e096d164076c609",
+      "sha256": "ad67b7fd0c7ccf3c5659d3bd539c6d6e4da53c0a675d748e6a7d4d8bf02be007",
       "unchanged": false
     },
     {
@@ -153,7 +153,7 @@
       "file": "index.html",
       "target": "client/index.html",
       "sourceSha256": "a4160c18e23489fbc6a9e21fe494e1ac52840a67b2e138997400a0b42835b556",
-      "sha256": "66b32ff5c95fdfb6f52f0d8a9be113bd75031a3b28e66746c05377fac741481d",
+      "sha256": "39a3bbc3a88b4d05a7da8bf1585a52c303df4be125f719f7156a4acd2de2dc43",
       "unchanged": false
     },
     {
@@ -597,13 +597,13 @@
     },
     {
       "target": "client/public/chat-presentation.js",
-      "description": "Message presentation: speaker identity by native cat ID and folded execution records (presentation_kind activity)",
-      "sha256": "090d2bb0149c2ce9d1c55be7608e1531b827cf0ab6e4036157293ae2e21d660d"
+      "description": "Message presentation: speaker identity by native cat ID and folded execution records (presentation_kind activity) that open onto their prose and their native toolEvents as literal text, one entry per event in stored order with each result's own status; a record with neither is a plain, non-expandable status line",
+      "sha256": "019f7cecea00d717a58e72803cb50f3f4e0cefb84c95e39fc591368e44bd1529"
     },
     {
       "target": "client/public/chat-presentation.css",
-      "description": "Single-chat face/name continuation and execution-record line on existing XBot classes and tokens",
-      "sha256": "a18931567181b2b346056c55315132a7e559862dab52bddd7f42e03f2bfd02bf"
+      "description": "Single-chat face/name continuation, execution-record line (expandable or plain) and its tool-event entries on existing XBot trace-call classes and tokens",
+      "sha256": "8e869779a732526eb25cf5cadf68029e736ea6af6a915df8cc04223f307dd132"
     },
     {
       "target": "client/public/template-lab/index.html",
@@ -652,6 +652,24 @@
       "description": "Cat template styles on the skills/persona settings shell, the original modal card and the 3D cat portraits; only existing tokens, original CSS unchanged",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-03",
       "sha256": "b10d2845d218cba3f34a2f1f6bc1d07bf62a8dd00b65e6a818d55fec9d8ab674"
+    },
+    {
+      "target": "client/public/workspace-rules.js",
+      "description": "File, saved-conversation and chat-task rules without DOM or network: conversation scope, sizes and badges, per-message attachment limits and refusal text, restoring files of a send that did not go out, Task order and dock summary, 请求传球 targets and gate, native ownership history (流转记录: newest first, handoff/human_update/claim named apart, nothing invented), saved-conversation list normalisation and refusal wording; shared by workspace.js and tests",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-04; interaction organization informed by OpenBot at acccbce543a59e8806ed3b60a74b11123b0ce5d2 (file cards with an in-place missing state, per-task resume/reassign/stop), no OpenBot code, text or assets copied; simplified by local Claude Code (claude-opus-5-5) on 2026-11-05 after user review: project/workspace management and manual Task creation/assignment removed, the working directory folded under 更多文件, 历史对话 added",
+      "sha256": "a136e018194a80d45b45fb0ed6bab82cb0104382d017c39b83388b55f1fa8b62"
+    },
+    {
+      "target": "client/public/workspace.js",
+      "description": "Files, saved conversations and chat Tasks for the chat shell: composer attachments uploaded to the exact native thread (picker, paste, drop; abort on switch; files handed back after a send that did not go out), file cards with download, server-offered preview and an honest missing state, the drawer 文件 page (deliverables and attachments; working-directory path, read-only browsing and mark-as-deliverable folded under 更多文件 and read only once opened; no file-policy claims), the cat 详情 page's folded 历史对话 (switches only between server-known threads with expectedThreadId, pending-attachment confirmation, late answers dropped), 任务 cards on the 任务 page (负责人 from the read Task, progress, background run, 请求传球 as an asynchronous request, stop/cancel/resume via runtime-tasks.js rules, 流转记录) and the dock Task line; no project or workspace management and no Task creation or assignment; reads follow the chat poll and native events, stale answers dropped; owner feedback and pass receipts hold only at the owner revision they were said at, and a late control/pass answer never replaces or repaints a newer read (ownerRevision, then updatedAt)",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-04; interaction organization informed by OpenBot at acccbce543a59e8806ed3b60a74b11123b0ce5d2 (file cards with an in-place missing state, per-task resume/reassign/stop), no OpenBot code, text or assets copied; simplified by local Claude Code (claude-opus-5-5) on 2026-11-05 after user review: project/workspace management and manual Task creation/assignment removed, the working directory folded under 更多文件, 历史对话 added",
+      "sha256": "95c422d9a28d9b053d90a96f95d63120d802d623c6316d8ed373a8194903a17c"
+    },
+    {
+      "target": "client/public/workspace.css",
+      "description": "File, saved-conversation and chat-task styles on the composer attach row and plus column, drawer tab body, psec, task-record/task-details/ty cards, wrow, .modal-card and .field controls; drawer tab spacing for six tabs; the 更多文件 and 历史对话 folds; only existing tokens, original CSS unchanged",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-04; interaction organization informed by OpenBot at acccbce543a59e8806ed3b60a74b11123b0ce5d2 (file cards with an in-place missing state, per-task resume/reassign/stop), no OpenBot code, text or assets copied; simplified by local Claude Code (claude-opus-5-5) on 2026-11-05 after user review: project/workspace management and manual Task creation/assignment removed, the working directory folded under 更多文件, 历史对话 added",
+      "sha256": "ef7a75b0f494eeaa0f60e51a8a16ab82717e292cde102138d28c367a576b6fb4"
     }
   ]
 }

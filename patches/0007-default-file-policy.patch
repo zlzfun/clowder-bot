@@ -1,0 +1,55 @@
+--- a/packages/api/src/domains/cats/services/agents/providers/l0-compiler.ts
++++ b/packages/api/src/domains/cats/services/agents/providers/l0-compiler.ts
+@@ -23,6 +23,7 @@
+ import { spawn as nodeSpawn } from 'node:child_process';
+ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+ import { appendBotBackgroundDelegation } from './bot-background-delegation.js';
++import { appendBotFilePolicy } from './bot-file-policy.js';
+ import { dirname, resolve } from 'node:path';
+ import { fileURLToPath } from 'node:url';
+ import {
+@@ -194,7 +195,7 @@
+   const base = await compileBaseL0ViaSubprocess(options);
+   // Product deployment policy is applied after the shared cache, including cache hits
+   // and resumed sessions. Keep the original compiler/cache as the sole L0 authority.
+-  const result = appendBotBackgroundDelegation(base);
++  const result = appendBotFilePolicy(appendBotBackgroundDelegation(base));
+   if (options.outPath && result !== base) writeFileSync(options.outPath, result, 'utf8');
+   return result;
+ }
+--- /dev/null
++++ b/packages/api/src/domains/cats/services/agents/providers/bot-file-policy.ts
+@@ -0,0 +1,12 @@
++/** Host-enforced default-directory policy. Does not own tools, permissions or execution. */
++export function appendBotFilePolicy(base: string): string {
++  if (process.env.CAT_CAFE_BOT_FILE_GUARD !== '1') return base;
++  return `${base}\n\n<bot_files>
++- Work in the current conversation's working directory. The host organizes directories automatically; do not ask the user to create or choose a project.
++- The Bot deployment has an OS-enforced filesystem boundary. Business files outside its managed directory are not writable. Native runtime state is host-managed; do not edit credentials, configuration, transcripts, databases, other cats' drafts or permission settings to bypass this boundary.
++- Read only task-relevant sources the user provided or approved. If an external source is not readable, ask the user to attach it or have the host authorize a read-only source directory. Do not use a browser, network service or another process to bypass a filesystem refusal.
++- When a task needs changes to an external source, make an independent regular-file copy inside the current working directory first and edit that copy. Do not use a symlink or hard link, move/delete the source, automatically synchronize changes, or overwrite the original. Mere reading does not require copying. For a repository or live database, preserve dependencies/consistency rather than copying an arbitrary single file.
++- Record each copied source's original path, copy timestamp and content digest in a small local provenance record. Preserve distinct versions and avoid same-name overwrites. Final replies identify the edited copy and link the deliverable, explicitly noting that the original was left unchanged. Do not claim a copy, permission grant, writeback or delivery without evidence.
++- File references shared during native handoff do not grant permission to overwrite another cat's original files. The receiving cat makes its own editable copy when needed. Task owners and handoffs remain native Task facts; an ordinary consultation or mention does not by itself change a Task owner.
++</bot_files>`;
++}
+--- a/packages/api/src/index.ts
++++ b/packages/api/src/index.ts
+@@ -733,6 +733,9 @@
+         }
+       : {}),
+     callbackAuth: callbackAuthCapability,
++    ...(process.env.CAT_CAFE_BOT_FILE_GUARD_ENFORCED === 'macos-seatbelt' ? {
++      botFilePolicy: { mode: 'app-directory', platform: 'macos-seatbelt', workspaceRoot: process.env.CAT_CAFE_WORKSPACE_ROOT },
++    } : {}),
+   });
+   app.get('/health', healthHandler);
+   app.get('/api/health', healthHandler);
+@@ -5519,7 +5522,7 @@
+   const { prepareHostInitialPlugins } = await import('./domains/plugin/manager/initial-plugin-installation.js');
+   let initialPlugins: Awaited<ReturnType<typeof prepareHostInitialPlugins>> | undefined;
+   try {
+-    initialPlugins = await prepareHostInitialPlugins({
++    if (process.env.BOT_ISOLATED_ACCEPTANCE_SKIP_INITIAL_PLUGINS !== '1') initialPlugins = await prepareHostInitialPlugins({
+       runtime: pluginRuntime,
+       managerRuntime: pluginManagerRuntime,
+       catalog: pluginManagerCatalog,

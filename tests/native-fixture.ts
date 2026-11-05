@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
 import { ApiError } from '../server/errors.js';
 import type { NativeTransport, NativeCat, NativeThread, NativeMessage, NativeEvent } from '../server/native/types.js';
 import type { NativeRuntime } from '../server/native/bridge.js';
@@ -20,6 +21,8 @@ export class NativeFixture implements NativeTransport {
     const parts = url.pathname.split('/').map(decodeURIComponent);
     let result: unknown;
     if (path === '/api/health') result = { status: 'ok', callbackAuth: { backend: 'redis', durability: 'durable' } };
+    else if (path === '/api/projects/mkdir' && method === 'POST') result = { createdPath: join(body.parentPath, body.name), name: body.name };
+    else if (url.pathname === '/api/projects/browse') result = { current: url.searchParams.get('path'), entries: [] };
     else if (path === '/api/cat-templates') result = { templates: ['ragdoll','maine-coon','siamese','turkish-van','dsh','dragon-li','bengal','golden-chinchilla'].map(id => ({ id, name: id, roleDescription: 'Native role', color: { primary: '#888', secondary: '#eee' } })), clientDefaults: {} };
     else if (url.pathname === '/api/cats/native-runtimes') result = { runtimes: this.runtimes };
     else if (path === '/api/accounts') result = { providers: [] };

@@ -1,0 +1,85 @@
+diff --git a/packages/shared/src/types/task.ts b/packages/shared/src/types/task.ts
+--- a/packages/shared/src/types/task.ts
++++ b/packages/shared/src/types/task.ts
+@@ -236,6 +236,15 @@
+   readonly ownerRevision?: number;
+   /** Assignment timestamp fences unbound legacy callbacks minted before an owner change. */
+   readonly ownerChangedAt?: number;
++  /** Bot view: receipts written atomically with successful native ownership changes. No backfilled guesses. */
++  readonly assignmentHistory?: readonly {
++    readonly revision: number;
++    readonly fromCatId: CatId | null;
++    readonly toCatId: CatId | null;
++    readonly at: number;
++    readonly sourceMessageRef: string | null;
++    readonly kind: 'handoff' | 'human_update' | 'claim';
++  }[];
+   readonly lastAppliedHandoffMessageRef?: string;
+   readonly executionRef?: TaskExecutionRef | null;
+   readonly backgroundExecution?: TaskBackgroundExecution;
+diff --git a/packages/api/src/domains/cats/services/stores/ports/OrdinaryTaskMutation.ts b/packages/api/src/domains/cats/services/stores/ports/OrdinaryTaskMutation.ts
+--- a/packages/api/src/domains/cats/services/stores/ports/OrdinaryTaskMutation.ts
++++ b/packages/api/src/domains/cats/services/stores/ports/OrdinaryTaskMutation.ts
+@@ -110,7 +110,19 @@
+   command: OrdinaryTaskMutation,
+   now: number,
+ ): OrdinaryTaskMutationResult {
+-  const result = decideOrdinaryTaskMutation(task, command, now);
++  let result = decideOrdinaryTaskMutation(task, command, now);
++  if (process.env.CAT_CAFE_BOT_TASK_HISTORY === '1' && task && result.kind === 'updated' &&
++      task.ownerCatId !== result.task.ownerCatId) {
++    const receipt = {
++      revision: result.task.ownerRevision ?? 0,
++      fromCatId: task.ownerCatId, toCatId: result.task.ownerCatId, at: now,
++      sourceMessageRef: 'messageRef' in command ? command.messageRef ?? null :
++        ('execution' in command && command.execution?.sourceMessageId ? `message:${command.execution.sourceMessageId}` : null),
++      kind: command.kind === 'handoff' ? 'handoff' as const :
++        command.kind === 'human_update' ? 'human_update' as const : 'claim' as const,
++    };
++    result = { ...result, task: { ...result.task, assignmentHistory: [...(task.assignmentHistory ?? []), receipt] } };
++  }
+   return task && result.kind === 'updated'
+     ? {
+         ...result,
+diff --git a/packages/api/src/domains/cats/services/stores/redis/RedisTaskCodec.ts b/packages/api/src/domains/cats/services/stores/redis/RedisTaskCodec.ts
+--- a/packages/api/src/domains/cats/services/stores/redis/RedisTaskCodec.ts
++++ b/packages/api/src/domains/cats/services/stores/redis/RedisTaskCodec.ts
+@@ -23,6 +23,7 @@
+     ownerRevision: task.ownerRevision === undefined ? '' : String(task.ownerRevision),
+     ownerChangedAt: task.ownerChangedAt === undefined ? '' : String(task.ownerChangedAt),
+     lastAppliedHandoffMessageRef: task.lastAppliedHandoffMessageRef ?? '',
++    assignmentHistory: task.assignmentHistory ? JSON.stringify(task.assignmentHistory) : '',
+     executionRef: task.executionRef ? JSON.stringify(task.executionRef) : '',
+     backgroundExecution: task.backgroundExecution ? JSON.stringify(task.backgroundExecution) : '',
+     backgroundCancelledAt: task.backgroundCancelledAt === undefined ? '' : String(task.backgroundCancelledAt),
+@@ -76,6 +77,18 @@
+     ...(data.sourceSummaryId ? { sourceSummaryId: data.sourceSummaryId } : {}),
+     resolveMode: data.resolveMode ? (data.resolveMode as TaskItem['resolveMode']) : undefined,
+   };
++  if (data.assignmentHistory) {
++    const history = JSON.parse(data.assignmentHistory);
++    if (!Array.isArray(history) || history.some((row, index) => !row ||
++      !Number.isSafeInteger(row.revision) || row.revision < 1 || !Number.isFinite(row.at) ||
++      !['handoff', 'human_update', 'claim'].includes(row.kind) ||
++      !(row.fromCatId === null || typeof row.fromCatId === 'string') ||
++      !(row.toCatId === null || typeof row.toCatId === 'string') ||
++      !(row.sourceMessageRef === null || (typeof row.sourceMessageRef === 'string' && row.sourceMessageRef.startsWith('message:'))) ||
++      (index > 0 && row.revision <= history[index - 1].revision)))
++      throw new Error(`Invalid assignment history for Task ${data.id}`);
++    hydrated = { ...hydrated, assignmentHistory: history };
++  }
+   if (data.backgroundExecution) {
+     const bg = JSON.parse(data.backgroundExecution);
+     if (
+diff --git a/packages/api/src/routes/tasks.ts b/packages/api/src/routes/tasks.ts
+--- a/packages/api/src/routes/tasks.ts
++++ b/packages/api/src/routes/tasks.ts
+@@ -212,7 +212,7 @@
+     await taskBackgroundRuntime()?.reconcileThread(threadId);
+     let tasks = await taskStore.listByThread(threadId);
+     if (kind) tasks = tasks.filter((t) => t.kind === kind);
+-    return { tasks };
++    return { tasks, ...(process.env.CAT_CAFE_BOT_TASK_HISTORY === '1' ? { assignmentHistoryVersion: 1 } : {}) };
+   });
+ 
+   // GET /api/tasks/:id

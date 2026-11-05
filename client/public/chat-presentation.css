@@ -1,6 +1,12 @@
 /* Message presentation (chat-presentation.js). Single-chat bot rows reuse the
    group chat's face, name and continuation layout; an execution record is a
-   routine-line drawer with the writer's xs face. Existing tokens only. */
+   routine-line drawer with the writer's xs face, and its native tool events
+   use the 轨迹 tab's trace-call entries. Existing tokens only. */
 .msg.bot.with-face.cont > .body { margin-left: 32px; }
-.activity-line summary .avatar svg { width: 100%; height: 100%; }
+.activity-line .sysline .avatar svg { width: 100%; height: 100%; }
 .activity-line.failed .activity-state { color: var(--err); }
+/* A record with nothing to open: the summary's centring, without a pointer. */
+.activity-line > div.sysline { margin: 0 auto; flex-wrap: wrap; }
+.activity-line .prose + .activity-tools { margin-top: 12px; }
+.activity-tools :is(.trace-args, .trace-out) { max-height: 240px; overflow: auto; }
+.activity-tools .tool-state.failed { color: var(--err); }

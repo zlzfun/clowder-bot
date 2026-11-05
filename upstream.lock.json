@@ -2,7 +2,7 @@
   "repository": "https://github.com/zts212653/clowder-ai.git",
   "commit": "42017e0cea07e3e259e7fb183be70433f05e131c",
   "source": "upstream/clowder-ai",
-  "build": ".runtime/clowder-ai-templates",
+  "build": ".runtime/clowder-ai-default-files",
   "nodeMajor": 24,
   "pnpm": "9.15.4",
   "patches": [
@@ -10,6 +10,8 @@
     "patches/0002-background-delegation-policy.patch",
     "patches/0003-background-output-checkpoint.patch",
     "patches/0004-task-background-control.patch",
-    "patches/0005-cat-templates.patch"
+    "patches/0005-cat-templates.patch",
+    "patches/0006-task-assignment-history.patch",
+    "patches/0007-default-file-policy.patch"
   ]
 }

@@ -78,12 +78,7 @@
     ctxRaw: "",
     peer: null,
     replyTo: null,
-    // Pictures pasted or dropped into the composer, waiting for send. Each
-    // entry is {id, uploading, url}; id is empty until the upload lands.
-    attach: [],
-    // Bumped whenever the list is abandoned, so an upload still in flight can
-    // tell that the list it was filling is gone.
-    attachBatch: 0,
+    // Files waiting in the composer live in workspace.js (see attachReady).
     placeholder: "写一条消息",
     version: "",
     tip: "",
@@ -1046,6 +1041,8 @@
   // (chat-presentation.js). With no cat known it is the neutral tile, never
   // the open chat's bot.
   const presentation = window.ClowderPresentation;
+  // Files, saved conversations and chat Tasks (workspace.js); init() is near the end.
+  const workspace = window.ClowderWorkspace;
 
   function speakerFace(who, size) {
     if (who.paint) return avatar(who.name, who.paint, size);
@@ -2978,7 +2975,10 @@
     }
     const images = [...pulled.images, ...pasted];
     if (images.length) wrap.append(gallery(images));
-    if (!pulled.text && !pulled.images.length && !pasted.length) {
+    // Files the message carried (native workspace_file blocks), as cards.
+    const files = m.attachments || [];
+    if (files.length) wrap.append(workspace.cards(files));
+    if (!pulled.text && !pulled.images.length && !pasted.length && !files.length) {
       const bubble = el("div", "bubble");
       bubble.textContent = parsed.text;
       wrap.append(bubble);
@@ -3060,7 +3060,7 @@
   // botBubble draws one bubble: say from spokenLines, or null for a legacy
   // line drawn from its content. who is the line's speaker; the first row of a
   // group carries its face and name, as in group chats.
-  function botBubble(m, say, messages, who, cont) {
+  function botBubble(m, say, messages, who, cont, last = true) {
     const row = el("div", "msg bot with-face");
     if (m.seq) row.dataset.seq = String(m.seq);
     if (m.time) row.dataset.time = String(m.time);
@@ -3073,14 +3073,17 @@
     // Pictures the bot showed with send_message_to_user, stored in paste/ like the
     // owner's own; the same gallery as userBubble.
     const pasted = pastedURLs(state.sel, say ? say.images : m.images);
+    // A line's files show once, under its last bubble.
+    const files = last ? m.attachments || [] : [];
     const said = say ? say.text : String(m.content || "").trim();
     if (say) {
       if (said) appendBotContent(body, displayText(said));
     } else if (said && said !== "SILENT") appendBotContent(body, displayText(window.XBotProviders.citedText(m.content,m.parts)));
-    else if (!pasted.length && !(m.parts || []).length && !(m.tool_calls || []).length) {
+    else if (!pasted.length && !files.length && !(m.parts || []).length && !(m.tool_calls || []).length) {
       appendBotContent(body, EMPTY_REPLY);
     }
     if (pasted.length) body.append(gallery(pasted));
+    if (files.length) body.append(workspace.cards(files));
     if (!say) window.XBotProviders.decorate(body, m.parts);
     bindMessageMenu(row, m, said);
     row.append(body);
@@ -3231,14 +3234,15 @@
       const says = spoken.get(i);
       if (!says) {
         const visibleParts = (m.parts || []).some(p => !p.hosted || p.hosted.name !== "image_generation");
-        if (!(m.content || visibleParts || (m.images || []).length || (!(m.tool_calls || []).length && !(m.parts || []).length))) return;
+        if (!(m.content || visibleParts || (m.images || []).length || (m.attachments || []).length || (!(m.tool_calls || []).length && !(m.parts || []).length))) return;
       }
-      for (const say of says || [null]) {
-        const row = botBubble(m, say, messages, speaker, !groupStart(lastMsg, m, lastKey, key));
+      const bubbles = says || [null];
+      bubbles.forEach((say, k) => {
+        const row = botBubble(m, say, messages, speaker, !groupStart(lastMsg, m, lastKey, key), k === bubbles.length - 1);
         inner.append(row);
         lastKey = key;
         lastMsg = m;
-      }
+      });
     });
     if (!any) inner.append(emptyState(niceName(who) || "clowder-bot", EMPTY_LINE, who, true));
     addTimeDividers(inner);
@@ -3318,6 +3322,7 @@
       if (m.time) row.dataset.time = String(m.time);
       if (!groupStart(lastMsg, m, last, key)) row.classList.add("cont");
       lastMsg = m;
+      const files = m.attachments || [];
       if (mine) {
         const wrap = el("div", "bubble-col");
         const pulled = pullImages(text);
@@ -3327,14 +3332,16 @@
           wrap.append(bubble);
         }
         if (pulled.images.length) wrap.append(gallery(pulled.images));
-        if (!pulled.text && !pulled.images.length) wrap.append(el("div", "bubble", text));
+        if (files.length) wrap.append(workspace.cards(files));
+        if (!pulled.text && !pulled.images.length && !files.length) wrap.append(el("div", "bubble", text));
         bindMessageMenu(row, m, text);
         row.append(wrap);
       } else {
         if (!row.classList.contains("cont")) row.append(speakerFace(speaker));
         const body = el("div", "body");
         if (!row.classList.contains("cont")) body.append(speakerHead(speaker, m.time));
-        appendBotContent(body, text);
+        if (text || !files.length) appendBotContent(body, text);
+        if (files.length) body.append(workspace.cards(files));
         bindMessageMenu(row, m, text);
         row.append(body);
         if (row.classList.contains("cont")) markContinuation(row, m.time);
@@ -4378,8 +4385,9 @@
   function resetConversation() {
     watchNativeThread(null);
     closeMessageMenu();
-    // Pasted pictures belong to the bot they were uploaded to.
-    clearAttach();
+    // Pending files belong to the thread they were uploaded to: workspace.js
+    // aborts their uploads and drops the old conversation's workspace view.
+    workspace.select(state.sel);
     state.streaming = 0;
     state.pendingSends = [];
     paintWorkStatus();
@@ -4503,6 +4511,7 @@
       nativeRefreshTimer = setTimeout(() => {
         nativeRefreshTimer = null;
         if (nativeThreadId !== id) return;
+        workspace.touch(); // a Task update need not change the transcript
         loadThread().catch(() => {}); refreshStatus().catch(() => {});
       }, 180);
     });
@@ -4522,6 +4531,7 @@
         const sig = JSON.stringify(messages);
         state.messages = messages;
         state.previewAt["b:" + selection.id] = Date.now();
+        workspace.observe(selection, data.thread_id, sig !== state.sig);
         if (sig === state.sig) return;
         state.sig = sig;
         state.preview["b:" + selection.id] = previewFromMessages(messages);
@@ -4537,6 +4547,7 @@
       const messages = data.messages || [];
       const sig = JSON.stringify(messages);
       state.previewAt["g:" + selection.id] = Date.now();
+      workspace.observe(selection, data.group?.native_thread_id || data.group?.id, sig !== state.sig);
       if (sig === state.sig) return;
       state.sig = sig;
       state.preview["g:" + selection.id] = previewFromGroup(messages);
@@ -4559,7 +4570,7 @@
     return row;
   }
 
-  const TABS = [["details", "详情"], ["library", "记忆"], ["computer", "任务"], ["trace", "轨迹"], ["context", "上下文"]];
+  const TABS = [["details", "详情"], ["library", "记忆"], ["computer", "任务"], ["files", "文件"], ["trace", "轨迹"], ["context", "上下文"]];
 
   function tabBar() {
     const bar = el("div", "tabs");
@@ -4995,6 +5006,11 @@
       syncTaskView(tasks, state.panelData || {name: state.sel.id});
       paintContextBar(); syncPanelChrome(); return;
     }
+    // workspace.js pages keep their own live state (folder, open forms, focus) across redraws.
+    const own = panelBody.querySelector(".ws-pane");
+    if (own && state.sel && state.tab === own.dataset.tab && workspace.current(own) && !(state.sel.type === "bot" && state.tab === "computer")) {
+      paintContextBar(); syncPanelChrome(); return;
+    }
     panelBody.replaceChildren();
     paintContextBar();
     if (!state.sel) {
@@ -5010,7 +5026,9 @@
       if (state.tab === "library") {
         body.append(el("p", "hint", "还没有记住任何事。对它说「记住……」就会出现在这里"));
       } else if (state.tab === "computer") {
-        body.append(el("p", "hint", "没有任务"));
+        body.append(workspace.tasksView(state.sel));
+      } else if (state.tab === "files") {
+        body.append(workspace.filesView(state.sel));
       } else if (state.tab === "trace") {
         body.append(el("p", "hint", "没有轨迹"));
       } else if (state.tab === "context") {
@@ -5030,7 +5048,8 @@
     syncPanelChrome();
     const body = el("div", "tab-body");
     if (state.tab === "library") body.append(libraryView(data));
-    else if (state.tab === "computer") body.append(computerView(data));
+    else if (state.tab === "computer") body.append(workspace.tasksView(state.sel), el("h4", "ws-exec-head", "执行与例程"), computerView(data));
+    else if (state.tab === "files") body.append(workspace.filesView(state.sel));
     else if (state.tab === "trace") body.append(traceView());
     else if (state.tab === "context") body.append(contextView(data));
     else body.append(detailsView(data));
@@ -5491,6 +5510,10 @@
     wrap.append(section);
     const config = catConfigSection(data);
     if (config) wrap.append(config);
+    // 历史对话: folded, and only when the cat has more than one saved
+    // conversation (workspace.js keeps the same node across redraws).
+    const history = workspace.conversationsView(state.sel);
+    if (history) wrap.append(history);
     return wrap;
   }
 
@@ -5664,7 +5687,8 @@
     host.replaceChildren();
     if (!agents.length) return;
     const row = el("button", "wrow"); row.type = "button"; row.title = "打开任务";
-    row.addEventListener("click", () => { state.tab = "computer"; rememberPanel(true); panelOpen(true); paintPanel(); });
+    // Running executions sit below the Task cards on the 任务 page: land on them.
+    row.addEventListener("click", () => { state.tab = "computer"; rememberPanel(true); panelOpen(true); paintPanel(); panelBody.querySelector(".ws-exec-head")?.scrollIntoView({ block: "start" }); });
     const stack = el("span", "work-stack");
     for (const ag of agents.slice(0, 3)) stack.append(taskAvatar(ag, "xs"));
     if (agents.length > 3) stack.append(el("span", "", "+" + (agents.length - 3)));
@@ -5888,7 +5912,7 @@
       ["最近结束", agents.filter(a => !["running", "awaiting", "queued"].includes(a.status)).sort((a,b) => Date.parse(b.finished_at || 0) - Date.parse(a.finished_at || 0)).slice(0,20), "agent"],
       ["例程", data.routines || [], "routine"],
     ];
-    if (!agents.length && !sections[3][1].length) { if (!root.querySelector(".panel-empty")) root.replaceChildren(panelEmpty("tasks", "没有任务", "让它「每天 8 点提醒我」，这里就会有一个例程。")); return; }
+    if (!agents.length && !sections[3][1].length) { if (!root.querySelector(".panel-empty")) root.replaceChildren(panelEmpty("tasks", "没有执行或例程", "让它「每天 8 点提醒我」，这里就会有一个例程。")); return; }
     root.querySelector(".panel-empty")?.remove();
     const cards = new Map([...root.querySelectorAll("[data-agent], [data-routine]")].map(n => [n.dataset.agent ? "agent:" + n.dataset.agent : "routine:" + n.dataset.routine, n]));
     const emptyActive = !sections[0][1].length && !sections[1][1].length;
@@ -6588,7 +6612,7 @@
     }
   }
 
-  function optimisticMessage(text, images) {
+  function optimisticMessage(text, images, files) {
     let inner = thread.querySelector(".thread-inner:not(.thread-skeleton)");
     if (!inner) {
       inner = el("div", "thread-inner");
@@ -6604,6 +6628,8 @@
     // optimistic row points at it directly. Nothing local to revoke, and the
     // row after the repaint looks exactly the same.
     if (images && images.length) body.append(gallery(pastedURLs(state.sel, images)));
+    // Uploaded files are on the server too; their cards wait for the send.
+    if (files && files.files.length) body.append(workspace.cards(files.files, { sending: true }));
     body.append(el("div", "send-state", "发送中"));
     row.append(body);
     markLiveGroup(inner, row);
@@ -6615,23 +6641,45 @@
     return row;
   }
 
-  async function sendText(text, pending, images) {
+  // A UUID for an idempotent request (randomUUID needs a secure context).
+  function requestKey() {
+    try { if (crypto.randomUUID) return crypto.randomUUID(); } catch (e) { /* insecure context */ }
+    const b = new Uint8Array(16);
+    crypto.getRandomValues(b);
+    b[6] = (b[6] & 15) | 64;
+    b[8] = (b[8] & 63) | 128;
+    const h = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+    return h.slice(0, 8) + "-" + h.slice(8, 12) + "-" + h.slice(12, 16) + "-" + h.slice(16, 20) + "-" + h.slice(20);
+  }
+
+  // files: the composer's uploaded attachments ({ids, threadId, files}) from
+  // workspace.takeAttachments(); a send that does not go out hands them back.
+  async function sendText(text, pending, images, files) {
     text = (text || "").trim();
     images = images || [];
+    files = files && files.ids && files.ids.length ? files : null;
     // A message sent while a reply is streaming interrupts it: the server forks the
     // running turn to the background and answers this one at once.
-    if ((!text && !images.length) || !state.sel) return;
+    if ((!text && !images.length && !files) || !state.sel) return;
     const selection = state.sel;
     ++state.threadLoad;
+    // One key per message: resending the same words and files after an
+    // unknown outcome reuses it, so a send that did land is not repeated.
+    const sendSig = JSON.stringify([text, files ? files.ids : []]);
+    let sendKey = "";
     if (!pending) {
       // Resending a failed text from the composer replaces its failed row.
       state.pendingSends = state.pendingSends.filter((row) => {
         const stale = !row.accepted && row.querySelector(".send-failed") && row.dataset.sendText === text;
-        if (stale) row.remove();
+        if (stale) {
+          if (row.retryKey && row.retrySig === sendSig) sendKey = row.retryKey;
+          row.remove();
+        }
         return !stale;
       });
     }
-    pending = pending || optimisticMessage(text, images);
+    sendKey = sendKey || requestKey();
+    pending = pending || optimisticMessage(text, images, files);
     pending.dataset.sendText = text;
     pending.baseline = ownerSends(text);
     const marker = pending.querySelector(".send-state");
@@ -6678,8 +6726,13 @@
     };
     setStatus("正在回复");
     try {
-      const payload = { text: text };
+      const payload = { text: text, idempotencyKey: sendKey };
       if (images.length) payload.images = images;
+      if (files) payload.attachments = files.ids;
+      // The thread this conversation was read from: a send never lands in a
+      // conversation that changed (another saved conversation) in the meantime.
+      const threadId = files ? files.threadId : workspace.threadId();
+      if (threadId) payload.expectedThreadId = threadId;
       if (state.replyTo && state.replyTo.seq > 0) payload.reply_to = state.replyTo.seq;
       const res = await apiFetch("/xbot-api/" + (selection.type === "group" ? "groups/" : "bots/") + encodeURIComponent(selection.id) + "/messages", {
         method: "POST",
@@ -6687,7 +6740,12 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error("发送失败");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const err = new Error(data.error || "发送失败");
+        err.status = res.status;
+        throw err;
+      }
       markSent();
       const ct = res.headers.get("content-type") || "";
       if (ct.includes("application/json")) {
@@ -6713,6 +6771,9 @@
         const key = "xbot-draft:" + (selection.type === "group" ? "group:" : "") + selection.id;
         try { sessionStorage.setItem(key, text); } catch (err) {}
       }
+      // The files of a send that did not go out return to the composer, or
+      // wait for this conversation to open again.
+      const filesBack = !accepted && files ? workspace.giveBack(files) : false;
       if (state.sel !== selection) return;
       setStatus("");
       if (accepted) {
@@ -6745,18 +6806,27 @@
       live?.remove();
       if (!marker.isConnected) pending.querySelector(".bubble-col")?.append(marker);
       marker.className = "send-state send-failed";
+      // An unknown outcome (no answer, or a server fault) may still have
+      // landed: resending the same message keeps its key. A refusal does not.
+      pending.retryKey = !accepted && (!e.status || e.status >= 500) ? sendKey : "";
+      pending.retrySig = sendSig;
+      // The server's own reason for a refusal (a changed conversation, a
+      // file that no longer belongs to it), when it gives one in Chinese.
+      const reason = !accepted && e.status >= 400 && e.status < 500 && /\p{Script=Han}/u.test(e.message || "") ? "：" + e.message.replace(/[。.]+$/, "") : "";
+      const failed = accepted ? "没送到" : "没发出去" + reason;
       // A picture cannot go back into the textarea, but its words can: the
       // send cleared the input, so the text is restored whether or not a
       // picture came with it, and the row says what the picture needs.
       const pictureNote = images.length ? "；图片要重新贴一次" : "";
+      const fileNote = files && !accepted ? (filesBack ? "，附件已放回" : "；附件需要重新添加") : "";
       if (!composerText(input).trim() && text) {
         composerSet(text);
         composerRefreshHeight();
-        marker.replaceChildren(el("span", "", (accepted ? "没送到，原文还在输入框里" : "没发出去，原文还在输入框里") + pictureNote));
-        announceSend("没发出去，原文还在输入框里" + (images.length ? "，图片要重新贴一次" : ""));
-      } else if (!text && images.length) {
-        marker.replaceChildren(el("span", "", accepted ? "没送到；图片要重新贴一次" : "没发出去；图片要重新贴一次"));
-        announceSend("没发出去，图片要重新贴一次");
+        marker.replaceChildren(el("span", "", failed + "，原文还在输入框里" + fileNote + pictureNote));
+        announceSend("没发出去，原文还在输入框里" + (fileNote ? "，" + fileNote.replace(/^[，；]/, "") : "") + (images.length ? "，图片要重新贴一次" : ""));
+      } else if (!text && (images.length || files)) {
+        marker.replaceChildren(el("span", "", failed + (files ? (accepted ? "" : filesBack ? "，附件已放回输入框" : "；附件需要重新添加") : "") + pictureNote));
+        announceSend("没发出去" + (files && filesBack ? "，附件已放回输入框" : "") + (images.length ? "，图片要重新贴一次" : ""));
       } else {
         // A newer draft is in the composer: keep it, and let the owner bring this text back.
         const back = el("button", "secondary", "放回输入框");
@@ -6769,10 +6839,12 @@
           input.focus();
           composerCaretTo(Infinity);
         });
-        marker.replaceChildren(el("span", "", (accepted ? "没送到" : "没发出去") + pictureNote), back);
+        marker.replaceChildren(el("span", "", failed + fileNote + pictureNote), back);
         announceSend("没发出去，可以放回输入框" + (images.length ? "，图片要重新贴一次" : ""));
       }
       syncComposer();
+      // A refusal because the conversation moved: read where it is now.
+      if (!accepted && e.status === 409) setTimeout(() => { state.sig = ""; loadThread().catch(() => {}); }, 0);
     } finally {
       live?.querySelector(".typing-dots")?.remove();
       live?.querySelector(".live-status")?.remove();
@@ -7001,190 +7073,16 @@
     });
   }
 
-  // Pictures pasted or dropped into the composer. Each one is uploaded the
-  // moment it arrives, so sending a message is the same request as before plus
-  // a list of ids; a picture the server refused never gets an id, and the note
-  // above the text says why in the server's words.
-  const ATTACH_MAX = 4;
-  const ATTACH_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
-  let attachSeq = 0;
-
-  function attachState() {
-    if (!state.attach) state.attach = [];
-    return state.attach;
-  }
-
-  function attachNote(text) {
-    const note = $("attach-note");
-    note.textContent = text || "";
-    note.hidden = !text;
-    // A refusal can arrive with no thumbnail to sit under, so the bar follows
-    // the note as well as the list. It is revealed here, not only in
-    // paintAttach, because the caller may not repaint.
-    const has = attachState().length > 0 || !!text;
-    $("attach-bar").hidden = !has;
-    composer.classList.toggle("has-attach", has);
-  }
-
-  function attachKey(sel) {
-    return sel ? (sel.type === "group" ? "group:" : "") + sel.id : "";
-  }
-
-  function paintAttach() {
-    const list = $("attach-list");
-    const rows = attachState();
-    list.replaceChildren();
-    for (const row of rows) {
-      const cell = el("div", "attach-thumb");
-      cell.dataset.id = row.id || "";
-      if (row.uploading) cell.classList.add("sending");
-      const img = document.createElement("img");
-      img.alt = "";
-      if (row.url) img.src = row.url;
-      cell.append(img);
-      const drop = el("button", "attach-drop");
-      drop.type = "button";
-      drop.setAttribute("aria-label", "去掉这张图");
-      drop.append(icon("x"));
-      drop.addEventListener("click", (ev) => {
-        ev.preventDefault();
-        ev.stopPropagation();
-        removeAttach(row);
-      });
-      cell.append(drop);
-      list.append(cell);
-    }
-    // The bar stays visible while it has something to say: a refusal has no
-    // thumbnail to sit under, and hiding the whole bar would hide the reason.
-    const has = rows.length > 0 || !$("attach-note").hidden;
-    $("attach-bar").hidden = !has;
-    composer.classList.toggle("has-attach", has);
-    syncComposer();
-  }
-
-  function removeAttach(row) {
-    const rows = attachState();
-    const at = rows.indexOf(row);
-    if (at >= 0) rows.splice(at, 1);
-    if (row.url) URL.revokeObjectURL(row.url);
-    // With nothing left to explain, an older refusal no longer applies. A
-    // caller that has a fresh reason sets it right after this call.
-    if (!rows.length) attachNote("");
-    paintAttach();
-  }
-
-  // clearAttach drops every pending picture. It runs after a send and when the
-  // conversation changes, because an id belongs to the bot it was uploaded to.
-  function clearAttach() {
-    for (const row of attachState()) if (row.url) URL.revokeObjectURL(row.url);
-    state.attach = [];
-    // Anything still uploading belongs to the run that just ended.
-    state.attachBatch = (state.attachBatch || 0) + 1;
-    attachNote("");
-    paintAttach();
-  }
-
-  function attachReady() {
-    return attachState().filter((row) => row.id);
-  }
-
-  function attachBusy() {
-    return attachState().some((row) => row.uploading);
-  }
-
-  async function uploadAttach(files) {
-    if (!state.sel || state.sel.type !== "bot") {
-      attachNote("图片先发到一个 Bot 的对话里，群组还不支持。");
-      return;
-    }
-    // One batch belongs to the conversation it was started in, and to the run
-    // of that conversation. The owner may switch bots while the first upload is
-    // still in flight, and switching away and back must not let the rest of the
-    // batch land in a list that was cleared in between, so a batch number is
-    // taken here and the list is abandoned the moment it changes.
-    const owner = state.sel;
-    const batch = state.attachBatch;
-    for (const file of files) {
-      if (state.attachBatch !== batch || attachKey(state.sel) !== attachKey(owner)) return;
-      const rows = attachState();
-      if (rows.length >= ATTACH_MAX) {
-        attachNote("一次最多 " + ATTACH_MAX + " 张图。");
-        return;
-      }
-      const type = String(file.type || "").toLowerCase();
-      if (ATTACH_TYPES.indexOf(type) < 0 && !/\.(png|jpe?g|gif|webp)$/i.test(file.name || "")) {
-        attachNote("只认 PNG、JPEG、GIF、WebP。");
-        continue;
-      }
-      if (file.size > 10 * 1024 * 1024) {
-        attachNote("图片超过 10 MB。");
-        continue;
-      }
-      // The server caps the pictures of one message together as well, so a
-      // batch that would be refused is stopped here, before any upload.
-      const total = rows.reduce((n, r) => n + (r.bytes || 0), 0) + file.size;
-      if (total > 10 * 1024 * 1024) {
-        attachNote("这几张图加起来超过 10 MB，去掉几张再发。");
-        return;
-      }
-      attachNote("");
-      const row = { seq: ++attachSeq, id: "", bytes: file.size, uploading: true, url: URL.createObjectURL(file) };
-      rows.push(row);
-      paintAttach();
-      // stillWanted is the one question every later step asks: is this row
-      // still on screen in the conversation the batch started in? A picture
-      // the owner removed, a switch to another bot, and a list cleared by a
-      // send all make it false, and none of them may be answered by the upload
-      // that was already in flight.
-      const stillWanted = () =>
-        state.attachBatch === batch && attachKey(state.sel) === attachKey(owner) && attachState().indexOf(row) >= 0;
-      try {
-        const res = await apiFetch("/xbot-api/bots/" + encodeURIComponent(owner.id) + "/paste", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: { "Content-Type": file.type || "application/octet-stream" },
-          body: file,
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || "这图片没传上来");
-        if (!data.image) throw new Error("这图片没传上来");
-        if (stillWanted()) {
-          row.id = data.image;
-          row.uploading = false;
-          paintAttach();
-        }
-      } catch (e) {
-        if (stillWanted()) {
-          removeAttach(row);
-          attachNote(visibleError(e, "这图片没传上来"));
-        }
-        continue;
-      }
-    }
-  }
-
-  // imagesFrom pulls the pictures out of a paste or a drop, ignoring everything
-  // else, so a pasted screenshot never arrives as a broken text paste.
-  function imagesFrom(data) {
-    if (!data) return [];
-    const out = [];
-    for (const item of data.items || []) {
-      if (item.kind !== "file") continue;
-      const file = item.getAsFile();
-      if (file && /^image\//i.test(file.type)) out.push(file);
-    }
-    if (!out.length) {
-      for (const file of data.files || []) {
-        if (/^image\//i.test(file.type)) out.push(file);
-      }
-    }
-    return out;
-  }
+  // Files waiting in the composer belong to workspace.js: any file from the
+  // picker, a paste or a drop is uploaded at once to this conversation's
+  // thread, and a send carries the ids. These two answer the send button.
+  function attachReady() { return workspace.attachReady(); }
+  function attachBusy() { return workspace.attachBusy(); }
 
   function syncComposer() {
     const hasText = composerText(input).trim().length > 0;
     input.classList.toggle("is-empty", !hasText);
-    const ready = attachReady().length > 0;
+    const ready = attachReady() > 0;
     const canSend = hasText || ready;
     composer.classList.toggle("has-text", hasText);
     $("send").disabled = !canSend || attachBusy();
@@ -7657,24 +7555,25 @@
   composer.addEventListener("submit", (ev) => {
     ev.preventDefault();
     const text = composerText(input);
-    const images = attachReady().map((row) => row.id);
-    if (attachBusy()) { attachNote("图片还在上传，等一下再发。"); return; }
-    if ((!text.trim() && !images.length) || !state.sel) return;
+    if (attachBusy()) { workspace.note("附件还在上传，等一下再发。"); return; }
+    if ((!text.trim() && !attachReady()) || !state.sel) return;
     composerSet("");
     composerRefreshHeight();
-    clearAttach();
+    // The ready files leave the composer with this send; a failure hands them back.
+    const files = workspace.takeAttachments();
     syncComposer();
-    sendText(text, null, images);
+    sendText(text, null, [], files);
   });
 
-  // A screenshot pasted from the clipboard arrives here, not as text. The
-  // browser gives the picture in clipboardData; anything else falls through to
-  // the plain-text handler below.
+  // A file pasted from the clipboard (a screenshot, a copied file) arrives
+  // here, not as text: it becomes an attachment, and its file name is not
+  // pasted as well. Anything else falls through to the plain-text handler.
   input.addEventListener("paste", (ev) => {
-    const files = imagesFrom(ev.clipboardData);
+    const files = workspace.filesFrom(ev.clipboardData);
     if (!files.length) return;
     ev.preventDefault();
-    uploadAttach(files);
+    ev.stopImmediatePropagation();
+    workspace.addFiles(files);
   });
 
   // Rich pastes stay plain: the draft is text, and the cap still applies at
@@ -7716,17 +7615,12 @@
   // During dragenter and dragover the browser hides the dragged files: only
   // the item types are readable. Accepting the drag must happen here anyway,
   // or the browser navigates to the dropped file instead of firing drop.
-  const carriesImage = (data) => {
-    if (!data) return false;
-    const items = [...(data.items || [])];
-    if (items.length) return items.some((it) => it.kind === "file" && /^image\//i.test(it.type));
-    return [...(data.files || [])].some((f) => /^image\//i.test(f.type));
-  };
+  // Any file is accepted: it becomes an attachment of the open conversation.
   for (const type of ["dragenter", "dragover"]) {
     dropZone.addEventListener(type, (ev) => {
-      if (!carriesImage(ev.dataTransfer)) return;
+      if (!workspace.carriesFiles(ev.dataTransfer)) return;
       ev.preventDefault();
-      composer.classList.add("dropping");
+      if (!state.peer && state.sel) composer.classList.add("dropping");
     });
   }
   dropZone.addEventListener("dragleave", (ev) => {
@@ -7735,11 +7629,11 @@
   });
   dropZone.addEventListener("drop", (ev) => {
     if (!ev.dataTransfer) return;
-    const files = imagesFrom(ev.dataTransfer);
+    const files = workspace.filesFrom(ev.dataTransfer);
     composer.classList.remove("dropping");
     if (!files.length) return;
     ev.preventDefault();
-    uploadAttach(files);
+    workspace.addFiles(files);
   });
 
   input.addEventListener("keydown", (ev) => {
@@ -7836,6 +7730,33 @@
     if (wide && !was) loadPanel().catch(() => {});
   }
 
+  // workspace.js draws with the shell's own helpers and reports back through these.
+  workspace.init({
+    api, apiFetch, icon, visibleError, syncComposer,
+    face: (catId, name, size) => {
+      const bot = (state.bots || []).find((b) => b.native_id === catId || b.id === catId);
+      return bot ? avatar(bot.name, paintOfBot(bot), size) : speakerFace({ name: name || catId, paint: null }, size);
+    },
+    catName: (catId) => ((state.bots || []).find((b) => b.native_id === catId || b.id === catId) || {}).name || "",
+    openImage: (url, trigger) => openShots([url], 0, trigger),
+    toast: showToast,
+    status: setStatus,
+    copy: (text) => copyText(text),
+    peer: () => !!state.peer,
+    busy: () => !!state.streaming,
+    // After switching to another saved conversation the cat talks in that thread: open it afresh.
+    reselect: (sel) => (sel.type === "group" ? selectGroup(sel.id) : selectBot(sel.id)),
+    reload: () => { state.sig = ""; return loadThread().catch(() => {}); },
+    repaintPanel: () => { if (panel.classList.contains("open")) paintPanel(); },
+    openTab: async (tab) => {
+      closePops();
+      state.tab = tab;
+      rememberPanel(true);
+      panelOpen(true);
+      if (window.innerWidth < 768) { sidebar.classList.remove("open"); syncBackdrop(); }
+      await loadPanel();
+    },
+  });
   syncSidebar();
   initTheme(); // in the app this also tells the window which theme to use
   syncComposer();

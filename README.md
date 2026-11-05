@@ -4,7 +4,7 @@
 
 ## 启动
 
-需要 **Node.js 24、npm、Git、redis-server**。pnpm 9.15.4 随项目开发依赖安装。成员接入本机已安装并配置的 Agent，沿用它的登录与默认配置。没有演示引擎，也不会在原生服务不可用时生成模拟回复。
+当前受保护运行时需要 **macOS、Node.js 24、npm、Git、redis-server**。Linux/Windows 的同等文件边界尚未适配，启动器会明确拒绝无保护运行。pnpm 9.15.4 随项目开发依赖安装。成员接入本机已安装并配置的 Agent，沿用它的登录与默认配置。没有演示引擎，也不会在原生服务不可用时生成模拟回复。
 
 ```bash
 git submodule update --init --recursive
@@ -50,6 +50,8 @@ flowchart LR
 当前有 **3 个外置运行时补丁、涉及 7 个文件**：原生执行入口的成员检查、原生 L0 编译后的后台委派指令、后台会话仍在运行时的答复落盘检查点。源码子模块保持干净，详细差异与退出条件见维护台账。成员检查属于执行准入，不是文件或长期记忆的保密隔离。
 
 轻量后台方案保留一个 Bot 的主 Agent/session：长任务交给原生后台 subagent，进度询问和独立问题由主会话处理，调整方向通过原生消息送给对应子任务。普通新消息使用原生 `continue_current` 准入，不主动中断已有执行。本部署的 Claude 使用原生 Agent SDK carrier；其他 runtime 的同等体验尚未完成真实验收。
+
+默认文件目录、附件与成果、原生传球及平台限制见 [默认文件策略](docs/default-files.md)。当前受保护的宿主启动仅支持 macOS；其他平台会拒绝无保护启动。
 
 详见 [底层对照与 MAS 要素](docs/backend-reference.md)、[差异与升级流程](docs/upstream-maintenance.md)、[Provider 边界](docs/provider-reference.md)、[接口范围](docs/xbot-api.md)。
 

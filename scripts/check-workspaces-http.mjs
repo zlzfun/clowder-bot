@@ -1,0 +1,38 @@
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {writeFile,readFile,mkdir} from 'node:fs/promises';
+import {resolve,join} from 'node:path';
+
+if(process.env.BOT_WORKSPACE_ACCEPTANCE!=='1')throw new Error('Use BOT_WORKSPACE_ACCEPTANCE=1 against the isolated candidate.');
+const base=`http://127.0.0.1:${process.env.PORT||3231}`;
+const evidencePath=resolve(process.env.BOT_WORKSPACE_EVIDENCE||'.runtime/workspaces-http-evidence.json');
+const call=async(path,method='GET',body)=>{
+  const r=await fetch(base+path,{method,headers:body!==undefined?{'Content-Type':'application/json'}:{},...(body!==undefined?{body:JSON.stringify(body)}:{})});
+  const data=await r.json();if(!r.ok)throw new Error(`${method} ${path}: ${r.status} ${JSON.stringify(data)}`);return data;
+};
+await call('/api/health');
+const run=randomUUID().slice(0,8),names=[`研究员-${run}`,`校对员-${run}`];
+const cats=[];
+for(const name of names)cats.push(await call('/xbot-api/bots','POST',{name,runtimeId:'codex'}));
+const scope='/xbot-api/bots/'+encodeURIComponent(names[0]);
+const work=await call(scope+'/workspace');
+const token=`WORKSPACE_TOKEN_${run}`,bytes=Buffer.from(`需求文档\n${token}\n请整理为简短交付报告。\n`);
+const uploaded=await fetch(base+scope+'/files?'+new URLSearchParams({name:'需求说明.md',expectedThreadId:work.threadId}),{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:bytes});assert.equal(uploaded.status,201);const {file}=await uploaded.json();
+assert.deepEqual(Buffer.from(await(await fetch(base+file.url)).arrayBuffer()),bytes);
+await writeFile(join(work.workspacePath,'验收报告.md'),`# 验收报告\n\n${token}\n\n项目文件与交付物已接通。\n`);
+const {file:deliverable}=await call(scope+'/deliverables','POST',{path:'验收报告.md',area:'workspace',expectedThreadId:work.threadId});assert.equal(deliverable.kind,'deliverable');
+assert.match(await(await fetch(base+deliverable.url)).text(),new RegExp(token));
+const group=await call('/xbot-api/groups','POST',{name:`研究协作-${run}`,members:names});
+const gs='/xbot-api/groups/'+encodeURIComponent(group.id);
+const groupWork=await call(gs+'/workspace');assert.notEqual(groupWork.workspacePath,work.workspacePath);
+await writeFile(join(groupWork.workspacePath,'团队说明.md'),'这是群聊资料。\n');
+const {task}=await call(gs+'/tasks','POST',{title:'研究并交付简报',why:'检查任务负责人和持久化交接记录',expectedThreadId:group.id});
+const {task:assigned}=await call(gs+'/tasks/'+task.id,'PATCH',{ownerCatId:cats[0].native_id,expectedOwnerRevision:task.ownerRevision??0});
+const {task:handed}=await call(gs+'/tasks/'+task.id,'PATCH',{ownerCatId:cats[1].native_id,expectedOwnerRevision:assigned.ownerRevision});
+assert.equal(handed.ownerCatId,cats[1].native_id);assert.equal(handed.assignmentHistory.length,2);assert.equal(handed.assignmentHistory[1].fromCatId,cats[0].native_id);
+const stale=await fetch(base+gs+'/tasks/'+task.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({ownerCatId:cats[0].native_id,expectedOwnerRevision:0})});assert.equal(stale.status,409);
+const native=await call('/native-api/api/tasks/'+task.id);assert.deepEqual(native.assignmentHistory,handed.assignmentHistory);
+assert.equal((await call(gs+'/tasks')).historyAvailable,true);
+const evidence={run,base,names,cats,work,file,deliverable,group,task:handed,token};
+await mkdir('.runtime',{recursive:true});await writeFile(evidencePath,JSON.stringify(evidence,null,2)+'\n');
+console.log(JSON.stringify({passed:true,run,threadId:work.threadId,groupId:group.id,taskId:task.id,history:handed.assignmentHistory.length,evidence:evidencePath}));
