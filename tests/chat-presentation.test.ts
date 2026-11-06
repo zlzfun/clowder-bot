@@ -9,9 +9,12 @@ const read = (path: string) => readFileSync(new URL('../' + path, import.meta.ur
 const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
 
 class El {
-  children: El[] = []; parent: El | null = null; className = ''; text = ''; open = false;
-  dataset: Record<string, string> = {}; listeners: Record<string, Array<() => void>> = {};
+  children: El[] = []; parent: El | null = null; className = ''; text = ''; open = false; disabled = false; type = '';
+  dataset: Record<string, string> = {}; listeners: Record<string, Array<() => void>> = {}; attrs: Record<string, string> = {};
   constructor(readonly tag: string) {}
+  setAttribute(name: string, value: string) { this.attrs[name] = String(value); }
+  // A press on a button: its click listeners run.
+  press() { assert.equal(this.tag, 'button'); for (const fn of this.listeners.click ?? []) fn(); }
   append(...nodes: Array<El | string>) {
     for (const item of nodes) {
       const child = typeof item === 'string' ? Object.assign(new El('#text'), { text: item }) : item;
@@ -280,6 +283,221 @@ test('tool labels and details are literal text, never markup', () => {
   ]);
   assert.equal(all(view.row).some(n => ['img', 'script', 'strong'].includes(n.tag)), false);
   assert.deepEqual(view.drawn, [], 'tool details never reach the Markdown renderer');
+});
+
+// The empty chat's greeting invitation: a fake POST whose answers the test
+// settles, and the outcomes the shell hears about.
+function inviter() {
+  const posts: Array<{ name: string; threadId: string; settle: (ok: boolean, value: unknown) => void }> = [];
+  const heard: string[] = [];
+  const g = P.greetings(
+    (name: string, threadId: string) => new Promise((resolve, reject) => {
+      posts.push({ name, threadId, settle: (ok, value) => (ok ? resolve(value) : reject(value)) });
+    }),
+    (name: string, threadId: string) => { heard.push(name + '/' + threadId); },
+  );
+  return { g, posts, heard };
+}
+const flush = () => new Promise<void>(resolve => setImmediate(() => resolve()));
+// One transcript read of the open single chat, as app.js hands it over.
+const chat = (extra: Record<string, unknown> = {}) => ({ threadId: 'thread-a', messages: [], history: false, greeting: null, ...extra });
+const seen = { visible: true, begun: false };
+const state = (v: { state: string } | null) => v && v.state;
+
+test('a truly empty chat on a visible page invites its cat once per thread: polls, native events and redraws never send again', async () => {
+  const { g, posts, heard } = inviter();
+  assert.equal(g.observe('宪宪', chat(), seen), true);
+  assert.deepEqual(posts.map(p => [p.name, p.threadId]), [['宪宪', 'thread-a']]);
+  assert.equal(state(g.view('宪宪', chat())), 'sending');
+  // The 3-second poll, an SSE-driven read and a redraw all read the same empty chat.
+  for (let i = 0; i < 3; i++) assert.equal(g.observe('宪宪', chat(), seen), false);
+  assert.equal(posts.length, 1);
+
+  posts[0].settle(true, { status: 'accepted' });
+  await flush();
+  assert.deepEqual(heard, ['宪宪/thread-a']);
+  assert.equal(state(g.view('宪宪', chat())), 'invited', 'accepted is only the invitation');
+  // The server's read now carries the registration (and a cursor for the hidden invitation).
+  const registered = chat({ history: true, greeting: { status: 'accepted', sourceMessageId: 'm-1' } });
+  assert.equal(g.observe('宪宪', registered, seen), false);
+  assert.equal(state(g.view('宪宪', registered)), 'invited');
+  // The cat's real reply arrives: real rows speak, the line goes.
+  assert.equal(g.view('宪宪', { ...registered, messages: [{ role: 'assistant', content: '你好呀' }] }), null);
+  assert.equal(posts.length, 1);
+  // Another thread of the same cat, or another cat, is its own chat.
+  assert.equal(g.observe('宪宪', chat({ threadId: 'thread-b' }), seen), true);
+  assert.equal(g.observe('砚砚', chat(), seen), true);
+  assert.deepEqual(posts.map(p => p.name + '/' + p.threadId), ['宪宪/thread-a', '宪宪/thread-b', '砚砚/thread-a']);
+});
+
+test('nothing invites from a hidden page, a chat with records or a cursor, a registration, the owner\'s own send or a read without a thread', () => {
+  const { g, posts } = inviter();
+  // A background tab decides nothing; its first visible read does.
+  assert.equal(g.observe('a', chat(), { visible: false, begun: false }), false);
+  assert.equal(posts.length, 0);
+  assert.equal(g.view('a', chat()), null, 'no line before anything was asked');
+  assert.equal(g.observe('a', chat(), seen), true);
+  // Records decide the thread for good, even if a later read comes back empty.
+  assert.equal(g.observe('b', chat({ messages: [{ role: 'user', content: 'hi' }] }), seen), false);
+  assert.equal(g.observe('b', chat(), seen), false);
+  // Records that project to no rows (a cursor or more pages).
+  assert.equal(g.observe('c', chat({ history: true }), seen), false);
+  assert.equal(g.observe('d', chat({ history: false, threadId: 'thread-d' }), { visible: true, begun: false }), true);
+  assert.equal(g.observe('e', chat({ threadId: 'thread-e', history: false, messages: [] }), { visible: true, begun: true }), false, 'the owner already began');
+  assert.equal(g.observe('e', chat({ threadId: 'thread-e' }), seen), false);
+  // Registered on the server already: unconfirmed asks for 重试, never a new automatic POST.
+  assert.equal(g.observe('f', chat({ greeting: { status: 'unconfirmed' } }), seen), false);
+  assert.equal(state(g.view('f', chat({ greeting: { status: 'unconfirmed' } }))), 'unconfirmed');
+  assert.equal(g.view('f', chat({ greeting: { status: 'mystery' } })), null, 'an unknown registration claims nothing');
+  assert.equal(g.observe('g', chat({ threadId: '' }), seen), false);
+  assert.equal(g.observe('g', null, seen), false);
+  assert.deepEqual(posts.map(p => p.name), ['a', 'd']);
+});
+
+test('a failed invitation is never retried by itself; 重试 asks again for that same thread, once at a time', async () => {
+  const { g, posts, heard } = inviter();
+  g.observe('宪宪', chat(), seen);
+  const err = Object.assign(new Error('服务出了点问题，请稍后再试。'), { status: 502 });
+  posts[0].settle(false, err);
+  await flush();
+  assert.deepEqual(heard, ['宪宪/thread-a']);
+  const failed = g.view('宪宪', chat());
+  assert.equal(state(failed), 'failed');
+  assert.equal(failed.error, err);
+  // Polls, events and redraws after the failure send nothing.
+  for (let i = 0; i < 3; i++) g.observe('宪宪', chat(), seen);
+  assert.equal(posts.length, 1);
+  // The server recorded an uncertain attempt: its word wins.
+  assert.equal(state(g.view('宪宪', chat({ history: true, greeting: { status: 'unconfirmed' } }))), 'unconfirmed');
+
+  assert.equal(g.retry('宪宪', 'thread-a'), true);
+  assert.equal(g.retry('宪宪', 'thread-a'), false, 'a second press while it is on its way');
+  assert.deepEqual(posts.map(p => p.threadId), ['thread-a', 'thread-a']);
+  assert.equal(state(g.view('宪宪', chat())), 'sending');
+  posts[1].settle(true, { status: 'accepted' });
+  await flush();
+  assert.equal(state(g.view('宪宪', chat())), 'invited');
+  assert.equal(g.retry('宪宪', ''), false);
+
+  // exists: the chat has records; it does not mean the cat said hello, and it shows no line.
+  const other = inviter();
+  other.g.observe('砚砚', chat(), seen);
+  other.posts[0].settle(true, { status: 'exists' });
+  await flush();
+  assert.equal(other.g.view('砚砚', chat()), null);
+  // A 200 without a status it knows confirms nothing: unconfirmed, with 重试, never blank.
+  for (const [i, body] of [{ status: 'done' }, {}, null].entries()) {
+    other.g.observe('墨墨' + i, chat(), seen);
+    other.posts[1 + i].settle(true, body);
+    await flush();
+    assert.equal(state(other.g.view('墨墨' + i, chat())), 'unconfirmed');
+  }
+  assert.equal(other.posts.length, 4, 'and it is not retried by itself');
+  // The server's accepted wins over this page's failure.
+  const lost = inviter();
+  lost.g.observe('宪宪', chat(), seen);
+  lost.posts[0].settle(false, new Error('连不上 clowder-bot'));
+  await flush();
+  assert.equal(state(lost.g.view('宪宪', chat({ history: true, greeting: { status: 'accepted', sourceMessageId: 'm-9' } }))), 'invited');
+});
+
+test('a late answer is reported for the chat it was sent for, whichever chat is open by then', async () => {
+  const { g, posts, heard } = inviter();
+  g.observe('新猫', chat({ threadId: 'thread-new' }), seen); // auto-entered after creation
+  g.observe('宪宪', chat({ messages: [{ role: 'user', content: 'hi' }] }), seen); // the owner switched away
+  posts[0].settle(true, { status: 'accepted' });
+  await flush();
+  assert.deepEqual(heard, ['新猫/thread-new']);
+  assert.equal(g.view('宪宪', chat({ messages: [{ role: 'user', content: 'hi' }] })), null);
+  assert.equal(state(g.view('新猫', chat({ threadId: 'thread-new' }))), 'invited', 'coming back shows its own state');
+});
+
+test('the greeting line says what this page asked, never that the cat replied or is working, and offers 重试 only when asking failed', () => {
+  const face = new El('span');
+  const line = (s: string, opt: Record<string, unknown> = {}) => P.greetingLine({ state: s, error: null }, { name: '宪宪', face, ...opt });
+  const words: Record<string, string> = {};
+  for (const s of ['sending', 'invited', 'failed', 'unconfirmed']) {
+    const row: El = line(s, s === 'failed' ? { reason: '服务出了点问题，请稍后再试。', retry: () => {} } : { retry: () => {} });
+    words[s] = byClass(row, 'label')!.textContent;
+    assert.deepEqual(row.className.split(' '), ['sysline', 'chat-greeting', s]);
+    assert.equal(row.attrs.role, 'status');
+    assert.deepEqual(Object.keys(row.dataset), ['tip'], 'not a message: no ID, seq, time or sender');
+    assert.equal(row.children[0], face);
+    assert.equal(all(row).some(n => n.className.split(' ').some(c => ['msg', 'bubble', 'bot-bubble', 'typing-dots', 'st-spin'].includes(c))), false);
+    const button = all(row).find(n => n.tag === 'button');
+    assert.equal(!!button, s === 'failed' || s === 'unconfirmed');
+  }
+  assert.deepEqual(words, {
+    sending: '正在邀请宪宪打个招呼',
+    invited: '已邀请宪宪打个招呼',
+    failed: '没能邀请宪宪打个招呼：服务出了点问题，请稍后再试。',
+    unconfirmed: '没能确认宪宪收到了邀请',
+  });
+  for (const text of Object.values(words)) assert.doesNotMatch(text, /回复了|已回复|在工作|正在处理|正在回复|打过招呼/);
+
+  let pressed = 0;
+  const row: El = line('failed', { retry: () => { pressed++; } });
+  const again = all(row).find(n => n.tag === 'button')!;
+  assert.deepEqual([again.textContent, again.type], ['重试', 'button']);
+  again.press();
+  assert.deepEqual([pressed, again.disabled], [1, true]);
+  assert.equal(byClass(line('failed'), 'label')!.textContent, '没能邀请宪宪打个招呼', 'no reason, no colon');
+  assert.equal(all(line('unconfirmed')).some(n => n.tag === 'button'), false, 'no 重试 without a handler');
+  assert.equal(byClass(P.greetingLine({ state: 'invited' }, { name: '  ' }), 'label')!.textContent, '已邀请猫猫打个招呼');
+  assert.equal(P.greetingLine({ state: 'mystery' }, { name: '宪宪' }), null);
+  assert.equal(P.greetingLine(null, { name: '宪宪' }), null);
+  // Names are text, never markup (the fake DOM throws on innerHTML).
+  assert.equal(byClass(P.greetingLine({ state: 'sending' }, { name: '<b>x</b>' }), 'label')!.textContent, '正在邀请<b>x</b>打个招呼');
+});
+
+test('an invitation the server cannot confirm keeps one 重试 line beside the chat\'s rows until a retry is taken', async () => {
+  // The browser read: the native invitation landed but its receipt was lost,
+  // so its source is an ordinary row next to the owner's own message.
+  const rows = [
+    { seq: 1, id: 'm-src', role: 'user', content: '聊天页的开场邀请：请打个招呼' },
+    { seq: 2, id: 'm-own', role: 'user', content: '你好' },
+  ];
+  const lost = chat({ messages: rows, history: true, greeting: { status: 'unconfirmed' } });
+  const { g, posts, heard } = inviter();
+  assert.equal(g.observe('宪宪', lost, seen), false, 'nothing is sent by itself');
+  assert.equal(state(g.view('宪宪', lost)), 'unconfirmed');
+  // Which row is the invitation is never read from the text.
+  assert.equal(state(g.view('宪宪', { ...lost, messages: [{ role: 'assistant', content: '任何内容' }] })), 'unconfirmed');
+
+  let tries = 0;
+  const line: El = P.greetingLine(g.view('宪宪', lost), { name: '宪宪', retry: () => { if (g.retry('宪宪', 'thread-a')) tries++; } });
+  const again = all(line).find(n => n.tag === 'button')!;
+  again.press();
+  assert.equal(again.disabled, true, 'no double press');
+  again.press(); // even a press that gets through sends nothing more
+  assert.deepEqual([tries, posts.map(p => p.name + '/' + p.threadId)], [1, ['宪宪/thread-a']]);
+  assert.equal(state(g.view('宪宪', lost)), 'sending');
+
+  // A failed retry is still retryable, and never retried by itself.
+  posts[0].settle(false, new Error('连不上 clowder-bot'));
+  await flush();
+  assert.equal(state(g.view('宪宪', lost)), 'unconfirmed');
+  for (let i = 0; i < 3; i++) g.observe('宪宪', lost, seen);
+  assert.equal(posts.length, 1);
+
+  // The server finds the receipt by its stable key: the line goes, even over the older read.
+  assert.equal(g.retry('宪宪', 'thread-a'), true);
+  posts[1].settle(true, { status: 'accepted' });
+  await flush();
+  assert.deepEqual(heard, ['宪宪/thread-a', '宪宪/thread-a']);
+  assert.equal(g.view('宪宪', lost), null);
+  // The next real read hides only the confirmed source; every other row stays, with no line.
+  assert.equal(g.view('宪宪', chat({ messages: [rows[1]], history: true, greeting: { status: 'accepted', sourceMessageId: 'm-src' } })), null);
+  assert.equal(posts.length, 2);
+});
+
+test('a chat with rows, history or nothing registered shows no greeting line', () => {
+  const { g } = inviter();
+  const rows = [{ role: 'user', content: 'hi' }, { role: 'assistant', content: '你好呀' }];
+  for (const greeting of [null, { status: 'accepted', sourceMessageId: 'm-1' }, { status: 'mystery' }])
+    assert.equal(g.view('砚砚', chat({ messages: rows, history: true, greeting })), null);
+  assert.equal(g.view('砚砚', chat({ history: true })), null);
+  assert.equal(g.view('砚砚', chat()), null);
 });
 
 test('the page loads message presentation before app.js and its styles after the café theme', () => {

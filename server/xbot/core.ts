@@ -49,6 +49,10 @@ export function createXbotCoreRouter(bridge: BotBridge) {
   router.get('/notes', (_req, res) => res.json({ notes: [] }));
   router.post('/notes/read', (_req, res) => res.json({ status: 'ok' }));
   router.get('/bots/:name/transcript', async (req, res) => res.json(await bridge.transcript(await bot(req.params.name), typeof req.query.before === 'string' ? req.query.before : undefined)));
+  router.post('/bots/:name/greeting', async (req, res) => {
+    const { expectedThreadId } = z.object({ expectedThreadId: z.string().min(1).max(100) }).strict().parse(req.body);
+    res.json(await bridge.greet(await bot(req.params.name), expectedThreadId));
+  });
   router.get('/bots/:name/steps', async (req, res) => {
     const thread = await direct(req.params.name), page = await bridge.messages(thread.id);
     res.json({ steps: page.messages.flatMap(m => (m.toolEvents ?? []).map(event => ({ time: new Date(m.timestamp).toISOString(), tool: 'Clowder AI', summary: JSON.stringify(event), native: event }))) });

@@ -9,6 +9,8 @@ export interface BotPresentation {
   workspaceThreads?: Record<string, string>;
   /** Existing native conversations, including retired project views. No copied messages. */
   conversationIds?: string[];
+  /** Native source ID once accepted. While pending, retain the invitation revision for an exact replay (legacy null = v1). */
+  greetingSources?: Record<string, string | null | { invitationVersion: 2 }>;
   folder?: string;
   avatarSeed?: string;
   avatarData?: string;
@@ -46,6 +48,7 @@ const presentationSchema = z.object({
     templateId: z.string().optional(), activeThreadId: z.string().optional(), folder: z.string().optional(),
     projectId: z.string().nullable().optional(), workspaceThreads: z.record(z.string(), z.string()).optional(),
     conversationIds: z.array(z.string()).optional(),
+    greetingSources: z.record(z.string(), z.union([z.string().min(1), z.null(), z.object({ invitationVersion: z.literal(2) }).strict()])).optional(),
     avatarSeed: z.string().optional(), avatarData: z.string().optional(), avatarMime: z.string().optional(),
     avatarUpdated: z.number().optional(), timezone: z.string().optional(), pinned: z.boolean().optional(),
     lastReadMessageId: z.string().optional(),

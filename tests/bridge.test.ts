@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { once } from 'node:events';
 import { request } from 'node:http';
+import { createHash } from 'node:crypto';
 import { createApp } from '../server/app.js';
 import { ApiError } from '../server/errors.js';
 import { ProductStore } from '../server/product-store.js';
@@ -59,6 +60,81 @@ test('ordinary followups use one non-interrupting native admission even while ba
   }
   assert.equal(calls.some(c => /\/cancel\/|\/steer|\/queue/.test(c.path)), false,
     'the bridge must not race a busy snapshot, cancel work, or admit then steer a second time');
+});
+test('an opening is one targeted native turn; only its confirmed invitation is omitted from chat', async t => {
+  const r = await setup(t), cat = await r.bridge.createBot({ name: '推特采集' });
+  const route = '/xbot-api/bots/' + encodeURIComponent(cat.name);
+  const page = await (await r.call(route + '/transcript')).json();
+  assert.deepEqual(page.messages, []);
+  const sends = () => r.native.calls.filter(c => c.path === '/api/messages' && c.method === 'POST');
+  assert.equal(sends().length, 0);
+  const invite = () => r.call(route + '/greeting', 'POST', { expectedThreadId: page.thread_id });
+  const [one, two] = await Promise.all([invite(), invite()]);
+  assert.deepEqual(await one.json(), {status:'accepted'});
+  assert.deepEqual(await two.json(), {status:'accepted'});
+  assert.equal(sends().length, 1);
+  const input = sends()[0]!.body;
+  assert.deepEqual(input.mentions, [cat.id]);
+  assert.equal(input.messageDisposition, 'next_work');
+  const source = {id:'message-1', type:'user' as const, catId:null, content:input.content, timestamp:1};
+  const owner = {...source, id:'human-copy', timestamp:2};
+  const reply = {id:'cat-reply', type:'assistant' as const, catId:cat.id, content:'想先看看哪个话题？', replyTo:source.id, timestamp:3};
+  r.native.messages.set(page.thread_id, [source, owner, reply]);
+  const after = await (await r.call(route + '/transcript')).json();
+  assert.deepEqual(after.greeting, {status:'accepted',sourceMessageId:source.id});
+  assert.ok(!after.messages.some((m:any) => m.id === source.id));
+  assert.equal(after.messages.find((m:any) => m.id === owner.id).content, owner.content);
+  assert.equal(after.messages.find((m:any) => m.id === reply.id).reply_to, 0);
+  assert.equal(after.messages.find((m:any) => m.id === reply.id).native.replyTo, source.id);
+  const restored = new ProductStore(join(r.dir, 'presentation.json'));
+  assert.deepEqual(restored.bot(cat.id).greetingSources, {[page.thread_id]:source.id});
+  assert.deepEqual(await (await invite()).json(), {status:'accepted'});
+  assert.equal(sends().length, 1);
+});
+test('greeting recovery uses the same native key and refuses other threads and pre-existing history', async t => {
+  const r = await setup(t), cat = await r.bridge.createBot({name:'兰舟'}), thread = await r.bridge.direct(cat);
+  const page = [{id:'existing',type:'user' as const,catId:null,content:'你好',timestamp:1}];
+  r.native.messages.set(thread.id,page);
+  await assert.rejects(r.bridge.greet(cat,'different-thread'), /切换/);
+  assert.deepEqual(await r.bridge.greet(cat,thread.id), {status:'exists'});
+  assert.ok(!r.native.calls.some(c => c.path === '/api/messages' && c.method === 'POST'));
+  r.native.messages.set(thread.id,[]);
+  r.native.queues.set(thread.id,{queue:[{id:'pending-first-turn',status:'queued'}],activeInvocations:[]});
+  assert.deepEqual(await r.bridge.greet(cat,thread.id), {status:'exists'});
+  assert.ok(!r.native.calls.some(c => c.path === '/api/messages' && c.method === 'POST'));
+  r.native.queues.delete(thread.id);
+  const request = r.native.request.bind(r.native);
+  const keys:string[] = [];
+  r.native.request = async (path, opts) => {
+    if (path === '/api/messages' && opts?.method === 'POST') {
+      keys.push((opts.body as any).idempotencyKey);
+      if (keys.length === 1) throw new ApiError(429,'消息队列已满');
+      if (keys.length === 2) throw new ApiError(503,'连接中断');
+    }
+    return request(path,opts);
+  };
+  await assert.rejects(r.bridge.greet(cat,thread.id), /队列已满/);
+  assert.equal((await r.bridge.transcript(cat)).greeting, undefined);
+  await assert.rejects(r.bridge.greet(cat,thread.id), /连接中断/);
+  assert.deepEqual((await r.bridge.transcript(cat)).greeting, {status:'unconfirmed'});
+  assert.deepEqual(new ProductStore(join(r.dir,'presentation.json')).bot(cat.id).greetingSources?.[thread.id], {invitationVersion:2});
+  const restarted = createApp({native:r.native,dataFile:join(r.dir,'presentation.json')});
+  assert.deepEqual(await restarted.bridge.greet(cat,thread.id), {status:'accepted'});
+  assert.equal(keys.length,3); assert.equal(new Set(keys).size,1);
+  await restarted.close();
+});
+test('an unconfirmed invitation from before the wording change replays its original bytes', async t => {
+  const r = await setup(t), cat = await r.bridge.createBot({name:'兰舟'}), thread = await r.bridge.direct(cat);
+  r.store.bot(cat.id).greetingSources = {[thread.id]:null};
+  r.store.save();
+  const restarted = createApp({native:r.native,dataFile:join(r.dir,'presentation.json')});
+  assert.deepEqual((await restarted.bridge.transcript(cat)).greeting, {status:'unconfirmed'});
+  await restarted.bridge.greet(cat,thread.id);
+  const sent = r.native.calls.find(c => c.path === '/api/messages' && c.method === 'POST');
+  assert.equal(createHash('sha256').update(sent!.body.content).digest('hex'),
+    '31c1143d89ac25ef65eb2ad804a3b2956157e6d835a7adc1e9b9f813d9de6100');
+  assert.deepEqual((await restarted.bridge.transcript(cat)).greeting, {status:'accepted',sourceMessageId:'message-1'});
+  await restarted.close();
 });
 test('stable message references survive edits, cancellation, pagination and bridge restart', async t => {
   const r = await setup(t), cat = await r.bridge.createBot({ name: 'Ada' }), thread = await r.bridge.direct(cat);

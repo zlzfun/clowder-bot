@@ -8,7 +8,7 @@
 
 ## 打开方式与入口
 
-开发服务运行时访问 `/template-lab/index.html`。打开即是当前聊天界面：侧栏问候、pin 行、名单，顶栏是所选猫猫，中间是原有的空对话（咖啡涂鸦、头像、「有什么事，直接说就行。」与起手句），底部是输入框。三只示例猫猫（宪宪、砚砚、墨墨）由原生种子模板按新建流程生成，名单里标「示例猫猫」。
+开发服务运行时访问 `/template-lab/index.html`。打开即是当前聊天界面：侧栏问候、pin 行、名单，顶栏是所选猫猫，中间是示例猫猫的空对话，只有一行中性的 `sysline`：猫猫的小头像与「样页预览：不连接猫猫，不会生成问候或回复」（2026-11-06 起替代原来的咖啡涂鸦、大头像、「有什么事，直接说就行。」与起手句）。正式应用里，新聊天的开场白由真实的猫猫按自己的名字和人设说出（见 [XBot 原版前端接入](xbot-frontend.md) 第 23 项）；样页不连接口，也不拼凑或模拟问候。底部是输入框。三只示例猫猫（宪宪、砚砚、墨墨）由原生种子模板按新建流程生成，名单里标「示例猫猫」。
 
 | 要做的事 | 入口（与当前应用一致） |
 | --- | --- |
@@ -32,7 +32,7 @@
 | `client/public/template-lab/lab.js` | 界面：外壳（pin 行与 +、名单、空对话、抽屉、菜单）、模板库与编辑、新建流程 |
 | `client/public/template-lab/fixture.json` | 评审数据，见下 |
 
-外壳的标记与类名取自 `client/index.html` 和 `app.js` 中的 `renderPinRow`、`toggleNewMenu`、`listButton`、`emptyState`、`starterPrompts`、`paintGreeting`、信息抽屉与 `#setpage`。页面复用 `tokens.css`、`app.css`、`providers.css`、`web-search.css`、`skills.css`、`persona-cards.css`、`cafe-theme.css`、`agents.css` 与 `cat-avatars.js`，不引入新包、外部服务或新图片。
+外壳的标记与类名取自 `client/index.html` 和 `app.js` 中的 `renderPinRow`、`toggleNewMenu`、`listButton`、`emptyState`（未选猫猫时）、`paintGreeting`、信息抽屉与 `#setpage`；示例猫猫空对话的预览行沿用 `app.css` 的 `.sysline`。页面复用 `tokens.css`、`app.css`、`providers.css`、`web-search.css`、`skills.css`、`persona-cards.css`、`cafe-theme.css`、`agents.css` 与 `cat-avatars.js`，不引入新包、外部服务或新图片。
 
 ## 数据来源
 

@@ -7,6 +7,7 @@ UI 保留 Bot 名称和文件夹概念，实际成员、执行和历史以 Clowd
 | Bot 创建/职责/重命名/删除 | `/api/cats`；删除成员保留原生历史 |
 | 本地 Agent 接入 | `/agents` 原生发现；`/bots/:name/agent` 绑定执行者并恢复原生默认继承 |
 | 单聊/新会话 | 原生 Thread，preferredCats 为该成员；新建保留旧会话 |
+| 首次单聊的问候 | `POST /xbot-api/bots/:name/greeting` 以 `expectedThreadId` 绑定已打开的单聊，向这只猫发起一次普通的原生聊天请求 |
 | 群聊 | 原生 Thread，preferredCats 为显式成员；消息路由保持原生 |
 | 发消息/回复引用 | `/api/messages`，原生 ID 与幂等键 |
 | 历史/导出 | 原生消息；主界面最近 200 条，导出完整分页 |
@@ -17,6 +18,12 @@ UI 保留 Bot 名称和文件夹概念，实际成员、执行和历史以 Clowd
 | 头像/文件夹/置顶 | Bot presentation store |
 
 运行面板补充原生队列、会话链、原生消息分页、记忆 catalog/search、Agent 与审批。F306 question/approval/elicitation 使用原生 revision、cardRef、operationId；其他支持内联操作的审批按原生 manifest 转发。需要完整原生会话卡片的交互不会自动批准。
+
+问候复用固定版本 `42017e0c` 的 `POST /api/messages`。原生身份上下文包含猫名、角色说明与性格（`assets/prompt-templates/s1-identity.md`）。适配层指定单个成员、`next_work` 与同一猫和会话的稳定幂等键。首次请求先检查原生历史和队列，已有对话返回 `exists`。检查与准入是两个操作，并发到达的用户消息由原生队列决定顺序。创建猫和读取历史各自独立，生成失败时猫仍可正常聊天。
+
+开场时，人设只影响问候的语气。普通昵称、意象和含义不明的名字以问好收尾。只有名字本身直接表达了一件要做的事，猫才顺着问一句，让用户自己说明想从哪里开始。
+
+接口收到原生邀请记录的 ID 后返回 `accepted`。猫的实际回复和执行失败从历史及活动接口读取。等待回执时，Bot 记录邀请措辞的版本，保证升级后的重试仍用原键和原文。收到回执后只保留原生消息 ID，聊天页据此收起应用代发的邀请。原生历史与导出保留原文。若传输中断而未确认回执，`transcript.greeting.status` 为 `unconfirmed`，由用户显式重试。
 
 `transcript` 为兼容 XBot 渲染器生成的投影，包含原生消息对象和 `native_message_id`。显示用 `send_message_to_user` 行带 `presentation_receipt: true`，不可计入模型工具调用/成本。真实工具轨迹来自 `toolEvents`。Bot 不自行估算或编造 Token。
 

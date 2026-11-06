@@ -27,7 +27,7 @@
       "file": "app.js",
       "target": "client/public/app.js",
       "sourceSha256": "1248f793493826bf044359c71e7d8772ccc3472d6021d6abb979dff9b6cb29bc",
-      "sha256": "c5da82cfba5e70c6857b756f0b3e544916ab84e07d9aca447737f2d9c09b7e80",
+      "sha256": "f6b25b41d9aa71d266eba221c73b7914f3bfd8d123ba29830b10c21f440e99eb",
       "unchanged": false
     },
     {
@@ -599,13 +599,15 @@
     },
     {
       "target": "client/public/chat-presentation.js",
-      "description": "Message presentation: speaker identity by native cat ID and folded execution records (presentation_kind activity) that open onto their prose and their native toolEvents as literal text, one entry per event in stored order with each result's own status; a record with neither is a plain, non-expandable status line",
-      "sha256": "019f7cecea00d717a58e72803cb50f3f4e0cefb84c95e39fc591368e44bd1529"
+      "description": "Message presentation: speaker identity by native cat ID and folded execution records (presentation_kind activity) that open onto their prose and their native toolEvents as literal text, one entry per event in stored order with each result's own status; a record with neither is a plain, non-expandable status line; the empty single chat's greeting invitation (greetings): page-only request bookkeeping per cat and native thread for POST /xbot-api/bots/:name/greeting {expectedThreadId}, at most one automatic request per thread for the page's life on the first visible read of a truly empty, unregistered chat, never retried by itself, owner retry for that thread only, the transcript greeting field (accepted/unconfirmed) preferred over the page's receipt, exists showing nothing; and its one status line (greetingLine: sysline with the cat's xs face, textContent only, no message ID, time, bubble or spinner, 重试 only for failed/unconfirmed); the cat's words are never made here",
+      "attribution": "2026-11-06 greeting invitation bookkeeping and status line authored by local Claude Code (claude-opus-5-5), replacing that day's name-keyword opening line",
+      "sha256": "91e4317ef2545acc576ffdd32f42357b8a81ae2cd3e8f090257954b48839d64f"
     },
     {
       "target": "client/public/chat-presentation.css",
-      "description": "Single-chat face/name continuation, execution-record line (expandable or plain) and its tool-event entries on existing XBot trace-call classes and tokens",
-      "sha256": "8e869779a732526eb25cf5cadf68029e736ea6af6a915df8cc04223f307dd132"
+      "description": "Single-chat face/name continuation, execution-record line (expandable or plain) and its tool-event entries on existing XBot trace-call classes and tokens; a chat opened by an accepted greeting invitation reads from the top (.thread-inner.greeted), other histories keep the bottom alignment; the greeting status line's face and 重试 on the existing sysline/text-btn; no new colors, original CSS unchanged",
+      "attribution": "2026-11-06 greeting layout and status line authored by local Claude Code (claude-opus-5-5), replacing that day's opening-line placement",
+      "sha256": "3eea3259cd297438d8b79e678cf2182766f28da0917ce2706636d610dea169bc"
     },
     {
       "target": "client/public/template-lab/index.html",
@@ -627,9 +629,9 @@
     },
     {
       "target": "client/public/template-lab/lab.js",
-      "description": "Cat template prototype UI on the app shell: pin-row plus menu, roster, empty chat, info drawer, settings panes, template library/editor, template-first and from-scratch creation with collapsed customization, sample cat snapshots; textContent only, composer never sends, no API calls",
-      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-03; review prototype, not loaded by production pages",
-      "sha256": "5441e004bd73a83ae531d9dbb3349b8d0d2144d4da2062c2e303143b1b27e214"
+      "description": "Cat template prototype UI on the app shell: pin-row plus menu, roster, empty chat (a sample cat's chat shows one neutral preview sysline saying the page talks to no cat and makes no greeting or reply; no welcome card, starters or simulated greeting), info drawer, settings panes, template library/editor, template-first and from-scratch creation with collapsed customization, sample cat snapshots; textContent only, composer never sends, no API calls",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-03; review prototype, not loaded by production pages; 2026-11-06 neutral empty-chat preview by local Claude Code (claude-opus-5-5)",
+      "sha256": "705bec8c896b1584035dc25ec89c39c150e46f37106ce9463e310616f5670830"
     },
     {
       "target": "client/public/template-lab/fixture.json",

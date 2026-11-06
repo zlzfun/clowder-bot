@@ -52,6 +52,9 @@
     pendingSends: [],
     replyErrors: [],
     firstRender: true,
+    // The open single chat's last successful transcript read (loadThread):
+    // {selection, threadId, messages, history, greeting}.
+    chatRead: null,
     threadLoad: 0,
     panelLoad: 0,
     knownNotes: null,
@@ -1099,6 +1102,19 @@
   // init() is near the end, after workspace.init.
   const experience = window.ClowderExperience;
   const experienceRules = window.ClowderExperienceRules;
+  // An empty single chat's greeting invitation (chat-presentation.js): one
+  // POST per chat thread for the page's life, never retried by itself. Its
+  // outcome redraws only the line of the chat it was sent for, if that chat is still
+  // the one on screen; the next read takes the server's word.
+  const greetings = presentation.greetings(
+    (name, threadId) => api("/xbot-api/bots/" + encodeURIComponent(name) + "/greeting", { method: "POST", body: { expectedThreadId: threadId } }),
+    (name, threadId) => {
+      const read = state.chatRead;
+      if (!read || read.selection !== state.sel || read.selection.id !== name || read.threadId !== threadId) return;
+      paintOpening();
+      loadThread().catch(() => {});
+    },
+  );
 
   function speakerFace(who, size) {
     if (who.paint) return avatar(who.name, who.paint, size);
@@ -2042,32 +2058,10 @@
     thread.scrollLeft = scroll.left; thread.scrollTop = scroll.top;
   }
 
-  // Empty chat (window review P2 #7): the bot's face, its name, one line and
-  // up to three starters made from its persona. A starter only fills the
-  // composer; sending still takes Enter or the send button. Scheduled tasks
-  // live in the drawer's 任务 tab (schedules.js), never in the profile.
-  const EMPTY_LINE = "有什么事，直接说就行。";
+  // An empty single chat has no welcome card: its cat is invited to say hello
+  // in its own words (greetings, placeGreeting) and the real reply is the
+  // chat's first message.
   const EMPTY_REPLY = "这次没有收到回复，请再试一次。";
-  const GENERIC_STARTERS = [
-    {text: "你能帮我做些什么？", icon: "message-circle-question"},
-    {text: "帮我整理今天要做的事", icon: "list-checks"},
-    {text: "把这段话总结成三点", icon: "book-open"},
-  ];
-
-  function starterPrompts(profile) {
-    const out = [];
-    const push = (text, icon) => {
-      text = String(text || "").replace(/\s+/g, " ").trim();
-      if (text && text.length <= 30 && !out.some(item => item.text === text) && out.length < 3) out.push({text, icon});
-    };
-    // What the persona or description says the bot does, asked as a request:
-    // 「负责整理日记」 becomes 「帮我整理日记」.
-    const said = [profile && profile.persona, profile && profile.description].join("\n");
-    const re = /(?:擅长|负责|专门|帮(?:主人|你|我|用户)?)([^，。,.；;：:！!？?\n「」]{2,14})/g;
-    for (let m; (m = re.exec(said)) && out.length < 3;) push("帮我" + m[1].trim(), /读|阅读|文章/.test(m[1]) ? "book-open" : "list-checks");
-    for (const item of GENERIC_STARTERS) push(item.text, item.icon);
-    return out;
-  }
 
   // The composer keeps the textarea's contract (plain text only, Enter sends,
   // Shift+Enter breaks a line, drafts and pasted pictures behave the same) but
@@ -2338,47 +2332,17 @@
     composerRecord(before, text, caret);
   }
 
-  function fillComposer(text) {
-    composerSet(String(text == null ? "" : text));
-    composerRefreshHeight();
-    syncComposer();
-    input.focus();
-    composerCaretTo(Infinity);
-  }
-
-  // The profile behind the starters: the panel's when it is this bot's, else
-  // fetched once per bot and kept for the page's life.
-  // A Map, so names like "constructor" are not mistaken for cached entries.
-  // An entry still in flight is shared with loadPanel, which would otherwise
-  // fetch the same profile a second time when the panel is open.
-  const starterProfiles = new Map();
+  // One profile request per bot at a time: refreshWork and loadPanel share a
+  // request still in flight instead of fetching the same profile twice.
+  // A Map, so names like "constructor" are not mistaken for entries.
+  const profileRequests = new Map();
   function fetchBotProfile(name) {
-    const live = starterProfiles.get(name);
+    const live = profileRequests.get(name);
     if (live && !live.done) return live.request;
     const entry = { done: false };
     entry.request = api("/xbot-api/bots/" + encodeURIComponent(name)).finally(() => { entry.done = true; });
-    starterProfiles.set(name, entry);
+    profileRequests.set(name, entry);
     return entry.request;
-  }
-  async function starterProfile(name) {
-    if (state.panelData && state.panelData.name === name) return state.panelData;
-    const cached = starterProfiles.get(name);
-    return (cached ? cached.request : fetchBotProfile(name)).catch(() => ({}));
-  }
-
-  function starterList(who) {
-    const box = el("div", "starters");
-    starterProfile(who).then((profile) => {
-      if (!box.isConnected) return;
-      for (const {text, icon: glyph} of starterPrompts(profile)) {
-        const btn = el("button", "starter");
-        btn.type = "button"; // never a submit: it fills the composer only
-        btn.append(icon(glyph), el("span", "", text), icon("chevron"));
-        btn.addEventListener("click", () => fillComposer(text));
-        box.append(btn);
-      }
-    });
-    return box;
   }
 
   function doodle(name) {
@@ -2400,13 +2364,12 @@
   }
 
   // face: an explicit paint (a group's groupFace); otherwise who's bot face.
-  function emptyState(heading, line, who, starters, face) {
+  // Single chats never use it: an empty one shows at most its greeting line.
+  function emptyState(heading, line, who, face) {
     const box = el("div", "empty");
-    if (starters) box.append(doodle("chat"));
     if (face) box.append(avatar(who, face, "lg"));
     else if (who) box.append(avatar(who, paintOf(who), "lg"));
     box.append(el("h2", "", heading), el("p", "", line));
-    if (starters && who) box.append(starterList(who));
     return box;
   }
 
@@ -3200,13 +3163,16 @@
     return !!m.internal;
   }
 
-  function renderMessages(messages, who) {
+  // read: the transcript read these rows came from (loadThread's state.chatRead).
+  function renderMessages(messages, who, read) {
     const inner = el("div", "thread-inner");
     const prevTop = thread.scrollTop;
     const near = state.firstRender || thread.scrollHeight - thread.scrollTop - thread.clientHeight < 120;
     if (!messages || !messages.length) {
-      inner.append(emptyState(niceName(who) || "clowder-bot", EMPTY_LINE, who, true));
+      // No rows: at most the greeting's status line (placeGreeting), never a
+      // made-up message. A chat with records but no rows stays blank.
       restoreSendFeedback(inner);
+      if (read) placeGreeting(inner, read);
       thread.replaceChildren(inner);
       state.firstRender = false;
       if (near) thread.scrollTop = thread.scrollHeight;
@@ -3215,7 +3181,6 @@
     }
     const anchor = near ? null : readingAnchor();
     const spoken = spokenLines(messages);
-    let any = false;
     let lastKey = "";
     let lastMsg = null;
     let lastRoutine = null;
@@ -3238,7 +3203,6 @@
       // never one of the bubbles and it ends the bubble group above it.
       if (presentation.isActivity(m)) {
         inner.append(activityRow(m));
-        any = true;
         lastKey = "";
         return;
       }
@@ -3248,7 +3212,6 @@
         lastRoutine.dataset.branch = m.branch || "";
         lastRoutine.dataset.time = m.time || ""; lastRoutine.dataset.timed = routine.time ? "true" : "";
         inner.append(lastRoutine);
-        any = true;
         lastKey = "";
         return;
       }
@@ -3256,7 +3219,6 @@
       const appr = approvalCardOf(m.content);
       if (appr) {
         if (latestApproval[appr.id] !== i) return;
-        any = true;
         lastKey = "";
         const approval = approvalHistoryCard(appr, m.time);
         approval.dataset.branch = m.branch || "";
@@ -3266,7 +3228,6 @@
       const card = codingCardOf(m.content);
       if (card) {
         if (latestCard[card.id] !== i) return;
-        any = true;
         lastKey = "";
         inner.append(codingCard(card));
         return;
@@ -3275,7 +3236,6 @@
         const parsed = unwrap(m.content || "");
         if (parsed.untrusted && parsed.source === "subagent" && parsed.type === "fork_end") return;
         if (parsed.untrusted && (parsed.source.startsWith("bot:") || parsed.source.startsWith("group:"))) {
-          any = true;
           lastKey = "";
           if (parsed.source.startsWith("bot:")) {
             addPeerEvent(inner, "received", parsed.sender || parsed.source.slice(4), m.time, m.relay && m.relay.device);
@@ -3285,18 +3245,15 @@
           return;
         }
         if (bounceTarget(parsed)) {
-          any = true;
           lastKey = "";
           addPeerEvent(inner, "bounce", bounceTarget(parsed), m.time);
           return;
         }
         if (parsed.untrusted) {
           inner.append(eventLine(parsed, (state.sel ? state.sel.id : "") + ":event:" + (m.seq || m.time || i)));
-          any = true;
           lastKey = "";
           return;
         }
-        any = true;
         const row = userBubble(m, messages);
         const cont = !groupStart(lastMsg, m, lastKey, "user");
         if (cont) row.classList.add("cont");
@@ -3306,7 +3263,6 @@
         return;
       }
       if (relays.has(i) || !spoken.has(i)) return;
-      any = true;
       // The row's own speaker, not the open chat's bot: two cats never share a group.
       const speaker = presentation.speaker(m);
       const key = speaker.key;
@@ -3323,7 +3279,12 @@
         lastMsg = m;
       });
     });
-    if (!any) inner.append(emptyState(niceName(who) || "clowder-bot", EMPTY_LINE, who, true));
+    // Rows that are all hidden (internal notes, background turns, a bare
+    // SILENT) are still a conversation with a record: no greeting line,
+    // unless the invitation is unconfirmed (placeGreeting).
+    // A chat its cat was invited to open keeps reading from the top.
+    if (greetingAccepted(read)) inner.classList.add("greeted");
+    if (read) placeGreeting(inner, read);
     addTimeDividers(inner);
     restoreSendFeedback(inner);
     thread.replaceChildren(inner);
@@ -3331,6 +3292,74 @@
     thread.scrollTop = near ? thread.scrollHeight : Math.min(prevTop, thread.scrollHeight);
     keepReading(anchor);
     experience.rendered();
+  }
+
+  // The transcript itself says this chat was opened by a greeting invitation.
+  function greetingAccepted(read) {
+    return !!(read && read.greeting && read.greeting.status === "accepted");
+  }
+
+  // The reason a greeting request failed, in the existing API error words.
+  function greetingReason(view) {
+    return view && view.state === "failed" ? visibleError(view.error).replace(/^没能完成：/, "") : "";
+  }
+
+  // A single chat's redraw key: its thread and rows, whether the native page
+  // holds more, and what its greeting line says.
+  function transcriptSig(read) {
+    const view = greetings.view(read.selection.id, read);
+    return JSON.stringify([read.threadId, read.messages, read.history, read.greeting, view && [view.state, greetingReason(view)]]);
+  }
+
+  // A single chat's one greeting line, at the top of the stream where the
+  // cat's own first message will land: what this page asked, never the cat's
+  // words. In an empty chat the owner's own send or a reply error on screen
+  // takes its place, so it never crowds out send feedback. Above rows (an
+  // unconfirmed invitation only) it changes no layout and no row.
+  function placeGreeting(inner, read) {
+    inner.dataset.chatThread = read.threadId;
+    inner.querySelector(":scope > .chat-greeting")?.remove();
+    const name = read.selection.id;
+    const view = greetings.view(name, read);
+    const rows = read.messages.length > 0;
+    const invited = greetingAccepted(read) || !!view && (view.state === "sending" || view.state === "invited");
+    const shown = !!view && (rows || !state.pendingSends.length && !state.replyErrors.length);
+    if (!rows) inner.classList.toggle("greeted", invited || shown);
+    if (!shown) return;
+    const line = presentation.greetingLine(view, {
+      name: niceName(name),
+      face: avatar(name, paintOf(name), "xs"),
+      reason: greetingReason(view),
+      // 重试 asks again for this same thread, and only while it is the one open.
+      retry: () => {
+        const now = state.chatRead;
+        if (!now || now.selection !== state.sel || now.selection.id !== name || now.threadId !== read.threadId) return;
+        if (greetings.retry(name, read.threadId)) paintOpening();
+      },
+    });
+    if (!line) return;
+    if (invited) line.dataset.invited = "true";
+    inner.prepend(line);
+  }
+
+  // This page's own invitation moved on (sent, taken, failed): the chat on
+  // screen redraws its line from the last read. Rows are never drawn here.
+  function paintOpening() {
+    const read = state.chatRead;
+    const inner = thread.querySelector(":scope > .thread-inner");
+    if (!read || read.selection !== state.sel || state.peer || state.streaming) return;
+    if (!inner || inner.dataset.chatThread !== read.threadId) return;
+    placeGreeting(inner, read);
+    state.sig = transcriptSig(read);
+  }
+
+  // The owner's send (or a live reply) takes the greeting line's place; a chat
+  // its cat was invited into keeps reading from the top.
+  function dropGreeting(inner) {
+    const line = inner.querySelector(":scope > .chat-greeting");
+    if (!line) return;
+    line.remove();
+    if (!line.dataset.invited) inner.classList.remove("greeted");
   }
 
   // A redraw keeps the row the owner is reading where it was, even when an
@@ -3367,7 +3396,7 @@
     const near = state.firstRender || thread.scrollHeight - thread.scrollTop - thread.clientHeight < 120;
     if (!messages || !messages.length) {
       const who = group && group.name;
-      inner.append(emptyState(niceName(who) || "群", "没有消息", who, false, groupFace(group)));
+      inner.append(emptyState(niceName(who) || "群", "没有消息", who, groupFace(group)));
       restoreSendFeedback(inner);
       thread.replaceChildren(inner);
       state.firstRender = false;
@@ -4494,6 +4523,7 @@
     state.replyErrors = [];
     state.firstRender = true;
     state.messages = [];
+    state.chatRead = null;
     state.panelData = null;
     // The scheduled-task section, its dialog and its pending answers belong to the cat left behind.
     window.ClowderSchedules?.teardown();
@@ -4629,9 +4659,25 @@
       if (selection.type === "bot") {
         const data = await api("/xbot-api/bots/" + encodeURIComponent(selection.id) + "/transcript");
         if (state.sel !== selection || request !== state.threadLoad || state.streaming || state.peer) return;
+        // A missing or malformed list is a failed read, not an empty chat.
+        if (!data || !Array.isArray(data.messages)) throw new Error("transcript without messages");
         watchNativeThread(data.thread_id);
-        const messages = data.messages || [];
-        const sig = JSON.stringify(messages);
+        const messages = data.messages;
+        // The native page can hold records that project to no rows: a cursor
+        // (before) or more pages mean the chat has history, so it is not new.
+        const history = (data.before != null && data.before !== "") || !!data.hasMore;
+        // greeting: the server's registration of a greeting invitation for
+        // this thread (accepted or unconfirmed); absent when there is none.
+        const read = { selection, threadId: data.thread_id ? String(data.thread_id) : "", messages, history, greeting: data.greeting == null ? null : data.greeting };
+        state.chatRead = read;
+        // A truly empty chat, read while the page is visible, invites its cat
+        // to say hello: once per thread, never awaited, so no answer holds up
+        // this render. Polls, native events and redraws only read it again.
+        greetings.observe(selection.id, read, {
+          visible: document.visibilityState === "visible",
+          begun: state.pendingSends.length > 0 || state.replyErrors.length > 0,
+        });
+        const sig = transcriptSig(read);
         state.messages = messages;
         state.previewAt["b:" + selection.id] = Date.now();
         workspace.observe(selection, data.thread_id, sig !== state.sig);
@@ -4641,7 +4687,7 @@
         state.preview["b:" + selection.id] = previewFromMessages(messages);
         renderLists();
         if (state.peer) return;
-        renderMessages(messages, selection.id);
+        renderMessages(messages, selection.id, read);
         if (panel.classList.contains("open")) await loadPanel();
         return;
       }
@@ -6578,6 +6624,7 @@
     const inner = thread.querySelector(".thread-inner") || thread;
     const empty = inner.querySelector(".empty");
     if (empty) empty.remove();
+    dropGreeting(inner);
     // The reply comes from the bot this chat posted to; its identity, as the
     // transcript will name it (native cat ID).
     const name = state.sel ? state.sel.id : "Bot";
@@ -6689,6 +6736,7 @@
       thread.replaceChildren(inner);
     }
     inner.querySelector(".empty")?.remove();
+    dropGreeting(inner);
     const row = el("div", "msg user optimistic");
     const body = el("div", "bubble-col");
     row.dataset.sender = "user";

@@ -1074,16 +1074,12 @@
   // ---------- the app shell: sidebar, header, thread, info drawer ----------
   // Markup and classes come from client/index.html and app.js (renderPinRow,
   // listButton, emptyState, paintGreeting, panel). Sample cats only: no
-  // sessions, no running state, and the composer never sends.
+  // sessions, no running state, no greeting, and the composer never sends.
   const SVG = "http://www.w3.org/2000/svg";
   const ICONS = {
     plus: [["path", { d: "M5 12h14" }], ["path", { d: "M12 5v14" }]],
     "users-plus": [["circle", { cx: 9, cy: 7, r: 3 }], ["path", { d: "M3 21v-2a6 6 0 0 1 12 0v2M16 4a3 3 0 0 1 0 6M19 13v6M16 16h6" }]],
     person: [["circle", { cx: 12, cy: 8, r: 4 }], ["path", { d: "M4 22v-2a8 8 0 0 1 16 0v2" }]],
-    chevron: [["path", { d: "m9 18 6-6-6-6" }]],
-    "message-circle-question": [["path", { d: "M7.9 20A9 9 0 1 0 4 16.1L2 22Z" }], ["path", { d: "M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" }], ["path", { d: "M12 17h.01" }]],
-    "list-checks": [["path", { d: "m3 17 2 2 4-4M3 7l2 2 4-4M13 6h8M13 12h8M13 18h8" }]],
-    "book-open": [["path", { d: "M12 7v14" }], ["path", { d: "M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h3a6 6 0 0 1 6 4 6 6 0 0 1 6-4h3a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-4a5 5 0 0 0-5 3 5 5 0 0 0-5-3z" }]],
   };
   function icon(name) {
     const svg = document.createElementNS(SVG, "svg");
@@ -1093,13 +1089,6 @@
       for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v));
       svg.append(node);
     }
-    return svg;
-  }
-  function doodle() {
-    const svg = document.createElementNS(SVG, "svg"), use = document.createElementNS(SVG, "use");
-    for (const [k, v] of Object.entries({ class: "doodle", width: 200, height: 120, viewBox: "0 0 200 120", fill: "none", stroke: "currentColor", "stroke-width": 1.5, "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" })) svg.setAttribute(k, String(v));
-    use.setAttribute("href", "#doodle-chat");
-    svg.append(use);
     return svg;
   }
 
@@ -1217,49 +1206,30 @@
     renderRoster(); renderChat();
   }
 
-  // Starters as app.js makes them: what the persona says the cat does, then the generic ones.
-  function starters(cat) {
-    const out = [], push = (text, glyph) => {
-      text = String(text || "").replace(/\s+/g, " ").trim();
-      if (text && text.length <= 30 && !out.some((s) => s.text === text) && out.length < 3) out.push({ text, glyph });
-    };
-    const said = [cat.config.portrait.roleDescription, cat.config.portrait.teamStrengths].join("\n");
-    const re = /(?:擅长|负责|专门|帮(?:主人|你|我|用户)?)([^，。,.；;：:！!？?\n「」]{2,14})/g;
-    for (let m; (m = re.exec(said)) && out.length < 3;) push("帮我" + m[1].trim(), /读|阅读|文章/.test(m[1]) ? "book-open" : "list-checks");
-    for (const [text, glyph] of [["你能帮我做些什么？", "message-circle-question"], ["帮我整理今天要做的事", "list-checks"], ["把这段话总结成三点", "book-open"]]) push(text, glyph);
-    return out;
-  }
-  function fillComposer(text) {
-    input.textContent = text;
-    input.classList.toggle("is-empty", !text);
-    input.focus();
-    showToast("交互样页没有接入聊天：起手句只填进输入框，不会发送。");
-  }
   function renderChat() {
-    const cat = selectedCat(), title = $("title"), sub = $("subtitle"), inner = h("div", "thread-inner"), box = h("div", "empty");
+    const cat = selectedCat(), title = $("title"), sub = $("subtitle"), inner = h("div", "thread-inner");
     if (!cat) {
       title.replaceChildren(document.createTextNode("clowder-bot"));
       sub.hidden = true; chip.disabled = true;
       panelOpen(false);
+      const box = h("div", "empty");
       box.append(h("h2", "", "选一个对话"), h("p", "", "左边是你的 Bot。"));
+      inner.append(box);
       input.dataset.placeholder = "写一条消息";
     } else {
       const head = portrait(cat.breedId, "head");
       title.replaceChildren(head, h("span", "title-name", cat.name));
       sub.textContent = cat.config.portrait.roleDescription; sub.hidden = !sub.textContent;
       chip.disabled = false;
-      box.append(doodle(), portrait(cat.breedId, "lg"), h("h2", "", cat.name), h("p", "", "有什么事，直接说就行。"));
-      const list = h("div", "starters");
-      for (const s of starters(cat)) {
-        const b = btn("starter", "", () => fillComposer(s.text));
-        b.append(icon(s.glyph), h("span", "", s.text), icon("chevron"));
-        list.append(b);
-      }
-      box.append(list);
+      // In the app a new cat says hello itself, in its own words. A sample cat
+      // talks to nobody, so its chat says it is a preview instead of making a
+      // greeting up: one neutral sysline, no message bubble.
+      const note = h("div", "sysline");
+      note.append(portrait(cat.breedId, "xs"), h("span", "label", "样页预览：不连接猫猫，不会生成问候或回复"));
+      inner.append(note);
       input.dataset.placeholder = `写给 ${cat.name} · 样页未接入聊天`;
       if (panel.classList.contains("open")) renderPanel();
     }
-    inner.append(box);
     $("thread").replaceChildren(inner);
   }
   const renderMain = () => renderChat();

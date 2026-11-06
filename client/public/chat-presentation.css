@@ -1,7 +1,8 @@
 /* Message presentation (chat-presentation.js). Single-chat bot rows reuse the
    group chat's face, name and continuation layout; an execution record is a
    routine-line drawer with the writer's xs face, and its native tool events
-   use the 轨迹 tab's trace-call entries. Existing tokens only. */
+   use the 轨迹 tab's trace-call entries; an empty chat's greeting status is a
+   plain sysline. Existing tokens only. */
 .msg.bot.with-face.cont > .body { margin-left: 32px; }
 .activity-line .sysline .avatar svg { width: 100%; height: 100%; }
 .activity-line.failed .activity-state { color: var(--err); }
@@ -10,3 +11,12 @@
 .activity-line .prose + .activity-tools { margin-top: 12px; }
 .activity-tools :is(.trace-args, .trace-out) { max-height: 240px; overflow: auto; }
 .activity-tools .tool-state.failed { color: var(--err); }
+/* A chat its cat was invited to open (the transcript's greeting accepted, or
+   this page's invitation on its way) reads from the top, where the cat's first
+   real message lands; every other history keeps XBot's bottom alignment. */
+.thread-inner.greeted { justify-content: flex-start; }
+.thread-inner.greeted > :first-child { margin-top: 20px; }
+/* The greeting's status line (greetingLine): the event sysline with the cat's
+   xs face; its 重试 reads as a button, in the line's own size. */
+.chat-greeting .avatar { flex: none; }
+.chat-greeting .text-btn { flex: none; color: var(--text); }

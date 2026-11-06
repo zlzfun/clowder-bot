@@ -154,6 +154,24 @@ Clowder Bot 的前端复用 XBot 的静态页面与浏览器脚本，保留其�
      - 群组座位里是陶土猫时，座位不再填 `--x-avatar-bg`，也不画圆形接缝；改用四个 1px 偏移的 `drop-shadow` 沿猫自己的形状（猫轮廓与圆窗的交集）画 1px 接缝，后排的猫从前排猫的耳朵旁露出来，相叠处仍有一道表面色细缝。2/3/4 只的位置、大小、层次、1.35 倍和未读点不变；上传图片座位仍是圆形接缝，空座位不变。接缝色取所在表面：侧栏 `--x-win`，行悬停 `--hover`、按下 `--fill-hover`、选中 `--selected`，主区（顶栏、空对话）`--bg`，顶栏按钮悬停或展开 `--hover`，抽屉 `--panel`。侧栏问候语里的忙碌猫叠放 `.greet-stack` 同样把原 2px 圆环换成 1px 贴形接缝。原 CSS 字节不变。
    - 测试 `tests/cat-avatars.test.ts`：断言 SVG 只有 `defs` 和已裁切的图层（没有底色形状），裁切路径就是该猫的 `outlines`；新增一条：运行描线脚本 `--check`，每条轮廓只有一个闭合外形、在格内、占格子面积 35%–65%，底部不越出近景圆。
    - 已知取舍：伸出脸颊外的胡须随背景一起去掉（脸上的胡须保留）；缅因猫最细的耳簇尖被开运算磨圆约 0.5px（36px 下）；最浅的卡片底（`--x-card`）上，浅色毛的猫主要靠毛发明暗显出轮廓。任务执行条 `.work-stack` 原本没有接缝，本项未加。
+23. 2026-11-06 单猫空聊天与开场问候（用户反馈：咖啡插画、大头像和名字堆在一起，三条固定建议呆板，「有什么事，直接说就行。」不好，参考 Grok 新 Bot 的开头；随后更正：不要关键词或模板，由猫按自己的名字和人设真实说一两句，名字用途明显可以顺着问一句，普通昵称只问好）。接口：`POST /xbot-api/bots/:name/greeting {expectedThreadId}` 应答 `{status:'accepted'|'exists'}`；transcript 可带 `greeting: {status:'accepted', sourceMessageId}` 或 `{status:'unconfirmed'}`，缺省表示没有登记。邀请原文、用途判断与模型调用都在后端和原生猫；已确认的邀请原文不在 `messages` 里。
+   - 删除旧欢迎卡（涂鸦、72px 头像、居中标题、旧文案、起手句及 `starterPrompts` 等），也删除上一版前端按名字关键词拼出的 `opening`/`openingRow`。单聊空对话不画任何假的猫气泡、发言时间或消息菜单，开场白只来自上游真实的猫回复。群聊、未选择、跨设备、未登录和「连不上」页不变；`index.html` 未改。
+   - 何时邀请（`chat-presentation.js` 的 `greetings`，只做本页的请求记账）：`loadThread` 每次成功读到所选单聊，都在签名比较之前交给 `greetings.observe`。只有 `messages` 为空、`before` 为空且 `hasMore` 为假、没有 `greeting`、页面 `visibilityState` 为 `visible`、屏上没有本次的发送或回复错误时，才发一次 `POST …/greeting {expectedThreadId: thread_id}`，新建猫猫后自动进入也一样。请求不被等待，不阻塞消息绘制。
+     - 每个「猫 + 线程」在本页生命周期内最多自动发一次。读到任何记录、游标、登记或主人自己的发送后，这个线程也不再自动发。后台标签页读到空聊天时不发，回到前台后的第一次成功读取（下一次轮询，最多约 3 秒）才发。
+     - 轮询、原生事件、重绘、迟到应答、切猫与切回都只是重新读取，不会再发。侧栏预览（`warmOne`）、群聊、读取失败或 `messages` 不是数组的记录不经过这里。
+     - 应答只记到它所属的猫和线程。只有那个对话仍在屏上且仍为空时，才原位重画状态行并重新读取一次；切回来时按记下的结果显示。
+   - 状态行：空对话顶部一行 `sysline`（猫的 xs 头像加短句，`role="status"`），只说本页的请求，不说猫已回复或正在工作，也没有转圈：
+     - 发送中「正在邀请宪宪打个招呼」；应答 `accepted` 或 transcript `greeting.status` 为 `accepted` 时「已邀请宪宪打个招呼」。
+     - `exists` 只表示已有记录，不显示任何行，交给下一次读取。
+     - 请求失败「没能邀请宪宪打个招呼：原因」，原因沿用现有 `api()`/`visibleError` 的说法；transcript `unconfirmed`「没能确认宪宪收到了邀请」。两者都带「重试」：只针对这一行所属的线程，且它仍是当前对话；发送中再点无效。失败从不自动重试。
+     - transcript 的 `greeting` 优先于本页回执（发送中除外），无法识别的状态不显示。
+     - 一旦有真正的消息（猫的回复、失败记录或用户消息），状态行消失，由真实消息和原有的运行、错误反馈接管。屏上有发送中、已排队、没发出去或回复出错的行时也不显示：`optimisticMessage`、`liveBubble` 用 `dropGreeting` 移除它，不挤掉发送反馈和用户消息。例外是 transcript `unconfirmed`（原生已收到邀请但回执丢失时，邀请原文是一条普通行）：即使已有消息，这一行和「重试」仍在消息最上方，不改版式，不按正文判断哪条是邀请，屏上的错误与未发出的消息照常保留，发送或回复进行中照旧先撤下、下一次读取再画，本页重试得到 `accepted` 后不再显示；POST 200 但没有有效 `status` 也按未确认显示并可重试。
+     - 原生记录不空但没有可显示的行（内部记录、后台轮次、纯 `SILENT`，或 `messages: []` 而 `before`/`hasMore` 表明还有记录）时照旧留空。读取失败照旧是「连不上 clowder-bot」与「重试」。
+   - 版式：transcript 带 `greeting.status: 'accepted'` 的对话，以及邀请发送中或已受理的空对话，给 `.thread-inner` 加 `greeted`，消息流从顶部开始，猫的真实首句在最上方；之后照常聊天，超过一屏后与原来一样滚动。其他历史保持原来的底部对齐。只显示失败或未确认行的空对话在主人发送后撤掉 `greeted`，回到原版式。
+   - `app.js`：`state.chatRead` 记录最近一次成功读取（`resetConversation` 清空）；签名改由 `transcriptSig` 计算（线程、消息、`history`、`greeting` 与状态行）；新增 `placeGreeting`、`paintOpening`、`dropGreeting`、`greetingAccepted`、`greetingReason`；`renderMessages` 的第三个参数改为这次读取。上一版对 `emptyState`、`renderMessages` 的精简和 `fetchBotProfile`（`profileRequests`）保留。
+   - `chat-presentation.js` 新增 `greetings(post, changed)`（按猫和线程记发送中、已受理、已有记录、失败、已判定，不保存猫说的话）与 `greetingLine(view, opt)`（只用 `textContent`）。`chat-presentation.css` 删去上一版的 `.chat-opener` 规则，新增 `greeted` 顶部对齐与状态行的头像、重试按钮规则，只用已有 token，原 CSS 字节不变。
+   - 模板样页：`template-lab/index.html` 恢复为本项之前的字节，不加载 `chat-presentation.js/css`。`lab.js` 里示例猫猫的空对话只有一行中性的「样页预览：不连接猫猫，不会生成问候或回复」，不调用接口，不模拟问候。
+   - 测试 `tests/chat-presentation.test.ts` 新增：空且可见时每个线程只发一次（轮询、事件、重绘不再发）；后台页、有记录、有游标、已登记、主人已发送或没有线程时不发；失败不自动重试，重试只针对该线程且不重复；`exists` 不显示，应答 200 无有效状态按未确认；服务端登记优先；迟到应答的归属；状态行文案与重试；已有消息时 `unconfirmed` 仍可重试（不读正文、不重复、失败可再试、受理后消失），普通 accepted、有历史或未登记时不显示。
 
 头像候选保留 N 手绘墨稿、G 3D 玩偶肖像、I 水彩绘本。`/avatar-lab/` 展示当前候选，首轮和第二轮完整样页均归档保留；应用暂不提供这三种画风的主题切换控件。
 
