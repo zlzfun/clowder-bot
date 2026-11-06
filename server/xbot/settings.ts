@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { ApiError } from '../errors.js';
 import { BotBridge, encode } from '../native/bridge.js';
 import { agentInventory, bindAgent } from '../native/agents.js';
+import { type CatTemplate, presentTemplate } from '../native/cat-templates.js';
 
 export function createXbotSettingsRouter(bridge: BotBridge) {
   const router = Router(), { native, store } = bridge;
@@ -13,9 +14,14 @@ export function createXbotSettingsRouter(bridge: BotBridge) {
     const input = z.object({ model: z.string().max(512).optional(), refresh: z.boolean().optional() }).strict().parse(req.body ?? {});
     res.json(await native.request('/api/cats/runtime-models', { method: 'POST', body: { runtimeId: req.params.id, ...input } }));
   });
-  // Clowder AI owns seed defaults, revisions, deletions and persistence.
-  router.get('/cat-templates', async (_req, res) => res.json(await native.request('/api/bot-cat-templates')));
-  router.get('/cat-templates/:id', async (req, res) => res.json(await native.request(`/api/bot-cat-templates/${encode(req.params.id)}`)));
+  router.get('/cat-templates', async (_req, res) => {
+    const catalog = await native.request<{ templates: CatTemplate[]; breeds: unknown[] }>('/api/bot-cat-templates');
+    res.json({ ...catalog, templates: catalog.templates.map(presentTemplate) });
+  });
+  router.get('/cat-templates/:id', async (req, res) => {
+    const entry = await native.request<{ template: CatTemplate }>(`/api/bot-cat-templates/${encode(req.params.id)}`);
+    res.json({ ...entry, template: presentTemplate(entry.template) });
+  });
   router.post('/cat-templates', async (req, res) => res.status(201).json(await native.request('/api/bot-cat-templates', { method: 'POST', body: req.body })));
   router.put('/cat-templates/:id', async (req, res) => res.json(await native.request(`/api/bot-cat-templates/${encode(req.params.id)}`, { method: 'PUT', body: req.body })));
   router.delete('/cat-templates/:id', async (req, res) => res.json(await native.request(`/api/bot-cat-templates/${encode(req.params.id)}`, { method: 'DELETE', body: req.body })));

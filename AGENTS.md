@@ -11,6 +11,7 @@
 - Before proposing or implementing a feature, identify its capability in the pinned, unpatched upstream source and the actual API/event/configuration contract; explain any higher-level composition and its partial-failure behavior. Distinguish upstream-native capability, Bot presentation/adapter work, existing local patches and upstream-dependent requests. A feature implemented by a local patch is not an upstream-native capability merely because it runs inside Clowder AI.
 - Existing runtime patches are historical compatibility debt, not precedents or authorization for further divergence. Audit their behavior and upstream replacement path; do not add or expand them. Retire them through an explicit, verified migration to upstream capability. This policy change does not itself authorize abruptly removing existing functionality or deleting/migrating user data.
 - Competitor research may inform presentation and upstream proposals. It does not authorize porting another product's memory, orchestration, context-management or permission mechanisms into Bot.
+- When investigating local Agent discovery or onboarding, consult OpenBot if a comparison would clarify the user flow. Verify the actual runtime and model contracts against pinned Clowder AI and the installed local tool.
 
 ## Chat-first usability
 

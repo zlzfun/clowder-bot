@@ -14,8 +14,9 @@ const config = {
   runtimeId: 'codex', breed: { mode: 'auto' }, model: { mode: 'explicit', value: 'gpt-6-astra' },
   effort: { mode: 'explicit', value: 'xhigh' }, portrait: { roleDescription: '检查配置', personality: '简洁', teamStrengths: '核对' },
 };
-const seed = { ...config, id: 'seed:maine-coon', name: '缅因猫', nameHint: '砚砚', revision: 7, source: { kind: 'native-seed' } };
+const seed = { ...config, id: 'seed:maine-coon', name: '缅因猫', nameHint: '砚砚', revision: 7, source: { kind: 'native-seed', breedId: 'maine-coon', variantId: 'codex-default' } };
 class TemplateFixture extends NativeFixture {
+  template = seed;
   override async request<T>(path: string, options: { method?: string; body?: any } = {}): Promise<T> {
     if (path.startsWith('/api/bot-cat-templates') || path === '/api/cats/runtime-models') {
       this.calls.push({ path, method: options.method || 'GET', body: options.body });
@@ -24,18 +25,19 @@ class TemplateFixture extends NativeFixture {
         const c = options.body.catConfig;
         let cat = this.cats.find(c => c.id === 'native-template-cat');
         if (!cat) {
-          cat = { id: 'native-template-cat', name: options.body.name, displayName: options.body.name, breedId: 'moonshot',
+          cat = { id: 'native-template-cat', name: options.body.name, displayName: options.body.name, breedId: c.breed.breedId ?? 'moonshot',
             roleDescription: c.portrait.roleDescription, personality: c.portrait.personality, teamStrengths: c.portrait.teamStrengths,
-            clientId: 'openai', configurationSource: 'native_tool', defaultModel: c.model.value, cli: { effort: c.effort.value },
+            clientId: 'openai', configurationSource: 'native_tool', defaultModel: c.model.value ?? '', cli: { effort: c.effort.value },
             mentionPatterns: ['@test'], color: { primary: '#888', secondary: '#eee' } } as NativeCat;
           this.cats.push(cat);
         }
-        return { cat, sourceTemplate: { id: seed.id, revision: 7, name: seed.name } } as T;
+        const ref = options.body.sourceTemplate;
+        return { cat, sourceTemplate: ref ? { ...ref, name: this.template.name } : null } as T;
       }
       if (path === '/api/cats/runtime-models') return { status: 'live', models: [{ value: 'gpt-6-astra', label: 'GPT', efforts: [{ value: 'xhigh', label: 'xhigh' }] }] } as T;
       if (options.method === 'DELETE') return { status: 'ok' } as T;
-      if (path === '/api/bot-cat-templates' && (!options.method || options.method === 'GET')) return { templates: [seed], breeds: [{ id: 'maine-coon', name: '缅因猫' }] } as T;
-      return { template: seed } as T;
+      if (path === '/api/bot-cat-templates' && (!options.method || options.method === 'GET')) return { templates: [this.template], breeds: [{ id: 'maine-coon', name: '缅因猫' }] } as T;
+      return { template: this.template } as T;
     }
     return super.request(path, options);
   }
@@ -75,6 +77,30 @@ test('model capabilities are native discovery results; arbitrary launch inputs a
   assert.deepEqual(r.native.calls.at(-1)?.body, { runtimeId: 'codex', ...body });
   assert.equal((await response.json()).models[0].efforts[0].value, 'xhigh');
   assert.equal((await r.call('/xbot-api/agents/codex/models', 'POST', { command: '/arbitrary/program' })).status, 400);
+});
+
+test('list, detail and create use factory defaults independently of the machine model catalog', async t => {
+  const r = await setup(t);
+  // Revision emitted by P005 for this fixture. Real shipped seeds are covered by test:cat-templates-native.
+  const stock = { ...seed, revision: 171891737033789, model: { mode: 'explicit', value: 'gpt-5.3-codex' } };
+  r.native.template = stock;
+  const list = await (await r.call('/xbot-api/cat-templates')).json();
+  const { template } = await (await r.call('/xbot-api/cat-templates/seed%3Amaine-coon')).json();
+  assert.deepEqual(template, list.templates[0]);
+  assert.deepEqual(template, { ...stock, model: { mode: 'inherit' }, effort: { mode: 'inherit' },
+    breed: { mode: 'explicit', breedId: 'maine-coon' } });
+  assert.equal(r.native.calls.some(c => c.path === '/api/cats/runtime-models'), false);
+  const { id, revision, name, nameHint, source, ...catConfig } = template;
+  const body = { name: '跟随本机', catConfig, sourceTemplate: { id, revision }, idempotencyKey: randomUUID() };
+  assert.equal((await r.call('/xbot-api/bots', 'POST', body)).status, 201);
+  assert.deepEqual(r.native.calls.find(c => c.path.endsWith('/instantiate'))?.body, body);
+  const detail = await (await r.call('/xbot-api/bots/跟随本机')).json();
+  assert.deepEqual(detail.cat_config.model, { mode: 'inherit' });
+  assert.deepEqual(detail.cat_config.effort, { mode: 'inherit' });
+
+  r.native.template = { ...stock, revision: stock.revision + 1 };
+  const edited = await (await r.call('/xbot-api/cat-templates')).json();
+  assert.deepEqual(edited.templates[0], r.native.template, 'saved pins keep their native revision and values');
 });
 
 test('creation preserves request identity, native configuration and separate avatar/provenance IDs', async t => {

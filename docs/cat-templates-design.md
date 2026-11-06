@@ -27,6 +27,10 @@ Bot 的 `ProductStore` 只保存头像等展示元数据与来源模板的 ID、
 
 模型和 effort 各自保存 `{mode:'inherit'}` 或 `{mode:'explicit',value}`。继承表示继续跟随 Agent 的默认配置，而非把探测值固化。模板后续变化不会改变猫猫，但继承的本机 Agent 默认值可能影响后续执行。
 
+Bot 读取未编辑的内置模板时，以来源猫种和原有画像作为创建默认值，模型和 effort 一律继承本机工具。固定上游支持 `configurationSource: 'native_tool'`、空 `defaultModel` 和无成员级 effort 覆盖。用户在创建时可以另选值；已有成员和已保存的模板继续使用各自的配置。
+
+P005 的读取协议在用户编辑内置模板后仍返回 `source.kind: 'native-seed'`。适配层用该版本的内容摘要修订识别未编辑种子，保留原生修订用于并发检查与创建重试。两个读取接口均不写回模板。升级时用 `npm run test:cat-templates-native` 对照实际种子和保存后的修订；上游若提供明确的「未编辑种子」字段，应改读该字段。
+
 模型选项来自原生 `runtime-models`，不另建 provider 目录。模型级 `efforts` 优先，其次使用匹配查询模型的 `effortOptions`；缺失表示未知，空数组表示明确不支持。未知值保留，明确不兼容时要求修正；不擅自把 `max` 降为 `high`。切换 Agent 时重置模型和 effort 覆盖，画像与手动猫种保留。
 
 自动猫种按模型系列推断，与 Agent 或模型版本无关：Claude/Opus/Sonnet/Haiku 为布偶猫，GPT/Codex 为缅因猫，Gemini 为暹罗猫，GLM 为狸花猫，Kimi 为梵花猫，DeepSeek 为小鲸鱼。无法识别且没有手动猫种时，创建返回 422。孟加拉猫、金渐层及仅画像种子保留上游显式身份。创建后保存解析出的猫种，不随后续模型默认值自动变换。

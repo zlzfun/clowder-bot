@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { presentTemplate } from '../server/native/cat-templates.ts';
 import { root, lock } from './upstream-source.mjs';
 
 const api = resolve(root, lock.build, 'packages/api/dist');
@@ -49,6 +50,23 @@ test('user overrides and deletion tombstones survive reopening; same-breed custo
   assert.throws(() => final.get(seed.id), e => e.status === 404);
   assert.equal(final.get(custom.id).name, '自己的布偶猫');
   assert.equal(final.list().templates.length, 8);
+});
+
+test('Bot factory presets inherit local tool settings and preserve saved native overrides', async t => {
+  const { dir, store } = create(t);
+  const { templates } = store.list();
+  for (const seed of templates) {
+    const presented = presentTemplate(seed);
+    assert.deepEqual(presented, { ...seed, breed: { mode: 'explicit', breedId: seed.source.breedId },
+      model: { mode: 'inherit' }, effort: { mode: 'inherit' } }, seed.id);
+  }
+  const seed = store.get('seed:maine-coon');
+  assert.equal(seed.model.value, 'gpt-5.3-codex');
+  const input = inputOf(seed);
+  const saved = await withRuntimeCatMutationLock(dir, () => store.save(input, seed.id, seed.revision));
+  assert.deepEqual(presentTemplate(saved), saved, 'even saving the original values is an explicit choice');
+  const custom = await withRuntimeCatMutationLock(dir, () => store.save({ ...input, name: '自己的缅因猫' }));
+  assert.deepEqual(presentTemplate(custom), custom);
 });
 
 test('parallel writes with one revision cannot silently overwrite each other', async t => {
