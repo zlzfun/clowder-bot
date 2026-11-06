@@ -552,8 +552,9 @@
   "extensions": [
     {
       "target": "client/public/cat-avatars.js",
-      "description": "Original 3D cat portrait renderer and preset identity mapping",
-      "sha256": "e24c7c4ae54d191db36970646876a79c912cc5654d6c86f29e7443624f9f8be0"
+      "description": "Original 3D cat portrait renderer and preset identity mapping; each portrait is clipped to its cat's own outline (integer path data traced from avatars/clay-cats.png by scripts/trace-cat-outlines.mjs, verified with --check), no backdrop shape, so it is transparent around the cat; the sheet is unchanged",
+      "sha256": "9945a828afc1f7d0f14c04cf075b388ef1259b6a0b01b648fd0dafca8a010356",
+      "attribution": "2026-11-06 transparent outline clip authored by local Claude Code (claude-opus-5-5)"
     },
     {
       "target": "client/public/avatars/clay-cats.png",
@@ -562,8 +563,9 @@
     },
     {
       "target": "client/public/cafe-theme.css",
-      "description": "Cat-cafe light/dark color overrides; closer crop of a cat's own clay portrait (data-avatar-bot faces: 1.25x about 50% 40% inside the clipped SVG drawing, circle and unread dot unchanged); group face of up to four members' own round portraits in one compact, slightly overlapping cluster without a tile (lead largest in front, 1px row-color seams, clay art zoomed into its seat), quiet empty seats for unknown members (existing tokens, uploaded photos at their natural cover crop, not recolored); restores app.css's single right-aligned .field select chevron on focus (light chevron copied byte-for-byte), original CSS unchanged",
-      "sha256": "214200bfc09409b3bd25c5f47e7e7329f7790d2445af11798ab8b4779601a437"
+      "description": "Cat-cafe light/dark color overrides; clay cat faces without a tile (transparent around the traced outline, photos/glyphs/empty seats keep their fill); closer crop of a cat's own clay portrait (data-avatar-bot faces: 1.25x about 50% 40% inside the clipped SVG drawing, circle and unread dot unchanged); group face of up to four members' own round portraits in one compact, slightly overlapping cluster without a tile (lead largest in front, 1px surface-color seams that hug a clay cat's own shape via drop-shadow and stay round for photos, clay art zoomed into its seat), quiet empty seats for unknown members (existing tokens, uploaded photos at their natural cover crop, not recolored); restores app.css's single right-aligned .field select chevron on focus (light chevron copied byte-for-byte), original CSS unchanged",
+      "sha256": "8a7669b56aa715a94f09e994f9a0e9daad330a12339d6ffcad0e9cf5bfa73fdd",
+      "attribution": "2026-11-06 transparent clay faces and cat-hugging group seams authored by local Claude Code (claude-opus-5-5)"
     },
     {
       "target": "client/public/runtime.html",

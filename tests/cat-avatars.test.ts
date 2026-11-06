@@ -4,6 +4,8 @@ import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { once } from 'node:events';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import { createApp } from '../server/app.js';
 import { NativeFixture } from './native-fixture.js';
@@ -45,7 +47,11 @@ test('all eight portraits use bounded, distinct cells of the production sheet', 
     const svg: Node = cats.createPortrait('cat:' + id, undefined, '', doc);
     assert.equal(svg.attributes['data-cat-id'], id);
     assert.equal(svg.style.overflow, 'hidden');
+    // Transparent around the cat: no backdrop shape, only the clipped artwork.
+    assert.deepEqual(svg.children.map(node => node.tag), ['defs', 'g']);
     const crop = svg.children.find(node => node.tag === 'defs')!.children[0];
+    assert.equal(crop.tag, 'clipPath');
+    assert.deepEqual(crop.children.map(node => [node.tag, node.attributes.d]), [['path', cats.outlines[id]]]);
     clips.add(crop.attributes.id);
     const group = svg.children.find(node => node.tag === 'g')!;
     assert.equal(group.attributes['clip-path'], `url(#${crop.attributes.id})`);
@@ -58,6 +64,35 @@ test('all eight portraits use bounded, distinct cells of the production sheet', 
   }
   assert.equal(offsets.size, 8);
   assert.equal(clips.size, 8);
+});
+
+test('each outline is a fresh trace of the sheet: one closed shape inside its cell that keeps the cat', () => {
+  const script = fileURLToPath(new URL('../scripts/trace-cat-outlines.mjs', import.meta.url));
+  // Exits non-zero unless cat-avatars.js carries exactly what the sheet traces to.
+  execFileSync(process.execPath, [script, '--check'], { stdio: 'pipe' });
+  assert.deepEqual(Object.keys(cats.outlines), ids);
+  for (const id of ids) {
+    const d: string = cats.outlines[id];
+    assert.match(d, /^M\d+ \d+l[-\d ]+z$/);
+    assert.equal((d.match(/[Mm]/g) || []).length, 1, `${id}: one outer outline, no holes`);
+    const numbers = d.match(/-?\d+/g)!.map(Number);
+    const points: [number, number][] = [];
+    let x = numbers[0], y = numbers[1];
+    points.push([x, y]);
+    for (let i = 2; i < numbers.length; i += 2) { x += numbers[i]; y += numbers[i + 1]; points.push([x, y]); }
+    let area = 0;
+    for (let i = 0; i < points.length; i++) {
+      const [x1, y1] = points[i], [x2, y2] = points[(i + 1) % points.length];
+      area += x1 * y2 - x2 * y1;
+      assert.ok(x1 >= 0 && x1 <= 443.5 && y1 >= 0 && y1 <= 443.5, `${id}: inside its cell`);
+    }
+    // A cat bust, not a sliver and not the whole tile (the sheet's margin stays out).
+    const share = Math.abs(area) / 2 / (443.5 * 443.5);
+    assert.ok(share > 0.35 && share < 0.65, `${id}: covers ${share.toFixed(2)} of the cell`);
+    // The flat base is rounded onto the solo face's circle: nothing below its arc.
+    const r = 443.5 / 2 / 1.05;
+    for (const [px, py] of points) if (py > r) assert.ok(Math.hypot(px - 443.5 / 2, py - r) <= r + 1.5, `${id}: base inside the arc`);
+  }
 });
 
 test('bot API preserves breed through creation, rename, upload, restore and export', async t => {

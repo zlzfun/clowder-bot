@@ -1,7 +1,7 @@
-/* Clowder Café: color overrides, a cat face's close-up crop and the group
-   member face (after the avatar surfaces), plus one repair of an upstream
-   select rule (end of file). Load after the original XBot styles. Layout,
-   typography, spacing, and interaction remain owned by app.css. */
+/* Clowder Café: color overrides, the clay cats' transparent faces (close-up
+   crop, group member face), plus one repair of an upstream select rule (end
+   of file). Load after the original XBot styles. Layout, typography, spacing,
+   and interaction remain owned by app.css. */
 :root {
   --x-win: #f0e5d6;
   --x-card: #fffbf5;
@@ -143,31 +143,49 @@ html[data-theme="dark"] .avatar.glyph {
   --av-bg: var(--x-avatar-bg);
   --av-ink: var(--x-text);
 }
+/* A clay cat is clipped to its own outline (cat-avatars.js, traced from the
+   sheet), so its face has no tile: the cat itself sits on the row, header,
+   transcript or drawer in both themes. Uploaded photos, the glyph fallback and
+   empty seats keep their fill. */
+.avatar:not(.glyph):not(.blob):not(.group):has(> svg[data-cat-id]),
+html[data-theme="dark"] .avatar:not(.glyph):not(.blob):not(.group):has(> svg[data-cat-id]) {
+  background: transparent;
+}
 /* A cat's own face (app.js marks it data-avatar-bot: list, header, messages,
    drawer, empty chat): a closer crop of the clay art so eyes and fur read at
    24-36px. It is cat-avatars.js's 8% inset zoomed 1.25x about 50% 40%, which
    equals the tile at 105%, centred, top edge at the top (viewBox units). The
    sheet's own headroom keeps every breed's ear tips in the circle (Maine Coon
-   tufts touch the rim). Only the clipped drawing inside the SVG viewport
-   moves, so the circle, the rail's visible unread dot, uploaded photos,
-   peer/picker faces and group seats are unchanged. */
+   tufts touch the rim); the circle's lower arc is also where the traced
+   outline rounds off the bust's flat base. Only the clipped drawing inside the
+   SVG viewport moves, so the circle, the rail's visible unread dot, uploaded
+   photos, peer/picker faces and group seats are unchanged. */
 .avatar[data-avatar-bot] > svg[data-cat-id] > g[clip-path] { transform: translate(-11.0875px, 0) scale(1.05); }
 /* Group face (app.js groupFace): two to four members' own round portraits
    huddled into one cluster, with no tile behind them. Seats overlap a little:
    the first member sits largest and in front, the others stagger behind it,
    and every face keeps both eyes clear of its neighbours. A 1px seam in the
-   row color (the unread dot's ring convention) parts overlapping edges. The
-   clay art is zoomed into its seat to drop the sheet's inner margin; uploaded
-   photos keep their natural cover crop and colors. An empty seat (no loaded
-   cat) is the row color tinted with the text color, opaque so a seat behind
-   does not show through. Positions are percentages of the avatar box that
-   app.css sizes, so the 36px list, 24px header and 48px drawer/empty chat
-   share them; the unread dot moves to the corner, off the top-right cat. */
+   surface color (the unread dot's ring convention) parts overlapping edges:
+   round for a photo seat, hugging the cat itself for a clay seat, which has
+   no fill, so the cat behind shows round the front cat's ears. The clay art
+   is zoomed into its seat to drop the sheet's inner margin; uploaded photos
+   keep their natural cover crop and colors. An empty seat (no loaded cat) is
+   the row color tinted with the text color, opaque so a seat behind does not
+   show through. Positions are percentages of the avatar box that app.css
+   sizes, so the 36px list, 24px header and 48px drawer/empty chat share
+   them; the unread dot moves to the corner, off the top-right cat. */
 .avatar.group,
 .title .avatar.group,
 html[data-theme="dark"] .avatar.group { overflow: visible; background: transparent; isolation: isolate; }
+/* The seam is the surface behind the face, as app.css paints it. */
 .avatar.group { --seat-seam: var(--x-win); }
+.main .avatar.group { --seat-seam: var(--bg); }
+.panel .avatar.group { --seat-seam: var(--panel); }
+.top-title:hover:not(:disabled) .avatar.group, .top-title.on .avatar.group { --seat-seam: var(--hover); }
+.item:hover .avatar.group { --seat-seam: var(--hover); }
+.item:active .avatar.group { --seat-seam: var(--fill-hover); }
 .item.active .avatar.group { --seat-seam: var(--selected); }
+.item.other .avatar.group { --seat-seam: var(--x-win); }
 .avatar.group > .unread { top: -1px; right: -1px; z-index: 2; }
 .avatar.group > .seat {
   position: absolute; border-radius: 50%; overflow: hidden;
@@ -176,6 +194,19 @@ html[data-theme="dark"] .avatar.group { overflow: visible; background: transpare
 .avatar.group > .seat:first-child { z-index: 1; }
 .avatar.group > .seat > img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .avatar.group > .seat > svg[data-cat-id] { transform: scale(1.35); transform-origin: 50% 40%; }
+/* Four 1px offset copies of the seat's own alpha (the cat inside its round
+   window) draw the seam round the cat instead of round the circle. */
+.avatar.group > .seat:has(> svg[data-cat-id]) {
+  background: transparent; box-shadow: none;
+  filter: drop-shadow(1px 0 0 var(--seat-seam)) drop-shadow(-1px 0 0 var(--seat-seam))
+    drop-shadow(0 1px 0 var(--seat-seam)) drop-shadow(0 -1px 0 var(--seat-seam));
+}
+/* The busy-cat stack under the greeting (sidebar) overlaps its faces the same way. */
+.greet-stack > .avatar:has(> svg[data-cat-id]) {
+  box-shadow: none;
+  filter: drop-shadow(1px 0 0 var(--x-win)) drop-shadow(-1px 0 0 var(--x-win))
+    drop-shadow(0 1px 0 var(--x-win)) drop-shadow(0 -1px 0 var(--x-win));
+}
 .avatar.group > .seat.vacant {
   background: linear-gradient(color-mix(in srgb, var(--x-text) 14%, transparent) 0 0) var(--seat-seam);
 }
