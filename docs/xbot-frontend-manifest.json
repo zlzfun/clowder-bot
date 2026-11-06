@@ -27,7 +27,7 @@
       "file": "app.js",
       "target": "client/public/app.js",
       "sourceSha256": "1248f793493826bf044359c71e7d8772ccc3472d6021d6abb979dff9b6cb29bc",
-      "sha256": "0162c28cae3e3be3c92b7a6444b6b4a0b6dff126ae114b288f128e59e9cf5153",
+      "sha256": "c5da82cfba5e70c6857b756f0b3e544916ab84e07d9aca447737f2d9c09b7e80",
       "unchanged": false
     },
     {
@@ -562,8 +562,8 @@
     },
     {
       "target": "client/public/cafe-theme.css",
-      "description": "Cat-cafe light/dark color overrides; restores app.css's single right-aligned .field select chevron on focus (light chevron copied byte-for-byte), original CSS unchanged",
-      "sha256": "8081eb565a30f99807ec76276a7c9991e70ee9736e93d8bffd9967cb81aff3f9"
+      "description": "Cat-cafe light/dark color overrides; closer crop of a cat's own clay portrait (data-avatar-bot faces: 1.25x about 50% 40% inside the clipped SVG drawing, circle and unread dot unchanged); group face of up to four members' own round portraits in one compact, slightly overlapping cluster without a tile (lead largest in front, 1px row-color seams, clay art zoomed into its seat), quiet empty seats for unknown members (existing tokens, uploaded photos at their natural cover crop, not recolored); restores app.css's single right-aligned .field select chevron on focus (light chevron copied byte-for-byte), original CSS unchanged",
+      "sha256": "214200bfc09409b3bd25c5f47e7e7329f7790d2445af11798ab8b4779601a437"
     },
     {
       "target": "client/public/runtime.html",

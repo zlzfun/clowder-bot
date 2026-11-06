@@ -999,20 +999,14 @@
     av.classList.add("glyph");
   }
 
-  function avatar(name, paint, size) {
-    paint = paint || {};
-    const av = el("span", "avatar" + (size ? " " + size : ""));
-    if (paint.botName) {
-      av.dataset.avatarBot = paint.botName;
-      av.dataset.avatarSize = size || "";
-      av.dataset.avatarSignature = avatarSignature(paint);
-    }
-    if (name) setTip(av, name, "right");
+  // The portrait inside a face: the uploaded photo, or the cat artwork (also
+  // when the photo fails to load). Bot avatars and group seats share it.
+  function drawFace(target, name, paint) {
     const seed = String(paint.seed || name || "");
-    const drawCat = (target = av) => {
-      if (!catAvatars) { drawGlyph(target, name || seed); return; }
-      target.classList.remove("glyph", "blob");
-      target.replaceChildren(catAvatars.createPortrait(seed, paint.templateId, name));
+    const drawCat = (into) => {
+      if (!catAvatars) { drawGlyph(into, name || seed); return; }
+      into.classList.remove("glyph", "blob");
+      into.replaceChildren(catAvatars.createPortrait(seed, paint.templateId, name));
     };
     if (paint.url) {
       const img = document.createElement("img");
@@ -1020,11 +1014,60 @@
       img.src = paint.url;
       img.decoding = "async";
       img.draggable = false;
-      img.addEventListener("error", () => drawCat(img.parentElement || av), { once: true });
-      av.append(img);
+      img.addEventListener("error", () => drawCat(img.parentElement || target), { once: true });
+      target.append(img);
     } else {
-      drawCat();
+      drawCat(target);
     }
+  }
+
+  // A group's face is its own members' portraits, huddled into one small
+  // cluster like cats round a café table. Seats are the first four distinct
+  // members in the group's order (the adapter gives names, or IDs for cats it
+  // cannot find); each keeps its seat, and a member with no loaded cat leaves
+  // it empty, so a roster reload never shifts a later cat forward. Fewer than
+  // two members, or none, pad with empty seats: a group never reads as one cat
+  // and no cat is made up. Built from the group record the caller holds.
+  const GROUP_SEATS = 4;
+  function groupFace(g) {
+    const bots = state.bots || [];
+    const members = Array.from(new Set((g && Array.isArray(g.members) ? g.members : []).map(String))).slice(0, GROUP_SEATS);
+    const cast = members.map((m) => {
+      const b = bots.find((x) => x.name === m) || bots.find((x) => x.native_id === m);
+      return b ? { name: b.name, paint: paintOfBot(b) } : null;
+    });
+    while (cast.length < 2) cast.push(null);
+    const sig = JSON.stringify(cast.map((c) => (c ? [c.name, avatarSignature(c.paint)] : 0)));
+    return { group: true, id: (g && g.id) || "", cast, sig };
+  }
+
+  function paintGroup(av, face) {
+    av.dataset.seats = String(face.cast.length);
+    av.dataset.avatarSignature = face.sig;
+    av.replaceChildren(...face.cast.map((c) => {
+      const seat = el("span", c ? "seat" : "seat vacant");
+      if (c) drawFace(seat, c.name, c.paint);
+      return seat;
+    }));
+  }
+
+  function avatar(name, paint, size) {
+    paint = paint || {};
+    const av = el("span", "avatar" + (size ? " " + size : ""));
+    if (paint.group) {
+      av.classList.add("group");
+      if (paint.id) av.dataset.avatarGroup = paint.id;
+      if (name) setTip(av, name, "right");
+      paintGroup(av, paint);
+      return av;
+    }
+    if (paint.botName) {
+      av.dataset.avatarBot = paint.botName;
+      av.dataset.avatarSize = size || "";
+      av.dataset.avatarSignature = avatarSignature(paint);
+    }
+    if (name) setTip(av, name, "right");
+    drawFace(av, name, paint);
     return av;
   }
 
@@ -1076,6 +1119,17 @@
       old.replaceChildren(...next.childNodes, ...(unread ? [unread] : []));
       old.classList.remove("glyph", "blob");
       old.dataset.avatarSignature = next.dataset.avatarSignature;
+    }
+    // Group faces (header, drawer, empty chat) follow the reloaded group record
+    // and its members' current portraits; one missing from the list keeps its seats.
+    for (const old of document.querySelectorAll(".avatar[data-avatar-group]")) {
+      const g = (state.groups || []).find((x) => x.id === old.dataset.avatarGroup);
+      if (!g) continue;
+      const face = groupFace(g);
+      if (old.dataset.avatarSignature === face.sig) continue;
+      const unread = old.querySelector(".unread");
+      paintGroup(old, face);
+      if (unread) old.append(unread);
     }
   }
 
@@ -2345,10 +2399,12 @@
     return box;
   }
 
-  function emptyState(heading, line, who, starters) {
+  // face: an explicit paint (a group's groupFace); otherwise who's bot face.
+  function emptyState(heading, line, who, starters, face) {
     const box = el("div", "empty");
     if (starters) box.append(doodle("chat"));
-    if (who) box.append(avatar(who, paintOf(who), "lg"));
+    if (face) box.append(avatar(who, face, "lg"));
+    else if (who) box.append(avatar(who, paintOf(who), "lg"));
     box.append(el("h2", "", heading), el("p", "", line));
     if (starters && who) box.append(starterList(who));
     return box;
@@ -3304,12 +3360,14 @@
     if (hit) thread.scrollTop += hit.row.getBoundingClientRect().top - thread.getBoundingClientRect().top - anchor.offset;
   }
 
-  function renderGroup(messages, who) {
+  // group: the record GET /xbot-api/groups/:id returned with these messages.
+  function renderGroup(messages, group) {
     const inner = el("div", "thread-inner grpchat");
     const prevTop = thread.scrollTop;
     const near = state.firstRender || thread.scrollHeight - thread.scrollTop - thread.clientHeight < 120;
     if (!messages || !messages.length) {
-      inner.append(emptyState(niceName(who) || "群", "没有消息", who));
+      const who = group && group.name;
+      inner.append(emptyState(niceName(who) || "群", "没有消息", who, false, groupFace(group)));
       restoreSendFeedback(inner);
       thread.replaceChildren(inner);
       state.firstRender = false;
@@ -3948,10 +4006,11 @@
 
   function renderLists() {
     const collapsed = folderStore();
+    const faces = new Map(state.groups.map((g) => [g.id, groupFace(g)]));
     const sig = JSON.stringify({
       bots: state.bots.map((b) => [b.name, !!b.pinned, !!b.primary, !!b.unread, (b.notes || 0) > 0, unreadOf(stStatus.map[b.name]) > 0, b.group || "", b.description, b.avatar, b.avatar_seed, b.avatar_url, b.templateId, lineForBot(b)]),
       folders: state.folders.map((f) => [f.name, f.count, !!f.ungrouped, (f.bots || []).join("\n"), !!collapsed[f.name]]),
-      groups: state.groups.map((g) => [g.id, g.name, lineForGroup(g), unreadOf(stStatus.groups[g.id]) > 0]),
+      groups: state.groups.map((g) => [g.id, g.name, faces.get(g.id).sig, lineForGroup(g), unreadOf(stStatus.groups[g.id]) > 0]),
       others: (state.others || []).map((o) => [(o && o.bot) || "", (o && o.name) || ""]),
       sel: state.sel,
     });
@@ -4019,7 +4078,9 @@
     for (const g of state.groups) {
       const open = state.sel && state.sel.type === "group" && state.sel.id === g.id;
       const d = groupDesc(g);
-      const btn = listButton(g.id, d.node, open, !open && unreadOf(stStatus.groups[g.id]) > 0, null, false, niceName(g.name || g.id));
+      // The tooltip is the shown group name, not its raw id (kept in data-group).
+      const shown = niceName(g.name || g.id);
+      const btn = listButton(shown, d.node, open, !open && unreadOf(stStatus.groups[g.id]) > 0, faces.get(g.id), false, shown);
       btn.dataset.group = g.id;
       btn.dataset.stsig = d.sig;
       btn.addEventListener("click", () => {
@@ -4103,15 +4164,19 @@
 
   // The header repeats the rail's square bot avatar (one character, or the
   // photo) so its left edge can share the message column's line.
+  // A selected group gets its member face from its own record (empty seats when
+  // it is missing from the loaded list), keyed by its id and seats, even when
+  // its id or name matches a cat's.
   let titleFace = "", titleAv = null;
   function setHeader(slug, label) {
     const shown = label || niceName(slug) || "clowder-bot";
-    const face = (slug && paintOf(slug)) || {};
-    const head = `bot:${slug}:${avatarSignature(face)}`;
+    const group = !!(slug && state.sel && state.sel.type === "group" && state.sel.id === slug);
+    const face = group ? groupFace(state.groups.find((x) => x.id === slug) || { id: slug }) : (slug && paintOf(slug)) || {};
+    const head = group ? `group:${slug}:${face.sig}` : `bot:${slug}:${avatarSignature(face)}`;
     if (head !== titleFace) {
       titleFace = head;
-      const bot = slug && (state.bots || []).find((b) => b.name === slug);
-      titleAv = bot ? avatar(slug, paintOfBot(bot), "head") : null;
+      const bot = !group && slug && (state.bots || []).find((b) => b.name === slug);
+      titleAv = group ? avatar(shown, face, "head") : bot ? avatar(slug, paintOfBot(bot), "head") : null;
       if (titleAv) setTip(titleAv, "");
     }
     titleEl.replaceChildren(...(titleAv ? [titleAv] : []), el("span", "title-name", shown));
@@ -4592,7 +4657,7 @@
       state.sig = sig;
       state.preview["g:" + selection.id] = previewFromGroup(messages);
       renderLists();
-      renderGroup(messages, data.group && data.group.name);
+      renderGroup(messages, data.group || { id: selection.id });
     } catch (e) {
       if (state.sel === selection && request === state.threadLoad && !state.streaming && !state.pendingSends.length) threadUnavailable();
     }
@@ -5061,8 +5126,8 @@
       return;
     }
     if (state.sel.type === "group") {
-      const g = state.groups.find((x) => x.id === state.sel.id) || { name: state.sel.id, members: [] };
-      renderPanelHead(g.name || g.id, null, (g.members || []).length + " 个成员");
+      const g = state.groups.find((x) => x.id === state.sel.id) || { id: state.sel.id, name: state.sel.id, members: [] };
+      renderPanelHead(g.name || g.id, groupFace(g), (g.members || []).length + " 个成员");
       const body = el("div", "tab-body");
       if (state.tab === "library") {
         // No owner-private records in a group, and no promise about what will be kept.

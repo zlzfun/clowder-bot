@@ -1,6 +1,7 @@
-/* Clowder Café: color overrides, plus one repair of an upstream select rule
-   (end of file). Load after the original XBot styles. Layout, typography,
-   spacing, and interaction remain owned by app.css. */
+/* Clowder Café: color overrides, a cat face's close-up crop and the group
+   member face (after the avatar surfaces), plus one repair of an upstream
+   select rule (end of file). Load after the original XBot styles. Layout,
+   typography, spacing, and interaction remain owned by app.css. */
 :root {
   --x-win: #f0e5d6;
   --x-card: #fffbf5;
@@ -133,8 +134,8 @@ html[data-theme="dark"] {
 }
 
 /* Replace hard-coded surface grays without changing the avatar artwork. */
-.avatar:not(.glyph):not(.blob),
-html[data-theme="dark"] .avatar:not(.glyph):not(.blob) {
+.avatar:not(.glyph):not(.blob):not(.group),
+html[data-theme="dark"] .avatar:not(.glyph):not(.blob):not(.group) {
   background: var(--x-avatar-bg);
 }
 .avatar.glyph,
@@ -142,6 +143,53 @@ html[data-theme="dark"] .avatar.glyph {
   --av-bg: var(--x-avatar-bg);
   --av-ink: var(--x-text);
 }
+/* A cat's own face (app.js marks it data-avatar-bot: list, header, messages,
+   drawer, empty chat): a closer crop of the clay art so eyes and fur read at
+   24-36px. It is cat-avatars.js's 8% inset zoomed 1.25x about 50% 40%, which
+   equals the tile at 105%, centred, top edge at the top (viewBox units). The
+   sheet's own headroom keeps every breed's ear tips in the circle (Maine Coon
+   tufts touch the rim). Only the clipped drawing inside the SVG viewport
+   moves, so the circle, the rail's visible unread dot, uploaded photos,
+   peer/picker faces and group seats are unchanged. */
+.avatar[data-avatar-bot] > svg[data-cat-id] > g[clip-path] { transform: translate(-11.0875px, 0) scale(1.05); }
+/* Group face (app.js groupFace): two to four members' own round portraits
+   huddled into one cluster, with no tile behind them. Seats overlap a little:
+   the first member sits largest and in front, the others stagger behind it,
+   and every face keeps both eyes clear of its neighbours. A 1px seam in the
+   row color (the unread dot's ring convention) parts overlapping edges. The
+   clay art is zoomed into its seat to drop the sheet's inner margin; uploaded
+   photos keep their natural cover crop and colors. An empty seat (no loaded
+   cat) is the row color tinted with the text color, opaque so a seat behind
+   does not show through. Positions are percentages of the avatar box that
+   app.css sizes, so the 36px list, 24px header and 48px drawer/empty chat
+   share them; the unread dot moves to the corner, off the top-right cat. */
+.avatar.group,
+.title .avatar.group,
+html[data-theme="dark"] .avatar.group { overflow: visible; background: transparent; isolation: isolate; }
+.avatar.group { --seat-seam: var(--x-win); }
+.item.active .avatar.group { --seat-seam: var(--selected); }
+.avatar.group > .unread { top: -1px; right: -1px; z-index: 2; }
+.avatar.group > .seat {
+  position: absolute; border-radius: 50%; overflow: hidden;
+  background: var(--x-avatar-bg); box-shadow: 0 0 0 1px var(--seat-seam);
+}
+.avatar.group > .seat:first-child { z-index: 1; }
+.avatar.group > .seat > img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.avatar.group > .seat > svg[data-cat-id] { transform: scale(1.35); transform-origin: 50% 40%; }
+.avatar.group > .seat.vacant {
+  background: linear-gradient(color-mix(in srgb, var(--x-text) 14%, transparent) 0 0) var(--seat-seam);
+}
+/* One cluster per count: the lead in front at the bottom left (centre for
+   three), the rest a little smaller behind it. */
+.avatar.group[data-seats="2"] > .seat:nth-child(1) { left: 0; top: 29%; width: 68%; height: 68%; }
+.avatar.group[data-seats="2"] > .seat:nth-child(2) { left: 40%; top: 3%; width: 60%; height: 60%; }
+.avatar.group[data-seats="3"] > .seat:nth-child(1) { left: 18%; top: 40%; width: 60%; height: 60%; }
+.avatar.group[data-seats="3"] > .seat:nth-child(2) { left: 0; top: 1%; width: 54%; height: 54%; }
+.avatar.group[data-seats="3"] > .seat:nth-child(3) { left: 50%; top: 8%; width: 48%; height: 48%; }
+.avatar.group[data-seats="4"] > .seat:nth-child(1) { left: 0; top: 42%; width: 58%; height: 58%; }
+.avatar.group[data-seats="4"] > .seat:nth-child(2) { left: 6%; top: 0; width: 52%; height: 52%; }
+.avatar.group[data-seats="4"] > .seat:nth-child(3) { left: 54%; top: 10%; width: 46%; height: 46%; }
+.avatar.group[data-seats="4"] > .seat:nth-child(4) { left: 48%; top: 48%; width: 52%; height: 52%; }
 .acct .ac-av { color: var(--x-text); }
 .who > time { color: var(--x-faint); }
 .backdrop, .modal, .mshade, .panel-scrim { background: var(--x-scrim); }
