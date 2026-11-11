@@ -78,6 +78,10 @@ test('a reply that is only a card is a message, in single chats and groups, and 
   r.native.messages.set(group.id, [only('g-card', [card], '提议捕捉品味信号：…'), only('g-empty', [])]);
   const page = await (await r.call(`/groups/${group.id}`)).json();
   assert.deepEqual(page.messages.map((m: any) => [m.id, m.blocks?.[0]?.approval?.id ?? null]), [['g-card', 'p1']]);
+  // A group page names the cursor of the page before it, like the single-chat transcript.
+  assert.deepEqual([page.before, page.hasMore], ['2000:g-card', false]);
+  r.native.messages.set(group.id, []);
+  assert.equal((await (await r.call(`/groups/${group.id}`)).json()).before, null);
 });
 
 test('an answered choice is recorded on the native block, only for a choice in this conversation', async t => {

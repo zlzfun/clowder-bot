@@ -77,7 +77,10 @@ export function createXbotCoreRouter(bridge: BotBridge) {
   router.get('/groups/:id', async (req, res) => {
     const thread = await bridge.group(req.params.id);
     const [cats, page] = await Promise.all([bridge.cats(), bridge.messages(thread.id, typeof req.query.before === 'string' ? req.query.before : undefined)]);
+    const first = page.messages[0];
     res.json({ group: bridge.groupItem(thread, cats), hasMore: page.hasMore,
+      // The cursor for the page before this one, as the single-chat transcript gives it.
+      before: first ? `${first.timelineOrderAt ?? first.timestamp}:${first.id}` : null,
       messages: bridge.presentMessages(page.messages, cats).map(({ message: m, name, ...presentation }) => {
         const rich = m.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(m);
         return { id: m.id, time: new Date(m.timestamp).toISOString(), sender: m.type === 'user' ? 'local' : name,
