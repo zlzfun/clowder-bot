@@ -413,6 +413,7 @@
   // work starts or stops; only out-of-place rows are moved.
   function sortStatusRows() {
     chatList.paint($("roster"));
+    presence.rows($("roster")); // typing dots on a row whose cat replies (chat-presence.js)
   }
 
   async function refreshStatus() {
@@ -942,6 +943,9 @@
   // (chat-notify.js); both init() near the end, after live.init.
   const cards = window.ClowderCards;
   const notify = window.ClowderNotify;
+  // 活起来 (chat-presence.js): 正在输入… in the header and on the sidebar row,
+  // each cat's own colour, the seen paw and the panels' exits; init() near the end.
+  const presence = window.ClowderPresence;
   // An empty single chat's greeting invitation (chat-presentation.js): one
   // POST per chat thread for the page's life, never retried by itself. Its
   // outcome redraws only the line of the chat it was sent for, if that chat is still
@@ -2726,14 +2730,13 @@
   }
 
   function addTimeDivider(inner, row, previous) {
-    if (inner.classList.contains("grpchat")) return;
     const last = previous || Array.from(inner.querySelectorAll(".msg[data-time], .routine-line[data-time]")).at(-1)?.dataset.time;
     const label = timeDivider(last, row.dataset.time);
     if (label) inner.append(el("div", "tdiv", label));
   }
 
+  // Single and group chats alike.
   function addTimeDividers(inner) {
-    if (inner.classList.contains("grpchat")) return;
     let previous;
     for (const row of inner.querySelectorAll(":scope > .msg[data-time], :scope > .routine-line[data-time]")) {
       const label = row.dataset.timed ? "" : timeDivider(previous, row.dataset.time);
@@ -3214,6 +3217,7 @@
     // Rows that did not change keep their element: only new rows rise in.
     const shown = live.commit(inner, keep);
     cards.rendered(); // request cards and choices filled in place, before the scroll is placed
+    presence.rendered(messages); // the seen paw by the owner's message a reply answers (chat-presence.js)
     state.firstRender = false;
     thread.scrollTop = near ? thread.scrollHeight : Math.min(prevTop, thread.scrollHeight);
     keepReading(anchor);
@@ -3406,10 +3410,12 @@
       last = key;
       inner.append(row);
     }
+    addTimeDividers(inner); // 今天 14:05 / 昨天 … between rows, as in single chats
     chatHistory.top(inner); // 更早的消息 at the top (chat-history.js)
     // Rows that did not change keep their element: only new rows rise in.
     const shown = live.commit(inner, sendFeedback(inner, messages));
     cards.rendered(); // request cards and choices filled in place, before the scroll is placed
+    presence.rendered(messages); // the seen paw by the owner's message a reply answers (chat-presence.js)
     state.firstRender = false;
     thread.scrollTop = near ? thread.scrollHeight : Math.min(prevTop, thread.scrollHeight);
     keepReading(anchor);
@@ -7414,7 +7420,11 @@
   // Replies drawn while they are written, the history's keyed redraw, the
   // stop control's look and 回到最新 (chat-live.js).
   let gapRead = 0;
+  // A cat's name by its native ID ("" when it is not in the list).
+  const catNameOf = (catId) => ((state.bots || []).find((b) => b.native_id === catId || b.id === catId) || {}).name || "";
   live.init({
+    // A reply that opens with its own cat's signature never shows it while written.
+    catName: catNameOf,
     thread,
     // The same Markdown path as a finished reply (botBubble).
     render: (parent, text) => appendMarkdown(parent, stripBotImages(displayText(text))),
@@ -7454,6 +7464,15 @@
       if (note.type === "group") await pickGroup(note.id); else await pickBot(note.id);
       if (note.kind === "approval") cards.locateSoon(state.sel, { proposalId: note.proposalId, messageId: note.messageId });
     },
+  });
+  // 活起来 (chat-presence.js): what the cats are doing in the header and on
+  // their sidebar rows (chat-live.js's replies, the status poll), their own
+  // colours, the seen paw (after each redraw) and the panels' exits.
+  presence.init({
+    thread, live, chip: $("head-chip"), catName: catNameOf,
+    bots: () => state.bots || [],
+    selected: () => (state.peer ? null : state.sel),
+    status: () => ({ bots: stStatus.map, groups: stStatus.groups }),
   });
   // 开箱即用 (quick-create.js) draws with these and opens what it made.
   quick.init({

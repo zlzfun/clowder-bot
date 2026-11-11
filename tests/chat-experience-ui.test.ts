@@ -1070,7 +1070,7 @@ test('the page loads the status-line scripts after workspace.js and before app.j
   assert.ok(at('workspace.js') < at('chat-experience-rules.js') && at('chat-experience-rules.js') < at('chat-experience.js') && at('chat-experience.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
   // Only the 开箱即用 extension (quick-create.css), the search palette (palette.css), 找得到 (chat-list.css, chat-history.css), 资料页与群 (profile.css, mention.css) and the live-reply styles (chat-live.css, last) come after.
-  assert.deepEqual(styles.slice(-9), ['chat-experience.css', 'quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'profile.css', 'mention.css', 'chat-cards.css', 'chat-live.css']);
+  assert.deepEqual(styles.slice(-10), ['chat-experience.css', 'quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'profile.css', 'mention.css', 'chat-cards.css', 'chat-presence.css', 'chat-live.css']);
   // Conversation changes, reads, native events and redraws reach the module.
   assert.match(app, /workspace\.select\(state\.sel\);\n[^\n]*\n\s+experience\.select\(state\.sel\);/);
   assert.equal((app.match(/experience\.observe\(selection, /g) || []).length, 2, 'single chats and groups');

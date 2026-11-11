@@ -11,6 +11,8 @@
 //   commit()  to put a freshly drawn history on screen, then rendered();
 //   expect()  when the owner sends, for the cat's typing bubble;
 //   working(), stopping(), stopped() and sendButton() for the composer.
+// chat-presence.js reads presence() (and watch()es it) for the header line
+// and the sidebar row: the same replies this module draws, nothing more.
 //
 // A reply in progress is a row in the cat's normal reply position. Without
 // words yet it is a typing bubble; while the engine thinks or takes a step,
@@ -94,6 +96,31 @@
     S.fresh = false;
     S.follow = true;
     pill();
+    told();
+  }
+
+  // ---------------------------------------------------------------- presence
+  // What the open conversation's cats are doing now, for the header's line
+  // and the sidebar row (chat-presence.js): the replies the engine started (a
+  // start event or an in-progress row named them) and that have not ended.
+  // A send's typing bubble no reply has claimed yet is not one of them.
+  const watchers = new Set();
+  let telling = false;
+  function told() {
+    if (telling || !watchers.size) return;
+    telling = true;
+    Promise.resolve().then(() => {
+      telling = false;
+      for (const fn of [...watchers]) { try { fn(); } catch (err) { /* a watcher never breaks the live view */ } }
+    });
+  }
+  function presence() {
+    const replies = [];
+    for (const e of S.replies.values()) {
+      if (e.r.done || e.gone || !e.r.catId) continue;
+      replies.push({ id: e.id, catId: e.r.catId, phase: e.r.phase, tool: e.r.step ? e.r.step.tool : "" });
+    }
+    return { key: S.key, stopping: !!S.stopping, replies };
   }
 
   function entry(id, catId, fromStart) {
@@ -234,7 +261,8 @@
   // false: a long reply waits a moment before its next drawing (it stays dirty).
   function paint(e, force) {
     if (!e.row || !e.bubble) { e.dirty = false; return true; }
-    const shown = R.display(e.r.text);
+    // With the speaking cat's name, a signature it opens with never shows either.
+    const shown = R.display(e.r.text, e.r.catId && H.catName ? H.catName(e.r.catId) : "");
     if (shown !== e.shown) {
       const now = Date.now();
       if (!force && shown && e.shown && now < e.next) return false;
@@ -258,6 +286,7 @@
     e.row.setAttribute("aria-busy", String(writing));
     step(e, S.stopping && writing ? "正在停止…" : e.wait ? (e.wait.queued ? "排队中" : "") : R.phrase(e.r));
     e.dirty = false;
+    told();
     return true;
   }
   // The quiet line: a change crossfades (old words out, new words in, in the same place).
@@ -308,6 +337,7 @@
     }
     if (changed || e.dirty) dirty(e);
     if (ev.kind === "start" || ev.kind === "done") H.changed();
+    if (changed || ev.kind === "start" || ev.kind === "done") told();
   }
   // The stream may have missed events (a reconnect, a gap): words can follow
   // on only by native position now, and the next read fills what was missed.
@@ -372,6 +402,7 @@
       if (shown) dropWait(w);
     }
     H.changed();
+    told();
   }
 
   // A reply whose end this page may have missed (the stream dropped or it
@@ -400,7 +431,7 @@
       dirty(e);
       ended = true;
     }
-    if (ended) H.changed();
+    if (ended) { H.changed(); told(); }
   }
 
   // The renderers draw an in-progress reply's row through here.
@@ -522,6 +553,7 @@
     for (const e of all()) if (e.dirty && e.row) grew = paint(e, true) || grew;
     if (grew && pin) toEnd();
     H.changed();
+    told();
   }
   // After the renderer placed the scroll: new rows below the view are news.
   function rendered(result) {
@@ -571,6 +603,7 @@
     S.stopping = on ? Date.now() : 0;
     if (on) S.stopWaits = S.waiting.filter((w) => w.wait.accepted);
     for (const e of all()) dirty(e);
+    told();
   }
   // The native stop answered: those queued sends were withdrawn, so a typing
   // bubble of theirs no reply has claimed a moment later will not get one.
@@ -671,7 +704,9 @@
   //   unread()            the server's unread replies here ("3", "3+" or "");
   //   changed()           working/idle may have changed (the composer follows);
   //   gap()               words were missed: read the transcript (its draft) soon;
-  //   focusComposer()     after 回到最新.
+  //   focusComposer()     after 回到最新;
+  //   catName(catId)      the speaking cat's name ("" when unknown), so a
+  //                       signature it opens its reply with is not drawn.
   function init(hooks) {
     H = hooks;
     mountPill();
@@ -681,6 +716,9 @@
   window.ClowderLive = Object.freeze({
     init, select, event, lost, read, frame, commit, reconcile, rendered, attach,
     expect, working, stopping, stopped, isStopping: () => !!S.stopping, sendButton, following, tick,
+    // The replies being written now (chat-presence.js), and a callback for
+    // when that may have changed (called after the change, coalesced).
+    presence, watch: (fn) => { watchers.add(fn); return () => watchers.delete(fn); },
     // A history row its owner changed in place (chat-history.js's top row):
     // the next redraw reads its markup again instead of the one remembered.
     touched: (n) => { if (n) delete n._lvSig; },
