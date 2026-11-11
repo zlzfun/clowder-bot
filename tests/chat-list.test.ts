@@ -484,7 +484,7 @@ test('when the status cannot be read, one quiet line over the list says it shows
   assert.equal(p.doc.querySelector('.cl-stale'), null, 'nothing until a read fails');
   p.list.stale(true);
   const line = p.doc.querySelector('.cl-stale')!;
-  assert.equal(text(line), '状态没能刷新，下面是上次读到的，可能已经变化。');
+  assert.equal(text(line), '状态没能刷新，列表可能不是最新的。');
   assert.equal(line.getAttribute('role'), 'status');
   assert.ok(line.nextSibling === p.roster, 'right above the list (the list redraws without touching it)');
   p.build(['团子']);

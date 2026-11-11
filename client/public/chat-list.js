@@ -382,7 +382,7 @@
   function stale(on) {
     const roster = document.getElementById("roster");
     if (!staleLine && on && roster && roster.parentElement) {
-      staleLine = node("p", "cl-stale", "状态没能刷新，下面是上次读到的，可能已经变化。");
+      staleLine = node("p", "cl-stale", "状态没能刷新，列表可能不是最新的。");
       staleLine.setAttribute("role", "status");
       roster.parentElement.insertBefore(staleLine, roster);
     }
