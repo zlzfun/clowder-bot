@@ -428,6 +428,8 @@
     for (const g of (data && Array.isArray(data.groups) ? data.groups : [])) if (g && g.id) groups[g.id] = g;
     stStatus.groups = groups;
     state.others = data && Array.isArray(data.others) ? data.others : null;
+    // A finished reply or a new request in a chat not in view: a desktop notification, if the owner turned them on.
+    notify.observe(data);
     renderLists();
     paintStatus();
     // The stop control follows what the status says runs or waits in this chat.
@@ -935,6 +937,11 @@
   const profile = window.ClowderProfile;
   const profileRules = window.ClowderProfileRules;
   const mention = window.ClowderMention;
+  // 确认与提醒: what a cat attaches to a reply, asks the owner to confirm or
+  // leaves unfinished (chat-cards.js), and desktop notifications
+  // (chat-notify.js); both init() near the end, after live.init.
+  const cards = window.ClowderCards;
+  const notify = window.ClowderNotify;
   // An empty single chat's greeting invitation (chat-presentation.js): one
   // POST per chat thread for the page's life, never retried by itself. Its
   // outcome redraws only the line of the chat it was sent for, if that chat is still
@@ -2942,30 +2949,26 @@
     // A line's files show once, under its last bubble.
     const files = last ? m.attachments || [] : [];
     const told = say ? say.text : String(m.content || "").trim();
-    const said = isSilent(told) ? "" : told;
+    // A request's message and an ended reply's stand-in words are not words (chat-cards.js).
+    const said = cards.words(m, isSilent(told) ? "" : told);
     if (say) {
       if (said) appendBotContent(body, displayText(said));
     } else if (said) appendBotContent(body, displayText(window.XBotProviders.citedText(m.content,m.parts)));
     else if (!pasted.length && !files.length && !(m.parts || []).length && !(m.tool_calls || []).length) {
       appendBotContent(body, EMPTY_REPLY);
     }
+    // Cards, checklists, choices and diffs, under the words of the line's last bubble.
+    if (last) cards.blocks(body, m, messages, false);
     if (pasted.length) body.append(gallery(pasted));
     if (files.length) body.append(workspace.cards(files));
     if (!say) window.XBotProviders.decorate(body, m.parts);
-    if (last) endedNote(body, m.status, said);
+    // How it ended, if it did not finish: 已停止 / 这次没完成 / 中途被打断, 详情, 再发一次.
+    if (last) cards.ending(body, m, messages, false);
     bindMessageMenu(row, m, said);
     row.append(body);
     if (cont) markContinuation(row, m.time);
     addBubbleTime(row, m.time);
     return row;
-  }
-
-  // A reply that stopped or did not complete after writing some words says so
-  // under them, from its native status (with no words, the server's own
-  // 已停止 / 这次没完成 is the reply). Nothing is undone by stopping.
-  function endedNote(body, status, said) {
-    const note = status === "canceled" || status === "cancelled" ? "已停止" : status === "failed" ? "这次没完成" : "";
-    if (note && said && !said.startsWith(note)) body.append(el("div", "lv-ended", note));
   }
 
   // A reply still being written (in_progress): its row in the cat's reply
@@ -3132,6 +3135,8 @@
         return;
       }
       if (m.role === "assistant" && silentOnly(m)) return;
+      // The engine's receipt reworded, or a refusal said by name: a quiet centred line (chat-cards.js).
+      if (m.notice) { inner.append(cards.notice(m, m.content)); lastKey = ""; return; }
       const appr = approvalCardOf(m.content);
       if (appr) {
         if (latestApproval[appr.id] !== i) return;
@@ -3208,6 +3213,7 @@
     chatHistory.starters(inner, read);
     // Rows that did not change keep their element: only new rows rise in.
     const shown = live.commit(inner, keep);
+    cards.rendered(); // request cards and choices filled in place, before the scroll is placed
     state.firstRender = false;
     thread.scrollTop = near ? thread.scrollHeight : Math.min(prevTop, thread.scrollHeight);
     keepReading(anchor);
@@ -3344,6 +3350,8 @@
         last = "";
         continue;
       }
+      // A receipt or a refusal: a quiet centred line, not a bubble (chat-cards.js).
+      if (!mine && m.notice) { inner.append(cards.notice(m, text)); last = ""; continue; }
       // A reply still being written: its row, filled by chat-live.js.
       if (!mine && m.in_progress) {
         inner.append(live.frame(replyFrame(m, speaker, true, !groupStart(lastMsg, m, last, speaker.key))));
@@ -3385,10 +3393,11 @@
         if (!row.classList.contains("cont")) row.append(speakerFace(speaker));
         const body = el("div", "body");
         if (!row.classList.contains("cont")) body.append(speakerHead(speaker, m.time));
-        const said = isSilent(text) ? "" : text;
+        const said = cards.words(m, isSilent(text) ? "" : text);
         if (said || !files.length) appendBotContent(body, said);
+        cards.blocks(body, m, messages, true);
         if (files.length) body.append(workspace.cards(files));
-        endedNote(body, m.status, said);
+        cards.ending(body, m, messages, true);
         bindMessageMenu(row, m, said);
         row.append(body);
         if (row.classList.contains("cont")) markContinuation(row, m.time);
@@ -3400,6 +3409,7 @@
     chatHistory.top(inner); // 更早的消息 at the top (chat-history.js)
     // Rows that did not change keep their element: only new rows rise in.
     const shown = live.commit(inner, sendFeedback(inner, messages));
+    cards.rendered(); // request cards and choices filled in place, before the scroll is placed
     state.firstRender = false;
     thread.scrollTop = near ? thread.scrollHeight : Math.min(prevTop, thread.scrollHeight);
     keepReading(anchor);
@@ -4408,6 +4418,8 @@
     live.select(chatKey(state.sel));
     // And its earlier pages, the header's ⋯ menu and the suggestions (chat-history.js).
     chatHistory.select(state.sel);
+    // And the open requests read for it, and its cards' frames (chat-cards.js).
+    cards.select(state.sel);
     stopState = null;
     state.streaming = 0;
     state.pendingSends = [];
@@ -4620,6 +4632,7 @@
         state.messages = messages;
         workspace.observe(selection, data.thread_id, sig !== state.sig);
         experience.observe(selection, data.thread_id, sig !== state.sig);
+        cards.observe(selection, data.thread_id, messages);
         if (sig === state.sig) { live.attach(); return; }
         state.sig = sig;
         if (state.peer) return;
@@ -4635,6 +4648,7 @@
       const sig = JSON.stringify(sigRows(messages));
       workspace.observe(selection, data.group?.native_thread_id || data.group?.id, sig !== state.sig);
       experience.observe(selection, data.group?.native_thread_id || data.group?.id, sig !== state.sig);
+      cards.observe(selection, data.group?.native_thread_id || data.group?.id, messages);
       if (sig === state.sig) { live.attach(); return; }
       state.sig = sig;
       renderGroup(messages, data.group || { id: selection.id });
@@ -6145,7 +6159,9 @@
   // The send shows at once (the owner's bubble 发送中, and the cat's typing
   // bubble from chat-live.js); the server's answer is only its admission, and
   // the reply arrives on the thread's event stream and in the transcript.
-  async function sendText(text, pending, images, files) {
+  // sent: called once the server took the message (a choice's pick and
+  // 再发一次 in chat-cards.js go through this same path).
+  async function sendText(text, pending, images, files, sent) {
     text = (text || "").trim();
     images = images || [];
     files = files && files.ids && files.ids.length ? files : null;
@@ -6235,6 +6251,7 @@
         throw err;
       }
       markSent();
+      try { if (sent) sent(); } catch (err) { /* the caller's own bookkeeping never fails the send */ }
       // The native admission (an event stream for a cat, JSON for a group): it
       // names the owner's message, so its row is matched when the history has it.
       const json = (res.headers.get("content-type") || "").includes("application/json");
@@ -7379,6 +7396,9 @@
     obscured: () => !$("setpage").hidden || !lightbox.hidden
       || (window.innerWidth < 768 && (panel.classList.contains("open") || sidebar.classList.contains("open"))),
     focusTask: (id) => workspace.focusTask(id),
+    // 去确认 finds the request's card in the history (chat-cards.js); a waiting request is named by its card's title.
+    confirm: (item) => cards.find(item),
+    approvalLabel: (item) => cards.label(item),
     // A confirmed read clears that conversation's dot at once; the next status poll agrees.
     onRead: (sel, threadId) => {
       const st = sel.type === "group" ? stStatus.groups[sel.id] : stStatus.map[sel.id];
@@ -7411,6 +7431,26 @@
       gapRead = setTimeout(() => { gapRead = 0; loadThread().catch(() => {}); }, 1500);
     },
     focusComposer: () => { if (window.innerWidth >= 768) input.focus({ preventScroll: true }); },
+  });
+  // 确认与提醒 (chat-cards.js): request cards, a cat's blocks and how an
+  // unfinished reply ended, in the history; picks and 再发一次 go out through
+  // the normal send path.
+  cards.init({
+    api, apiFetch, icon, thread,
+    render: (parent, text) => appendMarkdown(parent, displayText(text)),
+    send: (text, sent) => sendText(text, null, null, null, sent),
+    reload: () => { state.sig = ""; return loadThread().catch(() => {}); },
+  });
+  // Desktop notifications (chat-notify.js), from the status polled above: a
+  // click focuses the tab and opens that chat (and finds a request's card).
+  notify.init({
+    selection: () => (state.peer ? null : state.sel),
+    chatName: (note) => (note.type === "group" ? niceName(((state.groups || []).find((g) => g.id === note.id) || {}).name || "") : ""),
+    open: async (note) => {
+      if (!$("setpage").hidden) closeSettings(false);
+      if (note.type === "group") await pickGroup(note.id); else await pickBot(note.id);
+      if (note.kind === "approval") cards.locateSoon(state.sel, { proposalId: note.proposalId, messageId: note.messageId });
+    },
   });
   // 开箱即用 (quick-create.js) draws with these and opens what it made.
   quick.init({
@@ -7560,9 +7600,11 @@
     setInterval(() => {
       if (shell.hidden) return;
       // In a background tab the status is read every 30 s instead of 3 s, so
-      // the page title's unread count (chat-list.js) still says when a reply lands.
+      // the page title's unread count (chat-list.js) still says when a reply lands;
+      // every 6 s while the owner has desktop notifications on (chat-notify.js
+      // reads the same answer).
       hiddenTicks = document.hidden ? hiddenTicks + 1 : 0;
-      if (!document.hidden || hiddenTicks % 10 === 0) refreshStatus().catch(() => {});
+      if (!document.hidden || hiddenTicks % (notify.wanted() ? 2 : 10) === 0) refreshStatus().catch(() => {});
       if (state.streaming) return;
       if (!document.hidden) refreshUpdate().catch(() => {});
       refreshNotes().catch(() => {});

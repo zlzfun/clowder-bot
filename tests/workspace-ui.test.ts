@@ -1598,7 +1598,7 @@ test('the page loads the workspace scripts before app.js and their styles last; 
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
   // After every upstream and earlier style; only the status-line/memory, 开箱即用, 找得到, 资料页与群 and live-reply extensions (which build on it) follow.
   assert.ok(styles.indexOf('workspace.css') > styles.indexOf('chat-presentation.css'));
-  assert.deepEqual(styles.slice(styles.indexOf('workspace.css') + 1), ['chat-experience.css', 'quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'profile.css', 'mention.css', 'chat-live.css']);
+  assert.deepEqual(styles.slice(styles.indexOf('workspace.css') + 1), ['chat-experience.css', 'quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'profile.css', 'mention.css', 'chat-cards.css', 'chat-live.css']);
   assert.doesNotMatch(app, /\/paste"/);
   // 文件 is a tab of both kinds of chat (profile-rules.js), drawn by the module.
   assert.match(read('client/public/profile-rules.js'), /\["files", "文件"\]/);
@@ -1630,7 +1630,9 @@ test('a cat\'s SILENT is never shown as words: a bare one is not drawn, one that
     workspace: { cards: (files: Array<{ name: string }>) => ({ cards: files.map(f => f.name) }) },
     window: { XBotProviders: { citedText: (content: string) => content, decorate: () => {} } },
     bindMessageMenu: (row: Node, _m: unknown, text: string) => { row.dataset.copy = text; },
-    markContinuation: () => {}, addBubbleTime: () => {}, endedNote: () => {},
+    markContinuation: () => {}, addBubbleTime: () => {},
+    // chat-cards.js as it treats a plain reply: its words as they are, no blocks, no ending.
+    cards: { words: (_m: unknown, text: string) => text, blocks: () => {}, ending: () => {} },
   });
   // Only a bare SILENT is left out.
   assert.equal(out.silentOnly({ content: ' SILENT \n' }), true);
@@ -1655,6 +1657,6 @@ test('a cat\'s SILENT is never shown as words: a bare one is not drawn, one that
   assert.match(app, /if \(m\.role === "assistant" && silentOnly\(m\)\) return;/);
   assert.doesNotMatch(app, /=== "SILENT" && !\(m\.images \|\| \[\]\)\.length\) return;/);
   assert.match(app, /if \(!mine && isSilent\(text\) && !\(m\.attachments \|\| \[\]\)\.length\) continue;/);
-  assert.match(app, /const said = isSilent\(text\) \? "" : text;\n\s+if \(said \|\| !files\.length\) appendBotContent\(body, said\);/);
+  assert.match(app, /const said = cards\.words\(m, isSilent\(text\) \? "" : text\);\n\s+if \(said \|\| !files\.length\) appendBotContent\(body, said\);/);
   assert.match(app, /if \(silentOnly\(m\)\) \{ hidden\.add\(wake\.i\); hidden\.add\(i\); \}/);
 });

@@ -56,9 +56,9 @@
 ## 状态行与已读
 
 - 一行：行首是最紧要的一类，顺序为待确认、失败、处理中、排队、未完成任务；其余类别写成「· 处理中 1 · 排队 1 · 任务 3」，不因优先级隐去。多项待确认写「N 项等你确认」。读取部分失败追加「· 部分状态读不到」；没有任何事项而读取不完整、或第一次读取就失败时写「暂时无法确认状态」；读取失败但有上次结果时保留并注明。只有服务端 `unread>0` 且最新回复不在视野内时才写「N 条新回复」。不用「子代理」等内部概念；执行结束不称回复，Task 完成只描述该任务。
-- 点击原位展开：默认列前 6 项；更多时其后有「查看其余 N 项」，原位列出全部待确认与并发事项（原生顺序），再点「收起」回到前 6 项。展开与否在同一会话的刷新、重绘中保持（焦点留在这个按钮上），换会话或线程后恢复简短。服务端计数多于列出项时另写「另有 N 项没有列出」。每项是类别、猫头像与原生标签。有 `messageId` 的「查看」在当前对话里定位并聚焦该消息；任务项（有 `taskId`，即使也带来源消息）的「打开任务」打开「资料」（群聊「成员」）页的「高级」并聚焦该卡片（已完成的会展开「已完成」）；找不到时原位说明，不猜测。待确认另有「去确认」，在新标签打开运行面板，用其原有审批控件；聊天里不批准、不自动批准。Escape 收起并回到这一行。
+- 点击原位展开：默认列前 6 项；更多时其后有「查看其余 N 项」，原位列出全部待确认与并发事项（原生顺序），再点「收起」回到前 6 项。展开与否在同一会话的刷新、重绘中保持（焦点留在这个按钮上），换会话或线程后恢复简短。服务端计数多于列出项时另写「另有 N 项没有列出」。每项是类别、猫头像与原生标签。有 `messageId` 的「查看」在当前对话里定位并聚焦该消息；任务项（有 `taskId`，即使也带来源消息）的「打开任务」打开「资料」（群聊「成员」）页的「高级」并聚焦该卡片（已完成的会展开「已完成」）；找不到时原位说明，不猜测。待确认项是一个「去确认」（2026-11-11 起，[xbot-frontend.md](xbot-frontend.md) 第 32 项）：这件事的确认卡在已加载的历史里时，滚到那张卡、闪一下并聚焦它，由卡片上的按钮回答（界面只转交用户的回答，从不自动同意）；不在已加载的历史里（例如在更早的一页）时，链接在新标签打开运行面板，用其原有审批控件。有确认卡时待确认项不再另给「查看」。服务端标签还带引擎英文前缀时，换成卡片标题或去掉前缀的摘要。Escape 收起并回到这一行。
 - 侧栏：猫与群的第二行显示「N 项等你确认」「有一项失败」「暂时无法确认状态」，群也显示处理中／排队与红点；空闲时是离开时留下的「草稿：…」或这个对话最新说出的一句（`activity.last`：「你：…」、群聊「名字：…」、「[文件] 2 个」），名字行右端是那一句的时间，两条及以上新回复时第二行右端有数字，列表按最新一句的时间排序、页面标题带全部新回复的总数；整个状态读取失败时，列表上方一行淡字「状态没能刷新，列表可能不是最新的。」，下一次读取成功即消失（`chat-list.js`，见 [XBot 原版前端接入](xbot-frontend.md) 第 30 项及其复核修正）。第二行不单独响应点击：点整行任一处都只打开该会话（已打开的保持原样，窄屏下只收起列表、露出聊天），之后由聊天里的状态行定位消息或任务（见 [XBot 原版前端接入](xbot-frontend.md) 第 24 项）。
-- 已读：只有页面可见、对话区未被遮住、activity 与当前对话是同一线程、有未读、`latestMessageId` 那一行在对话视口里停留 0.8 秒，才 `POST <scope>/read`；同一条只发一次，一次一个请求。404（这条不是该线程的可见回复或已不存在，不当作接口缺失）与 409（线程已变化，另重新读取状态）只针对这一条回复，之后的新回复照常确认；其他失败 20 秒后才再试。切换会话或线程后到达的应答不改当前会话：成功只记下那一条已确认（不改红点和状态），失败不留下拒绝记录、等待或重读，回到原线程时那一条仍会再确认。后台轮询、隐藏页面、停在旧消息时都不确认。只做应用内提醒，没有系统通知。
+- 已读：只有页面可见、对话区未被遮住、activity 与当前对话是同一线程、有未读、`latestMessageId` 那一行在对话视口里停留 0.8 秒，才 `POST <scope>/read`；同一条只发一次，一次一个请求。404（这条不是该线程的可见回复或已不存在，不当作接口缺失）与 409（线程已变化，另重新读取状态）只针对这一条回复，之后的新回复照常确认；其他失败 20 秒后才再试。切换会话或线程后到达的应答不改当前会话：成功只记下那一条已确认（不改红点和状态），失败不留下拒绝记录、等待或重读，回到原线程时那一条仍会再确认。后台轮询、隐藏页面、停在旧消息时都不确认。桌面通知是可选的（设置 → 通用 → 桌面通知，第 32 项）：只读同一次状态应答里的 `activity.unread`、`activity.last` 与待确认项，不发 `POST <scope>/read`，不改未读数和页面标题；没有服务工作线程或手机推送。
 
 ## 记忆
 
@@ -71,6 +71,8 @@
 ## 用到的接口
 
 第 30 项另用到：`GET /xbot-api/bots/status` 里的 `activity.last`、`GET /xbot-api/bots/:name/transcript?before=`、`GET /xbot-api/groups/:id?before=` 与 `POST /xbot-api/bots/:name/new`。
+
+第 32 项另用到：`GET <scope>/approvals`、`POST <scope>/approvals/:id`、`POST <scope>/messages/:messageId/blocks/:blockId/answer`，以及会话行的 `blocks`、`blocks_hidden`、`ended`、`notice`。
 
 `GET <scope>/activity`、`POST <scope>/read`、`GET /xbot-api/bots/status`（`thread_id`、`activity`、`groups`）、`GET /xbot-api/memory/profile|taste`、`GET /xbot-api/memory/:kind/:id/source?revision=…`、`GET /xbot-api/bots/:name/memory`（便笺，只读；服务端原有的 `POST`／`DELETE` 路由保留，前端不调用）；`GET <scope>/workspace`（只用 `threadId`、`workspacePath`、`sharedPath`；`defaultRoot`、`filePolicy` 等字段不显示、不据此声明）；`GET /xbot-api/bots/:name/conversations`、`PUT /xbot-api/bots/:name/conversation`；`GET/POST <scope>/files`、`GET <scope>/workspace-tree`、`POST <scope>/deliverables`；`GET /xbot-api/files/:id/download`（含 HEAD 探测）、`/preview`、`/image`；`GET <scope>/tasks`、`POST <scope>/tasks/:id/handoff`、`POST <scope>/tasks/:id/control`；既有的 `POST <scope>/messages` 与 `POST /xbot-api/groups`。`<scope>` 为 `/xbot-api/bots/:name` 或 `/xbot-api/groups/:id`。下载链接、图片地址都按文件 ID 自行拼出，不直接使用服务端返回的 URL。前端不再调用 `/xbot-api/projects`、`PUT <scope>/workspace`、`POST <scope>/tasks` 与 `PATCH <scope>/tasks/:id`（服务端兼容接口另行保留或退役）。
 
