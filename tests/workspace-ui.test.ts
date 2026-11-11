@@ -1031,10 +1031,14 @@ const openCat = async (p: ReturnType<typeof historyCat>) => {
   return n;
 };
 
-test('历史对话 shows only once the cat has more than one saved conversation: folded, titled, the current one marked, and nothing else to manage', async () => {
+test('历史对话 is there once the cat\'s conversations are read, even with only the one open now: folded, titled, the current one marked, and nothing else to manage', async () => {
   const one = historyCat({ list: [{ id: 'thread-A', title: 'Ada', createdAt: T0 }] });
   const lone = await openCat(one);
-  assert.equal(lone.hidden, true, 'one conversation: nothing to go back to');
+  // Always reachable (资料 page): with one conversation it lists that one, marked and not a control.
+  assert.equal(lone.hidden, false, 'one conversation: the fold is there for the next 新对话');
+  assert.equal(textOf(foldOf(lone, 'ws-conv-fold').firstChild as El), '历史对话 · 1');
+  assert.deepEqual(rowsOf(lone).map(r => [r.tagName, r.getAttribute('aria-current')]), [['DIV', 'true']]);
+  assert.equal(all(lone).filter(e => e.tagName === 'BUTTON').length, 0, 'nothing to switch to yet');
   assert.equal(one.count('GET', '/xbot-api/bots/Ada/conversations'), 1);
   one.ws.observe(ada, 'thread-A', true);
   one.draw();
@@ -1592,14 +1596,16 @@ test('the page loads the workspace scripts before app.js and their styles last; 
   assert.ok(at('runtime-tasks.js') >= 0 && at('runtime-tasks.js') < at('workspace.js'));
   assert.ok(at('workspace-rules.js') < at('workspace.js') && at('workspace.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
-  // After every upstream and earlier style; only the status-line/memory, 开箱即用, 找得到 and live-reply extensions (which build on it) follow.
+  // After every upstream and earlier style; only the status-line/memory, 开箱即用, 找得到, 资料页与群 and live-reply extensions (which build on it) follow.
   assert.ok(styles.indexOf('workspace.css') > styles.indexOf('chat-presentation.css'));
-  assert.deepEqual(styles.slice(styles.indexOf('workspace.css') + 1), ['chat-experience.css', 'quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'chat-live.css']);
+  assert.deepEqual(styles.slice(styles.indexOf('workspace.css') + 1), ['chat-experience.css', 'quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'profile.css', 'mention.css', 'chat-live.css']);
   assert.doesNotMatch(app, /\/paste"/);
-  assert.match(app, /\["files", "文件"\]/);
-  // 详情 appends the module's 历史对话 node only when it gives one (cats, never groups).
-  const details = /function detailsView\(data\) \{[\s\S]*?\n {2}\}\n/.exec(app)![0];
-  assert.match(details, /const history = workspace\.conversationsView\(state\.sel\);\n\s+if \(history\) wrap\.append\(history\);/);
+  // 文件 is a tab of both kinds of chat (profile-rules.js), drawn by the module.
+  assert.match(read('client/public/profile-rules.js'), /\["files", "文件"\]/);
+  assert.equal((app.match(/workspace\.filesView\(state\.sel\)/g) || []).length, 2, 'a cat\'s and a group\'s');
+  // 资料 (profile.js) holds the module's 历史对话 node when it gives one (cats, never groups).
+  assert.match(app, /conversations: \(sel\) => workspace\.conversationsView\(sel\),/);
+  assert.match(read('client/public/profile.js'), /const convs = H\.conversations\(P\.sel\);/);
   // Only existing tokens: no new colour literal in the module's styles.
   assert.doesNotMatch(css.replace(/\/\*[\s\S]*?\*\//g, ''), /#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i);
   assert.doesNotMatch(css, /\.ws-chip|\.ws-menu|\.ws-ctx|\.ws-project-field|\.wst-create|\.ws-add/);

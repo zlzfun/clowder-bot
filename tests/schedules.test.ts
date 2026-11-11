@@ -832,7 +832,7 @@ test('刷新 also re-reads an open trigger record; nothing reads on a timer', as
 });
 
 // ---- wiring ----
-test('the drawer\'s 任务 tab mounts the module; the retired routine row and its claims are gone', () => {
+test('the drawer\'s 定时 tab mounts the module on a page of its own; the retired routine row and its claims are gone', () => {
   const html = read('client/index.html'), app = read('client/public/app.js'), source = read('client/public/schedules.js');
   const scripts = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]);
   assert.ok(scripts.indexOf('/schedules.js') >= 0 && scripts.indexOf('/schedules.js') < scripts.indexOf('/app.js'));
@@ -841,12 +841,18 @@ test('the drawer\'s 任务 tab mounts the module; the retired routine row and it
   assert.doesNotMatch(html, /定时任务/, 'no settings entry');
   // The section is mounted by the task view and torn down when the cat changes.
   assert.match(app, /window\.ClowderSchedules\.mount\(root, \{ api: scheduleApi, bot: name, icon \}\)/);
-  assert.match(app, /function syncTaskView\(root, data\) \{\s*const schedules = scheduleSection\(root, data\.name\);/);
+  // 定时 is its own tab now (profile-rules.js): a page the section is mounted into; the run cards no longer carry it.
+  assert.match(read('client/public/profile-rules.js'), /\["schedule", "定时"\]/);
+  assert.match(app, /function scheduleView\(name\) \{\s*const host = el\("div", "pf-sched"\);\s*host\.dataset\.bot = name;\s*scheduleSection\(host, name\);/);
+  assert.match(app, /else if \(tab === "schedule"\) body\.append\(scheduleView\(data\.name \|\| state\.sel\.id\)\);/);
+  assert.match(app, /if \(sched && state\.sel\?\.type === "bot" && tab === "schedule" && sched\.dataset\.bot === state\.sel\.id\) \{\s*panelHead\(\); scheduleSection\(sched, state\.sel\.id\);/, 'a repaint keeps the page shown');
+  const sync = /function syncTaskView\(root, data\) \{[\s\S]*?\n {2}\}\n/.exec(app)![0];
+  assert.doesNotMatch(sync, /scheduleSection|ClowderSchedules/);
   assert.match(app, /function resetConversation\(\) \{[\s\S]*?window\.ClowderSchedules\?\.teardown\(\);[\s\S]*?\n  \}/);
   assert.match(app, /if \(open && !panel\.classList\.contains\("open"\)\) window\.ClowderSchedules\?\.reopened\(\);/);
   assert.match(app, /const scheduleApi = \(path, opt\) => api\(path, Object\.assign\(\{\}, opt, \{ serverError: true \}\)\);/);
   assert.match(app, /if \(res\.status >= 500 && !serverError\)/, 'other callers keep the generic 5xx line');
-  assert.match(app, /if \(root && state\.tab === "computer" && root\.dataset\.bot === data\.name\) syncTaskView\(root, data\);/, 'the poll syncs only the view drawn for this cat');
+  assert.match(app, /if \(root && root\.dataset\.bot === data\.name\) syncTaskView\(root, data\);/, 'the poll syncs only the run cards drawn for this cat');
   assert.doesNotMatch(app, /routineCard|updateRoutineCard|routineChanges|cronText|每天 8 点提醒我|还没有例程|\["例程"|profile\.routines|prior\.routines|现在跑一次/);
   // Chat rendering of routine messages is a different thing and stays.
   assert.match(app, /function routineOf\(m\)/);

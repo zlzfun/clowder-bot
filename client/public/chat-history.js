@@ -10,7 +10,8 @@
 //   starters(inner, read) while drawing a single chat: suggestions under the
 //                        cat's greeting until the owner has said anything.
 // The chat header gets a compact 更多 (⋯) menu: 新对话 and 历史对话 for a cat,
-// 在对话里查找 when the search palette is there.
+// 在对话里查找 when the search palette is there. newConversation(sel, opener)
+// is the same 新对话 dialog for another entry (the drawer's 资料, profile.js).
 //
 // Every row still comes from the server and is drawn through the history's
 // keyed redraw (ClowderLive.commit in app.js), so a row that did not change
@@ -313,9 +314,10 @@
 
   // ---------------------------------------------------- the menu's actions
   // A small dialog in the shell's own style (.modal / .modal-card): Escape
-  // and Tab stay inside, focus returns to the ⋯ button.
+  // and Tab stay inside, focus returns to what opened it (the ⋯ button, or
+  // the drawer's 新对话).
   let layer = null;
-  function dialog({ title, body, submit, onSubmit }) {
+  function dialog({ title, body, submit, onSubmit, opener }) {
     if (layer) layer.close(true);
     const root = node("div", "modal ch-modal");
     const card = node("form", "modal-card");
@@ -347,7 +349,8 @@
         alive = false;
         root.remove();
         if (layer === d) layer = null;
-        if (more && more.isConnected && !more.hidden) more.focus({ preventScroll: true });
+        if (opener && opener.isConnected) opener.focus({ preventScroll: true });
+        else if (more && more.isConnected && !more.hidden) more.focus({ preventScroll: true });
         else document.getElementById("input")?.focus({ preventScroll: true });
       },
     };
@@ -371,26 +374,35 @@
 
   // 新对话: the cat starts a fresh conversation (the existing native move to a
   // new thread). It needs the current one to be idle; the old one stays a
-  // saved conversation, and what the cat remembers is not touched.
-  function newConversation(sel) {
+  // saved conversation, and what the cat remembers is not touched. The
+  // request names the conversation this page shows (expectedThreadId) when it
+  // knows it, so a view that is no longer current, or a retry after an answer
+  // that never came, cannot start a second one: the server says it changed.
+  function newConversation(sel, opener) {
     const name = H.name(sel);
     const busyText = name + "还在忙这段对话。等它做完，或者先点停止，再开始新对话。";
     const body = [node("p", "ch-note", "现在这段对话会留在「历史对话」里，随时能回去接着聊；" + name + "记住的事都还在。")];
     const files = H.pendingFiles();
     if (files) body.push(node("p", "ch-note", "待发送的 " + files + " 个附件会被移除。"));
     const d = dialog({
-      title: "和" + name + "开始新对话", body, submit: "开始新对话",
+      title: "和" + name + "开始新对话", body, submit: "开始新对话", opener,
       onSubmit: async () => {
         if (H.selected() !== sel) { d.close(true); return; }
         if (H.working()) { d.error(busyText); return; }
         d.error("");
         d.busy(true);
+        const expected = typeof H.threadId === "function" ? H.threadId() : "";
         try {
-          await H.api("/xbot-api/bots/" + encodeURIComponent(sel.id) + "/new", { method: "POST" });
+          await H.api("/xbot-api/bots/" + encodeURIComponent(sel.id) + "/new", expected ? { method: "POST", body: { expectedThreadId: expected } } : { method: "POST" });
         } catch (e) {
           if (!d.alive()) return;
           d.busy(false);
-          if (e && e.status === 409) d.error(/切换/.test(String(e.message || "")) ? "正在切换对话，稍等一下再试。" : busyText);
+          const said = String((e && e.message) || "");
+          if (e && e.status === 409 && /变化/.test(said)) {
+            // The conversation changed under this page (a 新对话 that did go through, or one opened elsewhere).
+            d.error("这段对话刚换过了。先看一眼对话，再决定要不要开新对话。");
+            H.reload();
+          } else if (e && e.status === 409) d.error(/切换/.test(said) ? "正在切换对话，稍等一下再试。" : busyText);
           else if (!e || !e.status || e.status >= 500) {
             // No answer, or the server failed: it may have started anyway. The chat reads again to say.
             d.error("没能确认新对话有没有开始。先看一眼对话，再决定要不要重试。");
@@ -408,7 +420,7 @@
     });
   }
 
-  // 历史对话: the existing list in the cat's 详情, opened on it.
+  // 历史对话: the existing list in the cat's 资料, opened on it.
   async function pastConversations(sel) {
     const asked = H.conversations();
     await H.openDetails();
@@ -444,7 +456,8 @@
   //   pendingFiles()       files waiting in the composer;
   //   conversations()      read the cat's saved conversations and open their
   //                        fold (resolves to how many, or null if unreadable);
-  //   openDetails()        open the drawer on 详情;
+  //   threadId()           the conversation this page shows, if known;
+  //   openDetails()        open the drawer on 资料;
   //   place(anchor, menu)  position a menu under its button;
   //   toast(text), status(text, isError).
   function init(hooks) {
@@ -457,7 +470,7 @@
   }
 
   window.ClowderHistory = Object.freeze({
-    init, select, merge, top, starters, load, sync: syncMenu, openMenu, closeMenu,
+    init, select, merge, top, starters, load, sync: syncMenu, openMenu, closeMenu, newConversation,
     // For tests and diagnostics only: what this page holds, never a record.
     peek: () => ({ key: P.key, thread: P.thread, held: P.held.length, state: P.state, loaded: P.loaded, cursor: nextCursor() }),
   });
