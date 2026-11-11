@@ -282,9 +282,11 @@ test('a signature a cat wrote at the start of its own reply is hidden when words
   assert.equal(shown('[快手/Haiku🐾]  今天精力满满，准备好接棒！🚀'), '今天精力满满，准备好接棒！🚀');
   assert.equal(shown('[快手🐾] 7'), '7');
   assert.equal(shown('[快手/Haiku 🐾] 好的\n\n[快手/Haiku 🐾]'), '好的', 'and the closing one as before');
-  // Not its own name, nothing after it on the line, not at the start, or the speaker unknown: the text stays.
-  for (const text of ['[墨点/gpt🐾] 是墨点的署名', '[快手/Haiku🐾]\n这是一段示例', '看这个 [快手/Haiku🐾] 格式', '[快手] 没有猫爪', '[快手/Haiku🐾]'])
-    assert.equal(shown(text), text === '[快手/Haiku🐾]' ? '' : text, text);
+  assert.equal(shown('[快手/Haiku🐾]\n\n7'), '7', 'the real shape: the signature on a line of its own, then the answer');
+  // Not its own name, not at the start, or no paw: the text stays. A signature with nothing after it is the closing kind.
+  for (const text of ['[墨点/gpt🐾] 是墨点的署名', '[墨点/gpt🐾]\n\n7', '看这个 [快手/Haiku🐾] 格式', '[快手] 没有猫爪'])
+    assert.equal(shown(text), text, text);
+  assert.equal(shown('[快手/Haiku🐾]'), '');
   assert.equal(shown('[快手/Haiku🐾]  今天'), '今天');
   assert.equal(messageDisplayText({ id: 'm', type: 'assistant', catId: cat.id, timestamp: 1, content: '[快手/Haiku🐾]  今天' }, thread.id), '[快手/Haiku🐾]  今天');
   // Through the routes: a group reply and the conversation's latest line.

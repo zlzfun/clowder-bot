@@ -64,12 +64,13 @@ export function messageDisplayText(message: NativeMessage, threadId: string, cat
 /**
  * Some models open a reply with the paw signature instead of closing with it
  * ("[快手/Haiku🐾]  今天…", seen in real group replies). It is hidden only when
- * it is the speaking cat's own name and words follow on the same line, so a
- * reply that talks about signatures, or quotes another cat's, keeps its text.
+ * it is the speaking cat's own name and words follow it (on the same line or,
+ * as in "[快手/Haiku🐾]\n\n7", on the next), so a reply that quotes another
+ * cat's signature, or mentions one further inside, keeps its text.
  */
 function withoutLeadingSignature(text: string, catName?: string): string {
   if (!catName || !text.startsWith('[')) return text;
-  const match = /^\[([^\[\]\r\n/]{1,80})(?:\/[^\[\]\r\n]{0,80})?\s?🐾\][ \t]+(?=\S)/u.exec(text);
+  const match = /^\[([^\[\]\r\n/]{1,80})(?:\/[^\[\]\r\n]{0,80})?\s?🐾\]\s+(?=\S)/u.exec(text);
   return match && match[1]!.trim() === catName ? text.slice(match[0].length) : text;
 }
 
