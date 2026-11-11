@@ -1,0 +1,160 @@
+// 群聊输入框里的 @ (classic script, window.ClowderMention). The rules live in
+// mention-rules.js; app.js passes the composer and its own text helpers
+// through init() and calls close() when the conversation changes.
+//
+// Typing @ in a group chat lists this group's members and 「全体」 above the
+// composer. ↑/↓ move, Enter or Tab inserts, Esc dismisses (until another @);
+// a click or a tap inserts too. Picking writes `@名字 ` at the caret as one
+// undoable edit. The text is sent as it is; the engine routes it. Single chats
+// never show the list.
+(() => {
+  "use strict";
+  const R = window.ClowderMentionRules;
+  if (!R) throw new Error("mention-rules.js must load before mention.js");
+
+  let H = null;
+  const node = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+  // 「全体」's mark: two people (app.js's set has only a person with a plus).
+  const USERS = '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>';
+  function glyph(body) {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("aria-hidden", "true");
+    svg.classList.add("icon");
+    svg.innerHTML = body;
+    return svg;
+  }
+  let seq = 0;
+  // pop: the list element while open; at: the mention being typed; dismissed:
+  // where an Esc'd mention starts, so the same @ stays quiet.
+  const S = { pop: null, items: [], active: 0, at: null, names: [], dismissed: -1, composing: false, pressing: false };
+
+  function init(hooks) {
+    H = hooks;
+    const input = H.input, composer = H.composer;
+    // Capture on the form: these keys are the list's before the composer
+    // turns Enter into a send, or the page turns Esc into closing the drawer.
+    composer.addEventListener("keydown", onKey, true);
+    input.addEventListener("input", (ev) => { if (!ev.isComposing) update(); });
+    input.addEventListener("compositionstart", () => { S.composing = true; });
+    input.addEventListener("compositionend", () => { S.composing = false; update(); });
+    input.addEventListener("click", () => update());
+    input.addEventListener("keyup", (ev) => { if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(ev.key)) update(); });
+    // Leaving the composer closes the list, except for a press on the list
+    // itself (a touch press may still move focus before its click lands).
+    input.addEventListener("blur", () => { if (!S.pressing) close(); });
+  }
+
+  const open = () => !!S.pop;
+
+  // Read the draft again: open, refresh or close the list.
+  function update() {
+    if (!H || S.composing) return;
+    const names = H.members();
+    if (!names) { close(); return; }
+    const found = R.active(H.text(), H.caret());
+    if (!found) { S.dismissed = -1; close(); return; }
+    if (found.start === S.dismissed) { close(); return; }
+    const items = R.suggest(found.query, names);
+    if (!items.length) { close(); return; }
+    const keep = S.pop && S.at && S.at.start === found.start ? S.items[S.active] : null;
+    S.at = found;
+    S.names = names;
+    S.items = items;
+    const again = keep ? items.findIndex((it) => it.kind === keep.kind && it.name === keep.name) : -1;
+    S.active = again >= 0 ? again : 0;
+    paint();
+  }
+
+  function paint() {
+    const input = H.input;
+    if (!S.pop) {
+      S.pop = node("div", "pop mx-pop");
+      S.pop.id = "mx-list-" + ++seq;
+      S.pop.setAttribute("role", "listbox");
+      S.pop.setAttribute("aria-label", "要 @ 的猫猫");
+      // Keep the caret in the composer: a press on the list never takes focus.
+      S.pop.addEventListener("pointerdown", (ev) => { S.pressing = true; ev.preventDefault(); });
+      S.pop.addEventListener("mousedown", (ev) => ev.preventDefault());
+      S.pop.addEventListener("pointercancel", () => { S.pressing = false; });
+      H.composer.append(S.pop);
+      input.setAttribute("aria-controls", S.pop.id);
+      input.setAttribute("aria-autocomplete", "list");
+    }
+    const id = S.pop.id;
+    S.pop.replaceChildren(...S.items.map((it, i) => {
+      const row = node("div", "mx-opt" + (it.kind === "all" ? " all" : ""));
+      row.id = id + "-" + i;
+      row.setAttribute("role", "option");
+      row.setAttribute("aria-selected", String(i === S.active));
+      if (it.kind === "all") {
+        const mark = node("span", "mx-all");
+        mark.setAttribute("aria-hidden", "true");
+        mark.append(glyph(USERS));
+        row.append(mark, node("span", "mx-name", R.ALL.label), node("span", "mx-hint", R.ALL.hint));
+      } else {
+        row.append(H.face(it.name), node("span", "mx-name", it.name));
+      }
+      row.addEventListener("mousemove", () => { if (S.active !== i) { S.active = i; mark(); } });
+      row.addEventListener("click", () => pick(i));
+      return row;
+    }));
+    mark();
+  }
+
+  // The highlighted row: kept in view, and named to assistive tech.
+  function mark() {
+    if (!S.pop) return;
+    [...S.pop.children].forEach((row, i) => row.setAttribute("aria-selected", String(i === S.active)));
+    const row = S.pop.children[S.active];
+    if (row) {
+      H.input.setAttribute("aria-activedescendant", row.id);
+      if (typeof row.scrollIntoView === "function") row.scrollIntoView({ block: "nearest" });
+    }
+  }
+
+  function pick(i) {
+    const item = S.items[i], at = S.at;
+    if (!item || !at) return;
+    const next = R.insert(H.text(), at, item, S.names);
+    S.dismissed = -1;
+    close();
+    if (document.activeElement !== H.input) H.input.focus({ preventScroll: true });
+    H.apply(next.text, next.caret);
+  }
+
+  function onKey(ev) {
+    if (!open() || ev.target !== H.input || ev.isComposing || ev.keyCode === 229) return;
+    if (ev.altKey || ev.ctrlKey || ev.metaKey) return;
+    const n = S.items.length;
+    if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+      S.active = (S.active + (ev.key === "ArrowDown" ? 1 : n - 1)) % n;
+      mark();
+    } else if ((ev.key === "Enter" || ev.key === "Tab") && !ev.shiftKey) {
+      pick(S.active);
+    } else if (ev.key === "Escape") {
+      S.dismissed = S.at ? S.at.start : -1;
+      close();
+    } else return;
+    ev.preventDefault();
+    ev.stopPropagation();
+  }
+
+  function close() {
+    S.pressing = false;
+    if (!S.pop) return;
+    S.pop.remove();
+    S.pop = null;
+    S.items = [];
+    S.at = null;
+    if (H) for (const name of ["aria-controls", "aria-activedescendant", "aria-autocomplete"]) H.input.removeAttribute(name);
+  }
+
+  window.ClowderMention = Object.freeze({
+    init,
+    update,
+    // Another conversation, or none: the list (and an Esc'd @) is forgotten.
+    close: () => { S.dismissed = -1; close(); },
+    open,
+  });
+})();

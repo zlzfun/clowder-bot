@@ -63,22 +63,16 @@
     preview: {},
     previewAt: {},
     listSig: "",
-    tab: "details",
+    // The drawer tab last chosen; each kind of chat shows its own tabs
+    // (profile-rules.js tabFor maps it, and the retired names, to one of them).
+    tab: "profile",
     panelData: null,
     panelTouched: false,
     editOpen: false,
     messages: [],
-    traceOpen: {},
-    traceOut: {},
-    traceThink: {},
-    // The context panel's own UI state: which request is shown, which band or
-    // message is open, and the snapshot itself (fetched per bot, never cached
-    // across a switch so a stale turn cannot be misread as the current one).
+    // The cat's context window as GET bots/:name/context reports it, for the
+    // note beside 它用什么思考 (fetched per bot, never kept across a switch).
     ctxSnap: null,
-    ctxStep: -1,
-    ctxMenu: false,
-    ctxOpen: { turn: true },
-    ctxRaw: "",
     peer: null,
     replyTo: null,
     // Files waiting in the composer live in workspace.js (see attachReady).
@@ -680,7 +674,6 @@
     "circle-x": '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/>',
     ban: '<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
     square: '<rect x="3" y="3" width="18" height="18" rx="2"/>',
-    "corner-down-right": '<path d="M15 10l5 5-5 5"/><path d="M4 4v7a4 4 0 0 0 4 4h12"/>',
     hourglass: '<path d="M5 22h14M5 2h14M17 22v-4.2a2 2 0 0 0-.6-1.4L12 12l-4.4 4.4a2 2 0 0 0-.6 1.4V22M7 2v4.2a2 2 0 0 0 .6 1.4L12 12l4.4-4.4a2 2 0 0 0 .6-1.4V2"/>',
     "circle-slash": '<circle cx="12" cy="12" r="10"/><path d="m4.929 4.929 14.142 14.142"/>',
     reply: '<polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/>',
@@ -933,6 +926,12 @@
   // 开箱即用 (quick-create.js): the first-run stage, the no-chat line and the
   // quick 新建猫猫 / 新建群聊 dialogs; init() is near the end, after experience.init.
   const quick = window.ClowderQuickCreate;
+  // 资料页与群 (profile.js): the drawer's 资料 and 成员 pages, its identity
+  // head, a group's rename / members / delete and its sidebar menu; and the @
+  // list in a group's composer (mention.js). init() is near the end.
+  const profile = window.ClowderProfile;
+  const profileRules = window.ClowderProfileRules;
+  const mention = window.ClowderMention;
   // An empty single chat's greeting invitation (chat-presentation.js): one
   // POST per chat thread for the page's life, never retried by itself. Its
   // outcome redraws only the line of the chat it was sent for, if that chat is still
@@ -2185,13 +2184,6 @@
     use.setAttribute("href", "#doodle-" + name);
     svg.append(use);
     return svg;
-  }
-
-  function panelEmpty(name, heading, text) {
-    const box = el("div", "panel-empty");
-    if (name) box.append(doodle(name));
-    box.append(el("h3", "", heading), el("p", "", text));
-    return box;
   }
 
   // face: an explicit paint (a group's groupFace); otherwise who's bot face.
@@ -4038,7 +4030,7 @@
     if (state.others && state.others.length) roster.append(othersFolder());
 
     // No groups, no header: 新建 already offers 新建群聊.
-    if (state.groups.length) roster.append(sectionLabel("群组"));
+    if (state.groups.length) roster.append(sectionLabel("群聊"));
     for (const g of state.groups) {
       const open = state.sel && state.sel.type === "group" && state.sel.id === g.id;
       const d = groupDesc(g);
@@ -4046,6 +4038,7 @@
       const shown = niceName(g.name || g.id);
       const btn = listButton(shown, d.node, open, !open && unreadOf(stStatus.groups[g.id]) > 0, faces.get(g.id), false, shown);
       btn.dataset.group = g.id;
+      btn.dataset.groupMenu = "true"; // right-click / long press: 改名, 删除群聊
       btn.dataset.stsig = d.sig;
       btn.addEventListener("click", () => pickGroup(g.id));
       roster.append(btn);
@@ -4461,15 +4454,10 @@
     state.panelData = null;
     // The scheduled-task section, its dialog and its pending answers belong to the cat left behind.
     window.ClowderSchedules?.teardown();
-    state.traceOpen = {};
-    state.traceOut = {};
-    state.traceThink = {};
-    // The snapshot belongs to one bot's one wake. Keeping it would show A's
-    // context under B's name, so it is dropped and refetched on demand.
+    // A group's @ list belongs to the composer of the chat left behind.
+    mention.close();
+    // The context note belongs to one cat; it is read again for the next.
     state.ctxSnap = null;
-    state.ctxStep = -1;
-    state.ctxMenu = false;
-    state.ctxRaw = "";
     ++state.threadLoad;
     ++state.panelLoad;
     thread.replaceChildren();
@@ -4527,7 +4515,7 @@
       }
     } catch (e) {}
     state.sig = "";
-    state.tab = state.tab || "details";
+    state.tab = state.tab || "profile";
     state.editOpen = false;
     closeDrawer();
     setHeader(name);
@@ -4700,16 +4688,19 @@
     return row;
   }
 
-  const TABS = [["details", "详情"], ["library", "记忆"], ["computer", "任务"], ["files", "文件"], ["trace", "轨迹"], ["context", "上下文"]];
+  // A cat: 资料 / 文件 / 记忆 / 定时; a group: 成员 / 文件 (profile-rules.js).
+  const panelKind = () => (state.sel && state.sel.type === "group" ? "group" : "bot");
+  const panelTab = () => profileRules.tabFor(panelKind(), state.tab);
 
   function tabBar() {
     const bar = el("div", "tabs");
     bar.setAttribute("role", "tablist");
-    for (const pair of TABS) {
-      const btn = el("button", state.tab === pair[0] ? "on" : "", pair[1]);
+    const tab = panelTab();
+    for (const pair of profileRules.tabs(panelKind())) {
+      const btn = el("button", tab === pair[0] ? "on" : "", pair[1]);
       btn.type = "button";
       btn.setAttribute("role", "tab");
-      btn.setAttribute("aria-selected", state.tab === pair[0] ? "true" : "false");
+      btn.setAttribute("aria-selected", tab === pair[0] ? "true" : "false");
       btn.addEventListener("click", () => {
         state.tab = pair[0];
         paintPanel();
@@ -4805,17 +4796,19 @@
 
   // Polling preserves both the edit button focus and an open sidebar menu.
   function syncPanelChrome() {
-    const bot = state.sel && state.sel.type === "bot";
-    // A repaint for the same bot (polling, status) must not close an open menu.
-    if (bot && chromeBot === state.sel.id) return;
+    const key = profileRules.key(state.sel);
+    // A repaint for the same chat (polling, status) must not close an open menu.
+    if (key && chromeBot === key) return;
     const row = $("panel-actions");
     closePanelMenu();
     row.replaceChildren();
-    row.hidden = !bot;
-    chromeBot = bot ? state.sel.id : "";
-    if (!bot) return;
-    const edit = panelAct("pencil", "编辑资料");
-    edit.addEventListener("click", () => openProfile(state.panelData || {}));
+    row.hidden = !key;
+    chromeBot = key;
+    if (!key) return;
+    // A cat: 编辑资料. A group: 改群名, the head's name edited in place.
+    const group = state.sel.type === "group";
+    const edit = panelAct("pencil", group ? "改群名" : "编辑资料");
+    edit.addEventListener("click", () => (group ? profile.renameHere() : openProfile(state.panelData || {})));
     row.append(edit);
   }
 
@@ -4823,7 +4816,11 @@
   // even after polling replaces their DOM. A long press must not select a Bot.
   let botPress = null;
   let suppressBotClick = null;
-  const sidebarBot = (target) => target.closest?.("[data-bot-menu]");
+  // Group rows open their own menu (改名, 删除群聊) the same way; a row's key
+  // tells a cat from a group of the same name.
+  const sidebarBot = (target) => target.closest?.("[data-bot-menu], [data-group-menu]");
+  const rowKey = (row) => (row.dataset.bot ? "b:" + row.dataset.bot : "g:" + row.dataset.group);
+  const openRowMenu = (row) => (row.dataset.bot ? openPanelMore(row, row.dataset.bot) : openGroupMenu(row, row.dataset.group));
   function cancelBotPress() {
     if (botPress) clearTimeout(botPress.timer);
     botPress = null;
@@ -4832,9 +4829,9 @@
     const row = sidebarBot(ev.target);
     if (!row) return;
     ev.preventDefault();
-    if (botPress || ev.pointerType === "touch") suppressBotClick = {name: row.dataset.bot, until: Infinity};
+    if (botPress || ev.pointerType === "touch") suppressBotClick = {name: rowKey(row), until: Infinity};
     cancelBotPress();
-    openPanelMore(row, row.dataset.bot);
+    openRowMenu(row);
   });
   sidebar.addEventListener("pointerdown", (ev) => {
     cancelBotPress();
@@ -4844,8 +4841,8 @@
     botPress = {x: ev.clientX, y: ev.clientY, timer: setTimeout(() => {
       botPress = null;
       if (!row.isConnected) return;
-      suppressBotClick = {name: row.dataset.bot, until: Infinity};
-      openPanelMore(row, row.dataset.bot);
+      suppressBotClick = {name: rowKey(row), until: Infinity};
+      openRowMenu(row);
     }, 500)};
   });
   sidebar.addEventListener("pointermove", (ev) => {
@@ -4859,7 +4856,7 @@
   sidebar.addEventListener("scroll", () => { cancelBotPress(); closePanelMenu(); }, true);
   sidebar.addEventListener("click", (ev) => {
     const row = sidebarBot(ev.target);
-    if (row && suppressBotClick?.name === row.dataset.bot && Date.now() < suppressBotClick.until) {
+    if (row && suppressBotClick?.name === rowKey(row) && Date.now() < suppressBotClick.until) {
       ev.preventDefault();
       ev.stopImmediatePropagation();
       suppressBotClick = null;
@@ -4898,6 +4895,21 @@
     item("download", "导出对话", () => openExport(name));
     menu.append(el("div", "mgap"));
     item("trash", "删除 Bot", () => confirmDelete(name), { danger: true });
+    anchor.classList.add("on");
+    anchor.setAttribute("aria-expanded", "true");
+    placeMenu(anchor, menu);
+    panelMoreAnchor = anchor;
+    panelMore = menu;
+  }
+
+  // A group row's menu (profile.js builds it: 改名, 删除群聊), placed and
+  // closed like a cat row's.
+  function openGroupMenu(anchor, id) {
+    const g = state.groups.find((x) => x.id === id);
+    if (!g) return;
+    closePops();
+    hideTip(); // the row's own tip would sit over the menu
+    const menu = profile.groupMenu(g);
     anchor.classList.add("on");
     anchor.setAttribute("aria-expanded", "true");
     placeMenu(anchor, menu);
@@ -5089,16 +5101,18 @@
     }, "删除");
   }
 
+  // 删除猫猫 (资料's last line, and a cat row's menu). The engine keeps what
+  // was said; the cat leaves the list.
   function confirmDelete(name) {
-    openModal("删除 Bot", [
-      { name: "warn", type: "note", label: "删除「" + niceName(name) + "」的原生成员配置。历史对话由 Clowder AI 保留。" },
+    openModal("删除猫猫", [
+      { name: "warn", type: "note", label: "删除「" + niceName(name) + "」？它会从列表里消失，和它的聊天记录不会被抹掉。" },
     ], async () => {
       try {
         await api("/xbot-api/bots/" + encodeURIComponent(name), { method: "DELETE" });
       } catch (e) {
         const msg = e.message || "";
-        if (/primary/i.test(msg)) throw new Error("主 Bot 不能删，先把主 Bot 交给另一个。");
-        if (/last bot/i.test(msg)) throw new Error("最后一个 Bot 不能删。");
+        if (/primary/i.test(msg)) throw new Error("它是默认接待的猫猫，暂时不能删。");
+        if (/last bot/i.test(msg)) throw new Error("最后一只猫猫不能删。");
         throw new Error(msg || "删除失败");
       }
       delete state.preview["b:" + name];
@@ -5110,39 +5124,53 @@
     }, "删除");
   }
 
-  // The fixed head has a name above its identity line. Only the body scrolls.
-  function renderPanelHead(name, paint, sub, pinned = false) {
+  // The fixed head: the chat's face and name. profile.js keeps it as one node
+  // per chat (a group name being edited survives a repaint) and updates it in
+  // place. Only the body scrolls.
+  function panelGroup() {
+    return state.groups.find((x) => x.id === state.sel.id) || { id: state.sel.id, name: state.sel.id, members: [] };
+  }
+
+  function panelHead() {
+    const head = state.sel.type === "group"
+      ? profile.groupHead(state.sel, panelGroup())
+      : profile.catHead(state.sel, state.panelData || { name: state.sel.id });
     const ident = $("panel-ident");
-    ident.replaceChildren();
+    if (ident.firstChild !== head || ident.childNodes.length !== 1) ident.replaceChildren(head);
     ident.hidden = false;
-    ident.append(avatar(name, paint, "lg"));
-    const who = el("div", "tx");
-    who.append(el("b", "", niceName(name) || "Bot"));
-    if (sub) {
-      const line = el("div", "sub");
-      if (pinned) line.append(icon("pin"));
-      line.append(el("span", "model", sub));
-      who.append(line);
-    }
-    ident.append(who);
+  }
+
+  function renderPanelHead() {
+    panelHead();
     const tabs = $("panel-tabs");
     tabs.replaceChildren(tabBar());
     tabs.hidden = false;
   }
 
+  // A cat: 资料 (profile.js: 职责, 置顶, 新对话 and 历史对话, a folded 高级 with
+  // what is technical), 文件, 记忆, 定时. A group: 成员 and 文件.
   function paintPanel() {
-    const tasks = panelBody.querySelector(".task-view");
-    if (tasks && state.sel?.type === "bot" && state.tab === "computer" && tasks.dataset.bot === state.sel.id) {
-      syncTaskView(tasks, state.panelData || {name: state.sel.id});
-      paintContextBar(); syncPanelChrome(); return;
+    const tab = state.sel ? panelTab() : "";
+    // 资料 / 成员 (profile.js), 定时 (schedules.js) and workspace.js's pages
+    // keep their own live state (an open fold, a confirm in progress, a form,
+    // a folder, focus) across redraws: when the page shown is already this
+    // chat's, it and the head are only brought up to date.
+    const page = panelBody.querySelector(".pf-page");
+    if (page && profile.current(page, state.sel) && tab === profileRules.home(panelKind())) {
+      panelHead();
+      if (state.sel.type === "group") profile.groupPage(state.sel, panelGroup());
+      else profile.catPage(state.sel, state.panelData || { name: state.sel.id });
+      syncPanelChrome(); return;
     }
-    // workspace.js pages keep their own live state (folder, open forms, focus) across redraws.
+    const sched = panelBody.querySelector(".pf-sched");
+    if (sched && state.sel?.type === "bot" && tab === "schedule" && sched.dataset.bot === state.sel.id) {
+      panelHead(); scheduleSection(sched, state.sel.id); syncPanelChrome(); return;
+    }
     const own = panelBody.querySelector(".ws-pane");
-    if (own && state.sel && state.tab === own.dataset.tab && workspace.current(own) && !(state.sel.type === "bot" && state.tab === "computer")) {
-      paintContextBar(); syncPanelChrome(); return;
+    if (own && state.sel && tab === own.dataset.tab && workspace.current(own)) {
+      panelHead(); syncPanelChrome(); return;
     }
     panelBody.replaceChildren();
-    paintContextBar();
     if (!state.sel) {
       window.ClowderSchedules?.teardown();
       $("panel-ident").hidden = true;
@@ -5150,232 +5178,34 @@
       syncPanelChrome();
       return;
     }
+    const body = el("div", "tab-body");
     if (state.sel.type === "group") {
-      const g = state.groups.find((x) => x.id === state.sel.id) || { id: state.sel.id, name: state.sel.id, members: [] };
-      renderPanelHead(g.name || g.id, groupFace(g), (g.members || []).length + " 个成员");
-      const body = el("div", "tab-body");
-      if (state.tab === "library") {
-        // No owner-private records in a group, and no promise about what will be kept.
-        body.append(experience.memoryView(state.sel));
-      } else if (state.tab === "computer") {
-        body.append(workspace.tasksView(state.sel));
-      } else if (state.tab === "files") {
-        body.append(workspace.filesView(state.sel));
-      } else if (state.tab === "trace") {
-        body.append(el("p", "hint", "没有轨迹"));
-      } else if (state.tab === "context") {
-        body.append(el("p", "hint", "群组没有上下文"));
-      } else {
-        const s = section("成员");
-        s.append(el("p", "", (g.members || []).map(niceName).join("、") || "没有成员"));
-        body.append(s);
-      }
+      renderPanelHead();
+      body.append(tab === "files" ? workspace.filesView(state.sel) : profile.groupPage(state.sel, panelGroup()));
       panelBody.append(body);
       syncPanelChrome();
       return;
     }
     const data = state.panelData || { name: state.sel.id };
-    const sub = [data.primary ? "主 Bot" : "", data.agent ? window.XBotAgents.headline(data.agent) : ""].filter(Boolean).join(" · ");
-    renderPanelHead(data.name || state.sel.id, paintOfBot(data), sub, data.pinned);
+    renderPanelHead();
     syncPanelChrome();
-    const body = el("div", "tab-body");
-    if (state.tab === "library") body.append(experience.memoryView(state.sel, data));
-    // Task cards first; then executions and, last, the cat's scheduled tasks (schedules.js).
-    else if (state.tab === "computer") body.append(workspace.tasksView(state.sel), el("h4", "ws-exec-head", "执行与定时任务"), computerView(data));
-    else if (state.tab === "files") body.append(workspace.filesView(state.sel));
-    else if (state.tab === "trace") body.append(traceView());
-    else if (state.tab === "context") body.append(contextView(data));
-    else body.append(detailsView(data));
+    if (tab === "memory") body.append(experience.memoryView(state.sel, data));
+    else if (tab === "files") body.append(workspace.filesView(state.sel));
+    else if (tab === "schedule") body.append(scheduleView(data.name || state.sel.id));
+    else body.append(profile.catPage(state.sel, data));
     panelBody.append(body);
   }
 
-  function durText(ms) {
-    const s = Math.max(1, Math.round(ms / 1000));
-    if (s < 60) return s + " 秒";
-    const m = Math.round(s / 60);
-    if (m < 60) return m + " 分";
-    return Math.round(m / 60) + " 小时";
+  // Opens 资料 (a group: 成员) at its folded 高级, where 任务与执行 now is:
+  // the work row above the composer and the old 任务 entry land here.
+  function openAdvanced() {
+    if (!state.sel) return;
+    state.tab = profileRules.home(panelKind());
+    profile.reveal(state.sel);
+    rememberPanel(true);
+    panelOpen(true);
+    paintPanel();
   }
-
-  function argText(args) {
-    if (!args || typeof args !== "object") return "";
-    if (typeof args.command === "string" && args.command) return args.command;
-    const keys = Object.keys(args);
-    if (!keys.length) return "";
-    try { return JSON.stringify(args, null, 2); } catch (e) { return ""; }
-  }
-
-  function previewOutput(text) {
-    const raw = String(text || "");
-    const lines = raw.split("\n");
-    let short = lines.slice(0, 4).join("\n");
-    if (short.length > 280) short = short.slice(0, 280);
-    const truncated = short.length < raw.length;
-    return { text: truncated ? short.replace(/\s+$/, "") + "…" : raw, truncated: truncated };
-  }
-
-  function traceTurns(messages) {
-    const results = {};
-    for (const m of messages || []) {
-      if (m.role === "tool" && m.tool_call_id) results[m.tool_call_id] = m;
-    }
-    const turns = [];
-    for (const m of messages || []) {
-      if (m.role !== "assistant") continue;
-      const calls = [];
-      for (const call of m.tool_calls || []) {
-        const info = toolSummary(call);
-        if (info.name === "ask_user") continue;
-        const result = results[call.id || ""];
-        calls.push({
-          name: info.name,
-          args: info.args,
-          output: result ? (result.content || "") : "",
-          hasResult: !!result,
-          resultTime: result && result.time,
-        });
-      }
-      // Hosted generation is projected onto the same trace calls as local
-      // tools; it stays a hosted protocol item and is never re-executed.
-      for (const part of m.parts || []) {
-        const h = part.hosted;
-        if (!h || h.name !== "image_generation") continue;
-        calls.push({ name: h.name, args: h.query ? { prompt: h.query } : {}, output: part.text || "", hasResult: ["completed", "failed"].includes(h.status), resultTime: m.time });
-      }
-      if (!calls.length) continue;
-      const start = m.time ? new Date(m.time).getTime() : 0;
-      let end = start;
-      for (const c of calls) {
-        if (!c.resultTime) continue;
-        const t = new Date(c.resultTime).getTime();
-        if (!Number.isNaN(t) && t > end) end = t;
-      }
-      turns.push({
-        key: (state.sel ? state.sel.id : "") + ":" + (m.seq != null ? m.seq : (m.time || turns.length)),
-        time: m.time,
-        names: calls.map((c) => c.name === "todo" ? todoTrace(c).title : c.name),
-        dur: start && end > start ? end - start : 0,
-        thinking: (m.thinking || "").trim(),
-        calls: calls,
-      });
-    }
-    return turns;
-  }
-
-  // A receipt confirms the write; arguments alone are only a proposed list.
-  // Keep the original call/result in the trace, never in the conversation.
-  function todoTrace(call) {
-    const output = String(call.output || "").trim();
-    const receipt = /^todo: (\d+) items \((\d+) in_progress, (\d+) pending, (\d+) done, (\d+) dropped\)/.exec(output);
-    let title = "待办 · 正在更新";
-    if (call.hasResult) title = /^error:/.test(output) ? "待办 · 更新失败" : "待办 · 结果待核对";
-    if (!receipt) return { title, lines: [] };
-    const total = Number(receipt[1]), done = Number(receipt[4]), dropped = Number(receipt[5]);
-    title = total ? "待办 · " + (done === total ? "已完成 " : "进度 ") + done + "/" + total + " 项" + (dropped ? " · 已放弃 " + dropped + " 项" : "") : "待办 · 已清空";
-    const labels = { pending: "待办", in_progress: "进行中", done: "已完成", dropped: "已放弃" };
-    const items = Array.isArray(call.args && call.args.items) ? call.args.items.slice(0, 20) : [];
-    const lines = items.filter(it => it && typeof it.content === "string").map(it => {
-      const status = String(it.status || "").trim().toLowerCase();
-      const reason = status === "dropped" && typeof it.reason === "string" ? it.reason.trim() : "";
-      return (labels[status] || "状态待核对") + " · " + it.content.trim() + (reason ? "（" + reason + "）" : "");
-    });
-    return { title, lines };
-  }
-
-  function traceBody(turn) {
-    const box = el("div", "trace-body");
-    // Thinking stays folded until the owner opens it; repaints keep the choice.
-    if (turn.thinking) {
-      const think = el("details", "trace-think");
-      think.open = !!state.traceThink[turn.key];
-      think.append(el("summary", "text-btn", "思考"), el("pre", "trace-out", turn.thinking));
-      think.addEventListener("toggle", () => { state.traceThink[turn.key] = think.open; });
-      box.append(think);
-    }
-    turn.calls.forEach((call, i) => {
-      const item = el("div", "trace-call");
-      if (call.name === "todo") {
-        const view = todoTrace(call);
-        item.append(el("div", "trace-call-name", view.title));
-        if (view.lines.length) item.append(el("pre", "trace-args", view.lines.join("\n")));
-        const raw = el("details");
-        raw.append(el("summary", "text-btn", "调用原文"));
-        const args = argText(call.args);
-        if (args) raw.append(el("pre", "trace-args", args));
-        if (call.output) raw.append(el("pre", "trace-out", call.output));
-        item.append(raw);
-        box.append(item);
-        return;
-      }
-      item.append(el("div", "trace-call-name", call.name));
-      const args = argText(call.args);
-      if (args) item.append(el("pre", "trace-args", args));
-      if (call.output) {
-        const outKey = turn.key + ":" + i;
-        const open = !!state.traceOut[outKey];
-        const preview = previewOutput(call.output);
-        item.append(el("pre", "trace-out", open || !preview.truncated ? call.output : preview.text));
-        if (preview.truncated) {
-          const more = el("button", "text-btn trace-more", open ? "收起" : "展开");
-          more.type = "button";
-          more.addEventListener("click", (ev) => {
-            ev.stopPropagation();
-            state.traceOut[outKey] = !state.traceOut[outKey];
-            paintPanel();
-          });
-          item.append(more);
-        }
-      }
-      box.append(item);
-    });
-    return box;
-  }
-
-  function traceView() {
-    const wrap = document.createDocumentFragment();
-    const turns = traceTurns(state.messages);
-    if (!turns.length) {
-      wrap.append(panelEmpty("trace", "没有轨迹", "它每做一件事，都会在这里留下一行。"));
-      return wrap;
-    }
-    const list = el("div", "trace");
-    for (const turn of turns) {
-      const open = !!state.traceOpen[turn.key];
-      const row = el("button", "trace-row" + (open ? " open" : ""));
-      row.type = "button";
-      row.setAttribute("aria-expanded", open ? "true" : "false");
-      row.append(
-        el("span", "trace-time", when(turn.time) || "—"),
-        el("span", "trace-tools", turn.names.join(" · ")),
-        el("span", "trace-dur", turn.dur ? durText(turn.dur) : ""),
-        icon("chevron", "chev")
-      );
-      row.addEventListener("click", () => {
-        state.traceOpen[turn.key] = !state.traceOpen[turn.key];
-        paintPanel();
-      });
-      list.append(row);
-      if (open) list.append(traceBody(turn));
-    }
-    wrap.append(list);
-    return wrap;
-  }
-
-
-  // ---- 上下文检视 ------------------------------------------------------
-  // One card: how full the working set is, what fills it, and the rows behind
-  // the bands the owner is likely to open. It reads the kernel's in-memory
-  // snapshot of the current wake and writes nothing. A bot driven by another
-  // process, or one that has not woken yet, has no snapshot and says so
-  // instead of showing zeros.
-
-  // CTX_BANDS fixes the legend order. The messages come first and the tool
-  // definitions last: the soft target is measured on the messages, so its tick
-  // on the band lines up with where the messages end.
-  const CTX_BANDS = [
-    ["turn", "本轮"], ["hist", "早先对话"], ["block", "摘要块"],
-    ["sys", "系统提示词"], ["mem", "记忆"], ["env", "环境更新"], ["tools", "工具定义"],
-  ];
 
   function ctxK(n) {
     if (!n) return "0";
@@ -5383,237 +5213,7 @@
     return (n / 1000).toFixed(1).replace(/\.0$/, "") + "K";
   }
 
-  // ctxSums folds a request's layers into the legend's bands. Summary blocks
-  // come one layer per block and are summed here.
-  function ctxSums(req) {
-    const sums = {};
-    for (const l of req.layers || []) sums[l.key] = (sums[l.key] || 0) + l.tokens;
-    if (req.tools > 0) sums.tools = req.tools;
-    return sums;
-  }
-
-  function ctxReq(snap) {
-    const reqs = snap.requests || [];
-    if (state.ctxStep < 0 || state.ctxStep >= reqs.length) return reqs[reqs.length - 1];
-    return reqs[state.ctxStep];
-  }
-
-  function contextView(data) {
-    const wrap = el("div", "ctx");
-    const snap = state.ctxSnap;
-    if (snap === null) {
-      wrap.append(el("p", "hint", "正在读取……"));
-      return wrap;
-    }
-    const reqs = snap.requests || [];
-    if (!reqs.length) {
-      wrap.append(panelEmpty("", "还没有快照", "发一句话，这里就会显示它这一轮读了哪些内容。"));
-      return wrap;
-    }
-    const req = ctxReq(snap);
-    const latest = req === reqs[reqs.length - 1];
-    const sums = ctxSums(req);
-    // Two lines (ADR 0015). The ceiling is the request's hard limit, tools
-    // included, so the band and the percentage are against it. The target is
-    // the soft line the background compacts at, measured on the messages.
-    const used = Math.max(0, req.prompt || 0);
-    const msgs = Math.max(0, used - (req.tools || 0));
-    const ceiling = snap.ceiling || 0;
-    const target = snap.target || 0;
-    const denom = ceiling || used || 1;
-    const free = ceiling ? Math.max(0, ceiling - used) : 0;
-    const share = (n) => (n * 100 / denom).toFixed(1) + "%";
-
-    wrap.append(ctxPicker(reqs, req, latest));
-
-    const head = el("div", "ctx-used");
-    head.append(el("b", "num", ceiling ? Math.round(used * 100 / ceiling) + "% 已用" : ctxK(used) + " 已用"));
-    if (ceiling) head.append(el("span", "num", ctxK(used) + " / " + ctxK(ceiling)));
-    wrap.append(head);
-
-    const band = el("div", "ctx-band");
-    for (const [key, label] of CTX_BANDS) {
-      if (!sums[key]) continue;
-      const seg = el("i", "ctx-c-" + key);
-      seg.style.width = Math.min(100, sums[key] * 100 / denom).toFixed(3) + "%";
-      setTip(seg, label + " " + ctxK(sums[key]));
-      band.append(seg);
-    }
-    const bandWrap = el("div", "ctx-bandwrap");
-    bandWrap.append(band);
-    if (ceiling && target && target < ceiling) {
-      const mark = el("i", "ctx-mark");
-      mark.style.left = (target * 100 / ceiling).toFixed(3) + "%";
-      setTip(mark, "后台整理线 " + ctxK(target));
-      bandWrap.append(mark);
-    }
-    wrap.append(bandWrap);
-
-    const legend = el("div", "ctx-legend");
-    const line = (cls, label, value, pct) => {
-      const row = el("div", "ctx-lg" + (cls ? " " + cls : ""));
-      row.append(el("span", "ctx-sw"), el("span", "ctx-lg-k", label), el("span", "ctx-lg-v num", value), el("span", "ctx-lg-p num", pct));
-      legend.append(row);
-    };
-    for (const [key, label] of CTX_BANDS) {
-      if (sums[key]) line("ctx-c-" + key, label, ctxK(sums[key]), share(sums[key]));
-    }
-    if (ceiling) line("ctx-free", "空余", ctxK(free), share(free));
-    wrap.append(legend);
-
-    const detail = snap.detail;
-    if (detail) wrap.append(ctxDetails(detail, req));
-
-    if (ceiling && target) {
-      wrap.append(el("p", "ctx-foot num", msgs < target
-        ? "离后台整理还有约 " + ctxK(target - msgs)
-        : "后台在整理 · 离上限还有约 " + ctxK(free)));
-    }
-    return wrap;
-  }
-
-  // ctxPicker is the title with the request menu: the last ten model calls of
-  // this wake, newest first. The newest is the default and is called 最新.
-  function ctxPicker(reqs, req, latest) {
-    const head = el("div", "ctx-hd");
-    const pick = el("button", "ctx-pick");
-    pick.type = "button";
-    pick.setAttribute("aria-haspopup", "menu");
-    pick.setAttribute("aria-expanded", state.ctxMenu ? "true" : "false");
-    pick.append(el("span", "", "上下文"), el("small", "num", latest ? "最新" : "第 " + req.step + " 次"), icon("chevronDown", "ctx-pick-i"));
-    pick.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      state.ctxMenu = !state.ctxMenu;
-      paintPanel();
-    });
-    head.append(pick);
-    if (state.ctxMenu) {
-      const menu = el("div", "ctx-menu");
-      menu.setAttribute("role", "menu");
-      for (let i = reqs.length - 1; i >= 0; i--) {
-        const r = reqs[i];
-        const item = el("button", "ctx-menu-i" + (r === req ? " on" : ""));
-        item.type = "button";
-        item.setAttribute("role", "menuitem");
-        item.append(el("span", "num", "第 " + r.step + " 次" + (i === reqs.length - 1 ? " · 最新" : "")), el("span", "num", ctxK(Math.max(0, r.prompt - r.tools))));
-        item.addEventListener("click", (ev) => {
-          ev.stopPropagation();
-          state.ctxStep = i === reqs.length - 1 ? -1 : i;
-          state.ctxMenu = false;
-          state.ctxRaw = "";
-          paintPanel();
-        });
-        menu.append(item);
-      }
-      head.append(menu);
-    }
-    return head;
-  }
-
-  // ctxDetails is the four sections behind the legend. Steps of an older
-  // request are the first turn_steps steps of the newest one: within one wake
-  // a turn only grows. The other sections always describe the newest request.
-  function ctxDetails(detail, req) {
-    const box = el("div", "ctx-dt");
-    const skip = detail.skipped_steps || 0;
-    const upto = Math.min(req.turn_steps || 0, skip + (detail.steps || []).length);
-    const steps = (detail.steps || []).slice(0, Math.max(0, upto - skip)).map((s, i) => ({
-      id: String(skip + i), code: s.tool, text: s.what || (s.tool ? "" : "回复"), n: s.tokens, bad: s.fail, raw: s.preview,
-    })).reverse();
-    ctxSection(box, "turn", "本轮", upto + " 步", steps, skip > 0 && upto > skip ? "前 " + skip + " 步没有留" : "");
-    const turns = (detail.turns || []).map((t, i) => ({ id: String(i), text: t.ask || "（没有开头的话）", n: t.tokens })).reverse();
-    const earlier = detail.earlier_turns || 0;
-    if (turns.length + earlier) ctxSection(box, "hist", "早先对话", (turns.length + earlier) + " 轮", turns, earlier ? "更早的 " + earlier + " 轮共 " + ctxK(detail.earlier_tokens) : "");
-    const blocks = (detail.blocks || []).map((b, i) => ({ id: String(i), text: "seq " + (b.from || "?") + "–" + (b.to || "?"), n: b.tokens, raw: b.preview }));
-    if (blocks.length) ctxSection(box, "block", "摘要块", String(blocks.length), blocks, "");
-    const tools = (detail.tool_defs || []).map((t, i) => ({ id: String(i), code: t.name, text: "", n: t.tokens }));
-    if (tools.length) ctxSection(box, "tools", "工具", String(tools.length), tools, "");
-    return box;
-  }
-
-  function ctxSection(box, key, label, count, rows, note) {
-    const open = !!state.ctxOpen[key];
-    const head = el("button", "ctx-ds" + (open ? " open" : ""));
-    head.type = "button";
-    head.setAttribute("aria-expanded", open ? "true" : "false");
-    head.append(icon("chevron", "ctx-ds-i"), el("span", "", label), el("span", "ctx-ds-v num", count));
-    head.addEventListener("click", () => {
-      state.ctxOpen[key] = !open;
-      paintPanel();
-    });
-    box.append(head);
-    if (!open) return;
-    const list = el("div", "ctx-rows");
-    for (const r of rows) {
-      const id = key + ":" + r.id;
-      const row = el("button", "ctx-r" + (r.n >= 1000 ? " big" : ""));
-      row.type = "button";
-      const name = el("span", "ctx-r-k");
-      if (r.code) name.append(el("code", "", r.code));
-      if (r.text) name.append(document.createTextNode(r.text));
-      if (r.bad) name.append(el("span", "ctx-bad", "失败"));
-      row.append(name, el("span", "ctx-r-v num", ctxK(r.n)));
-      if (r.raw) {
-        row.addEventListener("click", () => {
-          state.ctxRaw = state.ctxRaw === id ? "" : id;
-          paintPanel();
-        });
-      } else {
-        row.classList.add("flat");
-      }
-      list.append(row);
-      if (state.ctxRaw === id && r.raw) list.append(el("pre", "ctx-raw", r.raw));
-    }
-    if (!rows.length) list.append(el("div", "ctx-note", "还没有"));
-    if (note) list.append(el("div", "ctx-note", note));
-    box.append(list);
-  }
-
-  // A click anywhere else closes the request menu, the way the other menus close.
-  document.addEventListener("click", (ev) => {
-    if (!state.ctxMenu || ev.target.closest(".ctx-hd")) return;
-    state.ctxMenu = false;
-    if (state.tab === "context") paintPanel();
-  });
-
-  function paintContextBar() {
-    const host = $("ctxbar");
-    host.replaceChildren();
-    const snap = state.ctxSnap;
-    const req = snap?.requests?.at(-1);
-    host.hidden = !state.sel || state.sel.type !== "bot" || state.tab === "context" || !req || !(snap.ceiling > 0);
-    if (host.hidden) return;
-    const used = Math.max(0, req.prompt || 0), hard = snap.ceiling;
-    const bar = el("button", "ctxbar");
-    bar.type = "button";
-    bar.setAttribute("aria-label", "查看上下文");
-    setTip(bar, "上下文");
-    bar.append(icon("gauge"));
-    const label = el("span");
-    label.append(el("b", "", Math.round(used * 100 / hard) + "%"), document.createTextNode(" 已用"));
-    const band = el("div", "ubar");
-    const sums = ctxSums(req);
-    let room = 100;
-    for (const [key] of CTX_BANDS) {
-      if (!sums[key]) continue;
-      const seg = el("i", "ctx-c-" + key);
-      const pct = Math.min(room, Math.max(0, sums[key] * 100 / hard));
-      seg.style.width = pct + "%";
-      if (key === "tools") seg.style.marginLeft = "auto";
-      room -= pct;
-      band.append(seg);
-    }
-    if (snap.target > 0 && snap.target < hard) {
-      const tick = el("span", "soft");
-      tick.style.left = (snap.target * 100 / hard) + "%";
-      band.append(tick);
-    }
-    bar.append(label, band, el("span", "mono", ctxK(used) + " / " + ctxK(hard)));
-    bar.addEventListener("click", () => { state.tab = "context"; paintPanel(); });
-    host.append(bar);
-  }
-
-  // The Bot's local Agent, shared by the details tab and the profile drawer.
+  // The Bot's local Agent, shared by 资料 › 高级 and the profile drawer.
   // Busy is a hint only: the server refuses a switch while work is in flight.
   function agentTrigger(data, aside) {
     return window.XBotAgents.trigger({api, data, aside,
@@ -5626,28 +5226,26 @@
       }});
   }
 
-  function detailsView(data) {
-    const wrap = document.createDocumentFragment();
-    if (data.persona) {
-      const duty = el("div", "psec");
-      duty.append(el("h4", "", "职责"), el("p", "", data.persona));
-      wrap.append(duty);
-    }
-    const section = el("div", "psec");
-    const snap = state.ctxSnap;
-    const meta = [];
+  // 它用什么思考 in 资料 › 高级: the Agent row and its change dialog as before,
+  // with the context window the cat reports beside it. Drawn again only when
+  // what it shows changes, so a repaint never takes focus off it.
+  function agentPart(data) {
+    const snap = state.ctxSnap, meta = [];
     if (snap?.ceiling > 0) meta.push("窗口 " + ctxK(snap.ceiling));
     if (snap?.target > 0) meta.push("后台整理线 " + ctxK(snap.target));
-    const aside = meta.length ? el("span", "v", meta.join(" · ")) : null;
-    section.append(el("h4", "", "执行 Agent"), agentTrigger(data, aside));
-    wrap.append(section);
-    const config = catConfigSection(data);
-    if (config) wrap.append(config);
-    // 历史对话: folded, and only when the cat has more than one saved
-    // conversation (workspace.js keeps the same node across redraws).
-    const history = workspace.conversationsView(state.sel);
-    if (history) wrap.append(history);
-    return wrap;
+    const note = meta.join(" · ");
+    return {
+      sig: JSON.stringify([data.name || "", data.agent || null, data.cat_config?.effort || null, note]),
+      node: () => agentTrigger(data, note ? el("span", "v", note) : null),
+    };
+  }
+
+  // 模型与画像 in 资料 › 高级 (catConfigSection below).
+  function configPart(data) {
+    return {
+      sig: JSON.stringify([data.name || "", data.native_id || "", data.cat_config || null, data.agent?.id || "", data.agent?.label || "", data.agent?.configuredModel || ""]),
+      node: () => catConfigSection(data),
+    };
   }
 
   // The configuration copied into this cat when it was created (cat_config from
@@ -5663,7 +5261,8 @@
     // entry, so its 猫种 row is left out rather than showing the ID.
     const model = config.model?.mode === "explicit" ? config.model.value : agent.configuredModel || "";
     const ids = new Set(presets.map((p) => p.id));
-    if (config.breed?.mode === "explicit") ids.add(config.breed.breedId);
+    // A cat made from a name alone carries its own ID as its breed: no row.
+    if (config.breed?.mode === "explicit" && !profileRules.ownBreed(config, data)) ids.add(config.breed.breedId);
     const family = rules.familyBreed(model).breedId;
     if (family) ids.add(family);
     const breeds = [...ids].map((id) => ({ id, name: presets.find((p) => p.id === rules.avatarOf(id))?.label || "" })).filter((b) => b.name);
@@ -5674,7 +5273,7 @@
       return list;
     };
     const sec = el("div", "psec cat-config");
-    sec.append(el("h4", "", "配置"), facts(templates.describe(config, ctx).filter(([label]) => label !== "Agent")));
+    sec.append(el("h4", "", "模型与画像"), facts(templates.describe(config, ctx).filter(([label]) => label !== "Agent")));
     const portrait = config.portrait || {};
     const more = [["性格", portrait.personality], ["擅长", portrait.teamStrengths], ["提醒", portrait.caution]]
       .filter(([, value]) => typeof value === "string" && value.trim())
@@ -5802,8 +5401,8 @@
     host.replaceChildren();
     if (!agents.length) return;
     const row = el("button", "wrow"); row.type = "button"; row.title = "打开任务";
-    // Running executions sit below the Task cards on the 任务 page: land on them.
-    row.addEventListener("click", () => { state.tab = "computer"; rememberPanel(true); panelOpen(true); paintPanel(); panelBody.querySelector(".ws-exec-head")?.scrollIntoView({ block: "start" }); });
+    // Running executions sit below the Task cards in 资料 › 高级: land on them.
+    row.addEventListener("click", () => { openAdvanced(); panelBody.querySelector(".ws-exec-head")?.scrollIntoView({ block: "start" }); });
     const stack = el("span", "work-stack");
     for (const ag of agents.slice(0, 3)) stack.append(taskAvatar(ag, "xs"));
     if (agents.length > 3) stack.append(el("span", "", "+" + (agents.length - 3)));
@@ -5849,10 +5448,10 @@
     if (state.sel !== selection) return;
     state.panelData = data;
     paintWorkStatus();
-    // Only the task view drawn for this cat: a view still showing the cat left
-    // behind waits for its own repaint and never takes this cat's cards.
+    // Only the task view drawn for this cat (in 资料 › 高级): a view still
+    // showing the cat left behind waits for its own repaint and never takes this cat's cards.
     const root = panelBody.querySelector(".task-view");
-    if (root && state.tab === "computer" && root.dataset.bot === data.name) syncTaskView(root, data);
+    if (root && root.dataset.bot === data.name) syncTaskView(root, data);
     updateWorkTimes();
   }
 
@@ -5902,34 +5501,16 @@
     const close = el("button", "task-fold"); close.type = "button"; close.setAttribute("aria-label", "收起结果"); close.append(icon("chevronDown"));
     close.addEventListener("click", () => { card.classList.remove("expanded"); compact.setAttribute("aria-expanded", "false"); });
     head.append(close);
+    // Stop and cancel only: the old 引导 (steer) had no route on this server.
     const controls = el("div", "ca");
-    const steer = el("button", "secondary task-guide"); steer.type = "button"; steer.append(icon("corner-down-right"), document.createTextNode("引导"));
     const stop = el("button", "secondary task-stop"); stop.type = "button";
     const cancel = el("button", "secondary task-cancel"); cancel.type = "button"; cancel.append(icon("x"), document.createTextNode("取消"));
     stop.append(icon("square"), document.createTextNode("停止"));
-    confirmTaskStop(stop, () => controlAgent(ag.id, "cancel", ""));
-    cancel.addEventListener("click", () => controlAgent(ag.id, "cancel", ""));
-    controls.append(steer, stop, cancel);
-    const editor = el("form", "steer-editor"); editor.hidden = true;
-    const field = el("input"); field.placeholder = "追加指示"; field.maxLength = 4000;
-    const send = el("button", "secondary", "发送"); send.type = "submit";
-    editor.append(field, send); detail.append(controls, editor);
-    bindTaskEditor(card, ag.id);
+    confirmTaskStop(stop, () => controlAgent(ag.id));
+    cancel.addEventListener("click", () => controlAgent(ag.id));
+    controls.append(stop, cancel);
+    detail.append(controls);
     updateTaskCard(card, ag); return card;
-  }
-
-  function bindTaskEditor(card, id) {
-    const editor = card.querySelector(".steer-editor"), guide = card.querySelector(".task-guide"), field = editor.querySelector("input"), send = editor.querySelector("button");
-    const close = () => { editor.hidden = true; guide.setAttribute("aria-expanded", "false"); };
-    guide.setAttribute("aria-expanded", "false");
-    guide.addEventListener("click", () => { editor.hidden = !editor.hidden; guide.setAttribute("aria-expanded", String(!editor.hidden)); if (!editor.hidden) field.focus(); });
-    editor.addEventListener("keydown", ev => { if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); close(); guide.focus(); } });
-    editor.addEventListener("submit", async ev => {
-      ev.preventDefault(); if (!field.value.trim() || send.disabled) return;
-      send.disabled = true;
-      try { if (await controlAgent(id, "steer", field.value)) { field.value = ""; close(); guide.focus(); } }
-      finally { send.disabled = false; }
-    });
   }
 
   function updateTaskCard(card, ag) {
@@ -5981,8 +5562,7 @@
     }
     rawError.hidden = !rawError.childElementCount;
     card.querySelector(".ca").hidden = !hot;
-    card.querySelector(".task-guide").hidden = !running; card.querySelector(".task-stop").hidden = !running; card.querySelector(".task-cancel").hidden = ag.status !== "queued";
-    if (!running) { card.querySelector(".steer-editor").hidden = true; card.querySelector(".task-guide").setAttribute("aria-expanded", "false"); }
+    card.querySelector(".task-stop").hidden = !running; card.querySelector(".task-cancel").hidden = ag.status !== "queued";
     card.querySelector(".task-fold").hidden = hot;
   }
 
@@ -5991,18 +5571,25 @@
   // not be confirmed and the list should be checked before trying again.
   const scheduleApi = (path, opt) => api(path, Object.assign({}, opt, { serverError: true }));
 
-  // The cat's own scheduled tasks are a module (schedules.js) kept as the last
-  // section. It reads /xbot-api/bots/:name/routines itself (the profile carries
-  // none), so this frequent sync only keeps it in place: an open form, a
-  // history or a dialog survives every repaint of the cards above it.
+  // The cat's own scheduled tasks are a module (schedules.js) on the drawer's
+  // 定时 tab. It reads /xbot-api/bots/:name/routines itself (the profile carries
+  // none), so the frequent repaints only keep it in place: an open form, a
+  // history or a dialog survives them.
   function scheduleSection(root, name) {
     if (!window.ClowderSchedules || !name || root.dataset.bot !== name) return null;
     return window.ClowderSchedules.mount(root, { api: scheduleApi, bot: name, icon });
   }
 
+  // 定时: a page of its own. Choosing the tab again draws a new page, which
+  // moves the section into it and reads the list once more.
+  function scheduleView(name) {
+    const host = el("div", "pf-sched");
+    host.dataset.bot = name;
+    scheduleSection(host, name);
+    return host;
+  }
+
   function syncTaskView(root, data) {
-    const schedules = scheduleSection(root, data.name);
-    const before = schedules && schedules.parentNode === root ? schedules : null;
     const agents = [...(data.agents || []), ...routineRuns(state.messages || []).recent];
     const sections = [
       ["进行中", agents.filter(a => ["running", "awaiting"].includes(a.status))],
@@ -6017,7 +5604,7 @@
     const keep = new Set();
     for (const [label, items] of sections) {
       let section = [...root.children].find(n => n.dataset.section === label);
-      if (!section) { section = el("section", "task-section"); section.dataset.section = label; section.append(el("h4"), el("div", "task-items")); root.insertBefore(section, before); }
+      if (!section) { section = el("section", "task-section"); section.dataset.section = label; section.append(el("h4"), el("div", "task-items")); root.append(section); }
       section.hidden = emptyActive && ["进行中", "排队中"].includes(label);
       taskValue(section.querySelector("h4"), label + " · " + items.length);
       const list = section.querySelector(".task-items");
@@ -6402,14 +5989,13 @@
     }
   }
 
-  async function controlAgent(id, kind, text) {
-    if (kind === "steer" && !String(text || "").trim()) return;
+  // Stops or unqueues one run (POST …/agents/:run/cancel).
+  async function controlAgent(id) {
     if (!state.sel || state.sel.type !== "bot") return;
-    const path = "/xbot-api/bots/" + encodeURIComponent(state.sel.id) + "/agents/" + encodeURIComponent(id) + "/" + kind;
+    const path = "/xbot-api/bots/" + encodeURIComponent(state.sel.id) + "/agents/" + encodeURIComponent(id) + "/cancel";
     try {
-      if (kind === "cancel") await api(path, { method: "POST" });
-      else await api(path, { method: "POST", body: { text: text } });
-      setStatus(kind === "cancel" ? "已取消" : "已记下");
+      await api(path, { method: "POST" });
+      setStatus("已取消");
       await loadPanel(); return true;
     } catch (e) {
       setStatus(visibleError(e), true); return false;
@@ -6892,7 +6478,7 @@
     $("modal-title").textContent = title;
     $("modal-ok").hidden = false;
     $("modal-ok").textContent = okLabel || "创建";
-    $("modal-ok").className = okLabel === "删除" ? (title === "删除 Bot" ? "text-btn danger" : "secondary") : "primary";
+    $("modal-ok").className = okLabel === "删除" ? (title === "删除猫猫" ? "text-btn danger" : "secondary") : "primary";
     $("modal-ok").disabled = false;
     $("modal-cancel").textContent = "取消";
     modalFields.replaceChildren();
@@ -7784,7 +7370,9 @@
     repaintPanel: () => { if (panel.classList.contains("open")) paintPanel(); },
     openTab: async (tab) => {
       closePops();
-      state.tab = tab;
+      // 任务 now sits in 资料 (a group: 成员) › 高级: open it there.
+      if (profileRules.opensAdvanced(tab) && state.sel) { state.tab = profileRules.home(panelKind()); profile.reveal(state.sel); }
+      else state.tab = tab;
       rememberPanel(true);
       panelOpen(true);
       if (window.innerWidth < 768) { sidebar.classList.remove("open"); syncBackdrop(); }
@@ -7850,6 +7438,86 @@
     more: (opener) => openTemplateCreate(opener),
     showList: () => $("menu").click(),
     error: (e) => setStatus(visibleError(e), true),
+  });
+  // 资料页与群 (profile.js) draws with these. The technical parts of 资料 ›
+  // 高级 stay the shell's own: the Agent row, the configuration, task and run cards.
+  profile.init({
+    api, icon, visibleError, toast: showToast,
+    cats: () => state.bots || [],
+    catFace: (name, size) => avatar(name, paintOf(name), size),
+    catFaceSig: (name) => avatarSignature(paintOf(name) || {}),
+    groupFace: (g, size) => avatar(niceName(g.name || g.id), groupFace(g), size),
+    groupFaceSig: (g) => groupFace(g).sig,
+    unknownFace: () => speakerFace({ name: "?", paint: null }, ""),
+    agent: agentPart,
+    config: configPart,
+    tasks: (sel) => workspace.tasksView(sel),
+    exec: (data) => computerView(data),
+    syncExec: (root, data) => syncTaskView(root, data),
+    conversations: (sel) => workspace.conversationsView(sel),
+    runtimeHref: (data) => "/runtime.html" + (data.thread_id ? "?thread=" + encodeURIComponent(data.thread_id) : ""),
+    sending: () => state.pendingSends.some((row) => !row.keepFailed),
+    working: () => chatWorking(),
+    pendingFiles: () => attachReady() > 0 || attachBusy(),
+    editProfile: (data) => openProfile(data && data.name ? data : state.panelData || {}),
+    pin: async (name, on) => {
+      await api("/xbot-api/bots/" + encodeURIComponent(name) + "/pin", { method: "POST", body: { pinned: on } });
+      await refreshLists();
+    },
+    exportChat: (name) => openExport(name),
+    copyId: (name) => copyBotID(name),
+    deleteCat: (name) => confirmDelete(name),
+    // 新对话: the cat now talks in a new thread; its chat opens afresh there.
+    reopen: (sel) => (sel.type === "group" ? selectGroup(sel.id) : selectBot(sel.id)),
+    // A group's name or members changed: the list, the header and the drawer follow.
+    groupChanged: async (id) => {
+      await refreshLists().catch(() => {});
+      if (!state.sel || state.sel.type !== "group" || state.sel.id !== id) return;
+      const g = state.groups.find((x) => x.id === id);
+      if (g) setHeader(id, niceName(g.name || id));
+      if (panel.classList.contains("open")) paintPanel();
+      // An empty group's face and name come from its own read: read it again.
+      state.sig = "";
+      loadThread().catch(() => {});
+    },
+    // Gone from the list: an open group gives way to the home cat, as a deleted cat does.
+    groupDeleted: async (id) => {
+      delete state.preview["g:" + id];
+      const open = !!state.sel && state.sel.type === "group" && state.sel.id === id;
+      if (open) state.sel = null;
+      await refreshLists().catch(() => {});
+      if (!open) return;
+      const home = state.bots.find((b) => b.primary) || state.bots[0];
+      if (home) await selectBot(home.name);
+      else { paintPanel(); showNoChat(); }
+    },
+    closePops,
+    menuAnchor: () => panelMoreAnchor,
+    fallbackFocus: () => input,
+  });
+  // One programmatic edit of the draft (an @ suggestion): rendered like
+  // typing, one undo step, the caret after it.
+  function composerEdit(text, caret) {
+    if (text.length > COMPOSER_MAX) return;
+    const before = composerTextCache;
+    renderComposer(text);
+    composerRefreshHeight();
+    composerCaretTo(caret);
+    composerRecord(before, text, caret);
+    syncComposer();
+  }
+  // A group's composer offers its members on @ (mention.js); the text is sent as typed.
+  mention.init({
+    input, composer, icon,
+    face: (name) => avatar(name, paintOf(name), "xs"),
+    members: () => {
+      if (!state.sel || state.sel.type !== "group" || state.peer) return null;
+      const g = state.groups.find((x) => x.id === state.sel.id);
+      return g ? profileRules.known(g, state.bots) : [];
+    },
+    text: () => composerText(input),
+    caret: () => composerCaret(),
+    apply: composerEdit,
   });
   syncSidebar();
   initTheme(); // in the app this also tells the window which theme to use
