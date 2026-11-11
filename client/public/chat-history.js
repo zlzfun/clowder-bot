@@ -415,14 +415,23 @@
     const body = [node("p", "ch-note", "现在这段对话会留在「历史对话」里，随时能回去接着聊；" + name + "记住的事都还在。")];
     const files = H.pendingFiles();
     if (files) body.push(node("p", "ch-note", "待发送的 " + files + " 个附件会被移除。"));
+    // The conversation this dialog is about, named once when it opens and kept
+    // for every retry: after an answer that never came, the reload shows the
+    // conversation the first request did start, and a retry must not start
+    // yet another. Once another conversation is seen, the owner starts over.
+    const shown = () => (typeof H.threadId === "function" ? H.threadId() : "");
+    const expected = shown();
+    const changed = "这段对话刚换过了，没有再开新对话。先看一眼对话；还要开新对话的话，关掉这里再点一次「新对话」。";
+    let stale = false;
     const d = dialog({
       title: "和" + name + "开始新对话", body, submit: "开始新对话", opener,
       onSubmit: async () => {
-        if (H.selected() !== sel) { d.close(true); return; }
+        if (keyOf(H.selected()) !== keyOf(sel)) { d.close(true); return; }
+        const now = shown();
+        if (stale || (expected && now && now !== expected)) { stale = true; d.error(changed); return; }
         if (H.working()) { d.error(busyText); return; }
         d.error("");
         d.busy(true);
-        const expected = typeof H.threadId === "function" ? H.threadId() : "";
         try {
           await H.api("/xbot-api/bots/" + encodeURIComponent(sel.id) + "/new", expected ? { method: "POST", body: { expectedThreadId: expected } } : { method: "POST" });
         } catch (e) {
@@ -431,7 +440,8 @@
           const said = String((e && e.message) || "");
           if (e && e.status === 409 && /变化/.test(said)) {
             // The conversation changed under this page (a 新对话 that did go through, or one opened elsewhere).
-            d.error("这段对话刚换过了。先看一眼对话，再决定要不要开新对话。");
+            stale = true;
+            d.error(changed);
             H.reload();
           } else if (e && e.status === 409) d.error(/切换/.test(said) ? "正在切换对话，稍等一下再试。" : busyText);
           else if (!e || !e.status || e.status >= 500) {
@@ -445,7 +455,8 @@
         d.close(true);
         // The cat now talks in the new conversation; if this chat is still
         // open it opens afresh there (an empty chat, where the cat greets).
-        if (H.selected() === sel) await H.reopen(sel);
+        const open = H.selected();
+        if (keyOf(open) === keyOf(sel)) await H.reopen(open);
         H.toast("已开始新对话");
       },
     });

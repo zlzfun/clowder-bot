@@ -4896,6 +4896,7 @@
     placeMenu(anchor, menu);
     panelMoreAnchor = anchor;
     panelMore = menu;
+    menu.querySelector(".menu-row")?.focus(); // the keyboard lands in the menu (↑/↓, Esc: profile.js)
   }
 
   // The Clipboard API can be missing or refused (older engines, no
@@ -6008,6 +6009,8 @@
     renderLists();
     refreshBotFaces();
     syncNoChat();
+    // An open group drawer follows the record each poll brings (members edited elsewhere).
+    if (state.sel && state.sel.type === "group" && panel.classList.contains("open")) paintPanel();
   }
 
   async function refreshNotes() {
@@ -7536,7 +7539,9 @@
     copyId: (name) => copyBotID(name),
     deleteCat: (name) => confirmDelete(name),
     // A group's name or members changed: the list, the header and the drawer follow.
-    groupChanged: async (id) => {
+    // record: the group as the server answered the edit, shown at once.
+    groupChanged: async (id, record) => {
+      if (record) state.groups = state.groups.map((g) => (g.id === id ? Object.assign({}, g, record) : g));
       await refreshLists().catch(() => {});
       if (!state.sel || state.sel.type !== "group" || state.sel.id !== id) return;
       const g = state.groups.find((x) => x.id === id);
@@ -7557,7 +7562,10 @@
       else { paintPanel(); showNoChat(); }
     },
     closePops,
-    menuAnchor: () => panelMoreAnchor,
+    selected: () => state.sel,
+    groups: () => state.groups,
+    // A group's sidebar row now (polling may have drawn it anew), for focus to return to.
+    groupRow: (id) => [...document.querySelectorAll("#roster .item[data-group]")].find((n) => n.dataset.group === id) || null,
     fallbackFocus: () => input,
   });
   // One programmatic edit of the draft (an @ suggestion): rendered like

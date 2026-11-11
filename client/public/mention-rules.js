@@ -49,15 +49,23 @@
     return out;
   }
 
-  // Whether `@name` already stands in the text as a mention of its own.
-  function mentioned(text, name) {
-    const mark = "@" + name;
-    for (let i = text.indexOf(mark); i >= 0; i = text.indexOf(mark, i + 1)) {
-      const before = i > 0 ? text[i - 1] : "", after = text[i + mark.length] || "";
-      if ((!before || !WORDISH.test(before)) && (!after || !WORDISH.test(after))) return true;
+  // The names the text already mentions. At each @ the longest name that
+  // stands there as a mention of its own counts, as the engine reads it, so
+  // with members 「团」 and 「团 子」, `@团 子` mentions only 「团 子」.
+  function mentions(text, names) {
+    text = String(text == null ? "" : text);
+    const list = [...new Set((names || []).map(String).filter(Boolean))].sort((a, b) => b.length - a.length);
+    const out = new Set();
+    for (let i = 0; i < text.length; i++) {
+      if (!AT.test(text[i]) || (i > 0 && WORDISH.test(text[i - 1]))) continue;
+      const hit = list.find((n) => text.startsWith(n, i + 1) && !WORDISH.test(text[i + 1 + n.length] || ""));
+      if (hit) out.add(hit);
     }
-    return false;
+    return out;
   }
+  // Whether `@name` already stands in the text as a mention of its own (among
+  // `names`, the longest one at an @ wins).
+  const mentioned = (text, name, names) => mentions(text, names && names.length ? names : [name]).has(String(name));
   // The draft after picking: the typed `@query` becomes `@名字 ` (or one
   // mention per member not already mentioned elsewhere, for 「全体」), with
   // one space after it unless one is already there; the caret lands after it.
@@ -65,8 +73,9 @@
     text = String(text == null ? "" : text);
     const before = text.slice(0, at.start), after = text.slice(at.end);
     const rest = before + after;
-    const targets = item && item.kind === "all"
-      ? [...new Set((names || []).map(String))].filter((n) => !mentioned(rest, n))
+    const done = item && item.kind === "all" ? mentions(rest, names) : null;
+    const targets = done
+      ? [...new Set((names || []).map(String))].filter((n) => !done.has(n))
       : [String(item && item.name)];
     const mention = targets.map((n) => "@" + n).join(" ");
     if (!mention) return { text: rest, caret: before.length };
@@ -74,5 +83,5 @@
     return { text: before + mention + (spaced ? "" : " ") + after, caret: before.length + mention.length + 1 };
   }
 
-  root.ClowderMentionRules = Object.freeze({ MAX_QUERY, ALL, active, suggest, mentioned, insert });
+  root.ClowderMentionRules = Object.freeze({ MAX_QUERY, ALL, active, suggest, mentions, mentioned, insert });
 })(typeof window !== "undefined" ? window : globalThis);
