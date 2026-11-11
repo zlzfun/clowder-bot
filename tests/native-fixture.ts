@@ -11,6 +11,8 @@ export class NativeFixture implements NativeTransport {
   runtimes: NativeRuntime[] = [{ id: 'codex', label: 'Codex', clientId: 'openai', installed: true, configuredModel: 'native-default', models: [], readiness: { status: 'configured', checkedAt: 1000 } }];
   threads = new Map<string, NativeThread>();
   messages = new Map<string, NativeMessage[]>();
+  /** A smaller page than the callers ask for, to show paging without hundreds of messages. */
+  pageLimit?: number;
   queues = new Map<string, any>();
   taskRows: any[] = [];
   approvalItems: any[] = [];
@@ -50,7 +52,13 @@ export class NativeFixture implements NativeTransport {
     else if (parts[4] === 'artifacts') result = {threadId:parts[3],artifacts:this.artifactRows.get(parts[3]!) ?? []};
     else if (parts[4] === 'sessions') result = { sessions: [] };
     else if (parts[4] === 'cancel') result = { ok: true, cancelled: true };
-    else if (parts[2] === 'messages' && method === 'GET') result = { messages: this.messages.get(url.searchParams.get('threadId')!) ?? [], hasMore: false };
+    else if (parts[2] === 'messages' && method === 'GET') {
+      // The newest page, or the one before a cursor (`<order>:<message id>`), like native: `limit` at most, and whether older ones remain.
+      const all = this.messages.get(url.searchParams.get('threadId')!) ?? [], cursor = url.searchParams.get('before');
+      const end = cursor ? all.findIndex(message => message.id === cursor.slice(cursor.indexOf(':') + 1)) : all.length;
+      const limit = Math.min(Number(url.searchParams.get('limit')) || 200, this.pageLimit ?? Infinity), start = Math.max(0, (end < 0 ? 0 : end) - limit);
+      result = { messages: all.slice(start, end < 0 ? 0 : end), hasMore: start > 0 };
+    }
     else if (path === '/api/messages' && method === 'POST') result = { status: 'queued', userMessageId: 'message-1', entries: [{ entryId: 'queue-1', targetCatId: body.mentions?.[0] }], queuePosition: 1 };
     else if (url.pathname === '/api/tasks' && method === 'GET') result = {tasks:this.taskRows.filter(task=>task.threadId===url.searchParams.get('threadId'))};
     else if (url.pathname === '/api/approval-hub/pending') result = {items:this.approvalItems};

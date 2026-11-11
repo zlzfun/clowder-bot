@@ -91,6 +91,11 @@ test('new chats use default cat directory and retain all earlier conversation re
   assert.equal(r.native.threads.get(next)?.projectPath,r.thread.projectPath);
   const history=await (await r.call('/bots/Ada/conversations')).json();assert.equal(history.conversations.length,3);
   assert.ok(history.conversations.some((c:any)=>c.id===thread.id));assert.ok(history.conversations.find((c:any)=>c.id===next).current);
+  // A page that still shows an earlier conversation must not start a new one; the current one may.
+  const stale=await r.call('/bots/Ada/new','POST',{expectedThreadId:thread.id});assert.equal(stale.status,409);
+  assert.equal((await (await r.call('/bots/Ada/conversations')).json()).conversations.length,3,'nothing was created');
+  assert.equal((await r.call('/bots/Ada/new','POST',{expectedThreadId:next})).status,200);
+  assert.equal((await r.call('/bots/Ada/new','POST',{other:1})).status,400);
 });
 test('new groups automatically get separate directories; legacy project group files remain readable',async t=>{
   const r=await setup(t),{project}=await legacyProject(r);
