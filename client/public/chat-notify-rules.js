@@ -50,8 +50,10 @@
       const away = c.key !== inView;
       if (last && last.messageId !== before.last) {
         entry.last = last.messageId;
-        // A cat's reply the server still counts as unread.
-        if (away && last.from === "cat" && typeof a.unread === "number" && a.unread > 0) {
+        // A cat's reply the server still counts as unread. A request's own
+        // card message is announced as the request below, never by its raw words.
+        const card = asks.some((i) => i.messageId === last.messageId);
+        if (away && !card && last.from === "cat" && typeof a.unread === "number" && a.unread > 0) {
           notes.push({ kind: "reply", key: c.key, type: c.type, id: c.id, tag: "reply:" + last.messageId, messageId: last.messageId,
             catId: str(last.catId), catName: oneLine(last.catName), text: oneLine(last.text), files: Number.isSafeInteger(last.files) ? last.files : 0 });
         }

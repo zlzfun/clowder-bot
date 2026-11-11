@@ -219,6 +219,10 @@ test('notifications: nothing on first sight, a cat\'s unread latest reply or a n
   const asked = step(status([], [{ id: 'g1', activity: act({ threadId: 'tg', items: [ask] }) }]));
   assert.deepEqual([asked[0].kind, asked[0].key, asked[0].proposalId, asked[0].tag], ['approval', 'group:g1', 'p9', 'approval:p9']);
   assert.deepEqual(step(status([], [{ id: 'g1', activity: act({ threadId: 'tg', items: [ask] }) }])), []);
+  // A request whose card message is the chat's latest line: one note for the request, none for the card's raw words.
+  const ask2 = { ...ask, id: 'approval:F139:p10', proposalId: 'p10', messageId: 'mc2' };
+  const both = step(status([], [{ id: 'g1', activity: act({ threadId: 'tg', items: [ask, ask2], last: reply('mc2', '提议新建定时任务：Create schedule: 喝水'), unread: 2 }) }]));
+  assert.deepEqual(both.map((n: Any) => n.kind), ['approval']);
   // Another conversation of the same cat: only remembered.
   assert.deepEqual(step(status([{ bot: '团子', activity: act({ threadId: 't2', last: reply('old'), unread: 9 }) }])), []);
   // Words: the cat's name (and the group's), the reply's first line or files, or what waits.

@@ -859,7 +859,7 @@
       "target": "client/public/chat-notify-rules.js",
       "description": "Pure rules for desktop notifications: which polled status changes are due (a cat's unread latest reply, a new request; never the chat in view, never twice, nothing on first sight), their words, and the switch and permission wording",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 确认与提醒 (docs/xbot-frontend.md item 32; docs/chat-experience-api.md 「等你确认的事」「卡片、清单与选项」, docs/chat-live-api.md)",
-      "sha256": "7d77f691b18b8094636b837167be9149b27cd3ac31ca4227367537bfa936982a"
+      "sha256": "38d5fc8b799532a094c8e5ee34a617cf2f3d81713e49ade4587f7c72e591bc08"
     },
     {
       "target": "client/public/chat-notify.js",
