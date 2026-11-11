@@ -1,0 +1,291 @@
+// Rules for a reply drawn while it is being written (classic script,
+// window.ClowderLiveRules). No DOM and no network: chat-live.js draws from
+// these and tests load the same file. The contract is docs/chat-live-api.md:
+// the thread's event stream carries `live` events (start, thinking, step,
+// text with the native cumulative length `end`, done) and transcript rows mark
+// a reply still being written with in_progress.
+//
+// Everything here is a projection of native facts. A reply's words are the
+// native draft as the stream and the transcript give it: pieces are placed by
+// their native position only, never glued across a gap and never guessed; a
+// transcript draft can extend the words but never take back longer words the
+// stream already showed. The finished reply always comes from the transcript.
+(() => {
+  "use strict";
+  const str = (v) => (typeof v === "string" ? v : "");
+  const oneLine = (v) => String(v ?? "").replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim();
+  const clip = (s, n) => { const chars = Array.from(s); return chars.length > n ? chars.slice(0, n - 1).join("") + "…" : s; };
+  const HELD_MAX = 4000;
+
+  // ---- One reply ----
+  // fromStart: this page saw the reply's start marker before any of its words,
+  // so a piece without a native position may follow on. broken: some piece was
+  // missed or could not be placed, so a piece without a position never can.
+  function reply(id, catId, fromStart, now = 0) {
+    return {
+      id: str(id), catId: str(catId), text: "", fromStart: !!fromStart, broken: false, held: [],
+      replacedAt: 0, phase: "start", step: null, done: false, seenAt: now, doneAt: 0,
+    };
+  }
+
+  // Pieces that arrived ahead of the words so far wait at their native place
+  // until what comes before them is known (from the stream or a draft).
+  function drain(r) {
+    for (;;) {
+      r.held = r.held.filter((p) => p.end > r.text.length);
+      const next = r.held.find((p) => p.start === r.text.length);
+      if (!next) return;
+      r.text += next.text;
+      r.held.splice(r.held.indexOf(next), 1);
+    }
+  }
+  function hold(r, piece) {
+    if (r.held.some((p) => p.start === piece.start && p.end === piece.end)) return;
+    r.held.push(piece);
+    if (r.held.length > HELD_MAX) r.held.splice(0, r.held.length - HELD_MAX);
+  }
+
+  // A `text` event (the contract's alignment rule). true when the words changed.
+  function text(r, ev, now) {
+    const piece = str(ev.text);
+    if (!piece) return false;
+    if (ev.replace === true) {
+      // The whole reply is this piece now; positions before it no longer hold.
+      // (Codex sends the whole reply this way after each paragraph: the same
+      // words again change nothing.)
+      const changed = r.text !== piece;
+      r.text = piece;
+      r.held = [];
+      r.replacedAt = now;
+      return changed;
+    }
+    const end = ev.end;
+    if (Number.isSafeInteger(end) && end >= piece.length) {
+      const start = end - piece.length;
+      if (start === r.text.length) { r.text += piece; drain(r); return true; }
+      // Already here (a newer draft was read first).
+      if (end <= r.text.length) return false;
+      // A gap before it, or it overlaps words it cannot be checked against:
+      // never glued; it waits for the words before it.
+      hold(r, { start, end, text: piece });
+      r.broken = true;
+      return false;
+    }
+    // No native position: only safe while every piece since the start was seen.
+    if (r.fromStart && !r.broken) { r.text += piece; return true; }
+    r.broken = true;
+    return false;
+  }
+
+  // One live event for this reply. true when what the chat shows may change.
+  function apply(r, ev, now = 0) {
+    if (!r || !ev || r.done && ev.kind !== "done") return false;
+    switch (ev.kind) {
+      case "start":
+        // Seen from its very start only when nothing of it was known yet.
+        if (!r.text && !r.held.length && !r.broken) r.fromStart = true;
+        return false;
+      case "thinking":
+        if (r.phase === "thinking") return false;
+        r.phase = "thinking"; r.step = null;
+        return true;
+      case "step": {
+        const step = { tool: str(ev.tool), target: str(ev.target) };
+        if (r.phase === "step" && r.step && r.step.tool === step.tool && r.step.target === step.target) return false;
+        r.phase = "step"; r.step = step;
+        return true;
+      }
+      case "text": {
+        const before = r.phase;
+        const changed = text(r, ev, now);
+        // Words again (even ones still waiting for their place): whatever it
+        // was doing before them is behind it.
+        if (str(ev.text)) { r.phase = "text"; r.step = null; }
+        return changed || before !== r.phase;
+      }
+      case "done":
+        // Only that the reply stopped being produced: how it ended (finished,
+        // stopped, failed) is the transcript's to say.
+        if (r.done) return false;
+        r.done = true; r.doneAt = now; r.step = null;
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  // A transcript read's draft of this reply (the native content so far).
+  // requestedAt: when that read was asked for. A draft extends the words, or
+  // takes over when they differ and this page has no newer replacement; it
+  // never takes back longer words the stream already showed.
+  function draft(r, value, requestedAt = 0) {
+    const d = str(value);
+    if (!r || d === r.text) return false;
+    if (d.length > r.text.length && d.startsWith(r.text)) { r.text = d; drain(r); return true; }
+    if (r.text.startsWith(d)) return false;
+    if (r.replacedAt && r.replacedAt >= requestedAt) return false;
+    r.text = d;
+    r.held = r.held.filter((p) => p.end > d.length);
+    r.broken = true;
+    drain(r);
+    return true;
+  }
+
+  // The stream lost events (a reconnect, a sequence gap): nothing can follow
+  // on without a native position any more.
+  function lost(r) { if (r) r.broken = true; }
+
+  // ---- What the chat shows of the words so far ----
+  // As the server does for finished replies: a trailing paw signature on its
+  // own line is not shown (outside code fences), nor a last line that opens
+  // with "[" and is not closed yet (a signature still being written), nor a
+  // reply that is only SILENT or the start of it.
+  const SIGNATURE = /(?:^|\r?\n)(?: {0,3}\[[^\[\]\r\n]+🐾\][ \t]*(?:\r?\n|$))+\s*$/u;
+  function inFence(text) {
+    let fence = "";
+    for (const line of text.split(/\r?\n/)) {
+      const m = /^[ \t>]*(?:(?:[-+*]|\d+[.)])[ \t]+)?(`{3,}|~{3,})(.*)$/.exec(line);
+      if (!m) continue;
+      if (!fence) { if (m[1][0] !== "`" || !m[2].includes("`")) fence = m[1]; }
+      else if (m[1][0] === fence[0] && m[1].length >= fence.length && !m[2].trim()) fence = "";
+    }
+    return !!fence;
+  }
+  function display(value) {
+    let text = str(value).replace(/\r\n/g, "\n");
+    const bare = text.trim();
+    if (!bare || "SILENT".startsWith(bare)) return "";
+    for (let i = 0; i < 4; i++) {
+      const before = text;
+      // A last line that opens a bracket it has not closed: it may be a signature.
+      const cut = text.lastIndexOf("\n") + 1;
+      const last = text.slice(cut);
+      if (/^\s{0,3}\[/.test(last) && !last.includes("]")) text = text.slice(0, cut);
+      const sig = SIGNATURE.exec(text);
+      if (sig && !inFence(text.slice(0, sig.index))) text = text.slice(0, sig.index);
+      text = text.replace(/\s+$/, "");
+      if (text === before) break;
+    }
+    return "SILENT".startsWith(text.trim()) ? "" : text;
+  }
+  // Words to draw: a code fence still being written is drawn closed (the
+  // renderer pairs ``` marks), so code reads as code from its first line
+  // instead of turning into a block only when the fence closes.
+  function drawable(text) {
+    const s = str(text);
+    return (s.match(/```/g) || []).length % 2 ? s + "\n```" : s;
+  }
+
+  // ---- The quiet line under a reply in progress ----
+  // A native tool name in everyday words; the target is only ever a file name,
+  // a site or a short query the server already reduced it to, and is shown
+  // only where it reads naturally. Never a tool name, a command or a path.
+  const VERBS = [
+    [/^(read|readfile|view|viewfile|cat|open|openfile|notebookread|readnotebook|readmanyfiles)$/, "look"],
+    [/^(write|writefile|create|createfile|newfile|filechange)$/, "write"],
+    [/^(edit|editfile|multiedit|notebookedit|replace|strreplace|strreplaceeditor|applypatch|patch|editnotebook|insert)$/, "edit"],
+    [/^(bash|shell|sh|exec|execcommand|commandexecution|runshellcommand|runcommand|command|terminal|localshell|run|powershell|cmd|killshell|bashoutput)$/, "run"],
+    [/^(grep|glob|find|findfiles|search|searchfiles|searchfilecontent|listdirectory|listdir|ls|list|codesearch|ripgrep|rg)$/, "dig"],
+    [/^(websearch|googlewebsearch|googlesearch|websearchtool|searchweb|bingsearch|internetsearch)$/, "web"],
+    [/^(webfetch|fetch|fetchurl|browse|openurl|readurl|urlfetch|httpget|webopen)$/, "site"],
+    [/^(task|agent|subagent|spawn|spawnagent|delegate|dispatch|parallel)$/, "split"],
+    [/^(todowrite|todo|todoread|updateplan|plan|updatetodos|writetodos)$/, "plan"],
+  ];
+  function verb(tool) {
+    const raw = str(tool);
+    if (/^mcp(__|_tool_call$)/i.test(raw)) {
+      const name = raw.toLowerCase();
+      if (/search|query|lookup|find/.test(name)) return "lookup";
+      if (/memory|recall|remember/.test(name)) return "memory";
+      if (/browser|chrome|playwright|navigate|page|tab/.test(name)) return "browser";
+      return "tool";
+    }
+    const name = raw.toLowerCase().replace(/[^a-z]/g, "");
+    for (const [re, kind] of VERBS) if (re.test(name)) return kind;
+    return "";
+  }
+  // A target fit for one quiet line: one line, short, and never a path.
+  function target(value) {
+    const t = oneLine(value);
+    if (!t || /[\\/]/.test(t)) return "";
+    return clip(t, 24);
+  }
+  function stepWords(tool, rawTarget) {
+    const kind = verb(tool), t = target(rawTarget);
+    switch (kind) {
+      case "look": return t ? "在看 " + t : "在看文件";
+      // Codex's file_change both creates and edits: with a file named it is
+      // writing that file, without one it is changing files.
+      case "write": return t ? "在写 " + t : verb(tool) === "write" && /change/i.test(str(tool)) ? "在改文件" : "在写文件";
+      case "edit": return t ? "在改 " + t : "在改文件";
+      case "run": return "在运行命令";
+      case "dig": return "在翻找文件";
+      case "web": return t ? "在搜索「" + t + "」" : "在搜索";
+      case "site": return t ? "在读 " + t : "在读网页";
+      case "split": return "在分头处理";
+      case "plan": return "在列计划";
+      case "lookup": return "在查找";
+      case "memory": return "在回想";
+      case "browser": return "在用浏览器";
+      case "tool": return "在用工具";
+      default: return "在处理";
+    }
+  }
+  // The quiet line for a reply's current state ("" when there is none).
+  function phrase(r) {
+    if (!r || r.done) return "";
+    if (r.phase === "step" && r.step) return stepWords(r.step.tool, r.step.target);
+    if (r.phase === "thinking") return "在想…";
+    return "";
+  }
+
+  // ---- Which native events change the record (and so need a read) ----
+  // The pieces of a turn the live stream already draws, and engine telemetry,
+  // change nothing a read would show until the turn ends. Anything else
+  // (done, error, queue, thread, task, approval, connector and message
+  // updates, a resync or a disconnect, and any type not known here) does.
+  // A text event that is not part of the reply stream (an explicit post) is
+  // a new message: it is read.
+  const CHUNKS = new Set(["text", "tool_use", "tool_result", "system_info", "session_init", "status",
+    "provider_signal", "liveness_signal", "agent_loop", "thinking", "heartbeat"]);
+  function structural(ev) {
+    const type = ev && typeof ev.type === "string" ? ev.type : "";
+    if (type === "text") return ev.origin !== "stream";
+    return !CHUNKS.has(type);
+  }
+  // Events after which the stream may have missed something.
+  const gap = (ev) => !!ev && (ev.type === "resync" || ev.type === "disconnected");
+
+  // ---- The send's answer ----
+  // POST <scope>/messages answers as an event stream (a cat) or JSON (a group).
+  // The receipt is the native admission; it never means the reply is done.
+  function receipt(body, json) {
+    if (json) {
+      const data = body && typeof body === "object" ? body : {};
+      return { receipt: data, userMessageId: str(data.userMessageId), error: "" };
+    }
+    let found = null, error = "";
+    for (const block of str(body).replace(/\r\n/g, "\n").split("\n\n")) {
+      let event = "message", data = "";
+      for (const line of block.split("\n")) {
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:")) data += line.slice(5).trim();
+      }
+      if (!data) continue;
+      let payload = null;
+      try { payload = JSON.parse(data); } catch (e) { continue; }
+      if (event === "error") error = str(payload && (payload.error || payload.message)) || "回复出错了";
+      else if (event === "queued" && payload && typeof payload === "object") found = payload;
+    }
+    return { receipt: found || {}, userMessageId: str(found && found.userMessageId), error };
+  }
+
+  // ---- Redraw identity ----
+  // A row's drawn markup with the per-drawing SVG ids (clip paths of the cat
+  // faces, glyph tiles) made neutral, so the same row drawn twice compares equal.
+  const signature = (html) => str(html).replace(/\b(xbot-glyph|clowder-cat-crop)-\d+\b/g, "$1-#");
+
+  window.ClowderLiveRules = Object.freeze({
+    reply, apply, draft, lost, display, drawable, stepWords, phrase, structural, gap, receipt, signature,
+  });
+})();

@@ -1538,9 +1538,9 @@ test('the page loads the workspace scripts before app.js and their styles last; 
   assert.ok(at('runtime-tasks.js') >= 0 && at('runtime-tasks.js') < at('workspace.js'));
   assert.ok(at('workspace-rules.js') < at('workspace.js') && at('workspace.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
-  // After every upstream and earlier style; only the status-line/memory extension (which builds on it) follows.
+  // After every upstream and earlier style; only the status-line/memory and live-reply extensions (which build on it) follow.
   assert.ok(styles.indexOf('workspace.css') > styles.indexOf('chat-presentation.css'));
-  assert.deepEqual(styles.slice(styles.indexOf('workspace.css') + 1), ['chat-experience.css']);
+  assert.deepEqual(styles.slice(styles.indexOf('workspace.css') + 1), ['chat-experience.css', 'chat-live.css']);
   assert.doesNotMatch(app, /\/paste"/);
   assert.match(app, /\["files", "文件"\]/);
   // 详情 appends the module's 历史对话 node only when it gives one (cats, never groups).
@@ -1570,7 +1570,7 @@ test('a cat\'s SILENT is never shown as words: a bare one is not drawn, one that
     workspace: { cards: (files: Array<{ name: string }>) => ({ cards: files.map(f => f.name) }) },
     window: { XBotProviders: { citedText: (content: string) => content, decorate: () => {} } },
     bindMessageMenu: (row: Node, _m: unknown, text: string) => { row.dataset.copy = text; },
-    markContinuation: () => {}, addBubbleTime: () => {},
+    markContinuation: () => {}, addBubbleTime: () => {}, endedNote: () => {},
   });
   // Only a bare SILENT is left out.
   assert.equal(out.silentOnly({ content: ' SILENT \n' }), true);

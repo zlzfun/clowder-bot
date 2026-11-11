@@ -385,11 +385,6 @@
     });
     paintRailStatus();
     sortStatusRows();
-    if (state.sel && state.sel.type === "bot" && !state.peer) {
-      const st = stStatus.map[state.sel.id];
-      const host = thread.querySelector(".msg.live .body");
-      if (st && host && (st.todo || host.querySelector(".live-status"))) setWorking(host, workText(st.tool, st.tool_summary));
-    }
   }
 
   function paintRailStatus() {
@@ -444,6 +439,8 @@
     state.others = data && Array.isArray(data.others) ? data.others : null;
     renderLists();
     paintStatus();
+    // The stop control follows what the status says runs or waits in this chat.
+    syncComposer();
     await refreshWork();
   }
 
@@ -929,6 +926,10 @@
   // init() is near the end, after workspace.init.
   const experience = window.ClowderExperience;
   const experienceRules = window.ClowderExperienceRules;
+  // A reply drawn while it is written, the history's keyed redraw, the stop
+  // control's look and 回到最新 (chat-live.js); init() is near the end.
+  const live = window.ClowderLive;
+  const liveRules = window.ClowderLiveRules;
   // An empty single chat's greeting invitation (chat-presentation.js): one
   // POST per chat thread for the page's life, never retried by itself. Its
   // outcome redraws only the line of the chat it was sent for, if that chat is still
@@ -2953,12 +2954,84 @@
     if (pasted.length) body.append(gallery(pasted));
     if (files.length) body.append(workspace.cards(files));
     if (!say) window.XBotProviders.decorate(body, m.parts);
+    if (last) endedNote(body, m.status, said);
     bindMessageMenu(row, m, said);
     row.append(body);
     if (cont) markContinuation(row, m.time);
     addBubbleTime(row, m.time);
     return row;
   }
+
+  // A reply that stopped or did not complete after writing some words says so
+  // under them, from its native status (with no words, the server's own
+  // 已停止 / 这次没完成 is the reply). Nothing is undone by stopping.
+  function endedNote(body, status, said) {
+    const note = status === "canceled" || status === "cancelled" ? "已停止" : status === "failed" ? "这次没完成" : "";
+    if (note && said && !said.startsWith(note)) body.append(el("div", "lv-ended", note));
+  }
+
+  // A reply still being written (in_progress): its row in the cat's reply
+  // position, the same face, name line and grouping as a finished reply. The
+  // words, typing dots and quiet step line are drawn into it by chat-live.js.
+  // who null: a group's reply before any cat was named (no face, indented).
+  function replyFrame(m, who, group, cont) {
+    const row = el("div", "msg bot live" + (group ? "" : " with-face"));
+    const id = m.native_message_id || m.id;
+    if (id) row.dataset.mid = String(id);
+    if (group && m.id) row.dataset.id = String(m.id);
+    if (m.seq) row.dataset.seq = String(m.seq);
+    if (m.time) row.dataset.time = String(m.time);
+    if (who) row.dataset.sender = who.key;
+    const body = el("div", "body");
+    if (who && !cont) {
+      row.append(speakerFace(who));
+      body.append(speakerHead(who, m.time));
+    }
+    row.append(body);
+    if (cont || !who) row.classList.add("cont");
+    addBubbleTime(row, m.time);
+    return row;
+  }
+
+  // The speaker of a reply the stream started before any read named it.
+  function catWho(catId) {
+    const bot = (state.bots || []).find((b) => b.native_id === catId || b.id === catId);
+    return presentation.speaker({ speaker: bot || null, native_cat_id: catId, name: bot ? bot.name : "" });
+  }
+
+  // A reply row for chat-live.js (a send's typing bubble, or a reply the
+  // stream started): grouped against the row above it like the history's.
+  function liveRow(catId, time, prev) {
+    const group = !!state.sel && state.sel.type === "group";
+    const who = catId ? catWho(catId) : null;
+    const cont = !!who && !!prev && prev.classList.contains("msg") && !!prev.dataset.sender
+      && !groupStart({ time: prev.dataset.time }, { time }, prev.dataset.sender, who.key);
+    return replyFrame({ time }, who, group, cont);
+  }
+
+  // What a read says about replies, for chat-live.js: which are still being
+  // written, with the native words so far (the raw draft, whose length is the
+  // stream's own position), and which have ended.
+  function liveRows(messages, group) {
+    return (messages || []).filter((m) => m && (group ? m.kind === "bot" : m.role === "assistant")).map((m) => ({
+      id: String(m.native_message_id || m.id || ""),
+      catId: String(m.native_cat_id || ""),
+      inProgress: !!m.in_progress && !presentation.isActivity(m),
+      draft: m.native && typeof m.native.content === "string" ? m.native.content : String((group ? m.text : sayText(m)) || ""),
+    }));
+  }
+
+  // A reply in progress changes with every draft the engine saves; its words
+  // are drawn live, so only its place in the history decides a redraw.
+  function sigRows(messages) {
+    return (messages || []).map((m) => (m && m.in_progress ? {
+      id: m.id, seq: m.seq, role: m.role, kind: m.kind, time: m.time, in_progress: true, native_cat_id: m.native_cat_id,
+      presentation_kind: m.presentation_kind, speaker: m.speaker, sender: m.sender, attachments: m.attachments,
+    } : m));
+  }
+
+  // The open conversation, as chat-live.js and the history name it.
+  const chatKey = (sel) => (sel ? (sel.type === "group" ? "group:" : "bot:") + sel.id : "");
 
   // The name line of a bot group: the same .who as group chats.
   function speakerHead(who, time) {
@@ -2993,16 +3066,19 @@
   // read: the transcript read these rows came from (loadThread's state.chatRead).
   function renderMessages(messages, who, read) {
     const inner = el("div", "thread-inner");
+    inner.dataset.chat = chatKey(state.sel);
     const prevTop = thread.scrollTop;
-    const near = state.firstRender || thread.scrollHeight - thread.scrollTop - thread.clientHeight < 120;
+    const near = state.firstRender || live.following();
     if (!messages || !messages.length) {
       // No rows: at most the greeting's status line (placeGreeting), never a
       // made-up message. A chat with records but no rows stays blank.
-      restoreSendFeedback(inner);
+      const keep = sendFeedback(inner, messages);
       if (read) placeGreeting(inner, read);
-      thread.replaceChildren(inner);
+      const shown = live.commit(inner, keep);
       state.firstRender = false;
       if (near) thread.scrollTop = thread.scrollHeight;
+      updateWorkTimes();
+      live.rendered(shown);
       experience.rendered();
       return;
     }
@@ -3031,6 +3107,15 @@
       if (presentation.isActivity(m)) {
         inner.append(activityRow(m));
         lastKey = "";
+        return;
+      }
+      // A reply still being written: its row, which chat-live.js fills with
+      // the words so far (or typing dots), never placeholder words.
+      if (m.role === "assistant" && m.in_progress && !relays.has(i)) {
+        const speaker = presentation.speaker(m);
+        inner.append(live.frame(replyFrame(m, speaker, false, !groupStart(lastMsg, m, lastKey, speaker.key))));
+        lastKey = speaker.key;
+        lastMsg = m;
         return;
       }
       const routine = routineOf(m);
@@ -3111,13 +3196,16 @@
     // unless the invitation is unconfirmed (placeGreeting).
     // A chat its cat was invited to open keeps reading from the top.
     if (greetingAccepted(read)) inner.classList.add("greeted");
+    const keep = sendFeedback(inner, messages);
     if (read) placeGreeting(inner, read);
     addTimeDividers(inner);
-    restoreSendFeedback(inner);
-    thread.replaceChildren(inner);
+    // Rows that did not change keep their element: only new rows rise in.
+    const shown = live.commit(inner, keep);
     state.firstRender = false;
     thread.scrollTop = near ? thread.scrollHeight : Math.min(prevTop, thread.scrollHeight);
     keepReading(anchor);
+    updateWorkTimes();
+    live.rendered(shown);
     experience.rendered();
   }
 
@@ -3135,7 +3223,7 @@
   // holds more, and what its greeting line says.
   function transcriptSig(read) {
     const view = greetings.view(read.selection.id, read);
-    return JSON.stringify([read.threadId, read.messages, read.history, read.greeting, view && [view.state, greetingReason(view)]]);
+    return JSON.stringify([read.threadId, sigRows(read.messages), read.history, read.greeting, view && [view.state, greetingReason(view)]]);
   }
 
   // A single chat's one greeting line, at the top of the stream where the
@@ -3219,15 +3307,16 @@
   // group: the record GET /xbot-api/groups/:id returned with these messages.
   function renderGroup(messages, group) {
     const inner = el("div", "thread-inner grpchat");
+    inner.dataset.chat = chatKey(state.sel);
     const prevTop = thread.scrollTop;
-    const near = state.firstRender || thread.scrollHeight - thread.scrollTop - thread.clientHeight < 120;
+    const near = state.firstRender || live.following();
     if (!messages || !messages.length) {
       const who = group && group.name;
       inner.append(emptyState(niceName(who) || "群", "没有消息", who, groupFace(group)));
-      restoreSendFeedback(inner);
-      thread.replaceChildren(inner);
+      const shown = live.commit(inner, sendFeedback(inner, messages));
       state.firstRender = false;
       if (near) thread.scrollTop = thread.scrollHeight;
+      live.rendered(shown);
       experience.rendered();
       return;
     }
@@ -3245,6 +3334,13 @@
       if (!mine && presentation.isActivity(m)) {
         inner.append(activityRow(m));
         last = "";
+        continue;
+      }
+      // A reply still being written: its row, filled by chat-live.js.
+      if (!mine && m.in_progress) {
+        inner.append(live.frame(replyFrame(m, speaker, true, !groupStart(lastMsg, m, last, speaker.key))));
+        last = speaker.key;
+        lastMsg = m;
         continue;
       }
       if (!mine && /^\[action\]/i.test(text)) {
@@ -3284,6 +3380,7 @@
         const said = isSilent(text) ? "" : text;
         if (said || !files.length) appendBotContent(body, said);
         if (files.length) body.append(workspace.cards(files));
+        endedNote(body, m.status, said);
         bindMessageMenu(row, m, said);
         row.append(body);
         if (row.classList.contains("cont")) markContinuation(row, m.time);
@@ -3292,11 +3389,12 @@
       last = key;
       inner.append(row);
     }
-    restoreSendFeedback(inner);
-    thread.replaceChildren(inner);
+    // Rows that did not change keep their element: only new rows rise in.
+    const shown = live.commit(inner, sendFeedback(inner, messages));
     state.firstRender = false;
     thread.scrollTop = near ? thread.scrollHeight : Math.min(prevTop, thread.scrollHeight);
     keepReading(anchor);
+    live.rendered(shown);
     experience.rendered();
   }
 
@@ -3615,6 +3713,8 @@
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
       if (hiddenFromPreview(m)) continue;
+      // A reply still being written is not what the chat last said.
+      if (m.in_progress) continue;
       if (m.role === "assistant" && !spoken.has(i)) continue;
       const says = m.role === "assistant" && spoken.get(i);
       const parsed = says ? { text: says.map((say) => say.text).join(" ") } : unwrap(m.content || "");
@@ -3631,8 +3731,8 @@
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
       const raw = String(m.text || "").trim();
-      // An execution record is not a reply, so it is never the preview.
-      if (!raw || (m.kind !== "person" && isSilent(raw)) || /^\[action\]/i.test(raw) || presentation.isActivity(m)) continue;
+      // An execution record is not a reply, so it is never the preview; nor is a reply still being written.
+      if (!raw || m.in_progress || (m.kind !== "person" && isSilent(raw)) || /^\[action\]/i.test(raw) || presentation.isActivity(m)) continue;
       const who = m.kind === "person" ? "你" : niceName(m.sender || "");
       const text = clip(plainText(raw), 64);
       return who ? who + "：" + text : text;
@@ -4336,6 +4436,9 @@
     workspace.select(state.sel);
     // The status line and read position start over for this conversation.
     experience.select(state.sel);
+    // So do the replies drawn while written, typing bubbles and a stop in flight.
+    live.select(chatKey(state.sel));
+    stopState = null;
     state.streaming = 0;
     state.pendingSends = [];
     paintWorkStatus();
@@ -4458,13 +4561,24 @@
   let nativeEvents = null;
   let nativeThreadId = null;
   let nativeRefreshTimer = null;
+  let nativeRetryTimer = null;
   function watchNativeThread(id) {
     if (nativeThreadId === id) return;
     nativeEvents?.close(); nativeEvents = null; nativeThreadId = id;
     clearTimeout(nativeRefreshTimer); nativeRefreshTimer = null;
+    clearTimeout(nativeRetryTimer); nativeRetryTimer = null;
     if (!id) return;
-    nativeEvents = new EventSource("/xbot-api/runtime/threads/" + encodeURIComponent(id) + "/events");
-    nativeEvents.addEventListener("native", () => {
+    const source = nativeEvents = new EventSource("/xbot-api/runtime/threads/" + encodeURIComponent(id) + "/events");
+    source.addEventListener("native", (msg) => {
+      let ev = null;
+      try { ev = JSON.parse(msg.data); } catch (e) { /* unreadable: read the record */ }
+      if (nativeThreadId !== id) return;
+      // After a resync or a disconnect the stream may have missed pieces.
+      if (liveRules.gap(ev)) live.lost();
+      // The pieces of a turn are drawn from the live events below; only what
+      // changes the record (an end, the queue, a task, an approval, an
+      // explicit message…) reads the transcript and the status again.
+      if (ev && !liveRules.structural(ev)) return;
       if (nativeRefreshTimer) return;
       nativeRefreshTimer = setTimeout(() => {
         nativeRefreshTimer = null;
@@ -4474,6 +4588,26 @@
         loadThread().catch(() => {}); refreshStatus().catch(() => {});
       }, 180);
     });
+    // A reply as it is written (docs/chat-live-api.md): drawn by chat-live.js.
+    source.addEventListener("live", (msg) => {
+      if (nativeThreadId !== id) return;
+      let ev = null;
+      try { ev = JSON.parse(msg.data); } catch (e) { return; }
+      live.event(ev);
+    });
+    // The browser reconnects by itself; one the server refused (a restart)
+    // is opened again shortly. Either way pieces may be missing meanwhile.
+    source.addEventListener("error", () => {
+      if (nativeEvents !== source) return;
+      live.lost();
+      if (source.readyState !== 2 || nativeRetryTimer) return;
+      nativeRetryTimer = setTimeout(() => {
+        nativeRetryTimer = null;
+        if (nativeEvents !== source || nativeThreadId !== id) return;
+        nativeThreadId = null;
+        watchNativeThread(id);
+      }, 2000);
+    });
     // History remains the source of truth; the existing poll also repairs gaps/restarts.
   }
 
@@ -4481,6 +4615,9 @@
     if (!state.sel || state.streaming || state.peer) return;
     const selection = state.sel;
     const request = ++state.threadLoad;
+    // When this read was asked for: a reply's words drawn from the stream since
+    // then are never taken back by its (older) draft.
+    const requestedAt = Date.now();
     try {
       if (selection.type === "bot") {
         const data = await api("/xbot-api/bots/" + encodeURIComponent(selection.id) + "/transcript");
@@ -4503,12 +4640,15 @@
           visible: document.visibilityState === "visible",
           begun: state.pendingSends.length > 0 || state.replyErrors.length > 0,
         });
+        // Replies being written take their drafts (and ended ones their end)
+        // before deciding whether anything else changed.
+        live.read(liveRows(messages, false), requestedAt);
         const sig = transcriptSig(read);
         state.messages = messages;
         state.previewAt["b:" + selection.id] = Date.now();
         workspace.observe(selection, data.thread_id, sig !== state.sig);
         experience.observe(selection, data.thread_id, sig !== state.sig);
-        if (sig === state.sig) return;
+        if (sig === state.sig) { live.attach(); return; }
         state.sig = sig;
         state.preview["b:" + selection.id] = previewFromMessages(messages);
         renderLists();
@@ -4521,11 +4661,12 @@
       if (state.sel !== selection || request !== state.threadLoad || state.streaming || state.peer) return;
       watchNativeThread(data.group?.native_thread_id || data.group?.id);
       const messages = data.messages || [];
-      const sig = JSON.stringify(messages);
+      live.read(liveRows(messages, true), requestedAt);
+      const sig = JSON.stringify(sigRows(messages));
       state.previewAt["g:" + selection.id] = Date.now();
       workspace.observe(selection, data.group?.native_thread_id || data.group?.id, sig !== state.sig);
       experience.observe(selection, data.group?.native_thread_id || data.group?.id, sig !== state.sig);
-      if (sig === state.sig) return;
+      if (sig === state.sig) { live.attach(); return; }
       state.sig = sig;
       state.preview["g:" + selection.id] = previewFromGroup(messages);
       renderLists();
@@ -6349,43 +6490,6 @@
     return tool === "todo" ? "正在更新待办" : String(summary || "").split("\n")[0].trim();
   }
 
-  function setWorking(host, text) {
-    const st = state.sel && state.sel.type === "bot" && !state.peer && stStatus.map[state.sel.id];
-    const label = (st && st.todo) || text;
-    let status = host.querySelector(".live-status");
-    if (status && status.textContent === label) return;
-    if (!status) {
-      status = el("div", "meta live-status");
-      host.append(status);
-    }
-    status.replaceChildren();
-    const dot = el("i", "status-dot run");
-    setTip(dot, "正在处理");
-    status.append(dot);
-    if (label) status.append(el("span", "working-name", label));
-  }
-
-  function approvalCard(payload) {
-    const card = pendingApprovalCard({
-      tool: payload.tool || payload.name || "",
-      title: payload.title || "",
-      subtitle: payload.subtitle || "",
-      summary: payload.summary || "",
-      command: payload.command || "",
-      kind: payload.kind || "",
-      deadline: payload.deadline || payload.expires || "",
-      decide: async (ok) => {
-        if (!state.sel || state.sel.type !== "bot") throw new Error("没有选中的 Bot");
-        await api("/xbot-api/bots/" + encodeURIComponent(state.sel.id) + "/approvals/" + encodeURIComponent(payload.id || ""), {
-          method: "POST",
-          body: { allow: ok },
-        });
-      },
-    });
-    card.dataset.branch = payload.branch || payload.background || "";
-    return card;
-  }
-
   // How many owner messages in the loaded transcript carry exactly this text
   // (raw content, so image links and blank lines do not change the match).
   function ownerSends(text) {
@@ -6394,20 +6498,27 @@
       String(m.content || "").replace(/\r\n/g, "\n").trim() === text).length;
   }
 
-  function restoreSendFeedback(inner) {
-    // A queued send stays until the transcript gains one more copy of its text
-    // than it had when the send was queued; each copy resolves one queued row.
-    const queuedRecorded = (row) => {
-      if (!(state.sel && state.sel.type === "bot") || ownerSends(row.dataset.sendText) <= row.baseline) return false;
+  // A send the server took stays on screen until a read of the history holds
+  // that message (by the native ID its receipt named; in a single chat
+  // without one, by one more copy of its text), so it never blinks out
+  // between the answer and the next read. A failed one stays until resent.
+  // ids: the native IDs of the rows just read. Returns the rows this page
+  // holds after the history: sends, then reply errors.
+  function sendFeedback(inner, messages) {
+    const ids = new Set((messages || []).map((m) => String((m && (m.native_message_id || m.id)) || "")));
+    const recorded = (row) => {
+      if (row.dataset.mid) return ids.has(row.dataset.mid);
+      if (!(state.sel && state.sel.type === "bot")) return true;
+      if (ownerSends(row.dataset.sendText) <= row.baseline) return false;
+      // Each new copy of the text resolves one such send.
       for (const other of state.pendingSends) {
-        if (other !== row && (other.queued || other.keepFailed) && other.dataset.sendText === row.dataset.sendText) other.baseline++;
+        if (other !== row && other.accepted && !other.dataset.mid && other.dataset.sendText === row.dataset.sendText) other.baseline++;
       }
       return true;
     };
-    state.pendingSends = state.pendingSends.filter((row) => !row.accepted || ((row.queued || row.keepFailed) && !queuedRecorded(row)));
+    state.pendingSends = state.pendingSends.filter((row) => !row.accepted || !recorded(row));
     if (state.pendingSends.length) inner.querySelector(".empty")?.remove();
-    inner.append(...state.pendingSends, ...state.replyErrors);
-    updateWorkTimes();
+    return [...state.pendingSends, ...state.replyErrors];
   }
 
   let sendStatus;
@@ -6445,120 +6556,11 @@
     row.querySelector(".who")?.remove();
   }
 
-  function liveBubble() {
-
-    const inner = thread.querySelector(".thread-inner") || thread;
-    const empty = inner.querySelector(".empty");
-    if (empty) empty.remove();
-    dropGreeting(inner);
-    // The reply comes from the bot this chat posted to; its identity, as the
-    // transcript will name it (native cat ID).
-    const name = state.sel ? state.sel.id : "Bot";
-    const bot = (state.bots || []).find((b) => b.name === name);
-    const who = presentation.speaker({ speaker: bot || null, native_cat_id: bot && (bot.native_id || bot.id), name: name });
-    const now = new Date().toISOString();
-    const row = el("div", "msg bot live with-face");
-    row.dataset.sender = who.key;
-    row.dataset.time = now;
-    row.append(speakerFace(who));
-    const body = el("div", "body");
-    body.append(speakerHead(who, now));
-    const prose = el("div", "prose bot-bubble");
-    const dots = el("span", "typing-dots");
-    dots.setAttribute("aria-label", "正在回复");
-    for (let i = 0; i < 3; i++) dots.append(el("i", ""));
-    body.append(prose, dots);
-    row.append(body);
-    markLiveGroup(inner, row);
-    addBubbleTime(row, now);
-    addTimeDivider(inner, row);
-    inner.append(row);
-    thread.scrollTop = thread.scrollHeight;
-    return prose;
-  }
-
-  async function readSSE(res, selection, prose, onQueued, onLive) {
-    const reader = res.body.getReader();
-    const dec = new TextDecoder();
-    let buf = "";
-    // After a switch keep reading without touching the view: closing the
-    // request would cancel the turn on the server.
-    const drain = async () => { try { while (!(await reader.read()).done) { /* discard */ } } catch (e) { /* gone */ } };
-    if (state.sel !== selection) { await drain(); return; }
-    while (true) {
-      const step = await reader.read();
-      if (state.sel !== selection) { await drain(); return; }
-      if (step.done) break;
-      buf += dec.decode(step.value, { stream: true });
-      let cut;
-      while ((cut = buf.indexOf("\n\n")) >= 0) {
-        const block = buf.slice(0, cut);
-        buf = buf.slice(cut + 2);
-        let event = "message";
-        let data = "";
-        for (const line of block.split("\n")) {
-          if (line.startsWith("event:")) event = line.slice(6).trim();
-          else if (line.startsWith("data:")) data += line.slice(5).trim();
-        }
-        if (event === "queued") { onQueued(); continue; }
-        if (!data) continue;
-        let payload = {};
-        try { payload = JSON.parse(data); } catch (e) { continue; }
-        if (payload.status === "queued") { onQueued(); continue; }
-        const host = prose.closest(".body") || prose.parentElement;
-        if (event === "part") {
-          if (payload.hosted?.name === "image_generation") {
-            if (host) setWorking(host, "生成图片");
-          } else window.XBotProviders.progress(host, payload);
-        } else if (event === "tool") {
-          // Tool steps show only as the busy line; the trace has the detail.
-          setWorking(prose.closest(".body"), workText(payload.name, payload.summary));
-        } else if (event === "result" && payload.name === "send_message_to_user" && payload.text) {
-          // A message that landed is this bubble; the next one streams into a
-          // fresh live row, as the transcript keeps one bubble per call.
-          host.querySelector(".live-status")?.remove();
-          host.querySelector(".typing-dots")?.remove();
-          appendMarkdown(prose, stripBotImages(displayText(payload.text)));
-          host.parentElement.classList.remove("live");
-          prose = liveBubble();
-          onLive(prose);
-          thread.scrollTop = thread.scrollHeight;
-        } else if (event === "result" && payload.name === "bot_update_profile") {
-          // The result arrives after persistence. Refresh faces even while the
-          // streaming poll is paused, without holding up incoming text. The
-          // selection guard keeps a delayed fetch from restoring an old header.
-          refreshLists().then(() => {
-            if (state.sel === selection && selection.type === "bot" && !state.peer) setHeader(selection.id);
-          }).catch(() => {});
-        } else if (event === "approval" && host) {
-          const status = host.querySelector(".live-status");
-          if (status) status.remove();
-          host.append(approvalCard(payload));
-          thread.scrollTop = thread.scrollHeight;
-        } else if (event === "done" && payload.reply_to && host) {
-          const live = host.closest(".msg");
-          if (live && !live.querySelector(".quote-block")) {
-            const block = quoteBlock(state.messages, payload.reply_to);
-            const bubble = host.querySelector(".bubble");
-            const head = host.querySelector(":scope > .who");
-            if (bubble) host.insertBefore(block, bubble);
-            else if (head) head.after(block);
-            else host.prepend(block);
-          }
-        } else if (event === "done" && payload.background && host) {
-          const status = host.querySelector(".live-status");
-          if (status) status.remove();
-        } else if (event === "error") {
-          throw new Error(payload.error || payload.message || "回复出错了");
-        }
-      }
-    }
-  }
-
   function optimisticMessage(text, images, files) {
     let inner = thread.querySelector(".thread-inner:not(.thread-skeleton)");
     if (!inner) {
-      inner = el("div", "thread-inner");
+      inner = el("div", "thread-inner" + (state.sel && state.sel.type === "group" ? " grpchat" : ""));
+      inner.dataset.chat = chatKey(state.sel);
       thread.replaceChildren(inner);
     }
     inner.querySelector(".empty")?.remove();
@@ -6596,14 +6598,23 @@
     return h.slice(0, 8) + "-" + h.slice(8, 12) + "-" + h.slice(12, 16) + "-" + h.slice(16, 20) + "-" + h.slice(20);
   }
 
+  // The open single chat's cat, as native events name it.
+  function botCatId(name) {
+    const bot = (state.bots || []).find((b) => b.name === name);
+    return bot ? String(bot.native_id || bot.id || "") : "";
+  }
+
   // files: the composer's uploaded attachments ({ids, threadId, files}) from
   // workspace.takeAttachments(); a send that does not go out hands them back.
+  // The send shows at once (the owner's bubble 发送中, and the cat's typing
+  // bubble from chat-live.js); the server's answer is only its admission, and
+  // the reply arrives on the thread's event stream and in the transcript.
   async function sendText(text, pending, images, files) {
     text = (text || "").trim();
     images = images || [];
     files = files && files.ids && files.ids.length ? files : null;
-    // A message sent while a reply is streaming interrupts it: the server forks the
-    // running turn to the background and answers this one at once.
+    // A message sent while the cat works is taken in by the running turn or
+    // queued behind it (native continue_current); nothing is interrupted.
     if ((!text && !images.length && !files) || !state.sel) return;
     const selection = state.sel;
     ++state.threadLoad;
@@ -6630,16 +6641,8 @@
     marker.className = "send-state";
     marker.replaceChildren(document.createTextNode("发送中"));
     announceSend("发送中");
-    let prose = selection.type === "bot" ? liveBubble() : null;
-    let live = prose?.closest(".msg.live");
-    const markQueued = () => {
-      if (!state.pendingSends.includes(pending)) state.pendingSends.push(pending);
-      pending.queued = true;
-      pending.keepFailed = false;
-      pending.querySelector(".send-state")?.remove();
-      pending.querySelector(".bubble-col")?.append(el("div", "send-state", "已排队"));
-      announceSend("已排队");
-    };
+    // The cat's typing bubble at once, before the server has a row for its reply.
+    const reply = live.expect(selection.type === "bot" ? botCatId(selection.id) : "");
     let accepted = false;
     const markSent = () => {
       accepted = true;
@@ -6654,6 +6657,7 @@
       });
       pending.classList.remove("optimistic");
       marker.remove();
+      announceSend("已发送");
       // An older 回复出错了 line is resolved by the next accepted send.
       if (state.sel === selection) {
         state.replyErrors.forEach((row) => row.remove());
@@ -6668,7 +6672,6 @@
         if (state.sel === selection) state.streaming = Math.max(0, state.streaming - 1);
       }
     };
-    setStatus("正在回复");
     try {
       const payload = { text: text, idempotencyKey: sendKey };
       if (images.length) payload.images = images;
@@ -6691,23 +6694,18 @@
         throw err;
       }
       markSent();
-      const ct = res.headers.get("content-type") || "";
-      if (ct.includes("application/json")) {
-        const data = await res.json().catch(() => ({}));
-        if (state.sel !== selection) return;
-        if (data.status === "queued") {
-          markQueued();
-        }
-        setStatus(data.status === "queued" ? "已排队" : "");
-      } else if (prose) {
-        await readSSE(res, selection, prose, markQueued, (p) => { prose = p; live = p.closest(".msg.live"); });
-      }
+      // The native admission (an event stream for a cat, JSON for a group): it
+      // names the owner's message, so its row is matched when the history has it.
+      const json = (res.headers.get("content-type") || "").includes("application/json");
+      const answer = liveRules.receipt(json ? await res.json().catch(() => ({})) : await res.text().catch(() => ""), json);
+      if (answer.userMessageId) pending.dataset.mid = answer.userMessageId;
+      reply.accept(answer.userMessageId);
+      if (answer.error) throw new Error(answer.error);
       if (state.sel !== selection) return;
       state.sig = "";
       clearQuote();
       settle();
       await loadThread();
-      if (state.sel === selection && subtitle.textContent === "正在回复") setStatus("");
     } catch (e) {
       // Session expired mid-send: keep the text so the input gets it back
       // after the owner logs in again (showLogin already dropped the thread).
@@ -6720,14 +6718,8 @@
       const filesBack = !accepted && files ? workspace.giveBack(files) : false;
       if (state.sel !== selection) return;
       setStatus("");
+      reply.drop();
       if (accepted) {
-        if (pending.queued) {
-          live?.remove();
-          settle();
-          state.sig = "";
-          await loadThread();
-          return;
-        }
         if (!state.pendingSends.includes(pending)) state.pendingSends.push(pending);
         pending.keepFailed = true;
         const error = el("div", "msg bot");
@@ -6736,8 +6728,7 @@
         errorDetails(errorText, e.message, zhError(e.message));
         errorBody.append(errorText);
         error.append(errorBody);
-        live?.replaceWith(error);
-        if (!live) thread.querySelector(".thread-inner")?.append(error);
+        thread.querySelector(".thread-inner")?.append(error);
         state.replyErrors.push(error);
         announceSend("回复出错了");
         settle();
@@ -6747,7 +6738,6 @@
         // The transcript already holds this message: it did arrive, only the reply failed.
         if (!state.pendingSends.includes(pending)) return;
       }
-      live?.remove();
       if (!marker.isConnected) pending.querySelector(".bubble-col")?.append(marker);
       marker.className = "send-state send-failed";
       // An unknown outcome (no answer, or a server fault) may still have
@@ -6790,10 +6780,74 @@
       // A refusal because the conversation moved: read where it is now.
       if (!accepted && e.status === 409) setTimeout(() => { state.sig = ""; loadThread().catch(() => {}); }, 0);
     } finally {
-      live?.querySelector(".typing-dots")?.remove();
-      live?.querySelector(".live-status")?.remove();
-      if (prose && !prose.textContent && !live?.querySelector(".approval")) live?.remove();
       settle();
+      syncComposer();
+    }
+  }
+
+  // ---- Stop ----
+  // While this chat's cat works (a reply being written, a send waiting for its
+  // reply, or the status saying something runs or waits in this conversation)
+  // and nothing is typed, the send button stops it: the existing native stop
+  // withdraws what has not started and cancels what runs. Finished work stays
+  // as it is; the reply then ends as the transcript says (已停止 under its words).
+  let stopState = null;
+  function statusBusy() {
+    const sel = state.sel;
+    if (!sel || state.peer) return false;
+    const entry = sel.type === "group" ? stStatus.groups[sel.id] : stStatus.map[sel.id];
+    // This conversation's own thread only: the cat may be busy in another chat.
+    const a = experienceRules.activity(entry && entry.activity);
+    return !!a && (a.counts.running > 0 || a.counts.queued > 0);
+  }
+  const chatWorking = () => !!state.sel && !state.peer && (live.working() || statusBusy());
+
+  // The status says this send is waiting behind other work in this chat.
+  function sendQueued(userId) {
+    const sel = state.sel;
+    if (!sel || state.peer) return false;
+    if (sel.type === "group") {
+      const a = experienceRules.activity(stStatus.groups[sel.id] && stStatus.groups[sel.id].activity);
+      return !!a && a.counts.queued > 0;
+    }
+    const st = stStatus.map[sel.id];
+    return !!st && (st.queued || []).some((q) => q && ["queued", "pending"].includes(q.status) && q.threadId === st.thread_id
+      && (!userId || q.messageId === userId || q.userMessageId === userId));
+  }
+
+  async function stopChat() {
+    const selection = state.sel;
+    if (!selection || state.peer || stopState) return;
+    const scope = (selection.type === "group" ? "/xbot-api/groups/" : "/xbot-api/bots/") + encodeURIComponent(selection.id);
+    stopState = { selection, at: Date.now() };
+    live.stopping(true);
+    syncComposer();
+    try {
+      await api(scope + "/stop", { method: "POST" });
+      if (state.sel !== selection) return;
+      announceSend("正在停止");
+      live.stopped();
+      // The engine ends the turn on its own; the history and status say how.
+      state.sig = "";
+      refreshStatus().catch(() => {});
+      loadThread().catch(() => {});
+    } catch (e) {
+      if (state.sel !== selection) return;
+      stopState = null;
+      live.stopping(false);
+      setStatus("没能停止：" + visibleError(e, "连不上 clowder-bot").replace(/^没能完成：/, ""), true);
+      syncComposer();
+    }
+  }
+  // 正在停止… lasts until nothing runs or waits here any more; if that takes
+  // long, the button is offered again (the engine may still be winding down).
+  function settleStop() {
+    if (!stopState) return;
+    if (!chatWorking()) { stopState = null; live.stopping(false); return; }
+    if (Date.now() - stopState.at > 20000) {
+      stopState = null;
+      live.stopping(false);
+      setStatus("还没停下来，可以再点一次停止", true);
     }
   }
 
@@ -7029,10 +7083,22 @@
     const ready = attachReady() > 0;
     const canSend = hasText || ready;
     composer.classList.toggle("has-text", hasText);
-    $("send").disabled = !canSend || attachBusy();
-    $("send").classList.toggle("primary", canSend);
-    $("send").classList.toggle("secondary", !canSend);
+    settleStop();
+    // While this chat's cat works and nothing is typed, the button stops it;
+    // with words typed it sends them (the cat takes them in as it works).
+    const stop = !canSend && !attachBusy() && chatWorking();
+    const send = $("send");
+    live.sendButton(send, stop ? (stopState ? "stopping" : "stop") : "send");
+    send.disabled = stop ? !!stopState : !canSend || attachBusy();
+    send.classList.toggle("primary", canSend || stop);
+    send.classList.toggle("secondary", !(canSend || stop));
   }
+  // In stop mode the button is not a submit: Enter in an empty composer never stops.
+  $("send").addEventListener("click", (ev) => {
+    if (!$("send").classList.contains("lv-stop")) return;
+    ev.preventDefault();
+    stopChat();
+  });
 
   function closeAccount() {
     $("account-menu").hidden = true;
@@ -7723,6 +7789,30 @@
         renderLists();
       }
     },
+  });
+  // Replies drawn while they are written, the history's keyed redraw, the
+  // stop control's look and 回到最新 (chat-live.js).
+  let gapRead = 0;
+  live.init({
+    thread,
+    // The same Markdown path as a finished reply (botBubble).
+    render: (parent, text) => appendMarkdown(parent, stripBotImages(displayText(text))),
+    row: liveRow,
+    queued: sendQueued,
+    busy: statusBusy,
+    // The server's own count of replies not yet seen in this conversation.
+    unread: () => {
+      const a = experience.activity();
+      return a && nativeThreadId && a.threadId === nativeThreadId ? experienceRules.unreadText(a) : "";
+    },
+    changed: () => syncComposer(),
+    // Words of a reply were missed (a reload or reconnect mid-reply): read the
+    // draft a little sooner than the next poll, at most every 1.5 s.
+    gap: () => {
+      if (gapRead) return;
+      gapRead = setTimeout(() => { gapRead = 0; loadThread().catch(() => {}); }, 1500);
+    },
+    focusComposer: () => { if (window.innerWidth >= 768) input.focus({ preventScroll: true }); },
   });
   syncSidebar();
   initTheme(); // in the app this also tells the window which theme to use

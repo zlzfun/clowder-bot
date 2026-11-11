@@ -1014,14 +1014,15 @@ test('the page loads the status-line scripts after workspace.js and before app.j
   const at = (name: string) => scripts.indexOf(name);
   assert.ok(at('workspace.js') < at('chat-experience-rules.js') && at('chat-experience-rules.js') < at('chat-experience.js') && at('chat-experience.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
-  assert.equal(styles.at(-1), 'chat-experience.css');
+  // Only the live-reply styles (chat-live.css, which build on these) come after.
+  assert.deepEqual(styles.slice(-2), ['chat-experience.css', 'chat-live.css']);
   // Conversation changes, reads, native events and redraws reach the module.
   assert.match(app, /workspace\.select\(state\.sel\);\n[^\n]*\n\s+experience\.select\(state\.sel\);/);
   assert.equal((app.match(/experience\.observe\(selection, /g) || []).length, 2, 'single chats and groups');
   assert.match(app, /experience\.touch\(\);/);
   assert.equal((app.match(/experience\.rendered\(\);/g) || []).length, 4, 'both histories, drawn or empty');
-  // History rows carry the native message ID.
-  assert.equal((app.match(/row\.dataset\.mid = /g) || []).length, 3);
+  // History rows carry the native message ID (user, cat, group and reply-in-progress rows).
+  assert.equal((app.match(/row\.dataset\.mid = /g) || []).length, 4);
   // The sidebar: groups get a line and a dot; 等你确认 is acted on in the chat's status line, never by guessing a card.
   // A sidebar line is status only (see the sidebar rows test): it reads no steps and jumps nowhere.
   assert.match(app, /function groupDesc\(g\)/);

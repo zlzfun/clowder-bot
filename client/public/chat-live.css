@@ -1,0 +1,73 @@
+/* A reply drawn while it is being written, the stop control and 回到最新
+   (chat-live.js). Loaded after every other style. Builds on the bot bubble,
+   .who row, typing dots, .send button and the dock of app.css, and the --x-*
+   and motion tokens of tokens.css and the café layer. No new colors or fonts;
+   every motion is 180 ms ease-out or the token spring, and the global
+   prefers-reduced-motion rule of app.css stills all of it. */
+
+/* A row the history drew again (the same message, changed) or a reply the
+   finished transcript took over: it is already on screen, so it does not rise. */
+.msg.lv-still { animation: none; }
+
+/* The typing bubble: the reply's own bubble with three calm dots. */
+.bot-bubble.lv-typing { display: block; }
+.typing-dots i { animation: lv-dot 1200ms ease-in-out infinite; }
+.typing-dots i:nth-child(2) { animation-delay: 160ms; }
+.typing-dots i:nth-child(3) { animation-delay: 320ms; }
+.msg.lv-done .typing-dots i { animation: none; opacity: .4; }
+@keyframes lv-dot {
+  0%, 60%, 100% { opacity: .3; transform: none; }
+  30% { opacity: .75; transform: translateY(-2px); }
+}
+
+/* A soft caret after the last words while the reply is still being written. */
+.lv-writing .lv-tail::after {
+  content: ""; display: inline-block; width: 2px; height: 1.05em; margin-left: 3px;
+  vertical-align: -0.18em; border-radius: 1px; background: currentColor;
+  animation: lv-breathe 1100ms ease-in-out infinite;
+}
+@keyframes lv-breathe { 0%, 100% { opacity: .2; } 50% { opacity: .7; } }
+@media (prefers-reduced-motion: reduce) { .lv-writing .lv-tail::after { opacity: .5; } }
+
+/* One quiet line under the reply: 在想… / 在看 hello.txt / 正在停止…;
+   a change crossfades in the same place. */
+.lv-step {
+  display: grid; margin-top: var(--x-s2); padding: 0 var(--x-s1); max-width: 100%;
+  font-size: var(--x-fs-sm); line-height: 18px; color: var(--x-faint);
+}
+.lv-step[hidden] { display: none; }
+.lv-step > span { grid-area: 1 / 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lv-step > .lv-in { animation: lv-in 180ms ease-out both; }
+.lv-step > .lv-out { animation: lv-out 180ms ease-out both; }
+@keyframes lv-in { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+@keyframes lv-out { from { opacity: 1; } to { opacity: 0; } }
+
+/* A finished reply the transcript says was stopped or did not complete. */
+.lv-ended { margin-top: var(--x-s1); padding: 0 var(--x-s1); font-size: 12px; line-height: 18px; color: var(--x-faint); }
+
+/* The send button turns into a stop square in place while this chat's cat
+   works and nothing is typed. */
+.send.lv-morph { position: relative; transition: opacity 160ms ease-out, background-color 180ms ease-out, color 180ms ease-out; }
+.send.lv-morph > svg { transition: opacity 180ms ease-out, transform var(--dur-pop) var(--ease-spring); }
+.send.lv-morph > .lv-halt { position: absolute; inset: 0; margin: auto; opacity: 0; transform: scale(.5); }
+.send.lv-morph > .lv-halt rect { fill: currentColor; stroke: none; }
+.send.lv-stop > .lv-go { opacity: 0; transform: scale(.5); }
+.send.lv-stop > .lv-halt { opacity: 1; transform: none; }
+
+/* 回到最新: a small pill just above the dock, centred on the history. */
+.lv-anchor { position: relative; z-index: 2; width: min(680px, 100% - 64px); height: 0; margin: 0 auto; }
+.lv-latest {
+  position: absolute; left: 50%; bottom: var(--x-s4);
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--x-s2);
+  height: 32px; min-width: 32px; padding: 0 var(--x-s3); border: 0; border-radius: var(--x-r-pill);
+  background: var(--x-popover); color: var(--x-text-2); box-shadow: var(--x-shadow-pop);
+  font: inherit; font-size: var(--x-fs-sm); white-space: nowrap; cursor: pointer;
+  opacity: 0; visibility: hidden; transform: translate(-50%, 6px);
+  transition: opacity 180ms ease-out, transform 180ms ease-out, visibility 0s linear 180ms;
+}
+.lv-latest.on { opacity: 1; visibility: visible; transform: translate(-50%, 0); transition-delay: 0s; }
+.lv-latest:hover { background: var(--x-popover-hover); }
+.lv-latest.lv-count { padding: 0 var(--x-s5) 0 var(--x-s4); }
+.lv-latest .icon { width: 16px; height: 16px; stroke-width: 1.8; }
+.lv-latest-text:empty { display: none; }
+.main.peer .lv-anchor { display: none; }
