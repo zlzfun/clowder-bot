@@ -1,0 +1,266 @@
+/* The guide to what clowder-bot can do (showcase/index.html). It sits on the
+   product's own stylesheets (tokens.css, app.css for the faces and the base,
+   cafe-theme.css, chat-presence.css for the paw), so it looks like the same
+   product: only their tokens, no colours or fonts of its own. The one colour
+   that is not a token is a cat's own accent, read from GET /xbot-api/bots
+   (tour.js sets --t-accent). Its classes all start with t- so none of the
+   app's rules apply by accident. app.css's prefers-reduced-motion rule stills
+   every animation and transition here as well. */
+
+html, body { height: auto; }
+html { scroll-behavior: smooth; scroll-padding-top: var(--x-s7); }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body.t-page {
+  background: var(--x-win); color: var(--x-text);
+  font-size: var(--x-fs-body); line-height: 1.7;
+}
+:where(.t-page) :where(h1, h2, h3, p, ul, ol) { margin: 0; }
+:where(.t-page) :where(ul, ol) { padding: 0; list-style: none; }
+:where(.t-page) :where(a) { color: inherit; text-decoration: none; }
+.t-page code {
+  font-family: var(--mono); font-size: .88em; padding: 1px 6px; border-radius: var(--x-r-xs);
+  background: var(--x-fill-2); color: var(--x-text); white-space: nowrap;
+}
+.t-page :focus-visible { outline: 2px solid color-mix(in srgb, var(--x-primary) 70%, transparent); outline-offset: 2px; }
+.t-nowrap { white-space: nowrap; }
+.t-vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+.t-wrap { width: min(1120px, calc(100% - 48px)); margin-inline: auto; }
+@media (max-width: 640px) { .t-wrap { width: calc(100% - 32px); } }
+
+.t-skip {
+  position: absolute; left: var(--x-s5); top: -60px; z-index: 30; padding: var(--x-s3) var(--x-s5);
+  border-radius: var(--x-r-sm); background: var(--x-primary); color: var(--x-on-primary);
+}
+.t-skip:focus { top: var(--x-s5); }
+
+/* ---- The top bar: the name, and whether the staged chats are running ---- */
+.t-top-in { display: flex; align-items: center; justify-content: space-between; gap: var(--x-s5); min-height: 64px; }
+.t-brand { display: inline-flex; align-items: center; gap: var(--x-s4); font-weight: 600; font-size: var(--x-fs-ui); }
+.t-brand-mark { width: 28px; height: 28px; border-radius: 8px; }
+.t-live {
+  display: inline-flex; align-items: center; gap: var(--x-s3); min-height: 28px; padding: 0 var(--x-s5);
+  border-radius: var(--x-r-pill); background: var(--x-fill-1); color: var(--x-text-2); font-size: var(--x-fs-sm);
+}
+.t-live:empty, .t-live:not(.on) { visibility: hidden; }
+.t-live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--x-faint); flex: none; }
+.t-live.up .t-live-dot { background: var(--x-online); box-shadow: 0 0 0 3px color-mix(in srgb, var(--x-online) 22%, transparent); }
+
+/* ---- The opening: what it is, and the staged contact list ---- */
+.t-hero {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 432px); gap: 56px;
+  align-items: center; padding: var(--x-s8) 0 80px;
+}
+.t-hero-copy { display: flex; flex-direction: column; gap: var(--x-s6); max-width: 560px; }
+.t-eyebrow { color: var(--x-muted); font-size: var(--x-fs-ui); font-weight: 500; }
+.t-hero h1 { font-size: clamp(32px, 4.4vw, 50px); line-height: 1.2; font-weight: 600; letter-spacing: -.01em; text-wrap: balance; }
+.t-lead { font-size: 17px; line-height: 1.8; color: var(--x-text-2); }
+.t-honest, .t-off { font-size: var(--x-fs-ui); line-height: 1.75; color: var(--x-muted); }
+.t-honest-k {
+  display: inline-block; margin-right: var(--x-s3); padding: 0 var(--x-s3); border-radius: var(--x-r-xs);
+  background: var(--x-fill-2); color: var(--x-text-2); font-size: var(--x-fs-cap); font-weight: 600; line-height: 20px; vertical-align: 1px;
+}
+.t-off { padding: var(--x-s5) var(--x-s6); border-radius: var(--x-r-card); background: var(--x-fill-1); }
+.t-js .t-off:not(.on) { display: none; }
+
+.t-roster {
+  background: var(--x-card); border-radius: 24px; padding: var(--x-s3) var(--x-s3) var(--x-s4);
+  outline-offset: 4px;
+}
+.t-roster-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--x-s4); padding: var(--x-s5) var(--x-s5) var(--x-s3); }
+.t-roster-head h2 { font-size: var(--x-fs-title); font-weight: 600; }
+.t-roster-sub { font-size: var(--x-fs-cap); color: var(--x-muted); text-align: right; }
+.t-rows-label { padding: var(--x-s5) var(--x-s5) var(--x-s1); font-size: var(--x-fs-cap); font-weight: 600; color: var(--x-muted); }
+
+.t-row {
+  position: relative; display: flex; align-items: center; gap: var(--x-s5);
+  padding: var(--x-s3) var(--x-s4); border-radius: 14px;
+  transition: background-color 180ms ease-out;
+}
+.t-row:hover { background: var(--x-fill-1); }
+.t-row:active { background: var(--x-fill-2); }
+.t-row:target, .t-row.t-here { background: var(--x-fill-1); }
+.t-row-face { position: relative; width: 40px; height: 40px; flex: none; }
+.t-row-face > svg { display: block; width: 100%; height: 100%; }
+.t-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.t-row-top { display: flex; align-items: baseline; gap: var(--x-s3); min-width: 0; }
+.t-row-name { font-size: 14px; font-weight: 500; white-space: nowrap; }
+.t-row-what {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--x-fs-cap); color: var(--x-text-2); padding: 0 var(--x-s2); border-radius: var(--x-r-xs); background: var(--x-fill-2); line-height: 18px;
+}
+.t-row-time { margin-left: auto; padding-left: var(--x-s2); flex: none; font-size: var(--x-fs-cap); color: var(--x-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.t-row-time:empty { display: none; }
+.t-row-sub { display: flex; align-items: center; gap: var(--x-s3); min-width: 0; margin-top: 1px; }
+.t-row-line { flex: 1; min-width: 0; font-size: var(--x-fs-sm); line-height: 1.5; color: var(--x-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* What the contact list says on the row (the product's own wording, chat-list-rules.js): unread from two up, 等你确认, writing. */
+.t-row-count {
+  flex: none; min-width: 18px; height: 18px; padding: 0 5px; border-radius: var(--x-r-pill);
+  background: var(--x-primary); color: var(--x-on-primary); font-size: 11px; font-weight: 600; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums;
+}
+.t-row-wait { font-weight: 600; color: var(--x-text-2); }
+.t-row-wait::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: currentColor; vertical-align: 2px; }
+.t-row-dot { position: absolute; top: 1px; right: 1px; width: 9px; height: 9px; border-radius: 50%; background: var(--x-text); box-shadow: 0 0 0 2px var(--x-card); }
+.t-row:hover .t-row-dot { box-shadow: 0 0 0 2px var(--x-fill-1); }
+/* A cat at work: three small paws (chat-presence.css's own paw shape and knead). */
+.t-paws { display: inline-flex; gap: 2px; margin-right: 6px; vertical-align: -1px; }
+.t-paws > i, .t-stamp::after {
+  -webkit-mask: var(--pz-paw-shape) center / contain no-repeat; mask: var(--pz-paw-shape) center / contain no-repeat;
+}
+.t-paws > i { width: 9px; height: 9px; background: var(--t-accent, var(--x-faint)); transform-origin: 50% 100%; animation: pz-knead 1200ms ease-in-out infinite; }
+.t-paws > i:nth-child(2) { animation-delay: 160ms; }
+.t-paws > i:nth-child(3) { animation-delay: 320ms; }
+
+/* The stamp card: a chat you opened from here gets a paw on its face, stamped once (app's pz-stamp). */
+.t-stamp {
+  position: absolute; right: -6px; bottom: -5px; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--x-card); display: grid; place-items: center; transform: rotate(-12deg);
+}
+.t-row:hover .t-stamp { background: var(--x-fill-1); }
+.t-stamp::after { content: ""; width: 13px; height: 13px; background: var(--x-primary); }
+/* A new stamp waits until its row is in view, then lands once. */
+.t-stamp.t-wait { visibility: hidden; }
+.t-stamp.t-new { animation: pz-stamp var(--dur-pop) var(--ease-spring) both; }
+
+/* Group faces: the members' own faces huddled (as the app draws a group). */
+.t-huddle > svg { position: absolute; width: 58%; height: 58%; }
+.t-huddle > svg:nth-child(1) { left: 0; top: 0; }
+.t-huddle > svg:nth-child(2) { right: 0; top: 4%; }
+.t-huddle > svg:nth-child(3) { left: 20%; bottom: 0; }
+.t-huddle > svg:nth-child(4) { right: 0; bottom: 0; width: 50%; height: 50%; }
+.t-huddle.n4 > svg:nth-child(3) { left: 2%; bottom: 0; }
+
+/* ---- One ability: words on one side, the real picture on the other ---- */
+.t-ability {
+  display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 64px; align-items: center;
+  padding: 64px 0;
+}
+.t-ability:nth-of-type(odd) { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
+.t-ability:nth-of-type(odd) > .t-copy { order: 2; }
+.t-copy { display: flex; flex-direction: column; gap: var(--x-s5); max-width: 460px; }
+.t-ability:nth-of-type(odd) > .t-copy { justify-self: end; }
+.t-host { display: flex; align-items: center; gap: var(--x-s3); font-size: var(--x-fs-ui); color: var(--x-muted); }
+.t-host-k { color: var(--x-muted); }
+.t-host-face { position: relative; width: 28px; height: 28px; flex: none; }
+.t-host-face > svg { display: block; width: 100%; height: 100%; }
+.t-copy h2 { font-size: 30px; line-height: 1.3; font-weight: 600; margin-bottom: var(--x-s1); }
+.t-copy > p:not(.t-host):not(.t-try):not(.t-note) { font-size: 15.5px; line-height: 1.85; color: var(--x-text-2); }
+.t-try {
+  margin-top: var(--x-s2); padding: var(--x-s4) var(--x-s6); border-radius: var(--x-r-card);
+  background: var(--x-fill-1); font-size: var(--x-fs-ui); line-height: 1.7; color: var(--x-text-2);
+}
+.t-try-k { margin-right: var(--x-s4); font-weight: 600; color: var(--x-text); }
+.t-actions { display: flex; flex-wrap: wrap; gap: var(--x-s4); margin-top: var(--x-s2); }
+.t-actions[hidden] { display: none; }
+.t-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--x-s3); min-height: 40px; padding: 0 var(--x-s7);
+  border-radius: var(--x-r-card); background: var(--x-fill-2); color: var(--x-text); font-size: var(--x-fs-ui); font-weight: 500;
+  cursor: pointer; user-select: none;
+  transition: background-color 180ms ease-out, transform var(--dur-press) ease-out, opacity 180ms ease-out;
+}
+.t-btn:hover { background: var(--x-fill-3); }
+.t-btn:active { transform: scale(var(--press-scale)); }
+.t-btn-primary { background: var(--x-primary); color: var(--x-on-primary); }
+.t-btn-primary:hover { background: var(--x-primary-hover); }
+.t-btn-quiet { background: transparent; color: var(--x-text-2); padding: 0 var(--x-s4); }
+.t-btn-quiet:hover { background: var(--x-fill-1); }
+.t-btn[aria-busy="true"] { opacity: .72; cursor: progress; }
+.t-btn[aria-busy="true"]::before { content: ""; width: 12px; height: 12px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: stsp 800ms linear infinite; }
+.t-note { font-size: var(--x-fs-sm); color: var(--x-danger); }
+.t-note:empty { display: none; }
+
+.t-fig { position: relative; isolation: isolate; margin: 0; width: 100%; max-width: 600px; justify-self: center; }
+.t-fig picture { display: block; }
+.t-fig img, .t-tile-pic img { display: block; max-width: 100%; height: auto; margin-inline: auto; border-radius: var(--t-r, 18px); }
+/* A floating layer of the app (a dialog, the search, the drawer, a list) keeps its shadow. */
+.t-float img, img.t-float { box-shadow: var(--x-shadow-pop); }
+/* The chat and what it lists under 资料: the drawer's page laid over the picture's lower right. */
+.t-pair .t-main { width: 100%; }
+.t-pair .t-main img { width: 100%; }
+.t-pair .t-inset { position: relative; z-index: 1; width: 46%; margin: -16px 0 0 auto; }
+.t-pair .t-inset img { width: 100%; }
+/* The host cat's own colour, very quiet, behind its picture (as behind its face in the drawer). */
+.t-tinted .t-fig::before {
+  content: ""; position: absolute; inset: -8% -10%; z-index: -1; pointer-events: none;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--t-accent) 16%, transparent), color-mix(in srgb, var(--t-accent) 5%, transparent) 60%, transparent);
+}
+html[data-theme="dark"] .t-tinted .t-fig::before {
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--t-accent) 22%, transparent), color-mix(in srgb, var(--t-accent) 7%, transparent) 60%, transparent);
+}
+
+/* Appearing once, as a section comes into view; the host cat looks up. */
+.t-js .t-reveal { opacity: 0; transform: translateY(14px); transition: opacity 420ms ease-out, transform 420ms cubic-bezier(.2, .7, .2, 1); }
+.t-js .t-reveal.t-in { opacity: 1; transform: none; }
+.t-reveal.t-in .t-host-face { animation: t-look var(--dur-pop) var(--ease-spring) 180ms both; }
+@keyframes t-look { from { opacity: 0; transform: translateY(4px) scale(.7); } to { opacity: 1; transform: none; } }
+
+/* ---- 像平常用的聊天软件: three small things, three tiles ---- */
+.t-daily { padding: 64px 0; }
+.t-daily > h2, .t-under > h2 { font-size: 30px; line-height: 1.3; font-weight: 600; margin-bottom: var(--x-s8); }
+.t-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--x-s8); }
+.t-tile { display: flex; flex-direction: column; gap: var(--x-s4); padding: var(--x-s9) var(--x-s9) 0; border-radius: 24px; background: var(--x-card); overflow: hidden; }
+.t-tile h3 { font-size: var(--x-fs-title); font-weight: 600; }
+.t-tile p { font-size: 14.5px; line-height: 1.8; color: var(--x-text-2); max-width: 460px; }
+.t-tile-pic { display: block; margin-top: auto; padding-top: var(--x-s8); }
+.t-tile:not(.t-tile-wide) .t-tile-pic img { border-radius: var(--t-r, 18px) var(--t-r, 18px) 0 0; }
+.t-tile-wide { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 7fr); align-items: center; gap: var(--x-s9); padding-bottom: var(--x-s9); }
+.t-tile-wide > div { display: flex; flex-direction: column; gap: var(--x-s4); }
+.t-tile-wide .t-tile-pic { padding-top: 0; }
+
+/* ---- 底下是什么: four layers, one of them this project ---- */
+.t-under { padding: 72px 0 56px; }
+.t-under > p { max-width: 640px; font-size: 15.5px; line-height: 1.85; color: var(--x-text-2); margin: calc(var(--x-s8) * -.5) 0 var(--x-s8); }
+.t-stack { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--x-s8); counter-reset: none; }
+.t-layer { position: relative; display: flex; flex-direction: column; gap: var(--x-s2); padding: var(--x-s7); border-radius: var(--x-r-card); background: var(--x-card); }
+.t-layer-us { background: var(--x-fill-2); }
+.t-layer-name { font-weight: 600; font-size: 15px; }
+.t-layer-what { font-size: var(--x-fs-sm); line-height: 1.6; color: var(--x-muted); }
+.t-layer + .t-layer::before {
+  content: ""; position: absolute; left: calc(var(--x-s8) * -.5 - 4px); top: 50%; width: 8px; height: 8px; margin-top: -4px;
+  border-top: 1.5px solid var(--x-faint); border-right: 1.5px solid var(--x-faint); transform: rotate(45deg);
+}
+
+.t-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--x-s5); padding: var(--x-s8) 0 56px; font-size: var(--x-fs-sm); color: var(--x-muted); }
+.t-foot-top { color: var(--x-text-2); }
+.t-foot-top:hover { color: var(--x-text); }
+
+/* Back to the list, once it is out of view (like the app's 回到最新). */
+.t-back {
+  position: fixed; right: max(var(--x-s7), env(safe-area-inset-right)); bottom: max(var(--x-s7), env(safe-area-inset-bottom)); z-index: 20;
+  display: inline-flex; align-items: center; gap: var(--x-s2); min-height: 38px; padding: 0 var(--x-s6);
+  border-radius: var(--x-r-pill); background: var(--x-popover); color: var(--x-text); box-shadow: var(--x-shadow-pop);
+  font-size: var(--x-fs-ui); animation: rise 180ms ease-out;
+}
+.t-back:hover { background: var(--x-popover-hover); }
+.t-back[hidden] { display: none; }
+
+/* ---- Narrower windows ---- */
+@media (max-width: 960px) {
+  .t-hero { grid-template-columns: minmax(0, 1fr); gap: var(--x-s9); padding-bottom: 56px; }
+  .t-hero-copy { padding-top: var(--x-s6); max-width: 640px; }
+  .t-ability { grid-template-columns: minmax(0, 1fr); gap: var(--x-s9); padding: 56px 0; }
+  .t-ability:nth-of-type(odd) { grid-template-columns: minmax(0, 1fr); }
+  .t-ability:nth-of-type(odd) > .t-copy { order: 0; justify-self: start; }
+  .t-copy { max-width: 640px; }
+  .t-stack { grid-template-columns: minmax(0, 1fr); gap: var(--x-s6); }
+  .t-layer + .t-layer::before { left: 50%; top: calc(var(--x-s6) * -.5 - 5px); margin: 0 0 0 -4px; transform: rotate(135deg); }
+}
+@media (max-width: 640px) {
+  .t-top-in { min-height: 56px; }
+  .t-live { padding: 0 var(--x-s4); }
+  .t-hero { padding-top: var(--x-s5); }
+  .t-hero h1 { font-size: 30px; }
+  .t-lead { font-size: 16px; }
+  .t-roster { margin-inline: -6px; padding-inline: var(--x-s1); border-radius: 20px; }
+  .t-roster-head { flex-direction: column; gap: 0; }
+  .t-roster-sub { text-align: left; }
+  .t-ability, .t-daily { padding: 44px 0; }
+  .t-under { padding: 44px 0 40px; }
+  .t-copy h2, .t-daily > h2, .t-under > h2 { font-size: 24px; }
+  .t-copy > p:not(.t-host):not(.t-try):not(.t-note) { font-size: 15px; }
+  .t-pair .t-inset { width: 62%; }
+  .t-tiles { grid-template-columns: minmax(0, 1fr); gap: var(--x-s6); }
+  .t-tile { padding: var(--x-s8) var(--x-s7) 0; }
+  .t-tile-wide { grid-template-columns: minmax(0, 1fr); gap: var(--x-s6); padding-bottom: var(--x-s7); }
+  .t-foot { padding-bottom: 88px; }
+}

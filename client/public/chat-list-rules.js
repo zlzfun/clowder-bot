@@ -206,7 +206,34 @@
     return text ? clip(text, 80) : d.quote ? "引用了一条消息" : "";
   }
 
+  // ---- A link that opens a chat ----
+  // /#chat=<name>: the address names a chat to open. Only a fragment that is
+  // exactly chat=… counts (#login-code and the rest are not links to a chat);
+  // the name is URL-decoded (a malformed escape is read as written, and + is a
+  // plus) and trimmed. null: not such a link; "": a link that names nothing.
+  function linkName(hash) {
+    const m = /^#chat=([\s\S]*)$/.exec(str(hash));
+    if (!m) return null;
+    let name = m[1];
+    try { name = decodeURIComponent(name); } catch (e) { /* read as written */ }
+    return name.trim();
+  }
+  // The chat a linked name opens: the cat with that name, else the first group
+  // chat with it (a group without a name goes by the name it is shown under, its
+  // ID). {type: "bot", id: name} | {type: "group", id} | null.
+  function linked(name, bots, groups) {
+    const n = str(name).trim();
+    if (!n) return null;
+    const cat = (bots || []).find((b) => b && str(b.name).trim() === n);
+    if (cat) return { type: "bot", id: cat.name };
+    const group = (groups || []).find((g) => g && str(g.name || g.id).trim() === n);
+    return group ? { type: "group", id: group.id } : null;
+  }
+  // What the app says when no chat answers to a link's name.
+  const linkMissing = (name) => "列表里没有叫「" + clip(oneLine(name), 40) + "」的猫猫或群聊。";
+
   window.ClowderListRules = Object.freeze({
     plain, last, readWhole, preview, ago, stamp, order, unread, badge, total, title, greetName, drafts, draftLine, draftKey, quoteFits, oneLine,
+    linkName, linked, linkMissing,
   });
 })();
