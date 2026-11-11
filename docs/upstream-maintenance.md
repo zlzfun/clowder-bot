@@ -24,7 +24,14 @@
 
 - `BOT_DATA_DIR` 指定数据根目录；其下是 `native/`（原生数据）和 `bot/presentation.json`（Bot 展示数据）。`BOT_RUNTIME_DATA_DIR`、`BOT_PRODUCT_DATA_FILE` 仍可分别覆盖。
 - 都没设置时：这个检出里已经有 `data/native` 或 `data/bot` 的，继续用 `./data`，不会因为默认值变了而把已有数据晾在一边；全新的检出用 `~/.clowder-bot`。
-- `runtime:start` 发现数据目录位于某个 Git 检出之内时会打印提示。已有实例要搬到仓库外，需要停服务、备份、移动，并处理原生会话里保存的绝对路径；这一步要先在数据副本上验证，不随升级自动发生。
+- `runtime:start` 发现数据目录位于某个 Git 检出之内时会打印提示。
+- 已有实例用 `npm run data:move` 搬到仓库外（默认 `~/.clowder-bot`，`--to` 另选位置，`--backup <目录>` 先留一份）。不加 `--apply` 只预览；原生运行时还占着数据、目标已存在或目标仍在某个代码仓库里时拒绝执行。搬走后 `./data` 是指向新位置的链接；没有显式设置数据目录的启动方式会把它当作新位置本身。用 `BOT_RUNTIME_DATA_DIR`／`BOT_PRODUCT_DATA_FILE` 写死过路径的服务要手动改到新位置。
+
+2026-11-11 在隔离运行时上做过一遍（数据从 `.runtime/dev/data` 移到 `~/.clowder-bot-dev`，原位置留链接）：
+
+- 搬之前建的对话照常可用：历史、文件列表、上传、工作目录浏览、真实收发都正常。它保存的仍是旧路径，沿用原来的 CLI 会话，所以仍然带着仓库的说明；要让一只猫的上下文变干净，给它开一个新对话。
+- 搬之后新建的猫工作在 `~/.clowder-bot-dev/native/workspace/cats/<猫>`：会话记录里没有本仓库的 `CLAUDE.md`、没有记忆索引，个人钩子也没有输出；同样一句话的首轮输入从约 3.9 万 token 降到约 2.9 万。
+- 构建目录里指向数据目录的两个链接（`data`、`.cat-cafe`）经旧路径上的链接仍然解析到新位置，`runtime:start` 的校验通过，不需要重新构建。
 
 ## 差异台账
 

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { dataRoot, enclosingRepository, nativeDataDir, productDataFile } from '../shared/data-location.mjs';
@@ -21,6 +21,11 @@ test('a new install keeps its data outside the checkout; one that already has da
   assert.equal(dataRoot(root, {}, home), join(root, 'data'));
   assert.equal(nativeDataDir(root, {}, home), join(root, 'data', 'native'));
   assert.equal(productDataFile(root, {}, home), join(root, 'data', 'bot', 'presentation.json'));
+  // After a move ./data is a link kept for paths stored earlier: the data root is where it points.
+  const moved = join(dir, 'outside'); mkdirSync(join(moved, 'bot'), { recursive: true });
+  const linked = join(dir, 'linked-checkout'); mkdirSync(linked); symlinkSync(moved, join(linked, 'data'), 'dir');
+  assert.equal(dataRoot(linked, {}, home), moved);
+  assert.equal(nativeDataDir(linked, {}, home), join(moved, 'native'));
   // Explicit settings win, the specific ones over the general one.
   const elsewhere = join(dir, 'elsewhere');
   assert.equal(dataRoot(root, { BOT_DATA_DIR: elsewhere }, home), elsewhere);

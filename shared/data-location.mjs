@@ -7,15 +7,20 @@
 // read that repository's developer instructions on every turn. New installs
 // therefore keep their data outside the checkout; an install that already has
 // data in ./data keeps using it until it is moved deliberately.
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
-/** BOT_DATA_DIR, else ./data when this checkout already holds data, else ~/.clowder-bot. */
+/**
+ * BOT_DATA_DIR, else ./data when this checkout already holds data, else
+ * ~/.clowder-bot. A ./data that is a link (left behind by `npm run data:move`
+ * for paths stored earlier) counts as the place it points to, so cats get
+ * their real working directory, outside the checkout.
+ */
 export function dataRoot(root, env = process.env, home = homedir()) {
   if (env.BOT_DATA_DIR) return resolve(env.BOT_DATA_DIR);
   const legacy = join(root, 'data');
-  return existsSync(join(legacy, 'native')) || existsSync(join(legacy, 'bot')) ? legacy : join(home, '.clowder-bot');
+  return existsSync(join(legacy, 'native')) || existsSync(join(legacy, 'bot')) ? realpathSync(legacy) : join(home, '.clowder-bot');
 }
 /** The native runtime's data directory (BOT_RUNTIME_DATA_DIR still wins). */
 export function nativeDataDir(root, env = process.env, home = homedir()) {
