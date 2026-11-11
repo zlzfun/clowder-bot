@@ -847,7 +847,7 @@
       "target": "client/public/chat-cards.js",
       "description": "window.ClowderCards: request cards drawn at their message and answered in place (POST <scope>/approvals/:id), a cat's card / checklist / choices / diff blocks (picks sent through the normal send path, then POST …/blocks/:id/answer), the ending line with 详情 and 再发一次, receipt and refusal notices; interactive cards fill stable frames after ClowderLive.commit so unchanged rows keep their element",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 确认与提醒 (docs/xbot-frontend.md item 32; docs/chat-experience-api.md 「等你确认的事」「卡片、清单与选项」, docs/chat-live-api.md)",
-      "sha256": "20223b76723ab1421f4b47df689cde122fcf6a99cf0ddca7b100ae36d115f787"
+      "sha256": "5246fba586b84cb1f3f1cc8817fd773347143c0c5c84aa86e34fc4c4eea851ff"
     },
     {
       "target": "client/public/chat-cards.css",

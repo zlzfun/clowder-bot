@@ -666,13 +666,15 @@
     const text = R.choiceMessage(b, ids, custom);
     Object.assign(p, { phase: "sending", ids: ids.slice(), text, error: null });
     repaint();
+    // The conversation the block belongs to, as it was when the pick was made.
+    const where = { sel: S.sel, threadId: S.threadId, pick: p };
     let went = false;
     // Recorded as soon as the server took the message, not after its reply.
-    try { await H.send(text, () => { went = true; record(key, fact, ids, text); }); } catch (e) { /* the send path said why */ }
+    try { await H.send(text, () => { went = true; record(key, fact, ids, text, where); }); } catch (e) { /* the send path said why */ }
     if (!went) { p.phase = "unsent"; repaint(); }
   }
-  async function record(key, fact, ids, text) {
-    const p = pickOf(key), sel = S.sel, threadId = S.threadId, gen = S.gen;
+  async function record(key, fact, ids, text, where = { sel: S.sel, threadId: S.threadId }) {
+    const p = where.pick || pickOf(key), sel = where.sel, threadId = where.threadId, gen = S.gen;
     if (!sel || !threadId) { Object.assign(p, { phase: "unrecorded", error: { text: "对话还没读到" } }); repaint(); return; }
     Object.assign(p, { phase: "recording", ids: ids.slice(), text });
     repaint();
@@ -719,6 +721,11 @@
       const host = t && t.closest ? t.closest(".ck-live") : null;
       S.focus = host ? { kind: host.dataset.ck, key: host.dataset.ckKey, part: (t.dataset && t.dataset.ckFocus) || "card" } : null;
     });
+    // A press anywhere else means the owner moved on: nothing is given back then.
+    document.addEventListener("pointerdown", (ev) => {
+      const t = ev.target;
+      if (!(t && t.closest && t.closest(".ck-live"))) S.focus = null;
+    }, true);
   }
 
   window.ClowderCards = Object.freeze({
