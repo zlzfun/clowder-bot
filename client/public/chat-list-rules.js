@@ -229,11 +229,15 @@
     const group = (groups || []).find((g) => g && str(g.name || g.id).trim() === n);
     return group ? { type: "group", id: group.id } : null;
   }
-  // What the app says when no chat answers to a link's name.
-  const linkMissing = (name) => "列表里没有叫「" + clip(oneLine(name), 40) + "」的猫猫或群聊。";
+  // What the app says when no chat answers to a link's name (the app then
+  // carries on as usual: the line names the chat that was not found, so the
+  // chat that is open is never taken for it), and when a dialog that holds the
+  // owner's input is open, so the link opened nothing.
+  const linkMissing = (name) => "没有找到链接里的「" + clip(oneLine(name), 40) + "」：列表里没有叫这个名字的猫猫或群聊。";
+  const linkHeld = (name) => "有个窗口还开着，链接里的「" + clip(oneLine(name), 40) + "」没有打开。关掉它以后再打开这个链接。";
 
   window.ClowderListRules = Object.freeze({
     plain, last, readWhole, preview, ago, stamp, order, unread, badge, total, title, greetName, drafts, draftLine, draftKey, quoteFits, oneLine,
-    linkName, linked, linkMissing,
+    linkName, linked, linkMissing, linkHeld,
   });
 })();
