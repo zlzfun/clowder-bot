@@ -142,7 +142,8 @@ test('stable message references survive edits, cancellation, pagination and brid
   const r = await setup(t), cat = await r.bridge.createBot({ name: 'Ada' }), thread = await r.bridge.direct(cat);
   const user = { id: 'native-u', type: 'user' as const, content: 'ask', catId: null, timestamp: 1000 };
   const reply = { id: 'native-r', type: 'assistant' as const, content: 'draft', catId: cat.id, timestamp: 2000, replyTo: user.id, lifecycle: { kind: 'response', status: 'processing' } };
-  r.native.messages.set(thread.id, [user, reply]);
+  // A later question came in between, so the reply shows which one it answers (tests/live.test.ts covers when it does not).
+  r.native.messages.set(thread.id, [user, { ...user, id: 'native-u2', content: 'and this', timestamp: 1500 }, reply]);
   const page = await r.bridge.transcript(cat), replyRow = page.messages.find(m => m.id === reply.id)!;
   const seq = replyRow.seq; assert.equal(replyRow.reply_to, page.messages[0]!.seq);
   r.native.messages.set(thread.id, [{ ...reply, content: 'final', lifecycle: { kind: 'response', status: 'canceled' } }]);

@@ -3,7 +3,7 @@ import { ApiError } from '../errors.js';
 import { ProductStore } from '../product-store.js';
 import type { NativeCat, NativeMessage, NativeThread, NativeTransport } from './types.js';
 import { runtimeUnavailable, supportsRuntime } from './agents.js';
-import { messageDisplayText, messagePresentation } from './message-presentation.js';
+import { messageDisplayText, messagePresentation, replyInProgress } from './message-presentation.js';
 import { avatarBreed, type CatConfig, type SourceTemplate } from './cat-templates.js';
 import { Workspaces } from '../workspaces.js';
 import { NativeFiles } from './files.js';
@@ -123,16 +123,24 @@ export class BotBridge {
     const source = typeof invitation === 'string' ? invitation : undefined;
     const rows: Record<string, unknown>[] = [];
     for (const message of page.messages) this.store.sequence(thread.id, message.id);
+    // A reply names the message it answers. Right under that message the quote
+    // only repeats it, so it is shown when something else came in between.
+    let lastUser: string | undefined;
     for (const { message, ...presentation } of this.presentMessages(page.messages, cats)) {
       if (message.type === 'user' && message.id === source) continue;
       const seq = this.store.sequence(thread.id, message.id);
-      const text = messageDisplayText(message, thread.id);
+      const text = messageDisplayText(message, thread.id), inProgress = replyInProgress(message);
+      const quoted = message.replyTo && message.replyTo !== source
+        && !(message.type !== 'user' && message.replyTo === lastUser) ? message.replyTo : undefined;
+      if (message.type === 'user') lastUser = message.id;
       const base = { seq, id: message.id, native_message_id: message.id, role: message.type === 'user' ? 'user' : 'assistant',
         content: text, ...presentation, time: new Date(message.timestamp).toISOString(),
-        reply_to: message.replyTo && message.replyTo !== source ? this.store.state.messageRefs[thread.id]?.[message.replyTo] ?? 0 : 0,
-        status: message.lifecycle?.status ?? (message.isDraft ? 'processing' : 'complete'), attachments: this.workspaces.messageFiles(thread.id, message), native: message };
+        reply_to: quoted ? this.store.state.messageRefs[thread.id]?.[quoted] ?? 0 : 0,
+        status: message.lifecycle?.status ?? (message.isDraft ? 'processing' : 'complete'), ...(inProgress ? { in_progress: true } : {}),
+        attachments: this.workspaces.messageFiles(thread.id, message), native: message };
       if (message.type === 'user' || presentation.presentation_kind === 'activity') rows.push(base);
-      else if (text || base.attachments.length) {
+      // A reply that has started but has no words yet stays as a row: the chat shows it as typing.
+      else if (text || base.attachments.length || inProgress) {
         // XBot's delivery view. These receipts describe rendering, never model tool execution.
         const callId = `delivery_${message.id}`;
         rows.push({ ...base, presentation_receipt: true, tool_calls: [{ id: callId, type: 'function', function: { name: 'send_message_to_user', arguments: JSON.stringify({ text }) } }] });

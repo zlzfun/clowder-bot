@@ -1,5 +1,6 @@
 import express, { type Response } from 'express';
-import { messageDisplayText } from '../native/message-presentation.js';
+import { messageDisplayText, replyInProgress } from '../native/message-presentation.js';
+import { liveEvent } from '../native/live.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { ApiError } from '../errors.js';
@@ -29,7 +30,7 @@ export function createXbotCoreRouter(bridge: BotBridge) {
     return { ...bridge.botItem(cat), persona: cat.roleDescription, timezone: store.bot(cat.id).timezone ?? 'Asia/Shanghai',
       agent: agentBinding(cat, runtimes), persona_card: null, memory, routines: [],
       cat_config: catConfiguration(cat, runtimes), source_template: store.bot(cat.id).sourceTemplate ?? null,
-      agents: queue.activeInvocations.map(i => ({ id: i.invocationId ?? i.catId, type: 'agent', status: i.status ?? 'running', task: 'Clowder AI 正在执行', mode: 'chat', steps: 0, started_at: i.startedAt ? new Date(i.startedAt).toISOString() : '', native: i })),
+      agents: queue.activeInvocations.map(i => ({ id: i.invocationId ?? i.catId, type: 'agent', status: i.status ?? 'running', task: '正在处理', mode: 'chat', steps: 0, started_at: i.startedAt ? new Date(i.startedAt).toISOString() : '', native: i })),
       native: { cat, thread, queue }, memory_description: '会话共享笔记。长期记忆由 Clowder AI 原生记忆系统管理。' };
   };
   router.get('/session', async (_req, res) => {
@@ -70,8 +71,9 @@ export function createXbotCoreRouter(bridge: BotBridge) {
       messages: bridge.presentMessages(page.messages, cats).map(({ message: m, name, ...presentation }) => ({
         id: m.id, time: new Date(m.timestamp).toISOString(), sender: m.type === 'user' ? 'local' : name,
         kind: m.type === 'user' ? 'person' : 'bot', text: messageDisplayText(m, thread.id),
-        status: m.lifecycle?.status ?? (m.isDraft ? 'processing' : 'complete'), attachments: bridge.workspaces.messageFiles(thread.id, m), ...presentation, native: m,
-      })).filter(m => m.native.type !== 'assistant' || !!m.text.trim() || m.attachments.length > 0 || m.presentation_kind === 'activity') });
+        status: m.lifecycle?.status ?? (m.isDraft ? 'processing' : 'complete'), ...(replyInProgress(m) ? { in_progress: true } : {}),
+        attachments: bridge.workspaces.messageFiles(thread.id, m), ...presentation, native: m,
+      })).filter(m => m.native.type !== 'assistant' || !!m.text.trim() || m.attachments.length > 0 || m.presentation_kind === 'activity' || 'in_progress' in m) });
   });
   router.post('/bots', async (req, res) => {
     const input = z.object(botBody).strict().superRefine((value, ctx) => {
@@ -266,6 +268,9 @@ export function createXbotCoreRouter(bridge: BotBridge) {
       if (!ready) return;
       if (res.writableLength > 1_000_000) { res.end(); return; }
       sse(res, 'native', event);
+      // The same event in the few fields a chat needs to draw a reply as it is written.
+      const live = liveEvent(event, id);
+      if (live) sse(res, 'live', live);
     });
     res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' }); res.flushHeaders();
     ready = true;

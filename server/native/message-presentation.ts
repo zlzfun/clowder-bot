@@ -1,12 +1,22 @@
 import { createHash } from 'node:crypto';
 import type { NativeMessage } from './types.js';
 
-/** Display-only fallback, shared by direct and group chats. Native records stay untouched. */
+/** A reply the engine is still producing: an unpublished draft or a response that has not settled. */
+export function replyInProgress(message: NativeMessage): boolean {
+  return message.type === 'assistant'
+    && (message.isDraft === true || ['queued', 'processing'].includes(message.lifecycle?.status ?? ''));
+}
+
+/**
+ * Display-only text, shared by direct and group chats. Native records stay
+ * untouched. A reply still in progress has whatever was written so far, which
+ * may be nothing: the row then carries `in_progress` and the chat draws a
+ * typing indicator instead of placeholder words.
+ */
 export function messageDisplayText(message: NativeMessage, threadId: string): string {
   const text = message.type === 'assistant' ? withoutCatSignature(message, threadId) : message.content;
   const content = message.type === 'assistant' && text.trim() === 'SILENT' ? '' : text;
-  if (content) return content;
-  if (message.isDraft || ['queued', 'processing'].includes(message.lifecycle?.status ?? '')) return '正在等待或处理…';
+  if (content || replyInProgress(message)) return content;
   if (['canceled', 'cancelled'].includes(message.lifecycle?.status ?? '')) return '已停止';
   return message.lifecycle?.status === 'failed' ? '这次没完成，请查看详情' : '';
 }
@@ -29,11 +39,15 @@ function withoutCatSignature(message: NativeMessage, threadId: string): string {
       && typeof start === 'number' && Number.isSafeInteger(start) && start >= 0 && start + 2 < text.length && tail.end === text.length
       && tail.gluePrefixLength === 2 && text.slice(start, start + 2) === '\n\n'
       && revision.length === text.length && revision.sha256 === createHash('sha256').update(text).digest('hex');
-    return valid ? text.slice(0, start) : text;
+    // A cat may also sign by itself just before the host tail; that line goes too.
+    return valid ? withoutStandaloneSignature(text.slice(0, start as number)) : text;
   }
+  return withoutStandaloneSignature(text);
+}
 
-  // Older records and provider-written signatures have no host range. Only a
-  // standalone final paw signature is hidden, outside Markdown code fences.
+// Older records and provider-written signatures have no host range. Only a
+// standalone final paw signature is hidden, outside Markdown code fences.
+function withoutStandaloneSignature(text: string): string {
   const signature = /(?:^|\r?\n)(?: {0,3}\[[^\[\]\r\n]+🐾\][ \t]*(?:\r?\n|$))+\s*$/u.exec(text);
   if (!signature) return text;
   let fence = '';
