@@ -632,8 +632,8 @@ test('the shell loads the module before app.js and its styles after every earlie
   assert.ok(at('cat-avatars.js') < at('quick-create-rules.js') && at('chat-experience.js') < at('quick-create-rules.js'));
   assert.ok(at('quick-create-rules.js') < at('quick-create.js') && at('quick-create.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
-  // After every earlier style; only the live-reply styles (chat-live.css), which stay last, follow.
-  assert.deepEqual(styles.slice(styles.indexOf('chat-experience.css') + 1), ['quick-create.css', 'chat-live.css']);
+  // After every earlier style; only the 找得到 styles and the live-reply styles (chat-live.css), which stay last, follow.
+  assert.deepEqual(styles.slice(styles.indexOf('chat-experience.css') + 1), ['quick-create.css', 'chat-list.css', 'chat-history.css', 'chat-live.css']);
   assert.match(html, /aria-label="新建猫猫或群聊"/);
   // Nothing open: the stage with no cats, else the no-chat line; both hide the composer, as does the pre-login hold.
   assert.match(app, /else if \(!state\.sel\) showNoChat\(\);/);

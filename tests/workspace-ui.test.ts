@@ -1544,9 +1544,9 @@ test('the page loads the workspace scripts before app.js and their styles last; 
   assert.ok(at('runtime-tasks.js') >= 0 && at('runtime-tasks.js') < at('workspace.js'));
   assert.ok(at('workspace-rules.js') < at('workspace.js') && at('workspace.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
-  // After every upstream and earlier style; only the status-line/memory, live-reply and 开箱即用 extensions (which build on it) follow.
+  // After every upstream and earlier style; only the status-line/memory, 开箱即用, 找得到 and live-reply extensions (which build on it) follow.
   assert.ok(styles.indexOf('workspace.css') > styles.indexOf('chat-presentation.css'));
-  assert.deepEqual(styles.slice(styles.indexOf('workspace.css') + 1), ['chat-experience.css', 'quick-create.css', 'chat-live.css']);
+  assert.deepEqual(styles.slice(styles.indexOf('workspace.css') + 1), ['chat-experience.css', 'quick-create.css', 'chat-list.css', 'chat-history.css', 'chat-live.css']);
   assert.doesNotMatch(app, /\/paste"/);
   assert.match(app, /\["files", "文件"\]/);
   // 详情 appends the module's 历史对话 node only when it gives one (cats, never groups).

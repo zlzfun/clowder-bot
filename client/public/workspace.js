@@ -154,7 +154,8 @@
   };
   // The conversation whose 更多文件 / 历史对话 fold was left open: redraws, a
   // thread move and reopening the same conversation keep it open.
-  const folds = { more: "", convs: "" };
+  // asked: the cat whose 历史对话 the owner opened from the chat header.
+  const folds = { more: "", convs: "", asked: "" };
   const scopePath = () => R.scope(S.sel);
   const isGroup = () => !!S.sel && S.sel.type === "group";
   const panelOpen = () => !!$("panel") && $("panel").classList.contains("open");
@@ -860,7 +861,10 @@
     const root = S.roots.convs;
     if (!root || !root._wc) return;
     const w = root._wc, list = S.convs || [];
-    const show = list.length > 1 && S.convState !== "unavailable";
+    // Asked for by name (the chat header's 历史对话), it shows even with only
+    // the conversation open now, and says where earlier ones will appear.
+    const asked = folds.asked === S.key;
+    const show = (list.length > 1 || (asked && list.length > 0)) && S.convState !== "unavailable";
     root.hidden = !show;
     const current = currentConv(list);
     const sig = JSON.stringify([show, list, current, S.switching && S.switching.id, S.convLine]);
@@ -870,7 +874,7 @@
     const keep = focusKeyIn(root);
     w.label.textContent = "历史对话 · " + list.length;
     w.list.replaceChildren(...list.map((c) => convRow(c, c.id === current)));
-    const line = S.convLine;
+    const line = S.convLine || (list.length === 1 ? { text: "开始新对话后，现在这段会留在这里。", bad: false } : null);
     w.line.textContent = line ? line.text : "";
     w.line.hidden = !line;
     w.line.classList.toggle("ws-bad", !!(line && line.bad));
@@ -904,6 +908,23 @@
     row.append(copy);
     li.append(row);
     return li;
+  }
+
+  // 历史对话 asked for from the chat header's menu: the list is read now and
+  // its fold opens (even with only the current conversation). Resolves to
+  // how many saved conversations the cat has, or null when the list could
+  // not be read (or this is not a cat's chat any more).
+  async function openConversations() {
+    if (!S.sel || isGroup()) return null;
+    const key = S.key;
+    folds.asked = key;
+    folds.convs = key;
+    const root = S.roots.convs;
+    if (root && root._wc) root._wc.fold.open = true;
+    await loadConversations();
+    if (S.key !== key || S.convState !== "ready") return null;
+    paintConvs();
+    return (S.convs || []).length;
   }
 
   function convSay(text, bad) {
@@ -1810,7 +1831,9 @@
   window.ClowderWorkspace = Object.freeze({
     init, select, observe, touch, key: R.key,
     addFiles, filesFrom, carriesFiles, attachReady, attachBusy, takeAttachments: take, giveBack, note: setNote,
-    cards, filesView, tasksView, conversationsView, focusTask,
+    cards, filesView, tasksView, conversationsView, openConversations, focusTask,
+    // Files waiting in the composer, uploaded or not (they belong to this conversation).
+    pendingCount: () => S.pending.length,
     // Whether a drawer node is this module's live page (the shell keeps it instead of redrawing).
     current: (n) => !!n && (n === S.roots.files || n === S.roots.tasks),
     threadId: () => S.threadId,

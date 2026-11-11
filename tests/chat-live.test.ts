@@ -970,9 +970,12 @@ test('the page loads the live-reply scripts after chat-experience.js and before 
   assert.match(app, /live\.sendButton\(send, stop \? \(stopState \? "stopping" : "stop"\) : "send"\);/);
   const escape = /document\.addEventListener\("keydown", \(ev\) => \{\n\s+if \(ev\.key !== "Escape"\) return;[\s\S]*?\n {2}\}\);/.exec(app)![0];
   assert.doesNotMatch(escape, /stop/i);
-  // Previews never show a reply still being written.
-  assert.match(app, /if \(m\.in_progress\) continue;/);
-  assert.match(app, /if \(!raw \|\| m\.in_progress \|\|/);
+  // Previews never show a reply still being written: the sidebar's line is the
+  // server's activity.last (drafts and replies in progress never count there,
+  // docs/chat-experience-api.md), read by chat-list.js; no transcript is read for it.
+  assert.match(app, /chatList\.preview\("bot", name\)/);
+  assert.match(app, /chatList\.preview\("group", g\.id\)/);
+  assert.doesNotMatch(app, /function previewFromMessages|function previewFromGroup|function warmOne|state\.preview/);
   // Only existing tokens.
   assert.doesNotMatch(css.replace(/\/\*[\s\S]*?\*\//g, ''), /#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i);
 });
