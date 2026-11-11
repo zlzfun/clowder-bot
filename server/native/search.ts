@@ -54,9 +54,9 @@ export async function searchMessages(bridge: BotBridge, query: string, limit = 3
         // The opening invitation the app sent for the owner is not something the owner said.
         const owner = message.type === 'user' && !bridge.isInvitation(target.threadId, message);
         if (!owner && !replies.has(message.id)) continue;
-        const found = snippet(messageDisplayText(message, target.threadId), query);
-        if (!found) continue;
         const cat: NativeCat | undefined = owner ? undefined : cats.find(known => known.id === message.catId);
+        const found = snippet(messageDisplayText(message, target.threadId, cat?.name), query);
+        if (!found) continue;
         hits.push({ chat, threadId: target.threadId, current: target.current, messageId: message.id, time: new Date(message.timestamp).toISOString(),
           from: owner ? 'owner' : 'cat', ...(cat ? { catName: cat.name } : {}), ...found, order: orderTime(message) });
       }

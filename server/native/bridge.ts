@@ -3,7 +3,7 @@ import { ApiError } from '../errors.js';
 import { ProductStore } from '../product-store.js';
 import type { NativeCat, NativeMessage, NativeThread, NativeTransport } from './types.js';
 import { defaultRuntime, runtimeUnavailable, supportsRuntime } from './agents.js';
-import { messageDisplayText, messagePresentation, replyEnding, replyInProgress } from './message-presentation.js';
+import { messageDisplayText, messagePresentation, replyEnding, replyInProgress, rosterRefusals } from './message-presentation.js';
 import { avatarBreed, type CatConfig, type SourceTemplate } from './cat-templates.js';
 import { clip } from './text.js';
 import { messageBlocks } from './blocks.js';
@@ -158,10 +158,13 @@ export class BotBridge {
     // A reply names the message it answers. Right under that message the quote
     // only repeats it, so it is shown when something else came in between.
     let lastUser: string | undefined;
+    // A cat that was addressed but does not belong to this conversation: said once by name (see rosterRefusals).
+    const refusals = rosterRefusals(page.messages, id => cats.find(cat => cat.id === id)?.name, false);
     for (const { message, ...presentation } of this.presentMessages(page.messages, cats)) {
       if (message.type === 'user' && message.id === source) continue;
-      const seq = this.store.sequence(thread.id, message.id);
-      const text = messageDisplayText(message, thread.id), inProgress = replyInProgress(message);
+      if (refusals.get(message.id) === null) continue;
+      const seq = this.store.sequence(thread.id, message.id), refusal = refusals.get(message.id);
+      const text = refusal ?? messageDisplayText(message, thread.id, presentation.speaker?.name), inProgress = replyInProgress(message);
       const rich = message.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(message), ending = replyEnding(message);
       // At the top of a page that continues further back, what came just before is not known; no quote is guessed there.
       const quoted = message.replyTo && message.replyTo !== source
@@ -171,7 +174,7 @@ export class BotBridge {
         content: text, ...presentation, time: new Date(message.timestamp).toISOString(),
         reply_to: quoted ? this.store.state.messageRefs[thread.id]?.[quoted] ?? 0 : 0,
         status: message.lifecycle?.status ?? (message.isDraft ? 'processing' : 'complete'), ...(inProgress ? { in_progress: true } : {}),
-        ...(ending ? { ended: ending } : {}),
+        ...(ending ? { ended: ending } : {}), ...(refusal ? { notice: true } : {}),
         attachments: this.workspaces.messageFiles(thread.id, message),
         // Cards, checklists and choices the cat attached; `blocks_hidden` counts what the chat cannot draw yet.
         ...(rich.blocks.length ? { blocks: rich.blocks } : {}), ...(rich.hidden ? { blocks_hidden: rich.hidden } : {}), native: message };

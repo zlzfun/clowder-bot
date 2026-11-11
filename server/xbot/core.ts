@@ -1,5 +1,5 @@
 import express, { type Response } from 'express';
-import { messageDisplayText, replyEnding, replyInProgress } from '../native/message-presentation.js';
+import { messageDisplayText, replyEnding, replyInProgress, rosterRefusals } from '../native/message-presentation.js';
 import { liveEvent } from '../native/live.js';
 import { clip } from '../native/text.js';
 import { messageBlocks } from '../native/blocks.js';
@@ -78,13 +78,15 @@ export function createXbotCoreRouter(bridge: BotBridge) {
     const thread = await bridge.group(req.params.id);
     const [cats, page] = await Promise.all([bridge.cats(), bridge.messages(thread.id, typeof req.query.before === 'string' ? req.query.before : undefined)]);
     const first = page.messages[0];
+    // A cat that was addressed but is not in this group: said once by name instead of the engine's raw refusal lines.
+    const refusals = rosterRefusals(page.messages, id => cats.find(cat => cat.id === id)?.name, true);
     res.json({ group: bridge.groupItem(thread, cats), hasMore: page.hasMore,
       // The cursor for the page before this one, as the single-chat transcript gives it.
       before: first ? `${first.timelineOrderAt ?? first.timestamp}:${first.id}` : null,
-      messages: bridge.presentMessages(page.messages, cats).map(({ message: m, name, ...presentation }) => {
-        const rich = m.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(m);
+      messages: bridge.presentMessages(page.messages.filter(m => refusals.get(m.id) !== null), cats).map(({ message: m, name, ...presentation }) => {
+        const rich = m.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(m), refusal = refusals.get(m.id);
         return { id: m.id, time: new Date(m.timestamp).toISOString(), sender: m.type === 'user' ? 'local' : name,
-          kind: m.type === 'user' ? 'person' : 'bot', text: messageDisplayText(m, thread.id),
+          kind: m.type === 'user' ? 'person' : 'bot', text: refusal ?? messageDisplayText(m, thread.id, presentation.speaker?.name), ...(refusal ? { notice: true } : {}),
           status: m.lifecycle?.status ?? (m.isDraft ? 'processing' : 'complete'), ...(replyInProgress(m) ? { in_progress: true } : {}),
           ...(replyEnding(m) ? { ended: replyEnding(m) } : {}),
           attachments: bridge.workspaces.messageFiles(thread.id, m),
