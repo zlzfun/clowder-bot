@@ -1,0 +1,110 @@
+/* A chat that feels alive (chat-presence.js): the typing paws, the header's
+   正在输入… line, the sidebar's typing dots, the seen paw, and the motion of
+   sending, settling and leaving. Loaded just before chat-live.css (which
+   stays last). Builds on app.css, tokens.css and the café layer: no new
+   colours or fonts (a cat's own colour comes from the server, chosen by
+   chat-presence-rules.js, and arrives as --pz-paw or a rule keyed by the
+   speaker); motion uses the 180 ms ease-out, --dur-pop / --ease-spring and
+   --dur-press tokens. The global prefers-reduced-motion rule of app.css
+   stills every animation and transition here; chat-presence.js starts no
+   motion of its own then either. */
+
+/* One paw print: four toe beans over a pad (the seen paw draws the same shape). */
+:root {
+  --pz-paw-shape: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 12.6c-2.5 0-5.2 2.5-5.2 4.9 0 1.6 1.1 2.6 2.6 2.6 1.1 0 1.7-.5 2.6-.5s1.5.5 2.6.5c1.5 0 2.6-1 2.6-2.6 0-2.4-2.7-4.9-5.2-4.9z'/%3E%3Cellipse cx='5.6' cy='11.2' rx='1.9' ry='2.4' transform='rotate(-18 5.6 11.2)'/%3E%3Cellipse cx='9.3' cy='7.3' rx='2' ry='2.5' transform='rotate(-6 9.3 7.3)'/%3E%3Cellipse cx='14.7' cy='7.3' rx='2' ry='2.5' transform='rotate(6 14.7 7.3)'/%3E%3Cellipse cx='18.4' cy='11.2' rx='1.9' ry='2.4' transform='rotate(18 18.4 11.2)'/%3E%3C/svg%3E");
+}
+
+/* ---- 猫爪 · the signature: a cat "types" by stepping on the keys ----
+   The typing bubble's three dots are three small paws. While the send waits
+   for the engine (a typing bubble no reply has claimed, data-wait) they rest,
+   pale and in the theme's colour; once the engine really writes, they press
+   down in turn, like a cat walking over a keyboard, in the cat's own colour
+   when it stays legible on the bubble (--pz-paw, drawn at full strength, so
+   the ratio chat-presence-rules.js checked is the one on screen), else the
+   theme's. Only transform moves. Reduced motion: three still paws. The
+   markup is chat-live.js's own dots; only their look changes here. */
+@supports (mask-image: none) or (-webkit-mask-image: none) {
+  .thread .msg .typing-dots { gap: 5px; }
+  .thread .msg .typing-dots > i {
+    width: 11px; height: 11px; border-radius: 0;
+    background: var(--pz-paw, var(--faint)); opacity: var(--pz-paw-strength, .72);
+    -webkit-mask: var(--pz-paw-shape) center / contain no-repeat;
+    mask: var(--pz-paw-shape) center / contain no-repeat;
+    transform-origin: 50% 100%;
+    animation: pz-knead 1200ms ease-in-out infinite;
+  }
+  .thread .msg .typing-dots > i:nth-child(2) { animation-delay: 160ms; }
+  .thread .msg .typing-dots > i:nth-child(3) { animation-delay: 320ms; }
+  .thread .msg[data-wait] .typing-dots > i { animation: none; background: var(--faint); opacity: .4; }
+}
+@keyframes pz-knead {
+  0%, 60%, 100% { transform: none; }
+  30% { transform: translateY(1.5px) scale(1.1, .78); }
+}
+
+/* ---- The header: what the cat is doing, under its name ----
+   The line is placed over the chip, so the chip keeps its size and nothing
+   in the header moves but the name, which glides up to make room. A status
+   or an error in the shell's own subtitle takes precedence. */
+.top-title > .pz-sub {
+  position: absolute; top: 50%; left: 40px; max-width: min(240px, 52vw);
+  margin-top: 1px; font-size: 12px; line-height: 16px; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
+  opacity: 0; transform: translateY(3px);
+  transition: opacity 180ms ease-out, transform 180ms ease-out;
+}
+.top-title.pz-on > .pz-sub { opacity: 1; transform: none; }
+/* The name clips itself (ellipsis); its row must not clip it as it glides up. */
+.top-title > .title { overflow: visible; }
+.top-title > .title > .title-name { transition: transform 180ms ease-out; }
+.top-title.pz-on > .title > .title-name { transform: translateY(-8px); }
+.top-title:has(> #subtitle:not([hidden])) > .pz-sub { display: none; }
+.top-title:has(> #subtitle:not([hidden])) > .title > .title-name { transform: none; }
+
+/* ---- The sidebar: typing dots on a row whose cat replies ---- */
+.item .preview.st > .pz-dots { display: inline-flex; align-items: center; gap: 2px; flex: none; height: 11px; }
+.pz-dots > i { width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: .35; animation: pz-dot 1200ms ease-in-out infinite; }
+.pz-dots > i:nth-child(2) { animation-delay: 160ms; }
+.pz-dots > i:nth-child(3) { animation-delay: 320ms; }
+@keyframes pz-dot {
+  0%, 60%, 100% { opacity: .35; transform: none; }
+  30% { opacity: .9; transform: translateY(-1px); }
+}
+
+/* ---- Seen: the paw by the owner's latest message the engine picked up ----
+   In the hover time's place, left of the bubble: hovering shows the time
+   instead. Stamped once, the first time it appears on this page. */
+.pz-seen { color: var(--faint); }
+.msg.user > .bubble-col > .pz-seen {
+  position: absolute; right: calc(100% + 6px); bottom: 7px; width: 12px; height: 12px;
+  transform: rotate(-12deg);
+}
+.pz-seen > svg { display: block; width: 100%; height: 100%; fill: currentColor; stroke: none; }
+.pz-seen.pz-stamp { animation: pz-stamp var(--dur-pop) var(--ease-spring) both; }
+@keyframes pz-stamp {
+  from { opacity: 0; transform: translateY(-3px) rotate(-26deg) scale(1.4); }
+  to { opacity: 1; transform: rotate(-12deg); }
+}
+@media (hover: hover) { .msg.user:hover > .bubble-col > .pz-seen { visibility: hidden; } }
+
+/* ---- Motion ---- */
+/* Sending: the owner's new bubble settles in from the composer with the
+   token spring (a changed row, .lv-still, never moves again). */
+.thread-inner > .msg.user:not(.lv-still) { animation: pz-send var(--dur-pop) var(--ease-spring) both; transform-origin: 100% 100%; }
+@keyframes pz-send {
+  from { opacity: 0; transform: translateY(8px) scale(.97); }
+  to { opacity: 1; transform: none; }
+}
+/* The send button gives under the finger. */
+.composer .send.lv-morph { transition: opacity 160ms ease-out, background-color 180ms ease-out, color 180ms ease-out, transform var(--dur-press) ease-out; }
+.composer .send:active:not(:disabled) { transform: scale(var(--press-scale)); }
+.lv-anchor > .lv-latest.on:active { transform: translate(-50%, 0) scale(var(--press-scale)); }
+/* Reordering (chat-list.js glides the rows): the row rising to the top passes
+   over the rows making room for it, on the list's own surface, instead of
+   sliding under their text. */
+.item.cl-moving.cl-rise { position: relative; z-index: 1; }
+.item.cl-moving.cl-rise:not(.active):not(:hover) { background: var(--sidebar); }
+/* The drawer's scrim fades in with its slide (and out, as a copy). */
+.panel-scrim:not([hidden]) { animation: fade 180ms ease-out; }
+/* A copy of a closing layer, fading out where it was (chat-presence.js). */
+.pz-ghost, .pz-ghost * { animation: none !important; transition: none !important; pointer-events: none !important; }

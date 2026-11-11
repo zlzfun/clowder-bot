@@ -27,7 +27,7 @@
       "file": "app.js",
       "target": "client/public/app.js",
       "sourceSha256": "1248f793493826bf044359c71e7d8772ccc3472d6021d6abb979dff9b6cb29bc",
-      "sha256": "00980d8b85845b5d55f9469481a42066c31720dbe3f131c99ccbf482a10e0ca2",
+      "sha256": "f1d4ff69e46a8c3e3ca484aade2aeb4043874ee145ff0755b2ced88255e65d38",
       "unchanged": false
     },
     {
@@ -153,7 +153,7 @@
       "file": "index.html",
       "target": "client/index.html",
       "sourceSha256": "a4160c18e23489fbc6a9e21fe494e1ac52840a67b2e138997400a0b42835b556",
-      "sha256": "5c27969e615a47eca20dbfc269b240c93b64702302da63813f2a47db1467e898",
+      "sha256": "4a43ea8ea937926bfbb69f0a4b7c0ee5c93c2d9e27d37757cb0909e011049ada",
       "unchanged": false
     },
     {
@@ -709,13 +709,13 @@
       "target": "client/public/chat-live-rules.js",
       "description": "Live-reply rules without DOM or network: a reply's words placed by native position from `live` text events (append when the piece follows on, drop what is already held, never glue across a gap — pieces wait at their place until a transcript draft fills it, replace sets the whole reply, a piece without a position only while seen whole from the start marker), transcript drafts that extend but never take back longer streamed words (after a replacement this page saw, a draft is taken only to fill a gap and only when a piece received since vouches for it; a draft ahead of the stream ends unpositioned appends), the streaming display filter (trailing paw signature, unclosed last [ line, SILENT and its prefixes; code fences protect a paw line; an open fence drawn closed), everyday step wording for Claude Code, Codex, other agents and MCP tools (never a tool name, command or path), which native events change the record, the send receipt, and the redraw signature",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for the live reply round (docs/chat-live-api.md)",
-      "sha256": "1c860cca9a487d4fb60a66e060131a28ae964addf551d9118d37a580773e033f"
+      "sha256": "33dd54d8df212230a4679349a69f99cba49296bf15bdcea5edcc603d4345f401"
     },
     {
       "target": "client/public/chat-live.js",
       "description": "A reply drawn while it is written (typing bubble in the cat's reply position, one quiet crossfading step line, words through the existing Markdown path throttled to animation frames with a soft caret, the finished transcript row taking its place without rising), the send's typing bubble before the server names the reply (single chats and groups; 排队中 only when the status says the send waits after a grace period), the history's keyed redraw (unchanged rows keep their element, only new rows rise, changed rows replaced in place), the send/stop button morph, and 回到最新 above the composer with the server's unread count; nothing stored as a record; typing bubbles matched to the reply that answers them by native replyTo (a reply finished before any of it was seen takes the bubble's place), replies whose end was missed closed only on a fresh activity read showing nothing running or queued for their cat, and the stop cleanup limited to the sends taken when the stop was asked, in that conversation",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for the live reply round (docs/chat-live-api.md)",
-      "sha256": "c943a90f00c3239981e5266f5f257aef5ab0942f7cbb0b0784a9fe64fe73cd65"
+      "sha256": "cc34567a3f78eec8a5f01d2257110b823907cac3f23ae884d2ca0c2fa97d4a8c"
     },
     {
       "target": "client/public/chat-live.css",
@@ -769,7 +769,7 @@
       "target": "client/public/chat-list.js",
       "description": "The sidebar as a messenger's contact list from the status poll only: a row's second line (the draft left in a chat other than the open one as 草稿：…, else the latest line, kept across a failed read of the same conversation), the time on the name line refreshed every 30 s, the unread count beside the preview (two up, never on the open chat), rows reordered by recency with only out-of-place rows moved, the focused row never moved, a 180 ms glide from where each row was last seen (none under reduced motion), the (N) total in the page title, and drafts moved between the composer and their chat on leaving and opening it (the quote dropped when the same chat reopens in place; a sessionStorage copy for reloads in the tab)",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 找得到, part one (docs/xbot-frontend.md item 30)",
-      "sha256": "fbab8e0f42b4e674f40f65967cc819c57d8854d9fd90ae7523a15f7fec14777d"
+      "sha256": "860b0247ff9b2059cb1607f499df36ebdf84cab9d0b514c7282779b3f6092aaf"
     },
     {
       "target": "client/public/chat-list.css",
@@ -866,6 +866,24 @@
       "description": "window.ClowderNotify: one switch in 设置 → 通用 that asks for the browser's permission and says when it refused or is unsupported (remembered in localStorage), and silent notifications from the polled status that focus the tab and open the chat; never touches the document title",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 确认与提醒 (docs/xbot-frontend.md item 32; docs/chat-experience-api.md 「等你确认的事」「卡片、清单与选项」, docs/chat-live-api.md)",
       "sha256": "db8216004f6762768b7c84223415fee94ae2626358eb150d6d5842c84a6c8da9"
+    },
+    {
+      "target": "client/public/chat-presence-rules.js",
+      "description": "Pure rules for a chat that feels alive: the legibility decision for a cat's own colour pair on the current surfaces (WCAG 4.5:1 for words, 3:1 for glyphs, else the theme's colour) and its style sheet keyed by data-sender, the header's 正在输入… / 在查资料… / 在想… words from the live replies, what a sidebar row shows while its cat replies, and which owner message the seen paw marks (native.replyTo)",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 活起来 (docs/xbot-frontend.md item 33; docs/xbot-api.md bots[].accent, docs/chat-live-api.md)",
+      "sha256": "c1273391440391363dda3ed1d99f33898888acafa0877d2240525473dbd85a13"
+    },
+    {
+      "target": "client/public/chat-presence.js",
+      "description": "window.ClowderPresence: the header line under the cat's name and typing dots on sidebar rows (chat-live.js presence for the open chat, the status poll elsewhere), one style element for the cats' colours, the once-stamped seen paw placed after each keyed commit without changing row identity, and the palette's and drawer scrim's exit as a fading copy",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 活起来 (docs/xbot-frontend.md item 33; docs/xbot-api.md bots[].accent, docs/chat-live-api.md)",
+      "sha256": "62e538fcd5683e4f14e44a07bcc25336f585e5fed371fb36a6fe65b24fd93020"
+    },
+    {
+      "target": "client/public/chat-presence.css",
+      "description": "Styles for 活起来: the typing paws (the signature: chat-live.js's dots drawn as paws that press in turn while the engine writes, resting while a send waits), the header line, sidebar dots, the seen paw, the send settle and press, the rising row of a reorder and the scrim fade; existing tokens and motion tokens only, loaded just before chat-live.css, original CSS unchanged",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 活起来 (docs/xbot-frontend.md item 33; docs/xbot-api.md bots[].accent, docs/chat-live-api.md)",
+      "sha256": "e52f20cc958c81348c20dc0c8d2bd0a831d0e4218764c0e32b2a319714010c3c"
     }
   ]
 }

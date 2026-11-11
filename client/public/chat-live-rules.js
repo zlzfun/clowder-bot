@@ -167,8 +167,23 @@
     }
     return !!fence;
   }
-  function display(value) {
-    let text = str(value).replace(/\r\n/g, "\n");
+  // Some models open a reply with the paw signature instead of closing with
+  // it ("[团子/Haiku🐾]  今天…"). As the server's withoutLeadingSignature does
+  // for finished replies (server/native/message-presentation.ts, the same
+  // pattern): only the speaking cat's own name, and only once words follow
+  // it on the same line or a later one, so another cat's signature, or one
+  // further inside, stays. Until words follow, the rules below already keep
+  // a lone or half-written signature line off the screen.
+  const LEADING = /^\[([^\[\]\r\n/]{1,80})(?:\/[^\[\]\r\n]{0,80})?\s?🐾\](?:[ \t]+(?=\S)|(?:[ \t]*\r?\n)+(?=[ \t]*\S))/u;
+  function leading(value, name) {
+    const text = str(value), cat = str(name);
+    if (!cat || !text.startsWith("[")) return text;
+    const m = LEADING.exec(text);
+    return m && m[1].trim() === cat ? text.slice(m[0].length) : text;
+  }
+  // name: the speaking cat's name ("" when not known: nothing leading is cut).
+  function display(value, name) {
+    let text = leading(str(value), name).replace(/\r\n/g, "\n");
     const bare = text.trim();
     if (!bare || "SILENT".startsWith(bare)) return "";
     for (let i = 0; i < 4; i++) {
@@ -302,6 +317,9 @@
   const signature = (html) => str(html).replace(/\b(xbot-glyph|clowder-cat-crop)-\d+\b/g, "$1-#");
 
   window.ClowderLiveRules = Object.freeze({
-    reply, apply, draft, lost, display, drawable, stepWords, phrase, structural, gap, receipt, signature,
+    reply, apply, draft, lost, display, leading, drawable, stepWords, phrase, structural, gap, receipt, signature,
+    // A native tool name's everyday kind ("look", "run", … or ""), for the
+    // header's shorter words (chat-presence-rules.js).
+    verb,
   });
 })();

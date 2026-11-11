@@ -1598,7 +1598,7 @@ test('the page loads the workspace scripts before app.js and their styles last; 
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
   // After every upstream and earlier style; only the status-line/memory, 开箱即用, 找得到, 资料页与群 and live-reply extensions (which build on it) follow.
   assert.ok(styles.indexOf('workspace.css') > styles.indexOf('chat-presentation.css'));
-  assert.deepEqual(styles.slice(styles.indexOf('workspace.css') + 1), ['chat-experience.css', 'quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'profile.css', 'mention.css', 'chat-cards.css', 'chat-live.css']);
+  assert.deepEqual(styles.slice(styles.indexOf('workspace.css') + 1), ['chat-experience.css', 'quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'profile.css', 'mention.css', 'chat-cards.css', 'chat-presence.css', 'chat-live.css']);
   assert.doesNotMatch(app, /\/paste"/);
   // 文件 is a tab of both kinds of chat (profile-rules.js), drawn by the module.
   assert.match(read('client/public/profile-rules.js'), /\["files", "文件"\]/);

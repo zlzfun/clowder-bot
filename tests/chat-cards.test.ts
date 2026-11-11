@@ -1017,7 +1017,8 @@ test('the page loads the round\'s scripts before app.js and its styles just befo
   assert.ok(at('chat-live.js') < at('chat-cards-rules.js') && at('chat-cards-rules.js') < at('chat-cards.js') && at('chat-cards.js') < at('app.js'));
   assert.ok(at('chat-notify-rules.js') < at('chat-notify.js') && at('chat-notify.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
-  assert.deepEqual(styles.slice(-2), ['chat-cards.css', 'chat-live.css']);
+  // Only 活起来's styles (chat-presence.css) sit between them.
+  assert.deepEqual(styles.slice(-3), ['chat-cards.css', 'chat-presence.css', 'chat-live.css']);
   // Both histories: words, blocks and the ending through chat-cards.js; frames filled right after each keyed commit.
   assert.equal((app.match(/cards\.words\(m, isSilent\(/g) || []).length, 2);
   assert.equal((app.match(/cards\.blocks\(body, m, messages, (true|false)\);/g) || []).length, 2);
