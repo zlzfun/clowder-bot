@@ -1,0 +1,142 @@
+/* What a cat attaches to a reply, asks the owner to confirm, or leaves
+   unfinished (chat-cards.js), and the notification switch (chat-notify.js).
+   Builds on XBot's own chat cards in app.css: the request card and its
+   one-line outcome (.approval, .approval-line), the option card (.ask,
+   .ask-opt, .opt-badge, .ask-chosen), .sysline, .text-btn, .primary /
+   .secondary, the settings rows and switch (.setrow, .g7-switch); and on
+   chat-live.css's .lv-ended. Only existing --x-* tokens and app.css aliases;
+   no new colours or fonts; the one motion is app.css's quote-flash, which the
+   global prefers-reduced-motion rule stills. Loaded before chat-live.css. */
+
+/* ---- Under a reply's words: one column of blocks, as wide as a card. */
+.ck-blocks { display: flex; flex-direction: column; gap: var(--x-s3); width: 440px; max-width: 100%; }
+/* In the light theme the card surface (--cardx) sits next to the reply bubble's
+   fill; in the dark one it would sink below the page, so there the cards take
+   the bubble's own fill instead. */
+html[data-theme="dark"] .ck-blocks { --cardx: var(--x-bot-bubble); }
+.msg.bot .body > .bot-bubble:not(:empty) + .ck-blocks { margin-top: var(--x-s2); }
+.ck-live { display: block; min-width: 0; }
+.ck-live :is(.primary, .secondary, .ask-opt, .ask-send)[aria-disabled="true"] { cursor: default; }
+.ck-live .primary[aria-disabled="true"] { background: var(--fill); color: var(--muted); }
+.ck-live .secondary[aria-disabled="true"] { color: var(--muted); }
+.ck-live [data-ck-focus="card"]:focus { outline: none; }
+.ck-live [data-ck-focus="card"]:focus-visible { box-shadow: 0 0 0 2px var(--ring); }
+.ck-live .icon { width: 16px; height: 16px; flex: none; }
+.ck-live .approval-spinner { width: 13px; height: 13px; }
+
+/* ---- 等你确认: the request card (XBot's .approval). */
+.approval.ck-ask { padding: 14px 16px; }
+.ck-ask .approval-ico .icon { color: inherit; }
+.ck-ask-body { margin-top: var(--x-s1); font-size: 14px; line-height: 1.55; color: var(--x-text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.approval .quote.ck-quote {
+  margin: var(--x-s3) 0 0; padding: 0 0 0 var(--x-s4); border-left: 3px solid var(--x-fill-3);
+  font-size: var(--x-fs-sm); line-height: 1.5; color: var(--x-muted);
+}
+.ck-ask .approval-actions { flex-wrap: wrap; margin-top: var(--x-s5); }
+.ck-ask .approval-actions button { padding: 0 16px; }
+.ck-when { min-height: 36px; }
+.ck-note { margin: var(--x-s4) 0 0; font-size: var(--x-fs-sm); line-height: 1.5; color: var(--x-muted); }
+.ck-note.ck-bad { color: var(--err); }
+.ck-err { line-height: 1.5; }
+.ck-err .ck-link { margin-left: var(--x-s1); }
+
+/* Settled, submitted or unknown: XBot's one line; neutral ones say nothing about the outcome. */
+.approval-line.ck-line { width: 100%; padding: 9px 14px; font-size: 13.5px; color: var(--x-text); }
+.approval-line.ck-neutral .st { color: var(--x-muted); }
+.approval-line.ck-neutral .what { color: var(--x-text-2); }
+.approval-line.ck-line .ck-runtime { flex: none; font-size: 12px; }
+
+/* 去确认 and a clicked notification find the card: it flashes like a found message. */
+.ck-live .approval.ck-hit, .ck-live .approval-line.ck-hit { --bubble-fill: var(--cardx); animation: quote-flash 1.5s linear; }
+
+/* ---- Choices (XBot's option card .ask; each option is a button). */
+.ask.ck-ask-choice { padding: 14px 8px 8px; }
+.ask.ck-ask-choice > .ask-q { margin: 0 10px 8px; font-size: 14.5px; color: var(--x-text); font-weight: 600; }
+.ck-ask-desc { margin: -2px 10px 10px; font-size: var(--x-fs-sm); line-height: 1.5; color: var(--x-muted); }
+.ck-ask-choice .ask-opts { display: grid; gap: 2px; }
+.ck-ask-choice button.ask-opt { width: 100%; border: 0; background: transparent; color: var(--x-text); font: inherit; font-size: 14.5px; text-align: left; }
+.ck-ask-choice .ask-opt[aria-disabled="true"] { opacity: .55; }
+.ck-ask-choice .ask-opt[aria-disabled="true"]:hover { background: transparent; }
+.ck-ask-choice .ask-opt.on { background: var(--x-fill-2); }
+.ck-ask-choice .ask-opt.on .opt-badge { background: var(--accent); color: var(--primary-text); }
+.ck-ask-choice .opt-badge .icon { width: 14px; height: 14px; stroke-width: 2.4; }
+.ck-ask-choice .opt-t { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.ck-opt-label { overflow-wrap: anywhere; }
+.ck-opt-desc { font-size: var(--x-fs-sm); line-height: 1.45; color: var(--x-muted); }
+.ck-ask-choice .ask-opt.other { cursor: text; }
+.ck-ask-choice .ask-send .icon { width: 14px; height: 14px; }
+.ck-ask-choice .ask-send[aria-disabled="true"] { opacity: .35; }
+.ck-ask-choice .approval-actions.ck-confirm { flex-wrap: wrap; margin: var(--x-s2) 0 0; padding: 0 var(--x-s2) var(--x-s1); }
+.ck-ask-choice .approval-actions.ck-confirm button { height: 36px; min-height: 36px; padding: 0 16px; border-radius: 10px; font-size: 14px; display: inline-flex; align-items: center; gap: 6px; }
+.ck-ask-choice > .ck-note { margin: var(--x-s3) 10px var(--x-s1); }
+.ck-ask-choice > .ck-note .ck-link { margin-left: var(--x-s1); }
+.ask.done.ck-ask-choice > .ask-q { font-size: 13px; font-weight: 500; color: var(--x-faint); margin-bottom: var(--x-s1); }
+.ck-ask-choice .ask-chosen .icon { width: 18px; height: 18px; stroke-width: 2.4; }
+
+/* ---- A card, a checklist, a diff: the same card surface, read only. */
+.ck-card { border-radius: 16px; padding: 14px 16px; background: var(--cardx); min-width: 0; }
+.ck-card-head { display: flex; align-items: center; gap: var(--x-s3); min-width: 0; }
+.ck-card-title { min-width: 0; font-size: 14.5px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; color: var(--x-text); }
+.ck-tone-info .ck-tone { color: var(--info); }
+.ck-tone-success .ck-tone { color: var(--ok); }
+.ck-tone-warning .ck-tone { color: var(--warn); }
+.ck-tone-danger .ck-tone { color: var(--err); }
+.ck-card-body { margin-top: var(--x-s2); font-size: 14px; }
+.ck-fields { display: grid; grid-template-columns: auto 1fr; gap: var(--x-s1) var(--x-s5); margin: var(--x-s4) 0 0; font-size: 13.5px; line-height: 1.5; }
+.ck-fields dt { color: var(--x-muted); }
+.ck-fields dd { margin: 0; min-width: 0; overflow-wrap: anywhere; color: var(--x-text); }
+
+.ck-checks { list-style: none; margin: var(--x-s3) 0 0; padding: 0; display: grid; gap: var(--x-s1); }
+.ck-checklist > .ck-checks:first-child { margin-top: 0; }
+.ck-checks li { display: flex; align-items: flex-start; gap: var(--x-s4); font-size: 14px; line-height: 1.5; color: var(--x-text); }
+.ck-box {
+  flex: none; width: 18px; height: 18px; margin-top: 2px; border-radius: 6px;
+  display: grid; place-items: center; box-shadow: inset 0 0 0 1.5px var(--x-fill-3);
+}
+.ck-box .icon { width: 12px; height: 12px; stroke-width: 3; }
+.ck-checks li.on .ck-box { background: var(--x-primary); color: var(--x-on-primary); box-shadow: none; }
+.ck-checks li.on .ck-check-text { color: var(--x-muted); }
+.ck-check-text { min-width: 0; overflow-wrap: anywhere; }
+
+.ck-diff .ck-file { color: var(--x-muted); }
+.ck-diff-file { min-width: 0; font: 600 12.5px/1.4 var(--x-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--x-text); }
+.ck-diff-count { margin-left: auto; display: inline-flex; gap: var(--x-s2); font: 12px/1.4 var(--x-mono); flex: none; }
+.ck-add { color: var(--ok); }
+.ck-del { color: var(--err); }
+.ck-diff-body {
+  margin: var(--x-s4) 0 0; padding: var(--x-s2) 0; border-radius: 10px; background: var(--x-code);
+  max-height: 320px; overflow: auto; font: 12px/1.6 var(--x-mono); color: var(--x-text);
+}
+.ck-diff-body:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ck-dl { display: block; width: max-content; min-width: 100%; padding: 0 var(--x-s5); white-space: pre; }
+.ck-dl-add { background: var(--ok-bg); }
+.ck-dl-del { background: var(--err-bg); }
+.ck-dl-hunk, .ck-dl-meta { color: var(--x-faint); }
+
+/* What cannot be drawn yet is said, quietly. */
+.ck-hidden { margin: 0; padding: 0 var(--x-s1); font-size: 12px; line-height: 18px; color: var(--x-faint); }
+
+/* ---- A reply that did not finish: 已停止 · 详情 · 再发一次, quietly. */
+.lv-ended.ck-ended { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--x-s1); }
+.ck-ended .ck-link, .ck-err .ck-link, .ck-note .ck-link {
+  min-height: 22px; padding: 0 var(--x-s2); font-size: 12px; color: var(--x-muted);
+}
+.ck-ended .ck-link[aria-disabled="true"] { cursor: default; background: transparent; }
+.ck-said { padding: 0 var(--x-s2); color: var(--x-muted); }
+.ck-reason {
+  margin: var(--x-s1) var(--x-s1) 0; padding: var(--x-s3) var(--x-s4); max-width: 100%; max-height: 200px; overflow: auto;
+  border-radius: var(--x-r-sm); background: var(--x-fill-1);
+  font: 12px/1.5 var(--x-mono); color: var(--x-muted); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.ck-reason[hidden] { display: none; }
+/* Inside a card the box takes the code surface, so it still reads as a box. */
+.approval .ck-reason { margin: var(--x-s2) 0 0; background: var(--x-code); }
+
+/* ---- A receipt or a refusal: a quiet centred line in the history. */
+.thread-inner > .ck-notice { margin-top: 14px; }
+.thread-inner > .ck-notice + .msg { margin-top: 14px; }
+
+/* ---- 设置 → 通用 → 通知. */
+.ck-notify-said { margin-top: var(--x-s3); }
+.ck-notify-said[hidden] { display: none; }
+.ck-notify .g7-switch[aria-busy="true"] { opacity: .6; }

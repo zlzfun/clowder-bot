@@ -898,10 +898,12 @@ function appParts(names: string[], extra = '') {
   return code;
 }
 
-test('the shell hands chat-live.js the raw native draft of in-progress replies, redraws only when a row\'s place changes, and notes a stopped or failed reply under its words', () => {
+// How a reply that stopped or did not complete ended is drawn by chat-cards.js
+// from the row's `ended` (tests/chat-cards.test.ts); the shell only hands it the row.
+test('the shell hands chat-live.js the raw native draft of in-progress replies and redraws only when a row\'s place changes', () => {
   const out: Any = {};
   const els: Any[] = [];
-  vm.runInNewContext(appParts(['liveRows', 'sigRows', 'endedNote']) + 'out.liveRows = liveRows; out.sigRows = sigRows; out.endedNote = endedNote;', {
+  vm.runInNewContext(appParts(['liveRows', 'sigRows']) + 'out.liveRows = liveRows; out.sigRows = sigRows;', {
     out, presentation: { isActivity: (m: Any) => m.presentation_kind === 'activity' },
     sayText: (m: Any) => m.content, el: (tag: string, cls: string, text: string) => { const e = { tag, cls, text }; els.push(e); return e; },
   });
@@ -933,14 +935,7 @@ test('the shell hands chat-live.js the raw native draft of in-progress replies, 
   assert.notEqual(JSON.stringify(record('processing', [tool])), JSON.stringify(record('failed', [tool])), 'a changed status shows');
   const groupRecord = (text: string) => out.sigRows([{ id: 'y', kind: 'bot', presentation_kind: 'activity', in_progress: true, text }]);
   assert.notEqual(JSON.stringify(groupRecord('a')), JSON.stringify(groupRecord('ab')));
-  // 已停止 / 这次没完成 under words a reply wrote before it ended that way; never twice.
-  const body = { kids: [] as Any[], append(n: Any) { this.kids.push(n); } };
-  out.endedNote(body, 'canceled', '写到一半');
-  out.endedNote(body, 'failed', '写了一点');
-  out.endedNote(body, 'canceled', '已停止');
-  out.endedNote(body, 'completed', '写好了');
-  out.endedNote(body, 'canceled', '');
-  assert.deepEqual(body.kids.map((k: Any) => k.text), ['已停止', '这次没完成']);
+  assert.doesNotMatch(read('client/public/app.js'), /function endedNote\(/, 'the ending is drawn in one place (chat-cards.js)');
 });
 
 test('the page loads the live-reply scripts after chat-experience.js and before app.js, its styles last; the shell reads the transcript only for events that change the record and keeps no dead streaming paths', () => {

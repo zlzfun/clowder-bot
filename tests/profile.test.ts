@@ -1054,7 +1054,7 @@ test('the shell wires 资料页与群: scripts before app.js, styles before the 
   assert.ok(at('quick-create-rules.js') < at('profile-rules.js') && at('profile-rules.js') < at('profile.js') && at('profile.js') < at('app.js'));
   assert.ok(at('mention-rules.js') < at('mention.js') && at('mention.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
-  assert.deepEqual(styles.slice(-3), ['profile.css', 'mention.css', 'chat-live.css']);
+  assert.deepEqual(styles.slice(-4), ['profile.css', 'mention.css', 'chat-cards.css', 'chat-live.css']);
   assert.ok(scripts.indexOf('chat-history.js') < scripts.indexOf('profile-rules.js'), 'after the earlier rounds\' scripts');
   // The drawer: tabs from the rules; 资料 / 成员 kept across repaints; 定时 its own page.
   assert.match(app, /for \(const pair of profileRules\.tabs\(panelKind\(\)\)\)/);
