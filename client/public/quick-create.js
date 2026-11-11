@@ -1,15 +1,19 @@
 // 开箱即用。The rules live in quick-create-rules.js; app.js passes its helpers
 // through init(). Four views:
-//   stage()     no cats yet: 「领一只猫猫回家」 — the eight clay cats in a row,
-//               pick one, keep or change its name, 带它回家;
+//   stage()     no cats yet: 「领一只猫猫回家」 — the clay cats in a row, each
+//               a cat with its own character (a short hint says what the
+//               chosen one is like), pick one, keep or change its name,
+//               带它回家; or 自定义 for a cat of the owner's own;
 //   noChat()    cats, but no chat open: one line (and 打开列表 on a phone);
-//   openCat()   新建 → 新建猫猫: the same face, name, one optional line and the
-//               tool, in a small dialog; 更多设置 hands over to the template
+//   openCat()   新建 → 新建猫猫: the same faces, hint, 自定义, name and tool,
+//               in a small dialog; 更多设置 hands over to the template
 //               creator (cat-templates.js), unchanged;
 //   openGroup() 新建 → 新建群聊: cats as face chips, an optional name whose
 //               placeholder is the name the group gets without one.
-// Requests: GET /xbot-api/start (重新检测 adds ?refresh=1), POST /xbot-api/bots
-// {name, simple:{face, about?, agent}, idempotencyKey} and POST
+// Requests: GET /xbot-api/start (重新检测 adds ?refresh=1; its faces[] says
+// which faces there are and what each one's cat is like), POST /xbot-api/bots
+// {name, simple:{face, agent} | {face, custom: true, about?, personality?,
+// agent}, idempotencyKey} and POST
 // /xbot-api/groups {members, name?, idempotencyKey}. A cat or a group exists
 // only once the server answers; a request that may or may not have landed is
 // sent again unchanged under the same key, which returns that cat or group
@@ -31,10 +35,20 @@
   let seq = 0;
   const uid = (prefix) => "qc-" + prefix + "-" + ++seq;
   const presets = () => (window.ClowderAvatars && window.ClowderAvatars.presets) || [];
-  const faceIds = () => presets().map((p) => p.id);
   const portrait = (faceId) => (window.ClowderAvatars ? window.ClowderAvatars.createPortrait("cat:" + faceId) : node("span"));
   const media = (query) => !!(window.matchMedia && window.matchMedia(query).matches);
   const frame = () => new Promise((done) => (window.requestAnimationFrame ? window.requestAnimationFrame(() => done()) : setTimeout(done, 16)));
+  // The stage and the dialog sit centred: a form that grows or shrinks (自定义
+  // on or off) re-centres them. Glide from where they were (180 ms) instead of
+  // jumping; at once when motion is reduced or nothing is laid out.
+  function glide(el, change) {
+    const can = el && typeof el.animate === "function" && !media("(prefers-reduced-motion: reduce)");
+    const before = can ? el.getBoundingClientRect().top : 0;
+    change();
+    if (!can) return;
+    const dy = before - el.getBoundingClientRect().top;
+    if (Math.abs(dy) >= 1) el.animate([{ transform: `translateY(${dy}px)` }, { transform: "none" }], { duration: 180, easing: "ease-out" });
+  }
   const quietly = (run) => { try { Promise.resolve(run()).catch(() => {}); } catch { /* optional */ } };
   // One key per request body: the same body again is the same request.
   // randomUUID needs a secure context, which a LAN address may not be.
@@ -50,17 +64,19 @@
     return hex.slice(0, 8) + "-" + hex.slice(8, 12) + "-" + hex.slice(12, 16) + "-" + hex.slice(16, 20) + "-" + hex.slice(20);
   }
 
-  // ---- the eight faces ----
+  // ---- the faces ----
   // One radio group: a click or tap picks a cat, arrow keys, Home and End move
   // the choice. The chosen cat steps forward onto its cushion; the others sit
-  // back. With nothing chosen (still reading, or blocked) all eight sit back
-  // and the row is only a picture.
+  // back. With nothing chosen (still reading, or blocked) all of them sit back
+  // and the row is only a picture. Which faces, and how many, is the server's
+  // (faces[] in /start): offer() redraws the row when that changes; it wraps
+  // after eight (four on a phone).
   function lineup({ compact, onPick }) {
     const box = node("div", "qc-faces" + (compact ? " compact" : ""));
     box.setAttribute("role", "radiogroup");
     box.setAttribute("aria-label", "选一只猫猫");
-    let current = null, on = false;
-    const items = presets().map((p) => {
+    let current = null, on = false, items = [], offered = "";
+    function item(p) {
       const b = node("button", "qc-face");
       b.type = "button";
       b.setAttribute("role", "radio");
@@ -84,8 +100,19 @@
         choose(items[(to + items.length) % items.length].id);
       });
       return { id: p.id, b, pic };
-    });
-    box.append(...items.map((it) => it.b));
+    }
+    // [{id, label}] in the order to show; the same list again changes nothing.
+    function offer(list) {
+      const next = list.map((p) => p.id + "\n" + p.label).join("\n\n");
+      if (next === offered) return;
+      offered = next;
+      const refocus = box.contains(document.activeElement);
+      items = list.map(item);
+      box.replaceChildren(...items.map((it) => it.b));
+      if (!items.some((it) => it.id === current)) current = null;
+      paint();
+      if (refocus) { const lead = items.find((it) => it.b.tabIndex === 0); if (lead) lead.b.focus(); }
+    }
     function paint() {
       const lead = items.find((it) => it.id === current) || items[0];
       for (const it of items) {
@@ -105,13 +132,16 @@
       it.b.focus();
       onPick(id);
     }
-    paint();
+    // Every portrait until /start says which faces there are.
+    offer(presets());
     return {
-      element: box,
+      element: box, offer,
       get: () => current,
       set: (id) => { current = items.some((it) => it.id === id) ? id : null; paint(); },
       enable: (value) => { on = !!value; paint(); },
       picture: (id) => (items.find((it) => it.id === id) || {}).pic || null,
+      // A cat of the owner's own takes only the looks: the row says so.
+      label: (text) => box.setAttribute("aria-label", text),
     };
   }
 
@@ -187,50 +217,82 @@
   // ---- 领一只猫猫：the face, the name, the tool and one action ----
   // Shared by the stage and the 新建猫猫 dialog. It reads /start itself and
   // shows what is in the way instead of a form that cannot work.
+  // A face is a cat with its own character (the engine's template of that id,
+  // faces[] in /start): under the row a short, calm hint says what the chosen
+  // one is like, in the template's own words. 自定义 makes a cat of the
+  // owner's own instead: the row then picks only its looks, and two optional
+  // lines say what it is for and what it is like.
   // hold: where focus waits while a request is on its way (the dialog's card).
-  function catFlow({ dialog, alive, hold, onBusy = () => {}, onState = () => {}, done }) {
+  // centred: the box that re-centres when the form grows (the stage, the card).
+  function catFlow({ dialog, alive, hold, centred, onBusy = () => {}, onState = () => {}, done }) {
     const h = hooks();
     // picked: the face the owner chose, kept apart from the row, which shows no
     // choice while something blocks creation and gets it back afterwards.
-    let s = null, agent = null, faceTouched = false, picked = null, suggested = "", busy = false, attempt = null, loads = 0, refused = "", kind = "";
+    // offered: the faces on offer and what each one is like (R.offer); every
+    // portrait, without words, until /start says otherwise.
+    // custom: a cat of the owner's own (自定义). Switching keeps the name, the
+    // face and both lines; only what is sent changes.
+    let s = null, agent = null, faceTouched = false, picked = null, suggested = "", busy = false, loads = 0, refused = "", kind = "";
+    let offered = R.offer([], presets()), custom = false, painted = "", modeShown = null;
+    // The keys of requests whose answer was lost, by request body: the same
+    // body again — after switching to 自定义 and back, too — is the same
+    // request under its own key; a changed body (another mode is one) is new.
+    const unsure = new Map();
     const root = node(dialog ? "div" : "form", "qc-flow");
     root.tabIndex = -1;
     if (!dialog) {
       root.setAttribute("novalidate", "");
       root.addEventListener("submit", (ev) => { ev.preventDefault(); submit(); });
     }
-    const faces = lineup({ compact: dialog, onPick: (id) => { faceTouched = true; picked = id; follow(id); } });
+    const faces = lineup({ compact: dialog, onPick: (id) => { faceTouched = true; picked = id; follow(id); paintAbout(); say(custom ? "" : spoken()); } });
+    const ids = () => offered.map((f) => f.id);
+
+    // What the chosen cat is like — or, for a cat of the owner's own, that the
+    // face is only its looks — and the quiet 自定义 switch between the two.
+    const about = node("div", "qc-about"), trait = node("p", "qc-trait");
+    const mode = button("text-btn qc-mode", null, () => setMode(!custom));
+    mode.setAttribute("aria-pressed", "false");
+    about.append(trait, mode);
+    // Said once, politely, for each choice the owner makes (a face, 自定义 on
+    // or off); never for what the form fills in by itself, nor while typing.
+    const voice = node("p", "qc-sr");
+    voice.setAttribute("role", "status");
 
     const fields = node("div", "qc-fields");
-    const nameBox = node("div", dialog ? "field qc-field" : "qc-namebox");
-    const nameLab = node("label", dialog ? "" : "qc-label", "名字"), nameIn = node("input", dialog ? "" : "qc-input"), nameErr = node("p", "qc-err");
-    // The real limit (64 characters) is the rules'; the box only stops a runaway paste.
-    nameIn.type = "text"; nameIn.maxLength = R.NAME_INPUT_MAX; nameIn.autocomplete = "off"; nameIn.spellcheck = false;
-    nameIn.id = uid("name"); nameLab.htmlFor = nameIn.id;
-    nameErr.id = uid("name-err"); nameErr.setAttribute("role", "alert");
-    nameIn.setAttribute("aria-describedby", nameErr.id);
-    nameIn.addEventListener("input", () => { nameError(""); showError(""); });
-    nameBox.append(nameLab, nameIn, nameErr);
-    fields.append(nameBox);
-    let aboutIn = null, aboutErr = null;
-    if (dialog) {
-      const box = node("div", "field qc-field"), lab = node("label", "");
-      lab.append("它主要帮你做什么", node("span", "qc-opt", "可不填"));
-      aboutIn = node("input", "");
-      aboutIn.type = "text"; aboutIn.maxLength = R.ABOUT_INPUT_MAX; aboutIn.autocomplete = "off";
-      aboutIn.placeholder = "比如：帮我改简历、陪我练口语";
-      aboutIn.id = uid("about"); lab.htmlFor = aboutIn.id;
-      aboutErr = node("p", "qc-err");
-      aboutErr.id = uid("about-err"); aboutErr.setAttribute("role", "alert");
-      aboutIn.setAttribute("aria-describedby", aboutErr.id);
-      aboutIn.addEventListener("input", () => { aboutErr.textContent = ""; aboutIn.removeAttribute("aria-invalid"); showError(""); });
-      box.append(lab, aboutIn, aboutErr);
-      fields.append(box);
+    // A labelled text box with its own message line: the name, and the two optional lines of 自定义.
+    function field(label, { max, optional = false, placeholder = "", cls = "" }) {
+      const box = node("div", dialog ? "field qc-field" : "qc-namebox" + (cls ? " " + cls : ""));
+      const lab = node("label", dialog ? "" : "qc-label", label), input = node("input", dialog ? "" : "qc-input" + (optional ? " qc-free" : "")), err = node("p", "qc-err");
+      if (optional) lab.append(node("span", "qc-opt", "可不填"));
+      input.type = "text"; input.maxLength = max; input.autocomplete = "off";
+      if (placeholder) input.placeholder = placeholder;
+      input.id = uid("field"); lab.htmlFor = input.id;
+      err.id = uid("err"); err.setAttribute("role", "alert");
+      input.setAttribute("aria-describedby", err.id);
+      const mark = (text) => {
+        err.textContent = text || "";
+        if (text) input.setAttribute("aria-invalid", "true"); else input.removeAttribute("aria-invalid");
+      };
+      input.addEventListener("input", () => { mark(""); showError(""); });
+      box.append(lab, input, err);
+      return { box, input, mark };
     }
+    // The real limit (64 characters) is the rules'; the box only stops a runaway paste.
+    const nameF = field("名字", { max: R.NAME_INPUT_MAX }), nameIn = nameF.input;
+    nameIn.spellcheck = false;
+    // 自定义: what it is for (simple.about) and what it is like
+    // (simple.personality), both optional. Hidden, never removed, while the
+    // face's own cat is chosen, so switching back and forth loses nothing.
+    const aboutF = field("它主要帮你做什么", { max: R.ABOUT_INPUT_MAX, optional: true, placeholder: "比如：帮我改简历、陪我练口语", cls: "qc-ownbox" });
+    const temperF = field("它的性格", { max: R.PERSONALITY_INPUT_MAX, optional: true, placeholder: "比如：话不多，做事靠谱", cls: "qc-ownbox" });
+    const own = node("div", "qc-own");
+    own.hidden = true;
+    own.append(aboutF.box, temperF.box);
+    fields.append(nameF.box, own);
     const tool = toolLine((id) => {
       agent = id;
       // An untouched face goes with the tool, as the first one did.
-      if (!faceTouched) { const face = R.defaultFace(id, faceIds()); faces.set(face); follow(face); }
+      if (!faceTouched) setFace(R.defaultFace(id, ids()));
       tool.render(s, agent);
       showError("");
     });
@@ -246,7 +308,7 @@
     wait.setAttribute("role", "status");
     const needBox = node("div", "qc-need");
     const laterBox = node("div", "qc-later");
-    root.append(faces.element, wait, fields, needBox, laterBox);
+    root.append(faces.element, about, wait, fields, needBox, laterBox, voice);
 
     function show(next) {
       kind = next;
@@ -256,13 +318,61 @@
       laterBox.hidden = kind !== "later";
       go.hidden = kind !== "ready";
       faces.enable(kind === "ready");
-      if (kind !== "ready") faces.set(null);
+      if (kind !== "ready") { faces.set(null); say(""); }
+      paintAbout();
       onState(kind);
     }
     function showError(text) { error.textContent = text || ""; error.hidden = !text; }
-    function nameError(text) {
-      nameErr.textContent = text || "";
-      if (text) nameIn.setAttribute("aria-invalid", "true"); else nameIn.removeAttribute("aria-invalid");
+    function say(text) { if (voice.textContent !== (text || "")) voice.textContent = text || ""; }
+    const chosenFace = () => offered.find((f) => f.id === faces.get()) || null;
+    const spoken = () => { const f = chosenFace(); return f && f.hint ? f.hint.said : ""; };
+    function setFace(id) { faces.set(id); follow(id); paintAbout(); }
+    // The faces /start offers (in its order, those with a portrait here). A
+    // picked face that is no longer there gives way to the tool's own.
+    function offerFaces(list) {
+      offered = list;
+      faces.offer(list);
+      if (picked && !list.some((f) => f.id === picked)) { picked = null; faceTouched = false; }
+    }
+    // The hint under the row: the chosen cat's personality and what it is good
+    // at (R.trait), or 自定义's note. Two lines are kept free whenever faces
+    // have words, so the form below does not jump from one cat to the next.
+    function paintAbout() {
+      about.hidden = kind !== "ready";
+      const face = chosenFace(), hint = !custom && face ? face.hint : null;
+      const lines = custom ? [R.OWN_NOTE] : hint ? hint.lines : [];
+      about.classList.toggle("described", !custom && offered.some((f) => f.hint));
+      const sig = (custom ? "own" : face ? face.id : "") + "\n" + lines.join("\n");
+      if (sig !== painted) {
+        painted = sig;
+        trait.replaceChildren(...lines.map((line, i) => {
+          const span = node("span", "qc-trait-line");
+          // The dialog's row has no captions: the first line names the cat.
+          if (dialog && !custom && face && i === 0) span.append(node("b", "qc-trait-who", face.label));
+          span.append(line);
+          return span;
+        }));
+      }
+      trait.hidden = !lines.length;
+      trait.classList.toggle("own", custom);
+      if (modeShown !== custom) {
+        modeShown = custom;
+        mode.setAttribute("aria-pressed", String(custom));
+        mode.replaceChildren(h.icon(custom ? "check" : "pencil"), node("span", "", "自定义"));
+      }
+      mode.disabled = busy;
+    }
+    // 自定义 on or off. Focus stays on the switch; the fields keep what was typed.
+    function setMode(next) {
+      if (busy || kind !== "ready" || next === custom) return;
+      glide(centred && centred(), () => {
+        custom = next;
+        own.hidden = !custom;
+        faces.label(custom ? "选它的长相" : "选一只猫猫");
+        paintAbout();
+      });
+      say(custom ? R.OWN_NOTE : spoken());
+      showError("");
     }
     // The name box keeps the chosen face's nickname until the owner writes their own.
     function follow(face) {
@@ -303,6 +413,7 @@
     function apply(next, how) {
       const before = s, wasReady = !fields.hidden && !!(before && before.ready);
       s = next;
+      offerFaces(R.offer(next.faces, presets()));
       if (!next.ready) {
         let note = "";
         if (how === "refresh") note = R.sameStart(before, next) ? R.need(next).unchanged : "检测结果有变化。";
@@ -314,16 +425,19 @@
       if (!agent || !R.choiceOf(next, agent)) {
         const lost = wasReady && agent ? (R.choiceOf(before, agent) || {}).label : "";
         agent = next.agent.id;
-        if (!faceTouched) { const face = R.defaultFace(agent, faceIds()); faces.set(face); follow(face); }
+        if (!faceTouched) setFace(R.defaultFace(agent, ids()));
         if (lost) showError(lost + " 现在用不了，已经换成 " + next.agent.label + "。再点一次就好。");
       } else if (how === "refused") showError(refused);
       tool.render(next, agent);
-      if (wasReady) return;
+      if (wasReady) {
+        // The faces on offer changed under a choice that is no longer there.
+        if (!faces.get()) setFace(faceTouched && picked ? picked : R.defaultFace(agent, ids()));
+        return;
+      }
       // Back from blocked (or first time ready): the owner's own face if they picked one.
-      const face = faceTouched && picked ? picked : R.defaultFace(agent, faceIds());
+      const face = faceTouched && picked ? picked : R.defaultFace(agent, ids());
       show("ready");
-      faces.set(face);
-      follow(face);
+      setFace(face);
       if (dialog || how === "refresh") focusName();
     }
     function paintNeed(next, note) {
@@ -354,12 +468,12 @@
       busy = on;
       // A focused button that turns disabled would drop focus to the page:
       // hold it on the form until the answer says where it goes next.
-      const here = document.activeElement, holder = hold || root;
-      if (on && holder.contains(here) && here !== nameIn && here !== aboutIn) holder.focus();
+      const here = document.activeElement, holder = hold || root, typing = [nameIn, aboutF.input, temperF.input];
+      if (on && holder.contains(here) && !typing.includes(here)) holder.focus();
       faces.enable(!on);
       // Read-only rather than disabled, so the caret and focus stay put.
-      nameIn.readOnly = on;
-      if (aboutIn) aboutIn.readOnly = on;
+      for (const input of typing) input.readOnly = on;
+      mode.disabled = on;
       tool.disable(on);
       go.disabled = on;
       go.textContent = on ? (dialog ? "正在创建…" : "正在带它回家…") : dialog ? "创建" : "带它回家";
@@ -367,34 +481,40 @@
     }
     async function submit() {
       if (busy || !s || !s.ready || fields.hidden) return;
-      const body = R.catBody({ name: nameIn.value, face: faces.get(), agent, about: aboutIn ? aboutIn.value : "" });
+      // The face's own cat sends the face alone; 自定义 sends custom and what was written.
+      const body = R.catBody({ name: nameIn.value, face: faces.get(), agent, custom, about: aboutF.input.value, personality: temperF.input.value });
       const print = R.fingerprint(body);
       // The same request as one whose answer was lost goes back under its key
       // even when the refreshed list now knows the name: that cat may be this
       // request's own, and the server answers with it instead of a second one.
-      const again = !!attempt && attempt.print === print;
-      const problem = R.nameProblem(nameIn.value, again ? [] : h.cats());
-      if (problem) { nameError(problem); nameIn.focus(); return; }
-      const long = aboutIn ? R.aboutProblem(aboutIn.value) : "";
-      if (long) { aboutErr.textContent = long; aboutIn.setAttribute("aria-invalid", "true"); aboutIn.focus(); return; }
-      if (!again) attempt = { print, key: requestKey() };
+      const known = unsure.get(print) || "";
+      const problem = R.nameProblem(nameIn.value, known ? [] : h.cats());
+      if (problem) { nameF.mark(problem); nameIn.focus(); return; }
+      if (custom) {
+        for (const [f, check] of [[aboutF, R.aboutProblem], [temperF, R.personalityProblem]]) {
+          const long = check(f.input.value);
+          if (long) { f.mark(long); f.input.focus(); return; }
+        }
+      }
+      const key = known || requestKey();
       showError("");
       setBusy(true);
       let result;
-      try { result = await h.api("/xbot-api/bots", { method: "POST", body: { ...body, idempotencyKey: attempt.key } }); }
+      try { result = await h.api("/xbot-api/bots", { method: "POST", body: { ...body, idempotencyKey: key } }); }
       catch (err) {
         if (!alive()) return;
         setBusy(false);
         const what = R.catError(err, body.name, (R.choiceOf(s, agent) || {}).label);
-        // A refused request made no cat: the next one is new, checked against the list again.
-        if (what.kind !== "unsure") attempt = null;
-        if (what.kind === "name") { nameError(what.text); nameIn.focus(); quietly(h.refresh); }
+        // An unsure request may have made the cat: the same body keeps its key.
+        // A refused one made none: the next is new, checked against the list again.
+        if (what.kind === "unsure") unsure.set(print, key); else unsure.delete(print);
+        if (what.kind === "name") { nameF.mark(what.text); nameIn.focus(); quietly(h.refresh); }
         else if (what.kind === "blocked") { refused = what.text; await load("refused"); }
         else { showError(what.text); go.focus(); if (what.kind === "unsure") quietly(h.refresh); }
         return;
       }
       if (!alive()) return;
-      attempt = null;
+      unsure.clear();
       const name = (result && typeof result.name === "string" && result.name) || body.name;
       // A notice about the new cat (one default not written) is handed to the
       // shell now, by the cat's identity; the shell says it once that cat's
@@ -416,10 +536,11 @@
     return {
       element: root, go, start: () => load("first"), submit, later,
       // For cats arriving from elsewhere (release): a request in flight or a cat
-      // already made here; and whether the owner has a draft (their own face or
-      // name) or a request whose answer was lost.
+      // already made here; and whether the owner has a draft (their own face,
+      // name, 自定义 or its lines) or a request whose answer was lost.
       waiting: () => busy || kind === "later",
-      kept: () => faceTouched || !R.followsFace(nameIn.value, suggested) || !!attempt,
+      kept: () => faceTouched || custom || !R.followsFace(nameIn.value, suggested)
+        || !!R.trim(aboutF.input.value) || !!R.trim(temperF.input.value) || unsure.size > 0,
     };
   }
 
@@ -485,10 +606,12 @@
     const root = node("section", "qc-stage"), title = node("h2", "qc-title", "领一只猫猫回家");
     title.id = uid("title");
     root.setAttribute("aria-labelledby", title.id);
-    const sub = node("p", "qc-sub", "挑一只合眼缘的，给它起个名字。");
+    // Each face is a cat with its own character now, not only a look: 合心意.
+    const sub = node("p", "qc-sub", "挑一只合心意的，给它起个名字。");
     const flow = catFlow({
       dialog: false,
       alive: () => root.isConnected,
+      centred: () => root,
       onState: (kind) => { sub.hidden = kind !== "ready" && kind !== "loading"; },
       done: ({ name, face, picture }) => {
         root.classList.add("leaving");
@@ -609,6 +732,7 @@
       dialog: true,
       alive: () => L.alive,
       hold: L.card,
+      centred: () => L.card,
       onBusy: (on) => { L.busy = on; more.disabled = on; cancel.disabled = on; },
       done: ({ name, face, picture }) => {
         const going = arrive(name, face, picture); // takes the portrait's place before the dialog goes

@@ -1,6 +1,6 @@
-/* 开箱即用 (quick-create.js): the first-run 「领一只猫猫回家」 stage, the
-   no-chat line, and the quick 新建猫猫 / 新建群聊 dialogs. Loaded after every
-   other style. Only existing tokens (--x-*, the app.css aliases, the motion
+/* 开箱即用 (quick-create.js): the first-run 「领一只猫猫回家」 stage (faces
+   with a short hint of what each cat is like, and 自定义), the no-chat line,
+   and the quick 新建猫猫 / 新建群聊 dialogs. Loaded after every other style. Only existing tokens (--x-*, the app.css aliases, the motion
    durations and the panel's easing curve); no new colors, fonts or keyframes:
    the original .empty, .modal/.modal-card, .field, .primary, .secondary,
    .text-btn and the clay portraits carry the look. */
@@ -32,9 +32,12 @@
 .qc-fields { width: 100%; display: flex; flex-direction: column; align-items: center; }
 .qc-stage .qc-faces { margin-top: var(--x-s8); }
 
-/* ---- the eight faces: the chosen cat steps forward onto a cushion ---- */
-.qc-faces { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); width: 100%; }
+/* ---- the faces: the chosen cat steps forward onto a cushion ----
+   As many as the server offers (faces[] in /start): eight to a row, four on a
+   phone; fewer sit centred at the same size, more wrap onto a centred row. */
+.qc-faces { display: flex; flex-wrap: wrap; justify-content: center; width: 100%; }
 .qc-face {
+  flex: 0 0 12.5%;
   position: relative; min-width: 0; padding: 0; border: 0; border-radius: var(--x-r-card);
   display: flex; flex-direction: column; align-items: center; gap: 2px;
   background: transparent; color: var(--x-muted); cursor: pointer; -webkit-tap-highlight-color: transparent;
@@ -72,6 +75,31 @@
 /* Nothing chosen (still reading, or blocked): the row is only a picture. */
 .qc-faces.rest .qc-portrait { opacity: .62; }
 .qc-faces.rest .qc-face-name { display: none; }
+
+/* ---- what the chosen cat is like, and 自定义 ----
+   A hint, not a spec sheet: the template's personality, then what it is good
+   at, one line each (personality may take two on a phone), cut with an
+   ellipsis. Two lines stay reserved whenever faces have words, so the form
+   below holds still from one cat to the next and 自定义 stays put. */
+.qc-about { width: min(480px, 100%); margin-top: var(--x-s3); display: flex; flex-direction: column; align-items: center; gap: var(--x-s1); }
+.qc-trait { width: 100%; margin: 0; font-size: 13px; line-height: 20px; color: var(--x-muted); }
+.qc-about.described .qc-trait { min-height: 40px; }
+.qc-trait-line { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; animation: fade 180ms ease-out; }
+.qc-trait-line:first-child { color: var(--x-text-2); }
+.qc-trait.own .qc-trait-line { color: var(--x-muted); }
+.qc-trait-who { margin-right: var(--x-s2); font-weight: 600; color: var(--x-text); }
+.qc-mode { display: inline-flex; align-items: center; gap: var(--x-s1); min-height: 28px; padding: 0 10px; font-size: var(--x-fs-sm); color: var(--x-muted); }
+.qc-mode .icon { width: 13px; height: 13px; flex: none; }
+.qc-mode[aria-pressed="true"] { background: var(--x-fill-1); color: var(--x-text-2); }
+.qc-mode[aria-pressed="true"]:hover { background: var(--x-fill-2); color: var(--x-text); }
+.qc-mode:disabled { cursor: default; opacity: .6; }
+.qc-mode:disabled:hover { background: transparent; color: var(--x-muted); }
+.qc-mode[aria-pressed="true"]:disabled:hover { background: var(--x-fill-1); color: var(--x-text-2); }
+/* 自定义's two optional lines appear under the name. */
+.qc-own { width: 100%; display: flex; flex-direction: column; align-items: center; }
+.qc-own:not([hidden]) { animation: rise 180ms ease-out; }
+.qc-stage .qc-ownbox { margin-top: var(--x-s5); }
+.qc-input.qc-free { font-weight: 400; }
 
 /* ---- name, action, tool ---- */
 .qc-namebox { width: min(320px, 100%); margin-top: var(--x-s7); display: flex; flex-direction: column; gap: var(--x-s2); }
@@ -154,6 +182,9 @@
 .qc-card:focus { outline: none; }
 .qc-card .qc-flow, .qc-card .qc-fields { align-items: stretch; }
 .qc-card .qc-faces { margin-top: var(--x-s3); }
+/* The dialog reads left to right: the hint under the row, 自定义 at the edge like 更多设置. */
+.qc-card .qc-about { width: 100%; margin-top: var(--x-s2); align-items: flex-start; }
+.qc-card .qc-own { align-items: stretch; }
 .qc-card .field.qc-field { margin: var(--x-s5) 0 0; }
 .qc-opt { margin-left: var(--x-s2); font-size: var(--x-fs-cap); color: var(--x-faint); }
 .qc-card .qc-tool { max-width: none; margin-top: var(--x-s5); }
@@ -194,12 +225,19 @@
 @media (max-width: 560px) {
   .thread-inner.no-chat { width: calc(100% - 32px); }
   .qc-title { font-size: var(--x-fs-greet); }
-  .qc-faces { grid-template-columns: repeat(4, minmax(0, 1fr)); row-gap: var(--x-s1); }
+  .qc-faces { row-gap: var(--x-s1); }
+  .qc-face { flex-basis: 25%; }
   .qc-stage .qc-faces { margin-top: var(--x-s7); }
   .qc-faces.compact { width: min(100%, 280px); margin-inline: auto; }
   .qc-modal .modal-card { padding: var(--x-s7); }
+  /* At most three lines on a phone: the personality may wrap once, which in
+     the narrower dialog it usually does, so three lines stay free there. */
+  .qc-trait-line:first-child { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; }
+  .qc-card .qc-about.described .qc-trait { min-height: 60px; }
+  /* The second row's (empty) caption space already parts the hint from the faces. */
+  .qc-stage .qc-about { margin-top: var(--x-s1); }
 }
 @media (prefers-reduced-motion: reduce) {
   .qc-portrait, .qc-portrait::before, .qc-face-name, .qc-stage.leaving > * { transition: none; }
-  .qc-stage, .qc-wait-text { animation: none; }
+  .qc-stage, .qc-wait-text, .qc-trait-line, .qc-own:not([hidden]) { animation: none; }
 }
