@@ -6,7 +6,7 @@ import { defaultRuntime, memberCliArgs, runtimeUnavailable, supportsRuntime } fr
 import { approvalReceipt, approvalReceiptText, messageDisplayText, messagePresentation, replyEnding, replyInProgress, rosterRefusals } from './message-presentation.js';
 import { avatarBreed, type CatConfig, type SourceTemplate } from './cat-templates.js';
 import { clip } from './text.js';
-import { messageBlocks } from './blocks.js';
+import { messageBlocks, type ApprovalDecision } from './blocks.js';
 import { Workspaces } from '../workspaces.js';
 import { NativeFiles } from './files.js';
 import { Activity } from './activity.js';
@@ -167,7 +167,7 @@ export class BotBridge {
       const seq = this.store.sequence(thread.id, message.id), receipt = approvalReceipt(message);
       const refusal = refusals.get(message.id) ?? (receipt ? approvalReceiptText(receipt) : undefined);
       const text = refusal ?? messageDisplayText(message, thread.id, presentation.speaker?.name), inProgress = replyInProgress(message);
-      const rich = message.type === 'user' ? { blocks: [], hidden: 0 } : this.withDecisions(messageBlocks(message), decided), ending = replyEnding(message);
+      const rich = message.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(message, decided), ending = replyEnding(message);
       // At the top of a page that continues further back, what came just before is not known; no quote is guessed there.
       const quoted = message.replyTo && message.replyTo !== source
         && !(message.type !== 'user' && (message.replyTo === lastUser || (lastUser === undefined && page.hasMore))) ? message.replyTo : undefined;
@@ -246,13 +246,8 @@ export class BotBridge {
     try { return await request; } finally { this.greetingRequests.delete(key); }
   }
   /** How the requests for confirmation on this page were answered, from the engine's own receipts. */
-  decisions(messages: NativeMessage[]): Map<string, 'approved' | 'rejected' | 'closed'> {
-    return new Map(messages.map(approvalReceipt).filter(receipt => !!receipt).map(receipt => [receipt!.proposalId, receipt!.state]));
-  }
-  /** A request card says how it was answered when the receipt is on the same page. */
-  withDecisions<T extends ReturnType<typeof messageBlocks>>(rich: T, decided: Map<string, 'approved' | 'rejected' | 'closed'>): T {
-    for (const block of rich.blocks) if (block.kind === 'card' && block.approval && decided.has(block.approval.id)) block.approval.state = decided.get(block.approval.id);
-    return rich;
+  decisions(messages: NativeMessage[]): ApprovalDecision[] {
+    return messages.map(approvalReceipt).filter((receipt): receipt is ApprovalDecision => !!receipt);
   }
   presentMessages(messages: NativeMessage[], cats: NativeCat[]) {
     const kinds = messagePresentation(messages);
@@ -303,21 +298,13 @@ export class BotBridge {
         method: 'POST', body: { name: input.name, catConfig: input.catConfig,
           ...(input.sourceTemplate ? { sourceTemplate: input.sourceTemplate } : {}), idempotencyKey: input.idempotencyKey ?? randomUUID() },
       });
-      let cat = result.cat;
+      const cat = result.cat;
       if (!cat?.id || !cat.breedId) throw new ApiError(502, '原生创建结果缺少猫猫身份');
-      // The template route creates the member without the default CLI arguments (see memberCliArgs);
-      // they are added as a second native step. If that step fails the cat exists and works, only
-      // without them, and re-selecting its Agent in the profile applies them.
-      const args = memberCliArgs(cat.clientId);
-      if (args.length && !(Array.isArray(cat.cliConfigArgs) && cat.cliConfigArgs.length)) {
-        cat = await this.native.request<{ cat: NativeCat }>(`/api/cats/${encode(cat.id)}`, { method: 'PATCH',
-          body: { expectedRevision: cat.configurationRevision, cliConfigArgs: args } }).then(updated => updated.cat?.id ? updated.cat : cat).catch(() => cat);
-      }
-      const identity = avatarBreed(cat.breedId ?? result.cat.breedId!);
+      const identity = avatarBreed(cat.breedId);
       Object.assign(this.store.bot(cat.id), { templateId: identity, avatarSeed: input.avatar_seed || `cat:${identity}`,
         timezone: input.timezone, ...(result.sourceTemplate ? { sourceTemplate: result.sourceTemplate } : {}) });
       this.store.save();
-      return cat;
+      return this.withStartingArguments(cat);
     }
     if (input.sourceTemplate) throw new ApiError(400, '缺少创建配置');
     if ((await this.cats()).some(c => c.name.toLowerCase() === input.name.toLowerCase())) throw new ApiError(409, '已经有一只叫这个名字的猫猫了');
@@ -339,11 +326,41 @@ export class BotBridge {
       personality: source?.personality ?? template.personality,
       teamStrengths: input.description ?? source?.teamStrengths ?? template.teamStrengths,
       clientId: runtime.clientId, configurationSource: 'native_tool', defaultModel: '',
-      ...(memberCliArgs(runtime.clientId).length ? { cliConfigArgs: memberCliArgs(runtime.clientId) } : {}),
     } });
     Object.assign(this.store.bot(cat.id), { templateId: template.id, avatarSeed: input.avatar_seed, timezone: input.timezone });
     this.store.save();
+    return this.withStartingArguments(cat);
+  }
+  /**
+   * The CLI arguments a new cat starts with (memberCliArgs), written as their
+   * own native step after the member exists. The creation request itself never
+   * carries them: its shape stays what native recorded for its key, so a repeat
+   * of an older request still matches, whatever the defaults are by then. A
+   * member that already has arguments is left alone. A refused write is tried
+   * once more against the member's current revision; if it still fails the
+   * cat exists and works, and is returned without the arguments — the caller
+   * can tell from the record (startingArgumentsMissing) and says so.
+   */
+  private async withStartingArguments(created: NativeCat): Promise<NativeCat> {
+    const args = memberCliArgs(created.clientId), has = (cat: NativeCat) => Array.isArray(cat.cliConfigArgs) && cat.cliConfigArgs.length > 0;
+    let cat = created;
+    for (let attempt = 0; args.length && !has(cat) && attempt < 2; attempt++) {
+      try {
+        const updated = await this.native.request<{ cat: NativeCat }>(`/api/cats/${encode(cat.id)}`, { method: 'PATCH',
+          body: { expectedRevision: cat.configurationRevision, cliConfigArgs: args } });
+        if (updated.cat?.id) cat = updated.cat;
+      } catch {
+        // Someone edited the member in between, or the write did not go through: look at it as it is now.
+        const current = await this.cats().then(cats => cats.find(known => known.id === created.id)).catch(() => undefined);
+        if (!current) break;
+        cat = current;
+      }
+    }
     return cat;
+  }
+  /** True when a cat should have starting arguments (see withStartingArguments) and has none. */
+  startingArgumentsMissing(cat: NativeCat): boolean {
+    return memberCliArgs(cat.clientId).length > 0 && !(Array.isArray(cat.cliConfigArgs) && cat.cliConfigArgs.length > 0);
   }
   /**
    * A cat from a name alone, on the unpatched native member creation
@@ -374,15 +391,14 @@ export class BotBridge {
       body: { catId, name, displayName: name, nickname: name, color: template.color, mentionPatterns: [`@${name}`, `@${catId}`],
         roleDescription: about || defaultRole, personality: defaultPersonality,
         teamStrengths: about ? clip(about.replace(/\s+/g, ' '), 60) : defaultStrengths,
-        clientId: runtime.clientId, configurationSource: 'native_tool', defaultModel: '',
-        ...(memberCliArgs(runtime.clientId).length ? { cliConfigArgs: memberCliArgs(runtime.clientId) } : {}) } }).catch(error => {
+        clientId: runtime.clientId, configurationSource: 'native_tool', defaultModel: '' } }).catch(error => {
       if (error instanceof ApiError && error.status === 409) throw new ApiError(409, '这次创建和上一次的内容不一样，或者名字已被占用，请重新创建', error.details);
       throw error;
     });
     if (!cat?.id) throw new ApiError(502, '没能确认猫猫是否建好，请刷新后查看');
     Object.assign(this.store.bot(cat.id), { templateId: face, avatarSeed: `cat:${face}`, ...(timezone ? { timezone } : {}) });
     this.store.save();
-    return cat;
+    return this.withStartingArguments(cat);
   }
   async send(thread: NativeThread, body: { text: string; reply_to?: number; idempotencyKey?: string; attachments?: string[]; expectedThreadId?: string }, directCat?: NativeCat) {
     if (body.expectedThreadId && body.expectedThreadId !== thread.id) throw new ApiError(409, '会话已变化，请核对后重试');

@@ -9,6 +9,12 @@ import type { NativeMessage } from './types.js';
  * every cat the owner has) leaves one per cat. Refusals that follow the same
  * owner message are told once, by name: the first keeps the line, the others
  * are folded into it (null). Other messages are not in the map.
+ *
+ * The engine's line carries no reference to the message that caused it (only
+ * an id and a time), so the fold goes by position and the sentence says only
+ * who is not in the conversation, never which message it answers. Refusals of
+ * two requests that arrive back to back therefore read as one line naming
+ * every cat; a run cut by a page boundary is told on each page.
  */
 export function rosterRefusals(messages: NativeMessage[], nameOf: (catId: string) => string | undefined, group: boolean): Map<string, string | null> {
   const told = new Map<string, string | null>();
@@ -95,7 +101,9 @@ export function messageDisplayText(message: NativeMessage, threadId: string, cat
  */
 function withoutLeadingSignature(text: string, catName?: string): string {
   if (!catName || !text.startsWith('[')) return text;
-  const match = /^\[([^\[\]\r\n/]{1,80})(?:\/[^\[\]\r\n]{0,80})?\s?🐾\]\s+(?=\S)/u.exec(text);
+  // Spaces before words on the same line go with the signature; when the words start on a later line,
+  // only the empty lines in between go, so an indented first line (a code block) keeps its indentation.
+  const match = /^\[([^\[\]\r\n/]{1,80})(?:\/[^\[\]\r\n]{0,80})?\s?🐾\](?:[ \t]+(?=\S)|(?:[ \t]*\r?\n)+(?=[ \t]*\S))/u.exec(text);
   return match && match[1]!.trim() === catName ? text.slice(match[0].length) : text;
 }
 

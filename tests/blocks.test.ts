@@ -35,6 +35,13 @@ test('a cat’s cards, lists, choices and diffs come through as chat blocks; wha
   // What native recorded about a choice already made.
   const answered = messageBlocks(reply({ rich: { blocks: [{ ...choices, interactiveType: 'confirm', disabled: true, selectedIds: ['fish'] }] } })).blocks[0] as any;
   assert.deepEqual([answered.mode, answered.answered, answered.selected], ['confirm', true, ['fish']]);
+  // A confirmation has exactly two answers, picked the way the native web client picks them.
+  const confirm = (options: unknown[]) => (messageBlocks(reply({ rich: { blocks: [{ id: 'c', kind: 'interactive', interactiveType: 'confirm', options }] } })).blocks[0] as any).options.map((option: any) => [option.id, option.label]);
+  assert.deepEqual(confirm([{ id: 'go', label: '就这么办' }]), [['go', '就这么办'], ['__cancel__', '取消']], 'the first confirms; cancelling needs no declared option');
+  assert.deepEqual(confirm([{ id: 'no', label: '算了' }, { id: '__confirm__', label: '好' }, { id: 'later', label: '晚点' }]), [['__confirm__', '好'], ['no', '算了']]);
+  // An option that calls a native endpoint directly is not an ordinary choice: the block is counted, not offered.
+  assert.deepEqual(messageBlocks(reply({ rich: { blocks: [{ id: 'guide', kind: 'interactive', interactiveType: 'select',
+    options: [{ id: 'start', label: '开始引导', action: { type: 'callback', endpoint: '/api/guide-actions/start' } }, { id: 'skip', label: '跳过' }] }] } })), { blocks: [], hidden: 1 });
   assert.deepEqual(messageBlocks(reply({})), { blocks: [], hidden: 0 });
   assert.deepEqual(messageBlocks(reply({ rich: 'nope' })), { blocks: [], hidden: 0 });
   assert.equal(blockLine(blocks), '提议捕捉品味信号');
@@ -103,6 +110,19 @@ test('an answered choice is recorded on the native block, only for a choice in t
   assert.equal((await answer('nope', 'pick', ['fish'])).status, 404);
   assert.equal((await answer('q', 'pick', ['fish'], 'thread-old')).status, 409);
   assert.equal(patches.length, 1);
+  // Native closes a block for good with whatever it is given, so what the choice allows is checked before writing.
+  const ask = (id: string, more: Record<string, unknown>) => ({ id, kind: 'interactive', v: 1, interactiveType: 'select', options: [{ id: 'a', label: '甲' }, { id: 'b', label: '乙' }, { id: 'c', label: '丙' }], ...more });
+  r.native.messages.set(r.thread.id, [{ id: 'q2', type: 'assistant', catId: r.cat.id, timestamp: 2000, content: '', extra: { rich: { v: 1, blocks: [
+    ask('one', {}), ask('many', { interactiveType: 'multi-select', maxSelect: 2 }), ask('sure', { interactiveType: 'confirm', options: [{ id: 'go', label: '好' }] }),
+    ask('done', { disabled: true, selectedIds: ['a'] })] } } }]);
+  for (const [block, ids, status, why] of [
+    ['one', [], 400, 'nothing picked'], ['one', ['a', 'b'], 400, 'two for a single choice'], ['one', ['a', 'a'], 400, 'the same option twice'],
+    ['many', ['a', 'b', 'c'], 400, 'more than the block allows'], ['many', [], 400, 'nothing picked'],
+    ['sure', ['go', '__cancel__'], 400, 'both answers to a confirmation'], ['done', ['b'], 409, 'already answered'],
+  ] as const) assert.equal((await answer('q2', block, [...ids])).status, status, why);
+  assert.equal(patches.length, 1, 'nothing reached native');
+  for (const [block, ids] of [['one', ['b']], ['many', ['a', 'c']], ['sure', ['__cancel__']]] as const) assert.equal((await answer('q2', block, [...ids])).status, 200, block);
+  assert.deepEqual(patches.slice(1).map(patch => [patch.body.blockId, patch.body.selectedIds]), [['one', ['b']], ['many', ['a', 'c']], ['sure', ['__cancel__']]]);
 });
 
 test('the engine’s receipt for an answered request reads as a plain line and marks the request card', async t => {
@@ -110,15 +130,20 @@ test('the engine’s receipt for an answered request reads as a plain line and m
   // Trimmed from a real conversation: the request card message, then the hub's receipt after the owner agreed.
   const receipt = (id: string, proposal: string, producerId: string, resolution: string): NativeMessage => ({ id, type: 'connector', catId: null, timestamp: 3000,
     content: `审批结果：品味提案 ${proposal} 已批准。`, source: { connector: 'approval-hub', label: 'Host 审批结果回执',
-      meta: { presentation: 'system_notice', approvalDecisionReceipt: { v: 1, kind: 'approval_decision_receipt', producerId, canonicalProposalId: proposal, resolution, approvalCardRef: { threadId: r.thread.id, messageId: 'card' } } } } });
-  const request = (id: string, proposal: string): NativeMessage => ({ id, type: 'assistant', catId: r.cat.id, timestamp: 2000, content: '提议捕捉品味信号：…',
-    extra: { rich: { v: 1, blocks: [{ ...card, id: 'b-' + proposal, meta: { approval: { producerId: 'F221', canonicalProposalId: proposal } } }] } } });
-  r.native.messages.set(r.thread.id, [request('card', 'p1'), request('card2', 'p2'), request('card3', 'p3'), request('card4', 'p4'),
+      meta: { presentation: 'system_notice', approvalDecisionReceipt: { v: 1, kind: 'approval_decision_receipt', producerId, canonicalProposalId: proposal, resolution, approvalCardRef: { threadId: r.thread.id, messageId: cardOf[id] ?? 'card' } } } } });
+  const cardOf: Record<string, string> = { r1: 'card', r2: 'card2', r3: 'card3', r5: 'card5', r6: 'elsewhere' };
+  const request = (id: string, proposal: string, producerId = 'F221'): NativeMessage => ({ id, type: 'assistant', catId: r.cat.id, timestamp: 2000, content: '提议捕捉品味信号：…',
+    extra: { rich: { v: 1, blocks: [{ ...card, id: 'b-' + proposal, meta: { approval: { producerId, canonicalProposalId: proposal } } }] } } });
+  r.native.messages.set(r.thread.id, [request('card', 'p1'), request('card2', 'p2', 'F139'), request('card3', 'p3', 'F999'), request('card4', 'p4'),
+    request('card5', 'p5'), request('card6', 'p6'),
     receipt('r1', 'p1', 'F221', 'accepted'), receipt('r2', 'p2', 'F139', 'rejected'), receipt('r3', 'p3', 'F999', 'expired'),
+    // The same request number from another producer, and a receipt that names another message, settle nothing here.
+    receipt('r5', 'p5', 'F139', 'accepted'), receipt('r6', 'p6', 'F221', 'accepted'),
     { id: 'other', type: 'connector', catId: null, timestamp: 4000, content: '别的连接器消息', source: { connector: 'feishu' } }]);
   const rows = (await (await r.call('/bots/Ada/transcript')).json()).messages.filter((m: any) => m.id);
   const of = (id: string) => rows.find((m: any) => m.id === id);
-  assert.deepEqual(['card', 'card2', 'card3', 'card4'].map(id => of(id).blocks[0].approval), [{ id: 'p1', state: 'approved' }, { id: 'p2', state: 'rejected' }, { id: 'p3', state: 'closed' }, { id: 'p4' }]);
+  assert.deepEqual(['card', 'card2', 'card3', 'card4', 'card5', 'card6'].map(id => of(id).blocks[0].approval),
+    [{ id: 'p1', state: 'approved' }, { id: 'p2', state: 'rejected' }, { id: 'p3', state: 'closed' }, { id: 'p4' }, { id: 'p5' }, { id: 'p6' }]);
   assert.deepEqual(['r1', 'r2', 'r3', 'other'].map(id => [of(id).content, of(id).notice ?? false]),
     [['已记住这个偏好。', true], ['定时没有改动。', true], ['这件事已经结束。', true], ['别的连接器消息', false]]);
   assert.match(of('r1').native.content, /审批结果/, 'the native record keeps the engine’s wording');

@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, realpathSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, realpathSync, readdirSync, lstatSync } from 'node:fs';
+import { dirname, relative, resolve } from 'node:path';
 import { fingerprint, lock } from './upstream-source.mjs';
 import { nativeDataDir } from '../shared/data-location.mjs';
 
@@ -71,11 +71,38 @@ if (!existsSync(marker) || !existsSync(resolve(build, '.git')) || readFileSync(m
     command('git', ['apply', resolve(root, patch)], staging);
   }
   writeFileSync(resolve(staging, '.bot-build-source'), digest + '\n');
+  // A build made before this layout was its own repository. Where its main branch was checked out native
+  // could write taste entries into the build itself; whatever it holds there that the pinned source does not
+  // ship moves to the home before the build is replaced. Nothing in the home is overwritten.
+  if (existsSync(build) && !ofHome(build)) {
+    const carry = (from, to, shipped) => {
+      if (!existsSync(from) || lstatSync(from).isSymbolicLink()) return;
+      for (const entry of readdirSync(from, { withFileTypes: true })) {
+        const [mine, kept, theirs] = [from, to, shipped].map(dir => resolve(dir, entry.name));
+        if (entry.isDirectory()) carry(mine, kept, theirs);
+        else if (entry.isFile() && !existsSync(theirs) && !existsSync(kept)) {
+          mkdirSync(to, { recursive: true }); copyFileSync(mine, kept);
+          console.log(`Kept ${relative(build, mine)} from the previous build in ${home}`);
+        }
+      }
+    };
+    for (const dir of ['private/taste', 'docs/taste']) carry(resolve(build, dir), resolve(home, dir), resolve(source, dir));
+  }
   // Only generated code/dependencies are replaced. Runtime data, the home
   // repository and what native wrote into its main worktree stay where they are.
   rmSync(build, { recursive: true, force: true });
   inHome('worktree', 'prune');
   inHome('worktree', 'move', staging, build);
+}
+{
+  // Upstream keeps private taste entries under private/, which its own .gitignore leaves out of Git. The home
+  // has none of upstream's files, so the same rule is set in the repository itself: a backup of the home
+  // made with `git add .` must not commit them.
+  const exclude = resolve(home, '.git/info/exclude');
+  if (existsSync(resolve(home, '.git'))) {
+    const rules = existsSync(exclude) ? readFileSync(exclude, 'utf8') : '';
+    if (!/^\/?private\/$/m.test(rules)) { mkdirSync(dirname(exclude), { recursive: true }); writeFileSync(exclude, rules + (rules && !rules.endsWith('\n') ? '\n' : '') + 'private/\n'); }
+  }
 }
 if (!process.argv.includes('--source-only')) {
   rmSync(resolve(build, '.bot-build-complete'), { force: true });

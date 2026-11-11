@@ -274,6 +274,16 @@ test('cats addressed from outside a conversation are named once, not listed as r
   const rows = (await (await r.call('/xbot-api/bots/Ada/transcript')).json()).messages.filter((m: any) => m.id);
   assert.deepEqual(rows.map((m: any) => [m.id, m.content, m.notice ?? false]), [['u', 'hi', false], ['y1', 'Bob不在这个对话里，没有回答。', true]]);
   assert.equal(rosterRefusals([{ id: 'n', type: 'assistant', catId: 'c', timestamp: 1, content: 'Error: Member x is not in the execution roster of thread t' }], () => 'X', true).size, 0, 'only the engine’s own system line');
+  // The engine's line carries no link to the message that caused it, so the fold goes by position only and the
+  // sentence claims nothing about which message it answers: every cat that was turned away is still named.
+  const line = (id: string, member: string): any => ({ id, type: 'system', catId: null, timestamp: 1, content: `Error: Member ${member} is not in the execution roster of thread t` });
+  const said = (id: string): any => ({ id, type: 'user', catId: null, timestamp: 1, content: id });
+  const names = (id: string) => ({ a: 'Cy', b: 'Dee' } as Record<string, string>)[id];
+  assert.deepEqual([...rosterRefusals([said('u1'), said('u2'), line('x1', 'a'), line('x2', 'b')], names, true)],
+    [['x1', 'Cy、Dee不在这个群里，没有回答。'], ['x2', null]], 'two requests answered back to back read as one line with both names');
+  // A run cut by a page boundary is told on each page for the cats that page has.
+  assert.deepEqual([...rosterRefusals([said('u1'), line('x1', 'a')], names, true)], [['x1', 'Cy不在这个群里，没有回答。']]);
+  assert.deepEqual([...rosterRefusals([line('x2', 'b')], names, true)], [['x2', 'Dee不在这个群里，没有回答。']]);
 });
 
 test('a signature a cat wrote at the start of its own reply is hidden when words follow it', async t => {
@@ -283,6 +293,7 @@ test('a signature a cat wrote at the start of its own reply is hidden when words
   assert.equal(shown('[快手🐾] 7'), '7');
   assert.equal(shown('[快手/Haiku 🐾] 好的\n\n[快手/Haiku 🐾]'), '好的', 'and the closing one as before');
   assert.equal(shown('[快手/Haiku🐾]\n\n7'), '7', 'the real shape: the signature on a line of its own, then the answer');
+  assert.equal(shown('[快手/Haiku🐾]  \n \n    const a = 1;\n    const b = 2;'), '    const a = 1;\n    const b = 2;', 'an indented first line keeps its indentation: it may be a code block');
   // Not its own name, not at the start, or no paw: the text stays. A signature with nothing after it is the closing kind.
   for (const text of ['[墨点/gpt🐾] 是墨点的署名', '[墨点/gpt🐾]\n\n7', '看这个 [快手/Haiku🐾] 格式', '[快手] 没有猫爪'])
     assert.equal(shown(text), text, text);

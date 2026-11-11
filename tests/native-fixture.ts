@@ -40,6 +40,8 @@ export class NativeFixture implements NativeTransport {
     } else if (path === '/api/threads' && method === 'POST') {
       // Native answers a repeated creation key with the thread it made the first time.
       const made = body.idempotencyKey ? [...this.threads.values()].find(known => known.idempotencyKey === body.idempotencyKey) : undefined;
+      // …and, like the pinned upstream, applies the request's members to it again.
+      if (made && Array.isArray(body.preferredCats) && body.preferredCats.length) made.preferredCats = body.preferredCats;
       const thread = made ?? { ...body, id: randomUUID(), createdAt: Date.now() }; this.threads.set(thread.id, thread); result = thread;
     } else if (parts[2] === 'threads' && parts[3] && parts.length === 4) {
       const thread = this.threads.get(parts[3]); if (!thread) throw new ApiError(404, 'Missing thread');
