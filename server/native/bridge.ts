@@ -44,11 +44,15 @@ export interface QueueView {
 export interface RoleTemplate { id: string; name: string; nickname?: string; roleDescription: string; personality?: string; teamStrengths?: string; color: { primary: string; secondary: string } }
 export interface CreateBot { name: string; persona?: string; description?: string; avatar_seed?: string; templateId?: string; timezone?: string; runtimeId?: string;
   catConfig?: CatConfig; sourceTemplate?: { id: string; revision: number }; idempotencyKey?: string;
-  /** A name and, optionally, a face and a line about what the cat is for. Everything else uses native defaults. */
-  simple?: { face?: string; about?: string; agent?: string } }
+  /**
+   * A name and, optionally, a face. The face is one of the engine's cat templates: the cat starts with that
+   * template's role, personality and strengths. With `custom` (or words of the owner's own in `about` /
+   * `personality`) the face only gives the looks and the portrait is the owner's, or a plain helper's.
+   */
+  simple?: { face?: string; custom?: true; about?: string; personality?: string; agent?: string } }
 // The role a cat gets when the owner only named it. The owner can change it later in the cat's profile.
 const defaultRole = '随叫随到的伙伴：聊天、答疑、查资料、写东西、整理文件，交代的事会动手做完。说话自然简洁，先给结果，拿不准的地方再问。';
-// Said explicitly so the breed's stock engineering portrait is not filled in for a cat the owner only named.
+// A custom cat without words of the owner's own is a plain helper; said explicitly so native does not fill in a breed's stock portrait.
 const defaultPersonality = '亲切耐心，讲得清楚；做事利落，不绕弯子。';
 const defaultStrengths = '聊天答疑、查资料、写东西、整理文件';
 
@@ -369,7 +373,8 @@ export class BotBridge {
   /**
    * A cat from a name alone, on the unpatched native member creation
    * (POST /api/cats): the local Agent's own model and effort, the colour of the
-   * chosen face, a plain helper portrait. The request carries native's own
+   * chosen face and, unless the owner asked for a custom cat, the portrait of
+   * the engine's template for that face. The request carries native's own
    * creation identity (journey + key), so sending it again returns the same
    * cat and a different request under the same key is refused by native.
    */
@@ -388,13 +393,19 @@ export class BotBridge {
     const face = simple.face ?? ({ anthropic: 'ragdoll', openai: 'maine-coon', kimi: 'turkish-van' } as Record<string, string>)[runtime.clientId] ?? 'ragdoll';
     const template = (await this.templates()).templates.find(t => t.id === face);
     if (!template) throw new ApiError(503, '暂时读不到猫猫的外观资料，请稍后再试');
-    const about = simple.about?.trim();
+    const about = simple.about?.trim(), temper = simple.personality?.trim();
+    // Picking a face picks that cat: the engine's template of the same id gives the role, the personality and
+    // the strengths, as written upstream. Custom keeps only the looks.
+    const custom = simple.custom === true || !!about || !!temper;
+    const portrait = custom
+      ? { roleDescription: about || defaultRole, personality: temper || defaultPersonality, teamStrengths: about ? clip(about.replace(/\s+/g, ' '), 60) : defaultStrengths }
+      : { roleDescription: template.roleDescription?.trim() || defaultRole, personality: template.personality?.trim() || defaultPersonality,
+          teamStrengths: template.teamStrengths?.trim() || defaultStrengths };
     const journey = 'clowder-bot-simple';
     const { cat } = await this.native.request<{ cat: NativeCat }>('/api/cats', { method: 'POST',
       headers: { 'x-cat-cafe-onboarding-journey': journey, 'idempotency-key': `onboarding:${journey}:cat:${key}` },
       body: { catId, name, displayName: name, nickname: name, color: template.color, mentionPatterns: [`@${name}`, `@${catId}`],
-        roleDescription: about || defaultRole, personality: defaultPersonality,
-        teamStrengths: about ? clip(about.replace(/\s+/g, ' '), 60) : defaultStrengths,
+        ...portrait,
         clientId: runtime.clientId, configurationSource: 'native_tool', defaultModel: '' } }).catch(error => {
       if (error instanceof ApiError && error.status === 409) throw new ApiError(409, '这次创建和上一次的内容不一样，或者名字已被占用，请重新创建', error.details);
       throw error;

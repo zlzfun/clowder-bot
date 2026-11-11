@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { ApiError } from '../errors.js';
 import { BotBridge, encode } from '../native/bridge.js';
 import type { NativeCat } from '../native/types.js';
-import { agentBinding } from '../native/agents.js';
+import { agentBinding, catFaces } from '../native/agents.js';
 import { catConfigSchema, catConfiguration, sourceTemplateSchema } from '../native/cat-templates.js';
 
 // The version shown in 关于 is the package's, read once.
@@ -20,9 +20,10 @@ const botBody = { name: label, persona: z.string().max(32768).optional(), descri
   avatar_seed: seed.optional(), templateId: z.string().optional(), timezone: z.string().max(80).optional(),
   runtimeId: z.string().max(100).optional(), catConfig: catConfigSchema.optional(),
   sourceTemplate: sourceTemplateSchema.optional(), idempotencyKey: z.string().uuid().optional() };
-// The eight portraits of client/public/cat-avatars.js.
-const faces = ['ragdoll', 'maine-coon', 'siamese', 'turkish-van', 'dsh', 'dragon-li', 'bengal', 'golden-chinchilla'] as const;
-const simpleCat = z.object({ face: z.enum(faces).optional(), about: z.string().trim().max(2000).optional(), agent: z.string().min(1).max(100).optional() }).strict();
+// A cat from a name: a face (one of the engine's templates, whose portrait the cat starts with) or, with
+// `custom` or words of the owner's own, a cat that only takes the face's looks.
+const simpleCat = z.object({ face: z.enum(catFaces).optional(), custom: z.literal(true).optional(), about: z.string().trim().max(2000).optional(),
+  personality: z.string().trim().max(500).optional(), agent: z.string().min(1).max(100).optional() }).strict();
 // A group's name is a native thread title, free text unlike a cat's @-mentionable name.
 const groupTitle = z.string().trim().min(1).max(64).regex(/^[^<>\x00-\x1f\x7f]+$/, '名字包含不支持的字符');
 const sse = (res: Response, event: string, data: unknown) => {

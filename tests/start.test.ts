@@ -58,7 +58,8 @@ async function setup(t: any) {
 
 test('the first screen learns whether a chat can start, and what is in the way when it cannot', async t => {
   const r = await setup(t);
-  const start = async (query = '') => { const { checkedAt, ...rest } = await (await r.call('/xbot-api/start' + query)).json(); assert.equal(typeof checkedAt, 'number'); return rest; };
+  // `faces` (what each face is like) has its own test below.
+  const start = async (query = '') => { const { checkedAt, faces, ...rest } = await (await r.call('/xbot-api/start' + query)).json(); assert.equal(typeof checkedAt, 'number'); assert.ok(Array.isArray(faces)); return rest; };
   // Both tools logged in: the first one native lists is used; tools the adapter cannot bind are not offered.
   r.native.runtimes = [runtime('codex', 'openai', 'configured'), runtime('claude', 'anthropic', 'configured'), runtime('kimi', 'kimi', 'not_installed'),
     runtime('agy-native', 'google', 'configured', { agyCarrier: 'native' }), runtime('acp:x', 'openai', 'configured', { acp: {} })];
@@ -84,7 +85,26 @@ test('the first screen learns whether a chat can start, and what is in the way w
   assert.equal(defaultRuntime([]), undefined);
 });
 
-test('a cat needs only a name: one unpatched native creation with the Agent’s own defaults and a plain helper portrait', async t => {
+test('the first screen says what each face is like, from the engine’s own templates', async t => {
+  const r = await setup(t);
+  r.native.runtimes = [runtime('codex', 'openai', 'configured')];
+  const { faces } = await (await r.call('/xbot-api/start')).json();
+  assert.deepEqual(faces.map((face: any) => face.id), ['ragdoll', 'maine-coon', 'siamese', 'turkish-van', 'dsh', 'dragon-li', 'bengal', 'golden-chinchilla']);
+  assert.deepEqual(faces[1], { id: 'maine-coon', name: '缅因猫', role: '代码审查专家，擅长安全分析、测试覆盖和代码质量把控', personality: '严谨认真，注重细节，会直言不讳地指出问题', strengths: 'Review、找 bug、coding 落地' });
+  // A template the engine does not have is not offered a description; long or multi-line text is one clipped line.
+  const request = r.native.request.bind(r.native);
+  r.native.request = (async (path: string, options?: any) => path !== '/api/cat-templates' ? request(path, options)
+    : { templates: [{ id: 'ragdoll', name: '布偶猫', roleDescription: '第一行\n第二行' + '长'.repeat(200), color: { primary: '#888888', secondary: '#eeeeee' } }, { id: 'unknown-breed', name: '别的', roleDescription: 'x', color: {} }], clientDefaults: {} }) as typeof r.native.request;
+  const some = (await (await r.call('/xbot-api/start')).json()).faces;
+  assert.deepEqual(some.map((face: any) => face.id), ['ragdoll']);
+  assert.equal(some[0].role.length, 120); assert.ok(some[0].role.startsWith('第一行 第二行')); assert.equal('personality' in some[0], false);
+  // The first screen still answers when the templates cannot be read: it only loses the descriptions.
+  r.native.request = (async (path: string, options?: any) => { if (path === '/api/cat-templates') throw new ApiError(503, 'down'); return request(path, options); }) as typeof r.native.request;
+  const without = await r.call('/xbot-api/start');
+  assert.equal(without.status, 200); assert.deepEqual((await without.json()).faces, []);
+});
+
+test('a cat needs only a name: one unpatched native creation with the Agent’s own defaults and the portrait of the face’s template', async t => {
   const r = await setup(t);
   r.native.runtimes = [runtime('codex', 'openai', 'unknown'), runtime('claude', 'anthropic', 'configured')];
   const key = randomUUID(), creations = () => r.native.calls.filter(c => c.path === '/api/cats' && c.method === 'POST');
@@ -96,8 +116,8 @@ test('a cat needs only a name: one unpatched native creation with the Agent’s 
   assert.deepEqual([sent.name, sent.displayName, sent.clientId, sent.configurationSource, sent.defaultModel], ['团子', '团子', 'anthropic', 'native_tool', ''],
     'the logged-in Agent, its own model: nothing is chosen for it');
   assert.deepEqual(sent.mentionPatterns, ['@团子', '@' + sent.catId]);
-  assert.match(sent.roleDescription, /随叫随到/);
-  assert.ok(sent.personality && sent.teamStrengths, 'a stock engineering portrait is not left to fill in');
+  // Picking a face picks that cat: the engine's template of the same id (here the Claude default, 布偶猫) gives the portrait, as written upstream.
+  assert.deepEqual([sent.roleDescription, sent.personality, sent.teamStrengths], ['主架构师和核心开发者，擅长深度思考和系统设计', '温柔但有主见，喜欢深入分析问题，写代码快但注重质量', '架构设计、写代码一把好手']);
   for (const field of ['breedId', 'cli', 'accountRef', 'carrier', 'provider']) assert.equal(field in sent, false, field);
   // A Claude Code cat starts with the CLI's own schedulers off (memberCliArgs). The creation request never carries
   // them — it must stay what native recorded for its key — they are written as a second native step.
@@ -131,7 +151,18 @@ test('a cat needs only a name: one unpatched native creation with the Agent’s 
   assert.equal(twin.status, 409); assert.match((await twin.json()).error, /已经有一只叫这个名字/);
   assert.equal(r.native.cats.length, 1);
 
-  // A chosen face is the portrait and its colour; a line about the cat becomes its role and short description.
+  // A chosen face is that template's portrait, whichever tool runs it.
+  assert.equal((await r.call('/xbot-api/bots', 'POST', { name: '花花', simple: { face: 'siamese', agent: 'codex' }, idempotencyKey: randomUUID() })).status, 201);
+  assert.deepEqual([creations().at(-1)!.body.roleDescription, creations().at(-1)!.body.personality], ['视觉设计师和创意顾问，擅长 UI/UX 设计和视觉表达', '热血奔放，善于用视觉语言表达想法，表达力是全队最强的']);
+  // Custom: the face only gives the looks. Without words of the owner's own it is a plain helper; with them, theirs.
+  assert.equal((await r.call('/xbot-api/bots', 'POST', { name: '白板', simple: { face: 'maine-coon', custom: true, agent: 'codex' }, idempotencyKey: randomUUID() })).status, 201);
+  const plain = creations().at(-1)!.body;
+  assert.match(plain.roleDescription, /随叫随到/); assert.ok(plain.personality && plain.teamStrengths, 'a stock portrait is not left for native to fill in');
+  assert.doesNotMatch(plain.roleDescription + plain.personality, /代码审查|严谨认真/);
+  assert.equal((await r.call('/xbot-api/bots', 'POST', { name: '小诗', simple: { face: 'bengal', custom: true, about: '陪我写诗', personality: '话少，爱用比喻', agent: 'codex' }, idempotencyKey: randomUUID() })).status, 201);
+  assert.deepEqual([creations().at(-1)!.body.roleDescription, creations().at(-1)!.body.personality, creations().at(-1)!.body.teamStrengths], ['陪我写诗', '话少，爱用比喻', '陪我写诗']);
+  assert.equal((await r.call('/xbot-api/bots', 'POST', { name: '错', simple: { custom: false }, idempotencyKey: randomUUID() })).status, 400);
+  // Words of the owner's own make it custom even without the flag (a line about the cat becomes its role and short description).
   const about = '帮我管理每周的读书笔记，\n周五提醒我整理';
   assert.equal((await r.call('/xbot-api/bots', 'POST', { name: '栗子', simple: { face: 'golden-chinchilla', about, agent: 'codex' }, idempotencyKey: randomUUID() })).status, 201);
   const second = creations().at(-1)!.body;
@@ -139,6 +170,7 @@ test('a cat needs only a name: one unpatched native creation with the Agent’s 
   assert.equal(r.native.calls.some(c => c.method === 'PATCH' && c.path === '/api/cats/' + second.catId), false, 'a Codex cat has no arguments to add');
   assert.equal(second.roleDescription, about);
   assert.equal(second.teamStrengths, '帮我管理每周的读书笔记， 周五提醒我整理');
+  assert.match(second.personality, /亲切耐心/, 'not the template’s personality');
   const chestnut = (await (await r.call('/xbot-api/bots')).json()).bots.find((b: any) => b.name === '栗子');
   assert.deepEqual([chestnut.avatar_seed, chestnut.templateId], ['cat:golden-chinchilla', 'golden-chinchilla']);
   // Without a chosen face a Codex cat gets the face that goes with it.

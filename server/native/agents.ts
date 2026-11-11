@@ -1,4 +1,5 @@
 import { ApiError } from '../errors.js';
+import { clip } from './text.js';
 import type { BotBridge, NativeRuntime } from './bridge.js';
 import type { NativeCat } from './types.js';
 
@@ -88,8 +89,20 @@ export async function agentInventory(bridge: BotBridge, refresh = false) {
  * chat can start right away, and if not, what is in the way. It is the native
  * discovery read in everyday terms; nothing is installed, logged in or called.
  */
+/** The portraits of client/public/cat-avatars.js: the faces a cat can be created with. Each is one of the engine's cat templates. */
+export const catFaces = ['ragdoll', 'maine-coon', 'siamese', 'turkish-van', 'dsh', 'dragon-li', 'bengal', 'golden-chinchilla'] as const;
+
 export async function startSummary(bridge: BotBridge, refresh = false) {
-  const [runtimes, cats] = await Promise.all([bridge.runtimes(refresh), bridge.cats()]);
+  // The templates only add what each face is like; a first screen must not fail because they could not be read.
+  const [runtimes, cats, templates] = await Promise.all([bridge.runtimes(refresh), bridge.cats(), bridge.templates().then(result => result.templates, () => [])]);
+  // What each face is like, from the engine's template of the same id: a cat made by picking a face starts with this portrait.
+  const line = (value: unknown, max: number) => typeof value === 'string' && value.trim() ? clip(value.replace(/\s+/g, ' ').trim(), max) : undefined;
+  const faces = catFaces.flatMap(id => {
+    const template = templates.find(known => known.id === id);
+    if (!template) return [];
+    const [role, personality, strengths] = [line(template.roleDescription, 120), line(template.personality, 120), line(template.teamStrengths, 80)];
+    return [{ id, ...(line(template.name, 40) ? { name: line(template.name, 40)! } : {}), ...(role ? { role } : {}), ...(personality ? { personality } : {}), ...(strengths ? { strengths } : {}) }];
+  });
   const adapted = runtimes.filter(supportsRuntime), chosen = defaultRuntime(runtimes);
   const state = (runtime: NativeRuntime) => {
     const status = runtime.readiness?.status ?? (runtime.installed ? 'unknown' : 'not_installed');
@@ -103,7 +116,7 @@ export async function startSummary(bridge: BotBridge, refresh = false) {
     // `confirmed` is false when the tool is installed but its login could not be checked.
     agent: chosen ? { id: chosen.id, label: chosen.label, confirmed: chosen.readiness?.status === 'configured' } : null,
     blocked: chosen ? null : agents.some(agent => agent.state === 'login') ? 'login_required' as const : 'no_agent' as const,
-    agents, checkedAt: Date.now(),
+    agents, faces, checkedAt: Date.now(),
   };
 }
 
