@@ -958,11 +958,17 @@ test('project and workspace management are gone: no header chip or menu, no proj
   assert.equal(p.ws.projectField, undefined);
   assert.equal(p.ws.closePops, undefined);
 
-  // The shell: 新建群组 is the original name-and-members form again.
+  // The shell: 新建群聊 is the quick dialog (quick-create.js), whose request carries the
+  // members and, when one is typed, the name; nothing about a project or a workspace.
   const app = read('client/public/app.js'), src = read('client/public/workspace.js');
-  const group = /function openNewGroup\(\) \{[\s\S]*?\n {2}\}\n/.exec(app)![0];
-  assert.match(group, /body: \{ name: \(v\.name \|\| ""\)\.trim\(\), members: members \} \}/);
-  assert.doesNotMatch(group, /project|workspace/i);
+  const quick = read('client/public/quick-create.js') + read('client/public/quick-create-rules.js');
+  const group = /function openNewGroup\(opener\) \{[\s\S]*?\n {2}\}\n/.exec(app)![0];
+  assert.match(group, /quick\.openGroup\(/);
+  assert.doesNotMatch(group + quick, /project|workspace/i);
+  const rules: Any = {};
+  vm.runInNewContext(read('client/public/quick-create-rules.js'), { window: rules });
+  assert.deepEqual(plain(rules.ClowderQuickCreateRules.groupBody(['团子', '栗子'], ' 晨会 ')), { members: ['团子', '栗子'], name: '晨会' });
+  assert.deepEqual(plain(rules.ClowderQuickCreateRules.groupBody(['团子', '栗子'], '')), { members: ['团子', '栗子'] });
   assert.doesNotMatch(app, /projectField|workspace\.closePops|botLabel/);
   assert.doesNotMatch(src, /\/xbot-api\/projects|新建项目|换项目|projectId|"\/workspace", \{ method: "PUT"/);
   assert.doesNotMatch(src, /method: "PATCH"|\/tasks", \{ method: "POST"/, 'the module never creates or assigns a Task');
@@ -1538,9 +1544,10 @@ test('the page loads the workspace scripts before app.js and their styles last; 
   assert.ok(at('runtime-tasks.js') >= 0 && at('runtime-tasks.js') < at('workspace.js'));
   assert.ok(at('workspace-rules.js') < at('workspace.js') && at('workspace.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
-  // After every upstream and earlier style; only the status-line/memory extension (which builds on it) follows.
+  // After every upstream and earlier style; only the status-line/memory extension (which builds on it)
+  // and then the 开箱即用 extension follow.
   assert.ok(styles.indexOf('workspace.css') > styles.indexOf('chat-presentation.css'));
-  assert.deepEqual(styles.slice(styles.indexOf('workspace.css') + 1), ['chat-experience.css']);
+  assert.deepEqual(styles.slice(styles.indexOf('workspace.css') + 1), ['chat-experience.css', 'quick-create.css']);
   assert.doesNotMatch(app, /\/paste"/);
   assert.match(app, /\["files", "文件"\]/);
   // 详情 appends the module's 历史对话 node only when it gives one (cats, never groups).

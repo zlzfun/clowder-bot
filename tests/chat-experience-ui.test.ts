@@ -1014,7 +1014,8 @@ test('the page loads the status-line scripts after workspace.js and before app.j
   const at = (name: string) => scripts.indexOf(name);
   assert.ok(at('workspace.js') < at('chat-experience-rules.js') && at('chat-experience-rules.js') < at('chat-experience.js') && at('chat-experience.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
-  assert.equal(styles.at(-1), 'chat-experience.css');
+  // After every earlier style; only the 开箱即用 extension (quick-create.css) follows.
+  assert.deepEqual(styles.slice(styles.indexOf('chat-experience.css') + 1), ['quick-create.css']);
   // Conversation changes, reads, native events and redraws reach the module.
   assert.match(app, /workspace\.select\(state\.sel\);\n[^\n]*\n\s+experience\.select\(state\.sel\);/);
   assert.equal((app.match(/experience\.observe\(selection, /g) || []).length, 2, 'single chats and groups');
