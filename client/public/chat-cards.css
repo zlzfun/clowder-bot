@@ -10,6 +10,10 @@
 
 /* ---- Under a reply's words: one column of blocks, as wide as a card. */
 .ck-blocks { display: flex; flex-direction: column; gap: var(--x-s3); width: 440px; max-width: 100%; }
+/* In the light theme the card surface (--cardx) sits next to the reply bubble's
+   fill; in the dark one it would sink below the page, so there the cards take
+   the bubble's own fill instead. */
+html[data-theme="dark"] .ck-blocks { --cardx: var(--x-bot-bubble); }
 .msg.bot .body > .bot-bubble:not(:empty) + .ck-blocks { margin-top: var(--x-s2); }
 .ck-live { display: block; min-width: 0; }
 .ck-live :is(.primary, .secondary, .ask-opt, .ask-send)[aria-disabled="true"] { cursor: default; }
@@ -125,7 +129,8 @@
   font: 12px/1.5 var(--x-mono); color: var(--x-muted); white-space: pre-wrap; overflow-wrap: anywhere;
 }
 .ck-reason[hidden] { display: none; }
-.approval .ck-reason { margin: var(--x-s2) 0 0; }
+/* Inside a card the box takes the code surface, so it still reads as a box. */
+.approval .ck-reason { margin: var(--x-s2) 0 0; background: var(--x-code); }
 
 /* ---- A receipt or a refusal: a quiet centred line in the history. */
 .thread-inner > .ck-notice { margin-top: 14px; }

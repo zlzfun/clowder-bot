@@ -70,8 +70,10 @@
   const S = {
     sel: null, key: "", gen: 0, threadId: "",
     // This conversation's open requests (the last list read), how that read
-    // stands, when it was asked for, and what asked for it last.
-    list: new Map(), listState: "idle", listAt: 0, listSig: "", listReq: 0, listLoading: false,
+    // stands, when it was asked for, what asked for it last; reads are
+    // numbered (listReq), listDone is the number of the last one that came
+    // back, and listAgain asks for one more after the read in flight.
+    list: new Map(), listState: "idle", listAt: 0, listSig: "", listReq: 0, listDone: 0, listLoading: false, listAgain: false,
     // What each frame in the history stands for, from the latest drawing.
     facts: new Map(),
     // The focused frame, to give focus back when a redraw replaced its row.
@@ -90,7 +92,7 @@
     S.gen++;
     Object.assign(S, {
       sel: sel && sel.id ? { type: sel.type === "group" ? "group" : "bot", id: String(sel.id) } : null,
-      threadId: "", list: new Map(), listState: "idle", listAt: 0, listSig: "", listLoading: false, focus: null,
+      threadId: "", list: new Map(), listState: "idle", listAt: 0, listSig: "", listDone: 0, listLoading: false, listAgain: false, focus: null,
     });
     S.key = keyOf(S.sel);
     S.facts.clear();
@@ -104,7 +106,7 @@
   function observe(sel, threadId, messages) {
     if (!S.sel || keyOf(sel) !== S.key) return;
     const id = threadId ? String(threadId) : "";
-    if (id && id !== S.threadId) Object.assign(S, { threadId: id, list: new Map(), listState: "idle", listAt: 0, listSig: "" });
+    if (id && id !== S.threadId) Object.assign(S, { threadId: id, list: new Map(), listState: "idle", listAt: 0, listSig: "", listDone: 0 });
     const open = [];
     for (const m of messages || []) {
       for (const b of m && Array.isArray(m.blocks) ? m.blocks : []) {
@@ -122,7 +124,8 @@
   }
 
   async function loadList() {
-    if (!S.sel || !S.threadId || S.listLoading) return;
+    if (!S.sel || !S.threadId) return;
+    if (S.listLoading) { S.listAgain = true; return; }
     const gen = S.gen, req = ++S.listReq, threadId = S.threadId, askedAt = Date.now();
     S.listLoading = true;
     if (S.listState === "idle") S.listState = "loading";
@@ -136,6 +139,7 @@
       for (const i of got.list) seen.set(i.id, i);
       S.listState = "ready";
       S.listAt = askedAt;
+      S.listDone = req;
     } catch (e) {
       if (gen !== S.gen || req !== S.listReq) return;
       // A list read before stays (the server checks again on every answer);
@@ -145,7 +149,9 @@
     } finally {
       if (gen === S.gen && req === S.listReq) S.listLoading = false;
     }
-    if (gen === S.gen) repaint();
+    if (gen !== S.gen) return;
+    repaint();
+    if (S.listAgain && !S.listLoading) { S.listAgain = false; loadList(); }
   }
 
   // ------------------------------------------------------------ the history
@@ -345,7 +351,8 @@
     const local = decisions.get(id) || null;
     return R.card({
       fact: fact.block, item: S.list.get(id) || null, list: S.listState, seen: seen.get(id) || null,
-      local, fresh: !!local && S.listAt > local.at, catName: fact.catName, now: Date.now(),
+      // fresh: a list read asked for after the answer came back.
+      local, fresh: !!local && S.listDone > (local.after || 0), catName: fact.catName, now: Date.now(),
     });
   }
   const KIND_ICON = { preference: "book-open", profile: "person", person: "users-plus", schedule: "alarm-clock", question: "message-circle-question", other: "info" };
@@ -454,7 +461,8 @@
     }
     if (res.ok) {
       const settled = data.settled === true ? true : data.settled === false ? false : null;
-      decisions.set(id, { phase: "sent", decision, at, settled });
+      // after: reads numbered above this one were asked for after the answer.
+      decisions.set(id, { phase: "sent", decision, at, settled, after: S.listReq });
       announce(settled === true ? "已提交" : settled === false ? "已提交，还在处理" : "已提交，没能确认结果");
       // The receipt and the request's new state come with the next reads.
       S.listSig = "";
@@ -495,15 +503,17 @@
     S.locate = { key: keyOf(sel), item, until: Date.now() + 10000 };
     if (S.locate.key === S.key && find(item)) S.locate = null;
   }
-  // What the status line says for a waiting request (an activity item): the
-  // title its card shows once listed, else the engine's summary without its
-  // English tag.
+  // What the status line says for a waiting request (an activity item). The
+  // server's own everyday words stay; a label that still leads with the
+  // engine's English tag is named as its card names it once listed, else by
+  // the summary's words without the tag. "": keep the server's label.
   function label(item) {
+    const raw = R.oneLine(item && item.label).replace(/^等你确认[：:]?\s*/, "");
+    const said = R.summary(raw);
+    if (said === raw) return "";
     const id = item && item.proposalId ? String(item.proposalId) : "";
     const i = id ? S.list.get(id) || seen.get(id) : null;
     if (i && i.title) return i.title;
-    const raw = R.oneLine(item && item.label).replace(/^等你确认[：:]?\s*/, "");
-    const said = R.summary(raw);
     return said ? "等你确认：" + said : "";
   }
 
