@@ -35,3 +35,8 @@
 
 /* A row gliding from where it was to its new place. */
 .item.cl-moving { transition: transform 180ms ease-out, background 160ms ease-out; }
+
+/* The status could not be read: one quiet line over the list says what it
+   shows is the last read (状态没能刷新…), until a read succeeds. */
+.cl-stale { margin: 0 var(--x-s5) var(--x-s2); padding: 0 var(--x-s2); font-size: var(--x-fs-cap); line-height: 1.5; color: var(--x-faint); }
+.cl-stale[hidden] { display: none; }

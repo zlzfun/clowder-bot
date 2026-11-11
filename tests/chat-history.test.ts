@@ -431,6 +431,113 @@ test('历史对话 opens the cat\'s 资料 on its saved conversations and puts f
   assert.deepEqual(p.app.statuses, [['没能读取历史对话，稍后再试。', true]]);
 });
 
+test('while 新对话 is asked, focus stays in the dialog and everything behind it is out of reach; when the answer settles focus returns to its button', async () => {
+  const p = page();
+  const cat = { type: 'bot', id: '团子' };
+  p.open(cat);
+  p.app.shown = 'T1';
+  const more = p.top.querySelector('.ch-more')!;
+  more.click();
+  p.doc.querySelector('.ch-menu [data-item="new"]')!.click();
+  const root = p.doc.querySelector('.ch-modal')!, card = root.querySelector('.modal-card')!, ok = card.querySelector('button[type="submit"]')!;
+  const main = p.doc.querySelector('main')!;
+  assert.equal(main.inert, true, 'the page behind is inert while the dialog is open');
+  ok.focus();
+  ok.click();
+  assert.equal(ok.disabled, true);
+  assert.ok(p.doc.activeElement === card, 'focus rests on the dialog, not on a disabled button');
+  const tab = root.querySelector('.modal-card')!.key('Tab');
+  assert.equal(tab.defaultPrevented, true, 'Tab has nowhere to go but the dialog');
+  assert.ok(p.doc.activeElement === card);
+  p.fail(Object.assign(new Error('请先完成或停止会话中的任务'), { status: 409 }));
+  await p.settle();
+  assert.ok(p.doc.activeElement === ok, 'back on its button once it can be pressed again');
+  card.key('Escape');
+  assert.equal(main.inert, false, 'the page is reachable again when the dialog closes');
+  assert.ok(p.doc.activeElement === more);
+});
+
+test('the ⋯ menu survives a sidebar redraw (which removes every sidebar menu): it stays open with focus and its state until closed', () => {
+  const p = page();
+  p.open({ type: 'bot', id: '团子' });
+  const more = p.top.querySelector('.ch-more')!;
+  more.click();
+  const menu = p.doc.querySelector('.ch-menu')!;
+  const focused = p.doc.activeElement;
+  // renderLists, on a status change (an unread dot), clears the sidebar's menus with exactly this.
+  const app = read('client/public/app.js');
+  const clear = /document\.querySelectorAll\("\.folder-menu"\)\.forEach\(\(menu\) => menu\.remove\(\)\);/.exec(app);
+  assert.ok(clear, 'renderLists still clears .folder-menu');
+  p.doc.querySelectorAll('.folder-menu').forEach((m: El) => m.remove());
+  assert.ok(menu.isConnected, 'the header menu is not one of them');
+  assert.ok(p.doc.activeElement === focused);
+  assert.equal(more.getAttribute('aria-expanded'), 'true');
+  (p.doc.activeElement as El).key('Escape');
+  assert.ok(!menu.isConnected && more.getAttribute('aria-expanded') === 'false' && p.doc.activeElement === more);
+});
+
+test('a poll that moves the newest page on while the first earlier page is asked for leaves no hole: the answer joins the page its cursor came from', async () => {
+  const p = page();
+  p.open({ type: 'bot', id: '团子' });
+  p.poll(newest(21, 40));
+  p.history.load();
+  assert.equal(p.calls[0]!.path, '/xbot-api/bots/%E5%9B%A2%E5%AD%90/transcript?before=1794%3Am21');
+  // Two messages arrive before the answer: the newest page is now 23–42.
+  p.poll(newest(23, 42));
+  p.answer({ messages: range(1, 20), hasMore: false, before: '1794:m1', thread_id: 'T1' });
+  await p.settle();
+  assert.deepEqual(ids(p), range(1, 42).map(m => m.id), '21 and 22 are there');
+  assert.equal(text(p.topRow()), '没有更早的消息了');
+  // If more than a page came in meanwhile, the pages no longer meet: it starts over instead of showing a hole.
+  const q = page();
+  q.open({ type: 'bot', id: '团子' });
+  q.poll(newest(21, 40));
+  q.history.load();
+  q.poll(newest(300, 319));
+  q.answer({ messages: range(1, 20), hasMore: false, before: '1794:m1', thread_id: 'T1' });
+  await q.settle();
+  assert.deepEqual(ids(q), range(300, 319).map(m => m.id));
+  assert.equal(text(q.topRow()), '查看更早的消息');
+});
+
+test('a newest page whose records show no rows keeps the earlier rows loaded above it (its native boundary is the seam), and an empty group view offers them instead of 没有消息', async () => {
+  const R = rules();
+  const held = range(1, 20);
+  assert.deepEqual(plain(R.stitch(held, [], [], { was: '5:x', now: '5:x' })).length, 20, 'same boundary: still joined');
+  assert.equal(plain(R.stitch(held, [], [msg(100)], { was: '5:x', now: '6:y' })).length, 20, 'a visible message after hidden ones: joined below');
+  assert.equal(R.stitch(held, [], [], { was: '6:y', now: '5:x' }), null, 'a boundary that moved back is a break');
+  assert.equal(R.stitch(held, range(21, 22), [], { was: '5:x', now: '6:y' }), null, 'rows that were shown and are gone: a break');
+  assert.equal(R.order('1794:m1'), 1794);
+  assert.equal(R.order('nope'), null);
+  // In the module: an empty single chat with records behind it.
+  const p = page();
+  p.open({ type: 'bot', id: '团子' });
+  const empty = { messages: [], hasMore: true, before: '5:x', thread_id: 'T1' };
+  p.poll(empty);
+  assert.equal(text(p.topRow()), '查看更早的消息');
+  p.history.load();
+  assert.equal(p.calls[0]!.path, '/xbot-api/bots/%E5%9B%A2%E5%AD%90/transcript?before=5%3Ax');
+  p.answer({ messages: range(1, 20), hasMore: false, before: '1:m1', thread_id: 'T1' });
+  await p.settle();
+  assert.deepEqual(ids(p), range(1, 20).map(m => m.id), 'the earlier rows show and stay');
+  p.poll(empty);
+  assert.equal(ids(p).length, 20, 'the next poll keeps them');
+  p.poll({ messages: [msg(100)], hasMore: true, before: '6:y', thread_id: 'T1' });
+  assert.deepEqual(ids(p), [...range(1, 20).map(m => m.id), 'm100']);
+  // The group view: renderGroup's empty branch draws the top row instead of 没有消息 when there is one.
+  const app = read('client/public/app.js');
+  assert.match(app, /if \(!chatHistory\.top\(inner\)\) inner\.append\(emptyState\(niceName\(who\) \|\| "群", "没有消息"/);
+  const g = page();
+  g.open({ type: 'group', id: 'g1' });
+  g.app.thread = 'g1';
+  g.history.merge({ type: 'group', id: 'g1' }, 'g1', { messages: [], hasMore: true, before: '5:x' });
+  const inner = g.h('div', 'thread-inner');
+  assert.equal(g.history.top(inner), true);
+  assert.equal(text(inner.children[0]), '查看更早的消息');
+  g.history.merge({ type: 'group', id: 'g1' }, 'g1', { messages: [], hasMore: false, before: null });
+  assert.equal(g.history.top(g.h('div')), false, 'nothing before: the empty view says 没有消息 as before');
+});
+
 // ---------------------------------------------------------------- chat-live.js
 test('the keyed redraw counts only rows that arrived below as new: earlier history brought in on top neither rises nor counts (so 回到最新 does not light up)', () => {
   const p = page();

@@ -27,7 +27,7 @@
       "file": "app.js",
       "target": "client/public/app.js",
       "sourceSha256": "1248f793493826bf044359c71e7d8772ccc3472d6021d6abb979dff9b6cb29bc",
-      "sha256": "a955a9f96bb8534bfaa4a5615bad12345f3dd3b1722d6cc737537fa0427134ad",
+      "sha256": "7ba56002a459b70e9f9d09ce0e99445d94c63e774a51d28852fb7d34254098b7",
       "unchanged": false
     },
     {
@@ -763,37 +763,37 @@
       "target": "client/public/chat-list-rules.js",
       "description": "Contact-list rules without DOM or network: the status poll's activity.last checked (owner or cat, time, one plain line, files), the preview line (你：… for the owner, 名字：… for a cat in a group, the single chat's cat bare, [文件] / [文件] N 个 for a file-only line), short relative times in one style (刚刚, N 分钟前, today's clock, 昨天, weekday, M月D日, Y/M/D) with a full stamp, recency order (newest first, rows with nothing said keep their order, ties never swap), unread count from two up and the page title's total, the greeting's owner name (none for the default 你), and per-chat drafts (words plus a single chat's quote)",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 找得到, part one (docs/xbot-frontend.md item 30)",
-      "sha256": "8036fd4634ea725450a1e507e8e3c9b05df4c0036b604dde565b8098f0e3d439"
+      "sha256": "215d39f958d42dec7ffda6e09ed8d5c298dfc5bde0678c7a5a37a8cf54782790"
     },
     {
       "target": "client/public/chat-list.js",
       "description": "The sidebar as a messenger's contact list from the status poll only: a row's second line (the draft left in a chat other than the open one as 草稿：…, else the latest line, kept across a failed read of the same conversation), the time on the name line refreshed every 30 s, the unread count beside the preview (two up, never on the open chat), rows reordered by recency with only out-of-place rows moved, the focused row never moved, a 180 ms glide from where each row was last seen (none under reduced motion), the (N) total in the page title, and drafts moved between the composer and their chat on leaving and opening it (the quote dropped when the same chat reopens in place; a sessionStorage copy for reloads in the tab)",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 找得到, part one (docs/xbot-frontend.md item 30)",
-      "sha256": "dfc18f4a5dc3eee09c57b6ad152addf77acb04792d9d1fe3953a21c6caafcb21"
+      "sha256": "fbab8e0f42b4e674f40f65967cc819c57d8854d9fd90ae7523a15f7fec14777d"
     },
     {
       "target": "client/public/chat-list.css",
       "description": "Contact-list row layout (name line over preview, count at the end of the preview line), the quiet right-aligned time, the count pill on the primary pair, the 草稿 tag and the 180 ms glide; existing --x-* tokens only, original CSS unchanged",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 找得到, part one (docs/xbot-frontend.md item 30)",
-      "sha256": "5c65d2463bf462487270344aa0398cb4511efa9cc194bb49d62578bb4fa80678"
+      "sha256": "bd3c8b3b62174da464fd9ca91267ca736de802c46a46c0d6c8a6bd39785f7536"
     },
     {
       "target": "client/public/chat-history-rules.js",
       "description": "Conversation-over-time rules without DOM or network: row identity by native message (delivery rows by call), earlier pages kept joined above a newest page that moves on (let go when it no longer meets them, never shown with a hole), overlapping pages deduplicated, the ?before= request on the transcript or group route with the server's own cursor, a page answer checked, and when the three first-words suggestions show (single chat, cat greeted and not writing, owner silent, nothing on its way, no earlier records)",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 找得到, part one (docs/xbot-frontend.md item 30)",
-      "sha256": "981559f1a6ec7df0676638deed8debd69cc024cbcba4afa6c3d5d5ba8603eda6"
+      "sha256": "08d23bde4ff7c3054bf17ea92ce4559369007364a68eee90f67f5c0f28d2081a"
     },
     {
       "target": "client/public/chat-history.js",
       "description": "Earlier messages (newest-page reads merged with the pages the owner scrolled back to; a quiet top row: 查看更早的消息 / 正在加载… / 没有更早的消息了 / failure with 重试, changed in place and re-read by the keyed redraw; scrolling near the top loads; answers for a chat or conversation left behind discarded), the chat header's ⋯ menu (新对话 and 历史对话 for a cat, 在对话里查找 only when window.ClowderPalette exists; arrows, Escape back to ⋯), the 新对话 dialog over the existing POST /xbot-api/bots/:name/new (says the old conversation stays under 历史对话 and what the cat remembers is kept; busy, switching and unsure answers said plainly), 历史对话 opening the existing list in 详情, and the suggestions under a cat's greeting that send on a tap",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 找得到, part one (docs/xbot-frontend.md item 30)",
-      "sha256": "2788cb2374d3b774a49f5cfac98b0deaba25033cec2e53bacc482cf852c99026"
+      "sha256": "38b54560ca7b902685f4a875aa10c9d7903e4c1bacdd0fe7cbbec9049cb82ae5"
     },
     {
       "target": "client/public/chat-history.css",
       "description": "The header ⋯ at the column's right end (the chip stays centred), the history's quiet top row with the status spinner, the suggestions as pills in the bubbles' column with the existing rise, and the new-conversation dialog on the original modal card; existing tokens and keyframes only, original CSS unchanged",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 找得到, part one (docs/xbot-frontend.md item 30)",
-      "sha256": "b6294d9383554d9ff64f102dfe0a1d799bbcf18f5de7a3af18cc1273d0b7b442"
+      "sha256": "f5bfd624750fd918fe600ea5175d547dffbdcd12f83043b4a64eafda8d21fd1d"
     },
     {
       "target": "client/public/profile-rules.js",
