@@ -95,6 +95,8 @@ BOT_BACKGROUND_SMOKE=1 npm run test:background-journey
 
 界面预览不需要引擎和模型：`npm run preview:fixture` 在 **http://127.0.0.1:3230** 用脚本化的协议替身运行真实的适配层，按固定上游的事件形态回放一轮回复（逐字输出、步骤、停止、失败；团子按 Claude Code 的事件形态回答，栗子按 Codex 的），也能摆出本机没有可用 Agent、需要登录等首屏状态（`POST /__preview {"agents":"ready|unknown|login|none"}`），或把每页消息数调小来看「更早的消息」怎么加载（`{"page":12}`）。回复是固定文本并写明是预览；数据在临时目录，退出即删，不会成为运行时的后备路径。
 
+`npm run showcase` 是同一个预览，只是联系人换成摆好的一组：引擎的每个模板一只猫（名字、长相和颜色都照模板），加两个群聊，每个对话演示一件事，在里面说话也有它自己的固定回复（`scripts/showcase-scene.ts`）。同一个地址下的 **/tour/** 是能力说明页（`showcase/`，不属于应用本身）：一页看完这个应用能做什么，开头就是这组联系人和它们现在的最后一句，每一节都能直接打开对应的对话，或让那只猫现场演示一遍。页面里的图都是界面截图，示例重启后用 `BASE=http://127.0.0.1:3230/ node scripts/showcase-shots.mjs` 重拍（需要本机已有的 Playwright，见 [前端接入](docs/xbot-frontend.md) 第 36 项）。
+
 原生集成测试使用专用临时成员和会话，结束时通过原生接口删除测试成员、软删除测试会话，不清空存储。更多验收与上游回归命令见 [维护说明](docs/upstream-maintenance.md)。
 
 后台旅程验收保留独立 Bot、聊天与 `.runtime/background-journey/` 证据，不删除原有数据。它核对原生子任务身份、定向消息、连续心跳和完成回报，不能代替所有复杂任务或进程故障恢复的验证。
