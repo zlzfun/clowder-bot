@@ -26,6 +26,31 @@ export function rosterRefusals(messages: NativeMessage[], nameOf: (catId: string
   return told;
 }
 
+/**
+ * The engine's receipt after the owner answered a request for confirmation: a
+ * connector message from its approval hub that names the request, the card
+ * message it belonged to and how it was resolved ("审批结果：品味提案 proposal_…
+ * 已批准。" in the engine's words).
+ */
+export function approvalReceipt(message: NativeMessage): { proposalId: string; producerId: string; state: 'approved' | 'rejected' | 'closed'; cardMessageId?: string } | undefined {
+  if (message.type !== 'connector') return undefined;
+  const source = record(message.source), receipt = record(record(source.meta).approvalDecisionReceipt);
+  if (source.connector !== 'approval-hub' || receipt.kind !== 'approval_decision_receipt' || typeof receipt.canonicalProposalId !== 'string') return undefined;
+  const card = record(receipt.approvalCardRef).messageId;
+  return { proposalId: receipt.canonicalProposalId, producerId: typeof receipt.producerId === 'string' ? receipt.producerId : '',
+    state: receipt.resolution === 'accepted' ? 'approved' : receipt.resolution === 'rejected' ? 'rejected' : 'closed',
+    ...(typeof card === 'string' ? { cardMessageId: card } : {}) };
+}
+/** That receipt in the chat's words. */
+export function approvalReceiptText(receipt: NonNullable<ReturnType<typeof approvalReceipt>>): string {
+  const said: Record<string, [string, string]> = {
+    F221: ['已记住这个偏好。', '没有记这个偏好。'], F231: ['已更新关于你的资料。', '没有更新关于你的资料。'],
+    F276: ['已记下这个人。', '没有记这个人。'], F139: ['定时已按你的确认处理。', '定时没有改动。'],
+  };
+  const [yes, no] = said[receipt.producerId] ?? ['已同意。', '已拒绝。'];
+  return receipt.state === 'approved' ? yes : receipt.state === 'rejected' ? no : '这件事已经结束。';
+}
+
 /** A reply the engine is still producing: an unpublished draft or a response that has not settled. */
 export function replyInProgress(message: NativeMessage): boolean {
   return message.type === 'assistant'

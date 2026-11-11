@@ -106,7 +106,13 @@ class PreviewNative extends NativeFixture {
       // The real engine fails this way when its taste store cannot be written (see docs/chat-app-roadmap.md).
       if (this.hubFails && decision[2] === 'approve') throw new ApiError(500, 'Vignette write failed', { error: 'Vignette write failed', detail: 'preview: the store is switched to failing' });
       item.resolution = decision[2] === 'approve' ? 'approved' : 'rejected';
-      this.emit(item.navigation.approvalCardRef.threadId, { type: 'thread_updated' });
+      // The engine then posts its own receipt into the conversation (a connector message from the approval hub).
+      const ref = item.navigation.approvalCardRef;
+      this.messages.get(ref.threadId)?.push({ id: this.id(), type: 'connector', catId: null, timestamp: Date.now(),
+        content: `审批结果：提案 ${item.proposalId} ${decision[2] === 'approve' ? '已批准' : '已拒绝'}。`,
+        source: { connector: 'approval-hub', label: 'Host 审批结果回执', meta: { presentation: 'system_notice', approvalDecisionReceipt: { v: 1, kind: 'approval_decision_receipt',
+          producerId: item.sourceFeatureId, canonicalProposalId: item.proposalId, resolution: decision[2] === 'approve' ? 'accepted' : 'rejected', approvalCardRef: ref, decidedAt: Date.now() } } } });
+      this.emit(ref.threadId, { type: 'thread_updated' });
       return done({ ok: true });
     }
     if (parts[2] === 'messages' && parts[4] === 'block-state' && method === 'PATCH') {
