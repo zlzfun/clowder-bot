@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { z } from 'zod';
 import { clip } from '../server/native/text.js';
-import { catFaces, startSummary } from '../server/native/agents.js';
+import { catFaces, faceTemplates, startSummary } from '../server/native/agents.js';
 import { catTemplates } from './native-fixture.js';
 
 // 开箱即用 (quick-create-rules.js, quick-create.js): the first-run stage, the
@@ -1015,7 +1015,7 @@ test('the shell loads the module before app.js and its styles after every earlie
 // upstream), so these tests read what the first screen will really get.
 async function realFaces(): Promise<Any[]> {
   const templates = catTemplates.map(([id, name, roleDescription, personality, teamStrengths]) => ({ id, name, roleDescription, personality, teamStrengths, color: { primary: '#888888', secondary: '#eeeeee' } }));
-  const bridge: Any = { runtimes: async () => [], cats: async () => [], templates: async () => ({ templates }) };
+  const bridge: Any = { runtimes: async () => [], cats: async () => [], templates: async () => ({ templates }), faceTemplates: async () => faceTemplates({ templates }) };
   return plain((await startSummary(bridge)).faces);
 }
 const withFaces = async (start: Any = START.ready) => ({ ...start, faces: await realFaces() });

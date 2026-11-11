@@ -22,7 +22,8 @@ const botBody = { name: label, persona: z.string().max(32768).optional(), descri
   sourceTemplate: sourceTemplateSchema.optional(), idempotencyKey: z.string().uuid().optional() };
 // A cat from a name: a face (one of the engine's templates, whose portrait the cat starts with) or, with
 // `custom` or words of the owner's own, a cat that only takes the face's looks.
-const simpleCat = z.object({ face: z.enum(catFaces).optional(), custom: z.literal(true).optional(), about: z.string().trim().max(2000).optional(),
+// `rev` is the face's `rev` from GET /start: the portrait the owner was shown.
+const simpleCat = z.object({ face: z.enum(catFaces).optional(), rev: z.string().min(1).max(64).optional(), custom: z.literal(true).optional(), about: z.string().trim().max(2000).optional(),
   personality: z.string().trim().max(500).optional(), agent: z.string().min(1).max(100).optional() }).strict();
 // A group's name is a native thread title, free text unlike a cat's @-mentionable name.
 const groupTitle = z.string().trim().min(1).max(64).regex(/^[^<>\x00-\x1f\x7f]+$/, '名字包含不支持的字符');

@@ -58,7 +58,7 @@ export function createApp(options: { dataFile?: string; native?: NativeTransport
   const errors: ErrorRequestHandler = (error, _req, res, _next) => {
     if (res.headersSent) { res.end(); return; }
     if (error instanceof ZodError) { res.status(400).json({ error: error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('；') }); return; }
-    if (error instanceof ApiError) { res.status(error.status).json({ error: error.message, ...(error.details ? { native: error.details } : {}) }); return; }
+    if (error instanceof ApiError) { res.status(error.status).json({ error: error.message, ...(error.code ? { code: error.code } : {}), ...(error.details ? { native: error.details } : {}) }); return; }
     if (error?.type === 'entity.too.large') { res.status(413).json({ error: '请求内容过大' }); return; }
     if (error instanceof SyntaxError && 'body' in error) { res.status(400).json({ error: 'JSON 格式不正确' }); return; }
     console.error('[clowder-bot]', error instanceof Error ? error.message : 'Unexpected error');

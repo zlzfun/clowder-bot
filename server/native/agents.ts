@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { ApiError } from '../errors.js';
 import { clip } from './text.js';
 import type { BotBridge, NativeRuntime } from './bridge.js';
@@ -92,16 +93,41 @@ export async function agentInventory(bridge: BotBridge, refresh = false) {
 /** The portraits of client/public/cat-avatars.js: the faces a cat can be created with. Each is one of the engine's cat templates. */
 export const catFaces = ['ragdoll', 'maine-coon', 'siamese', 'turkish-van', 'dsh', 'dragon-li', 'bengal', 'golden-chinchilla'] as const;
 
+/** One of the engine's cat templates as a face is made from it: only well-formed fields are kept. */
+export interface FaceTemplate { id: string; name?: string; roleDescription?: string; personality?: string; teamStrengths?: string; color?: { primary: string; secondary: string };
+  /** Changes when the portrait does: what a creation screen showed and what a creation uses can be compared. */
+  rev: string }
+/**
+ * The engine's templates (unpatched GET /api/cat-templates) read defensively: upstream serves its
+ * template file without checking the entries, so an entry that is not an object, has no id or carries
+ * a field of the wrong type must not break the first screen or a creation.
+ */
+export function faceTemplates(raw: unknown): FaceTemplate[] {
+  const list = raw && typeof raw === 'object' && Array.isArray((raw as { templates?: unknown }).templates) ? (raw as { templates: unknown[] }).templates : [];
+  const words = (value: unknown) => typeof value === 'string' && value.trim() ? value.trim() : undefined;
+  return list.flatMap(entry => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return [];
+    const item = entry as Record<string, unknown>, id = words(item.id);
+    if (!id) return [];
+    const colour = item.color && typeof item.color === 'object' ? item.color as Record<string, unknown> : {};
+    const [name, roleDescription, personality, teamStrengths] = [words(item.name), words(item.roleDescription), words(item.personality), words(item.teamStrengths)];
+    return [{ id, ...(name ? { name } : {}), ...(roleDescription ? { roleDescription } : {}), ...(personality ? { personality } : {}), ...(teamStrengths ? { teamStrengths } : {}),
+      ...(typeof colour.primary === 'string' && typeof colour.secondary === 'string' ? { color: { primary: colour.primary, secondary: colour.secondary } } : {}),
+      rev: createHash('sha256').update(JSON.stringify([roleDescription ?? null, personality ?? null, teamStrengths ?? null])).digest('hex').slice(0, 16) }];
+  });
+}
+
 export async function startSummary(bridge: BotBridge, refresh = false) {
   // The templates only add what each face is like; a first screen must not fail because they could not be read.
-  const [runtimes, cats, templates] = await Promise.all([bridge.runtimes(refresh), bridge.cats(), bridge.templates().then(result => result.templates, () => [])]);
+  const [runtimes, cats, templates] = await Promise.all([bridge.runtimes(refresh), bridge.cats(), bridge.faceTemplates().catch(() => [])]);
   // What each face is like, from the engine's template of the same id: a cat made by picking a face starts with this portrait.
-  const line = (value: unknown, max: number) => typeof value === 'string' && value.trim() ? clip(value.replace(/\s+/g, ' ').trim(), max) : undefined;
+  // `rev` goes back with the creation, so the cat that is made is the one that was described.
+  const line = (value: string | undefined, max: number) => value ? clip(value.replace(/\s+/g, ' '), max) : undefined;
   const faces = catFaces.flatMap(id => {
     const template = templates.find(known => known.id === id);
     if (!template) return [];
-    const [role, personality, strengths] = [line(template.roleDescription, 120), line(template.personality, 120), line(template.teamStrengths, 80)];
-    return [{ id, ...(line(template.name, 40) ? { name: line(template.name, 40)! } : {}), ...(role ? { role } : {}), ...(personality ? { personality } : {}), ...(strengths ? { strengths } : {}) }];
+    const [name, role, personality, strengths] = [line(template.name, 40), line(template.roleDescription, 120), line(template.personality, 120), line(template.teamStrengths, 80)];
+    return [{ id, rev: template.rev, ...(name ? { name } : {}), ...(role ? { role } : {}), ...(personality ? { personality } : {}), ...(strengths ? { strengths } : {}) }];
   });
   const adapted = runtimes.filter(supportsRuntime), chosen = defaultRuntime(runtimes);
   const state = (runtime: NativeRuntime) => {

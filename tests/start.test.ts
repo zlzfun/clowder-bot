@@ -90,7 +90,9 @@ test('the first screen says what each face is like, from the engine’s own temp
   r.native.runtimes = [runtime('codex', 'openai', 'configured')];
   const { faces } = await (await r.call('/xbot-api/start')).json();
   assert.deepEqual(faces.map((face: any) => face.id), ['ragdoll', 'maine-coon', 'siamese', 'turkish-van', 'dsh', 'dragon-li', 'bengal', 'golden-chinchilla']);
-  assert.deepEqual(faces[1], { id: 'maine-coon', name: '缅因猫', role: '代码审查专家，擅长安全分析、测试覆盖和代码质量把控', personality: '严谨认真，注重细节，会直言不讳地指出问题', strengths: 'Review、找 bug、coding 落地' });
+  const { rev, ...coon } = faces[1];
+  assert.deepEqual(coon, { id: 'maine-coon', name: '缅因猫', role: '代码审查专家，擅长安全分析、测试覆盖和代码质量把控', personality: '严谨认真，注重细节，会直言不讳地指出问题', strengths: 'Review、找 bug、coding 落地' });
+  assert.match(rev, /^[0-9a-f]{16}$/); assert.equal(new Set(faces.map((face: any) => face.rev)).size, 8, 'each portrait has its own');
   // A template the engine does not have is not offered a description; long or multi-line text is one clipped line.
   const request = r.native.request.bind(r.native);
   r.native.request = (async (path: string, options?: any) => path !== '/api/cat-templates' ? request(path, options)
@@ -98,6 +100,20 @@ test('the first screen says what each face is like, from the engine’s own temp
   const some = (await (await r.call('/xbot-api/start')).json()).faces;
   assert.deepEqual(some.map((face: any) => face.id), ['ragdoll']);
   assert.equal(some[0].role.length, 120); assert.ok(some[0].role.startsWith('第一行 第二行')); assert.equal('personality' in some[0], false);
+  // Upstream serves its template file unchecked: an entry that is not an object, has no id or a field of the wrong type is left out or read without that field.
+  r.native.request = (async (path: string, options?: any) => path !== '/api/cat-templates' ? request(path, options)
+    : { templates: [null, 'junk', { name: 'no id' }, { id: 'siamese', name: '暹罗猫', roleDescription: '设计师', personality: 7, teamStrengths: ['x'], color: { primary: '#111111', secondary: '#222222' } }] }) as typeof r.native.request;
+  const odd = (await (await r.call('/xbot-api/start')).json()).faces;
+  assert.deepEqual(odd.map(({ rev, ...face }: any) => face), [{ id: 'siamese', name: '暹罗猫', role: '设计师' }]);
+  // …and a cat can still be made from it: the missing words are the plain helper's.
+  const made = await r.call('/xbot-api/bots', 'POST', { name: '小暹', simple: { face: 'siamese', rev: odd[0].rev }, idempotencyKey: randomUUID() });
+  assert.equal(made.status, 201);
+  const body = r.native.calls.findLast(c => c.path === '/api/cats' && c.method === 'POST')!.body;
+  assert.equal(body.roleDescription, '设计师'); assert.match(body.personality, /亲切耐心/);
+  for (const shape of [null, {}, { templates: 'nope' }]) {
+    r.native.request = (async (path: string, options?: any) => path !== '/api/cat-templates' ? request(path, options) : shape) as typeof r.native.request;
+    assert.deepEqual((await (await r.call('/xbot-api/start')).json()).faces, [], JSON.stringify(shape));
+  }
   // The first screen still answers when the templates cannot be read: it only loses the descriptions.
   r.native.request = (async (path: string, options?: any) => { if (path === '/api/cat-templates') throw new ApiError(503, 'down'); return request(path, options); }) as typeof r.native.request;
   const without = await r.call('/xbot-api/start');
@@ -176,6 +192,52 @@ test('a cat needs only a name: one unpatched native creation with the Agent’s 
   // Without a chosen face a Codex cat gets the face that goes with it.
   await r.call('/xbot-api/bots', 'POST', { name: '年糕', simple: { agent: 'codex' }, idempotencyKey: randomUUID() });
   assert.equal((await (await r.call('/xbot-api/bots')).json()).bots.find((b: any) => b.name === '年糕').avatar_seed, 'cat:maine-coon');
+});
+
+test('the cat that is made is the one that was described, and a repeat reaches native exactly as the first time', async t => {
+  const r = await setup(t);
+  r.native.runtimes = [runtime('codex', 'openai', 'configured')];
+  const creations = () => r.native.calls.filter(c => c.path === '/api/cats' && c.method === 'POST');
+  const faces = (await (await r.call('/xbot-api/start')).json()).faces, coon = faces.find((face: any) => face.id === 'maine-coon');
+  const request = r.native.request.bind(r.native);
+  const rewrite = (personality: string) => {
+    r.native.request = (async (path: string, options?: any) => {
+      const result: any = await request(path, options);
+      return path === '/api/cat-templates' ? { ...result, templates: result.templates.map((t: any) => t.id === 'maine-coon' ? { ...t, personality } : t) } : result;
+    }) as typeof r.native.request;
+  };
+  // The answer of the first attempt is lost; meanwhile the engine's template is edited. The repeat is the same request,
+  // so it is replayed as it was first resolved — native sees the identical body and returns the cat it made.
+  const key = randomUUID(), ask = { name: '砚砚', simple: { face: 'maine-coon', rev: coon.rev }, idempotencyKey: key };
+  assert.equal((await r.call('/xbot-api/bots', 'POST', ask)).status, 201);
+  rewrite('换了一种脾气');
+  const again = await r.call('/xbot-api/bots', 'POST', ask);
+  assert.equal(again.status, 201);
+  assert.deepEqual({ ...creations()[1]!.body }, { ...creations()[0]!.body }, 'identical, though the template changed in between');
+  assert.equal(creations()[1]!.body.personality, '严谨认真，注重细节，会直言不讳地指出问题');
+  assert.equal(r.native.cats.length, 1);
+  // A new request that still carries the portrait the screen showed earlier is not created as something else: it is refused by code, before native is asked.
+  const stale = await r.call('/xbot-api/bots', 'POST', { name: '小审', simple: { face: 'maine-coon', rev: coon.rev }, idempotencyKey: randomUUID() });
+  assert.equal(stale.status, 409);
+  assert.deepEqual([(await stale.json()).code, creations().length, r.native.cats.length], ['face_changed', 2, 1]);
+  // With the portrait as it is now (a fresh /start) it goes through, and gets the new words.
+  const fresh = (await (await r.call('/xbot-api/start')).json()).faces.find((face: any) => face.id === 'maine-coon');
+  assert.notEqual(fresh.rev, coon.rev); assert.equal(fresh.personality, '换了一种脾气');
+  assert.equal((await r.call('/xbot-api/bots', 'POST', { name: '小审', simple: { face: 'maine-coon', rev: fresh.rev }, idempotencyKey: randomUUID() })).status, 201);
+  assert.equal(creations().at(-1)!.body.personality, '换了一种脾气');
+  // A custom cat does not depend on the portrait; without `rev` the current template is used.
+  assert.equal((await r.call('/xbot-api/bots', 'POST', { name: '自己的', simple: { face: 'maine-coon', rev: coon.rev, custom: true }, idempotencyKey: randomUUID() })).status, 201);
+  assert.equal((await r.call('/xbot-api/bots', 'POST', { name: '不带', simple: { face: 'maine-coon' }, idempotencyKey: randomUUID() })).status, 201);
+  // The templates cannot be read: nothing is asked of native, and the refusal says by code that nothing was created — custom or not.
+  r.native.request = (async (path: string, options?: any) => { if (path === '/api/cat-templates') throw new ApiError(503, 'down'); return request(path, options); }) as typeof r.native.request;
+  const before = creations().length;
+  for (const simple of [{ face: 'ragdoll' }, { face: 'ragdoll', custom: true, about: '陪我聊天' }]) {
+    const down = await r.call('/xbot-api/bots', 'POST', { name: '等等', simple, idempotencyKey: randomUUID() });
+    assert.equal(down.status, 503);
+    const said = await down.json();
+    assert.equal(said.code, 'faces_unavailable'); assert.match(said.error, /没有创建/);
+  }
+  assert.equal(creations().length, before);
 });
 
 test('a new cat whose starting arguments could not be written exists, and the answer says what is missing', async t => {

@@ -31,14 +31,18 @@ UI 保留 Bot 名称和文件夹概念，实际成员、执行和历史以 Clowd
 - `blocked`：`null`、`login_required`（有装好但需要登录的）或 `no_agent`。
 - `agents[]`：适配层能绑定的那几种（Codex、Claude Code、Kimi）各自的 `state`：`ready`、`unknown`、`login`、`missing`，以及原生给出的 `loginCommand`。
 - `cats`：现有猫的数量。
-- `faces[]`：可以选的猫脸，各带它在引擎里的同名模板的画像：`{id, name?, role?, personality?, strengths?}`（未打补丁的上游 `GET /api/cat-templates` 的 `roleDescription`／`personality`／`teamStrengths`，各压成一行并截断）。挑哪张脸，建出来的猫就以这份画像起步，所以首屏和新建猫猫要把它的特点简短地说出来。顺序是客户端头像库的顺序；引擎没有对应模板的脸不在其中；模板读不到时是空数组，首屏其余内容照常。`name` 是上游模板自己的叫法（例如 `dsh` 是「小鲸鱼」），头像旁的称呼仍由客户端决定。
+- `faces[]`：可以选的猫脸，各带它在引擎里的同名模板的画像：`{id, rev, name?, role?, personality?, strengths?}`（`rev` 随画像内容变化，建猫时带回，见下）（未打补丁的上游 `GET /api/cat-templates` 的 `roleDescription`／`personality`／`teamStrengths`，各压成一行并截断）。挑哪张脸，建出来的猫就以这份画像起步，所以首屏和新建猫猫要把它的特点简短地说出来。顺序是客户端头像库的顺序；引擎没有对应模板的脸不在其中；模板读不到时是空数组，首屏其余内容照常。`name` 是上游模板自己的叫法（例如 `dsh` 是「小鲸鱼」），头像旁的称呼仍由客户端决定。
 
-`POST /xbot-api/bots` 增加第三种请求体 `{name, simple: {face?, custom?, about?, personality?, agent?}, idempotencyKey}`：
+`POST /xbot-api/bots` 增加第三种请求体 `{name, simple: {face?, rev?, custom?, about?, personality?, agent?}, idempotencyKey}`：
 
 - 只调用**未打补丁的上游** `POST /api/cats`（固定版本 `42017e0` 的 `routes/cats.ts`），与历史上的 fork／导入路径是同一个原生接口；不经过本地补丁 P005 的 `/api/bot-cat-templates/instantiate`。带 `catConfig` 的完整创建仍走 P005，那是待退出的历史补丁，不因这个流程而扩展。
 - 请求体只有成员本身的字段：`catId`、名字与别名、所选猫脸对应角色模板的颜色、职责／性格／简介、`clientId`、`configurationSource: 'native_tool'`、`defaultModel: ''`。模型与推理强度不写，沿用该 Agent 的本机默认。不传 `breedId`，由原生按新成员处理；头像只存在 Bot 的展示数据里。
 - Agent 取 `simple.agent` 或上面的默认。`face` 是八张猫脸之一（不选时按 Agent 取对应的那张），决定头像和颜色，**也决定这只猫是谁**：默认按模板建，职责、性格、擅长取引擎里同名模板的原文（与 `faces[]` 里给界面看的是同一份）。模板里没写的项用通用的「随叫随到的伙伴」补上。
 - 自定义（不按模板）：带 `custom: true`，或者写了自己的话（`about` 一句用途，成为职责与简介；`personality` 性格，≤500 字）。这时猫脸只是外观；没写的项用通用的「随叫随到的伙伴」和「亲切耐心，讲得清楚」。2026-11-12 之前只填名字建的猫都是这份通用画像，不受这次改动影响。
+- 建出来的就是看到的那只：按模板建时带上 `faces[]` 里这张脸的 `rev`。引擎里这份画像在页面读取之后变了，创建会在询问原生之前被拒绝（409，`code: 'face_changed'`），页面应重新读取 `/start`、让用户再看一眼。不带 `rev` 时按当前模板建。自定义不受它影响。
+- 模板读不到（或这张脸没有可用的模板和颜色）时创建被拒绝：503，`code: 'faces_unavailable'`，「暂时读不到猫猫的资料，这次没有创建」。这时还没有向原生发出任何创建请求，所以不是「结果不明」；自定义也需要模板里的颜色，同样建不了。
+- 重发：同一个键、同样的内容再次到达时，适配层把第一次解析出来的原生请求原样重放（工具、模板当时的原文都不重新解析），所以即使模板在两次之间变了，原生看到的仍是同一个请求。这份对应关系只留在进程内存里（最近 50 个），不写入展示数据；进程重启后的重发按当前模板重新解析。
+- 上游的模板接口不校验条目，适配层读取时只保留格式正确的字段：不是对象、没有 `id` 的条目跳过，类型不对的字段当作没写。
 - 留意：上游有几个模板的职责写的是它在上游用的模型或工具（狸花猫「GLM 对话猫」、孟加拉猫「混血多模型 agent…」、金渐层「开源多模型编码 agent…」），而这里建出来的猫用的是本机的 Claude Code 或 Codex。按模板建时原文照用，不做改写。
 - 幂等用上游成员创建自带的请求身份：请求头 `x-cat-cafe-onboarding-journey: clowder-bot-simple` 与 `idempotency-key: onboarding:clowder-bot-simple:cat:<idempotencyKey>`（`config/member-create-receipt.ts`）。`catId` 由 `idempotencyKey` 推导，所以同一个键、同样的内容重发得到同一只猫；同一个键换了内容由原生拒绝（409）。重发时如果那只猫已经在，就不再按当前的 Agent 检测结果拦截。这一路径 2026-11-11 在隔离运行时上实测过创建、重放和冲突。
 - 绑定 Claude Code 的猫，成员记录里带一组默认的「额外 CLI 参数」（上游成员编辑里的 `cliConfigArgs`，受支持的成员级设置）：`--settings {"skillOverrides":{"schedule":"off","loop":"off"}} --disallowedTools RemoteTrigger,CronCreate,CronDelete,CronList`，关掉 CLI 自带的云端定时，让「每天 9 点提醒我」走引擎的定时工具和它的确认。Codex 没有自带定时，不写参数。它是成员建好之后单独的一步（`PATCH /api/cats/:id {expectedRevision, cliConfigArgs}`），三种创建方式都一样；创建请求本身不带这组参数，形状始终是原生按幂等键记下的那个，所以默认值以后怎么变，重发旧请求都不会被当成「内容不同」。成员已有参数时不动（包括用户后来自己改的）；写入被拒绝时按成员当前的版本再试一次，仍不成功则猫照常建好，应答多带一句 `notice` 说明少了什么、去哪里补，不把它说成完全建好。`PUT /bots/:name/agent` 换 Agent 时在同一次修改里写入。设置 JSON 里不能有空白：上游按空白切分参数。只影响此后新建或重新绑定的猫，已有的猫不改。
