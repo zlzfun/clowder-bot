@@ -78,11 +78,13 @@ export class ProductStore {
       this.state = parsed.data;
     } else this.state = { version: 1, bots: {}, groupThreadIds: [], folders: [], messageRefs: {}, projects: [], groupProjects: {}, files: {}, readCursors: {} };
   }
+  /** Counts new message references, so a read that added none need not rewrite the file. */
+  references = 0;
   bot(id: string): BotPresentation { return this.state.bots[id] ??= {}; }
   sequence(threadId: string, messageId: string): number {
     const refs = this.state.messageRefs[threadId] ??= {};
     // Reserve the next slot for XBot's UI delivery receipt.
-    if (!refs[messageId]) refs[messageId] = Object.values(refs).reduce((n, seq) => Math.max(n, seq), -1) + 2;
+    if (!refs[messageId]) { refs[messageId] = Object.values(refs).reduce((n, seq) => Math.max(n, seq), -1) + 2; this.references++; }
     return refs[messageId];
   }
   messageId(threadId: string, seq: number): string | undefined {

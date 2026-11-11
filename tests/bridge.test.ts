@@ -153,6 +153,19 @@ test('stable message references survive edits, cancellation, pagination and brid
   await r.bridge.send(thread, { text: 'followup', reply_to: seq as number }, cat);
   assert.equal(r.native.calls.at(-1)?.body.replyTo, reply.id);
 });
+test('re-reading a conversation with nothing new does not rewrite the presentation file', async t => {
+  const r = await setup(t), cat = await r.bridge.createBot({ name: 'Ada' }), thread = await r.bridge.direct(cat);
+  r.native.messages.set(thread.id, [{ id: 'u1', type: 'user', content: 'ask', catId: null, timestamp: 1000 }]);
+  const first = await r.bridge.transcript(cat);
+  let saves = 0; const save = r.store.save.bind(r.store);
+  r.store.save = () => { saves++; save(); };
+  for (let i = 0; i < 3; i++) assert.deepEqual((await r.bridge.transcript(cat)).messages.map(m => m.seq), first.messages.map(m => m.seq));
+  assert.equal(saves, 0, 'the chat polls every few seconds');
+  r.native.messages.get(thread.id)!.push({ id: 'a1', type: 'assistant', content: 'answer', catId: cat.id, timestamp: 2000 });
+  const next = await r.bridge.transcript(cat);
+  assert.equal(saves, 1, 'a new message gets its reference saved once');
+  assert.equal(new ProductStore(join(r.dir, 'presentation.json')).messageId(thread.id, next.messages.find(m => m.id === 'a1')!.seq as number), 'a1');
+});
 test('member settings use native catalog; group routing stays native; old memory scopes fail explicitly', async t => {
   const r = await setup(t);
   await r.bridge.createBot({ name: 'Ada' }); await r.bridge.createBot({ name: 'Bob' });

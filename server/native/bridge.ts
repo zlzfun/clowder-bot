@@ -128,7 +128,7 @@ export class BotBridge {
       await this.greetingRequests.get(greetingKey(cat.id, thread.id))?.catch(() => {});
     const invitation = this.store.bot(cat.id).greetingSources?.[thread.id];
     const source = typeof invitation === 'string' ? invitation : undefined;
-    const rows: Record<string, unknown>[] = [];
+    const rows: Record<string, unknown>[] = [], known = this.store.references;
     for (const message of page.messages) this.store.sequence(thread.id, message.id);
     // A reply names the message it answers. Right under that message the quote
     // only repeats it, so it is shown when something else came in between.
@@ -154,7 +154,8 @@ export class BotBridge {
         rows.push({ seq: seq + 1, role: 'tool', name: 'send_message_to_user', content: "sent to the owner's chat", tool_call_id: callId, presentation_receipt: true, time: base.time });
       }
     }
-    this.store.save();
+    // The chat re-reads the conversation every few seconds; only a read that met new messages has something to save.
+    if (this.store.references !== known) this.store.save();
     const first = page.messages[0];
     return { messages: rows, hasMore: page.hasMore, before: first ? `${first.timelineOrderAt ?? first.timestamp}:${first.id}` : null, thread_id: thread.id,
       ...(invitation !== undefined ? { greeting: source ? { status: 'accepted', sourceMessageId: source } : { status: 'unconfirmed' } } : {}) };
