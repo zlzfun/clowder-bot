@@ -7,6 +7,12 @@ export function triggerWords(trigger: unknown): string {
   const t = record(trigger);
   if (t.type === 'once' && typeof t.fireAt === 'number')
     return new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(t.fireAt));
+  // A one-off counted from the moment it is agreed to ("3 分钟后提醒我").
+  if (t.type === 'once' && typeof t.delayMs === 'number' && t.delayMs > 0) {
+    const minutes = Math.max(1, Math.round(t.delayMs / 60000));
+    const span = minutes % 1440 === 0 ? `${minutes / 1440} 天` : minutes % 60 === 0 ? `${minutes / 60} 小时` : `${minutes} 分钟`;
+    return t.relativeTo === 'approval' ? `同意后 ${span}` : `${span}后`;
+  }
   if (t.type === 'interval' && typeof t.ms === 'number' && t.ms > 0) {
     const minutes = Math.round(t.ms / 60000);
     return minutes % 1440 === 0 ? `每 ${minutes / 1440} 天` : minutes % 60 === 0 ? `每 ${minutes / 60} 小时` : `每 ${minutes} 分钟`;
@@ -19,5 +25,5 @@ export function triggerWords(trigger: unknown): string {
     const days = match[3] === '*' ? '每天' : '每' + [...new Set(match[3]!.split(',').map(Number))].sort().map(day => weekdays[day]).join('、');
     return `${days} ${clock}${zone}`;
   }
-  return '按原生计划';
+  return '按设定的时间';
 }

@@ -239,6 +239,8 @@
       const dy = was - now;
       if (Math.abs(dy) < 1 || Math.abs(dy) > 2000) continue;
       r.classList.remove("cl-moving");
+      // A row rising to its new place passes over the rows making room (chat-presence.css).
+      r.classList.toggle("cl-rise", dy > 0);
       r.style.transform = "translateY(" + dy + "px)";
       moved.push(r);
     }
@@ -248,7 +250,7 @@
       for (const r of moved) {
         r.classList.add("cl-moving");
         r.style.transform = "";
-        const done = () => { r.classList.remove("cl-moving"); r.removeEventListener("transitionend", done); };
+        const done = () => { r.classList.remove("cl-moving", "cl-rise"); r.removeEventListener("transitionend", done); };
         r.addEventListener("transitionend", done);
         setTimeout(done, 400);
       }

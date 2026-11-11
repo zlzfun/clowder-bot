@@ -71,7 +71,10 @@ test('a pick the server accepts: one for a single choice or a confirmation, one 
 });
 
 // ------------------------------------------------------------ request cards
-const fact = (state?: string) => ({ id: 'card-1', kind: 'card', title: '提议捕捉品味信号', body: 'Taste [authentic-expression]: 回答简短、先说结论', approval: { id: 'p1', ...(state ? { state } : {}) } });
+// A request card as the server gives it: the engine's own card title and Markdown body, and the
+// chat's own words in card.approval (kind, a title without its subject, body).
+const fact = (state?: string, words: Record<string, unknown> = { kind: 'preference', title: '想记住你的一个偏好', body: '回答简短一点，先说结论' }) =>
+  ({ id: 'card-1', kind: 'card', title: '提议捕捉品味信号', body: '**猫的判断**：Taste [authentic-expression]: 回答简短、先说结论', approval: { id: 'p1', ...words, ...(state ? { state } : {}) } });
 const pref = { id: 'p1', kind: 'preference', title: '团子想记住你的一个偏好', body: '回答简短一点，先说结论', quote: '记住我喜欢简短', catName: '团子', messageId: 'm-card', approve: { label: '记住' }, reject: { label: '不用记' }, note: '', expiresAt: 0 };
 
 test('the open list is checked: open requests with their labels; anything else is dropped, never guessed', () => {
@@ -117,12 +120,10 @@ test('a request card is open with the server\'s labels, says where to go when it
   for (const v of [sent(true), sent(false), sent(null)]) assert.equal(v.tone, 'neutral', 'no outcome is claimed before the receipt');
   // The receipt on the same page names the outcome, in the request's own words.
   const done = (state: string) => R.card({ fact: fact(state), item: null, list: 'ready', seen: pref });
-  assert.deepEqual([done('approved').text, done('approved').tone], ['已记住', 'ok']);
-  assert.deepEqual([done('rejected').text, done('rejected').tone], ['没有记', 'no']);
+  assert.deepEqual([done('approved').text, done('approved').tone], ['已记住这个偏好', 'ok']);
+  assert.deepEqual([done('rejected').text, done('rejected').tone], ['没有记这个偏好', 'no']);
   assert.equal(done('closed').text, '已结束');
-  assert.equal(R.card({ fact: fact('approved') }).text, '已同意', 'without the list\'s words: plain');
-  assert.equal(R.card({ fact: fact('approved') }).what, '回答简短、先说结论', 'the engine\'s summary without its English tag');
-  assert.equal(R.outcome('schedule', 'rejected'), '没有改动');
+  assert.equal(R.card({ fact: fact('approved', {}) }).text, '已同意', 'a row without the chat\'s words: plain, and never the engine\'s');
   // No longer listed and nothing on the page says how: 已处理. A failed answer leaves the card open with the server's words.
   assert.equal(R.card({ fact: fact(), item: null, list: 'ready' }).text, '已处理');
   const failed = R.card({ fact: fact(), item: pref, list: 'ready', local: { phase: 'error', decision: 'approve', at: 5, error: { text: '这一步没有成功，还没有生效', detail: 'Vignette write failed' } } });
@@ -130,9 +131,37 @@ test('a request card is open with the server\'s labels, says where to go when it
   assert.equal(failed.actions.length, 2, 'it can be answered again');
   // Not read yet: the card without actions (none may be stale); a failed read sends to the runtime panel.
   const waiting = R.card({ fact: fact(), list: 'loading', catName: '团子' });
-  assert.deepEqual([waiting.mode, waiting.actions.length, waiting.waiting, waiting.title], ['ask', 0, '正在读取…', '团子有件事等你确认']);
-  const unread = R.card({ fact: fact(), list: 'error' });
-  assert.deepEqual([unread.mode, unread.runtime], ['line', true]);
+  assert.deepEqual([waiting.mode, waiting.actions.length, waiting.waiting, waiting.title], ['ask', 0, '正在读取…', '团子想记住你的一个偏好']);
+  const unread = R.card({ fact: fact(), list: 'error', catName: '团子' });
+  assert.deepEqual([unread.mode, unread.actions.length, unread.runtime, unread.title, unread.body], ['ask', 0, true, '团子想记住你的一个偏好', '回答简短一点，先说结论']);
+  assert.match(unread.note, /暂时读不到这件事现在的状态/);
+});
+
+// Review 2026-11-11 (frontend-r5), finding 9.
+test('after a fresh load an answered request says its real outcome in the chat\'s own words from the row; the engine\'s card title and Markdown body never become the words', () => {
+  const R = rules();
+  const schedule = { kind: 'schedule', title: '想设一个定时', body: '每周五写周报 · 每周五 17:00（Asia/Singapore）' };
+  const raw = { title: '提议创建定时任务：每周五写周报', body: '**Create schedule**: 每周五写周报\n\n`0 17 * * 5`' };
+  const row = (state?: string, words = schedule) => ({ ...fact(state, words), ...raw });
+  const done = (state: string, words = schedule) => R.card({ fact: row(state, words), list: 'idle', catName: '团子' });
+  assert.deepEqual([done('approved').text, done('approved').what, done('approved').tone], ['已设好这个定时', '每周五写周报 · 每周五 17:00（Asia/Singapore）', 'ok']);
+  assert.equal(done('rejected').text, '没有设这个定时');
+  assert.equal(done('approved', { ...schedule, title: '想取消一个定时' }).text, '已取消这个定时');
+  assert.equal(done('rejected', { ...schedule, title: '想取消一个定时' }).text, '这个定时还留着');
+  assert.equal(done('approved', { kind: 'profile', title: '想更新关于你的资料', body: '住在新加坡' }).text, '已更新关于你的资料');
+  assert.equal(done('rejected', { kind: 'person', title: '想记下一位相关的人', body: '同事小林' }).text, '没有记这个人');
+  // Still open, the list slow or unreadable: the card from the row, its subject the cat; never an action.
+  for (const list of ['idle', 'loading', 'error', 'missing']) {
+    const v = R.card({ fact: row(), list, catName: '团子' });
+    assert.deepEqual([v.mode, v.title, v.body, v.actions.length], ['ask', '团子想设一个定时', '每周五写周报 · 每周五 17:00（Asia/Singapore）', 0], list);
+  }
+  // No longer open and no receipt: neutral, still in the row's words.
+  const gone = R.card({ fact: row(), list: 'ready', catName: '团子' });
+  assert.deepEqual([gone.text, gone.what], ['已处理', '每周五写周报 · 每周五 17:00（Asia/Singapore）']);
+  // Wherever it is drawn, nothing of the engine's own wording shows.
+  const views = [done('approved'), done('rejected'), gone, R.card({ fact: row(), list: 'error', catName: '团子' })];
+  for (const v of views) assert.doesNotMatch(JSON.stringify(v), /提议|Create schedule|\*\*|`/);
+  assert.deepEqual(plain(R.wording({ kind: 'mystery', title: '' }, null, null, '')), { kind: 'other', title: '猫猫有件事等你确认', body: '', quote: '' });
 });
 
 test('expiry is said quietly and only when close; failures keep the server\'s words and the engine\'s reason apart', () => {
@@ -145,8 +174,6 @@ test('expiry is said quietly and only when close; failures keep the server\'s wo
   assert.equal(R.expiry(0, now), '');
   assert.deepEqual(plain(R.failure({ error: '这一步没有成功，还没有生效', native: { error: 'Vignette write failed', detail: 'store' } }, 'x')), { text: '这一步没有成功，还没有生效', detail: 'Vignette write failed · store' });
   assert.deepEqual(plain(R.failure({ error: 'Invalid input' }, '没能提交')), { text: '没能提交', detail: 'Invalid input' });
-  assert.equal(R.summary('Create schedule: 喝水提醒'), '喝水提醒');
-  assert.equal(R.summary('回答：先说结论'), '回答：先说结论', 'Chinese words are not a tag');
 });
 
 // ------------------------------------------------------------ choices, blocks, endings
@@ -162,7 +189,10 @@ test('a choice shows answered only from the record; a pick in flight, unsent or 
   const unrecorded = R.choice(block, { phase: 'unrecorded', text: '我选了：乙', error: { text: '暂时没能记下' } });
   assert.deepEqual([unrecorded.mode, unrecorded.busy, unrecorded.retry], ['ask', false, true]);
   assert.equal(unrecorded.note, '已经发出「我选了：乙」，但没能记下这次选择：暂时没能记下。可以再选一次。');
-  assert.equal(R.choice(block, { phase: 'refused', error: { text: '这个选项已经回答过了' } }).note, '这个选项已经回答过了');
+  assert.equal(R.choice(block, { phase: 'refused', error: { text: '同一个选项不能选两次' } }).note, '同一个选项不能选两次');
+  // Already answered (409): nothing is offered again.
+  const conflict = R.choice(block, { phase: 'conflict', ids: ['b'], error: { text: '这个选项已经回答过了' } });
+  assert.deepEqual([conflict.mode, conflict.busy, conflict.note, conflict.sending.length], ['ask', true, '这个选项已经回答过了，这里不再提供选择。', 0]);
   const many = { mode: 'multiple', max: 2, options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }, { id: 'c', label: 'C' }], answered: false, selected: [] };
   assert.deepEqual([R.choice(many, { phase: 'idle', picks: ['a', 'c'] }).full, R.choice(many, { phase: 'idle', picks: ['a', 'c'] }).ready], [true, true]);
   assert.equal(R.choice(many, { phase: 'idle', picks: [] }).ready, false);
@@ -202,29 +232,32 @@ const reply = (id: string, text = '好了', extra: Record<string, unknown> = {})
 test('notifications: nothing on first sight, a cat\'s unread latest reply or a new request elsewhere, never the chat in view, never twice', () => {
   const N = notifyRules();
   let mem = new Map();
-  const step = (data: Any, inView = '') => { const out = N.decide(mem, N.chats(data), inView); mem = out.memory; return plain(out.notes); };
-  assert.deepEqual(step(status([{ bot: '团子', activity: act({ last: reply('m1'), unread: 3 }) }])), [], 'what was there when the page opened');
-  const got = step(status([{ bot: '团子', activity: act({ last: reply('m2', '纸箱让猫觉得安全'), unread: 4 }) }]));
+  const step = (data: Any, inView = '') => { const out = N.decide(mem, N.chats(data), (key: string) => key === inView); mem = out.memory; return plain(out.notes); };
+  const tz = (activity: Any, more: Record<string, unknown> = {}) => status([{ bot: '团子', native_id: 'cat-1', activity, ...more }]);
+  assert.deepEqual(step(tz(act({ last: reply('m1'), unread: 3 }))), [], 'what was there when the page opened');
+  const got = step(tz(act({ last: reply('m2', '纸箱让猫觉得安全'), unread: 4 })));
   assert.equal(got.length, 1);
-  assert.deepEqual([got[0].kind, got[0].key, got[0].messageId, got[0].text, got[0].tag], ['reply', 'bot:团子', 'm2', '纸箱让猫觉得安全', 'reply:m2']);
-  assert.deepEqual(step(status([{ bot: '团子', activity: act({ last: reply('m2'), unread: 4 }) }])), [], 'never twice');
-  assert.deepEqual(step(status([{ bot: '团子', activity: act({ last: reply('m3'), unread: 1 }) }]), 'bot:团子'), [], 'the chat in view');
-  assert.deepEqual(step(status([{ bot: '团子', activity: act({ last: reply('m4', '读过了'), unread: 0 }) }])), [], 'already read');
-  assert.deepEqual(step(status([{ bot: '团子', activity: act({ last: { ...reply('m5'), from: 'owner' }, unread: 0 }) }])), [], 'the owner\'s own words');
-  assert.deepEqual(step(status([{ bot: '团子', activity: null }])), [], 'a chat it could not read changes nothing');
-  assert.deepEqual(step(status([{ bot: '团子', activity: act({ last: reply('m5'), unread: 1 }) }])), [], 'the same latest line after a failed read is not new');
-  // A new request: once, by its own ID; in a group too.
+  assert.deepEqual([got[0].kind, got[0].key, got[0].id, got[0].nativeId, got[0].messageId, got[0].text, got[0].tag], ['reply', 'bot:cat-1', '团子', 'cat-1', 'm2', '纸箱让猫觉得安全', 'msg:m2']);
+  assert.deepEqual(step(tz(act({ last: reply('m2'), unread: 4 }))), [], 'never twice');
+  assert.deepEqual(step(tz(act({ last: reply('m3'), unread: 1 })), 'bot:cat-1'), [], 'the chat in view');
+  assert.deepEqual(step(tz(act({ last: reply('m4', '读过了'), unread: 0 }))), [], 'already read');
+  assert.deepEqual(step(tz(act({ last: { ...reply('m5'), from: 'owner' }, unread: 0 }))), [], 'the owner\'s own words');
+  assert.deepEqual(step(tz(null)), [], 'a chat it could not read changes nothing');
+  assert.deepEqual(step(tz(act({ last: reply('m5'), unread: 1 }))), [], 'the same latest line after a failed read is not new');
+  // A new request: once; in a group too.
   const ask = { id: 'approval:F221:p9', kind: 'approval', label: '等你确认：x', catName: '年糕', messageId: 'mc', proposalId: 'p9' };
   assert.deepEqual(step(status([], [{ id: 'g1', activity: act({ threadId: 'tg' }) }])), []);
   const asked = step(status([], [{ id: 'g1', activity: act({ threadId: 'tg', items: [ask] }) }]));
-  assert.deepEqual([asked[0].kind, asked[0].key, asked[0].proposalId, asked[0].tag], ['approval', 'group:g1', 'p9', 'approval:p9']);
+  assert.deepEqual([asked[0].kind, asked[0].key, asked[0].proposalId, asked[0].tag], ['approval', 'group:g1', 'p9', 'msg:mc']);
   assert.deepEqual(step(status([], [{ id: 'g1', activity: act({ threadId: 'tg', items: [ask] }) }])), []);
-  // A request whose card message is the chat's latest line: one note for the request, none for the card's raw words.
+  // A request whose card message is the chat's latest line: one note for the request, none for the card.
   const ask2 = { ...ask, id: 'approval:F139:p10', proposalId: 'p10', messageId: 'mc2' };
-  const both = step(status([], [{ id: 'g1', activity: act({ threadId: 'tg', items: [ask, ask2], last: reply('mc2', '提议新建定时任务：Create schedule: 喝水'), unread: 2 }) }]));
-  assert.deepEqual(both.map((n: Any) => n.kind), ['approval']);
+  const both = step(status([], [{ id: 'g1', activity: act({ threadId: 'tg', items: [ask, ask2], last: reply('mc2', '想设一个定时：喝水'), unread: 2 }) }]));
+  assert.deepEqual(both.map((n: Any) => [n.kind, n.tag]), [['approval', 'msg:mc2']]);
   // Another conversation of the same cat: only remembered.
-  assert.deepEqual(step(status([{ bot: '团子', activity: act({ threadId: 't2', last: reply('old'), unread: 9 }) }])), []);
+  assert.deepEqual(step(tz(act({ threadId: 't2', last: reply('old'), unread: 9 }))), []);
+  // A reminder that came due is a line of its own, never the latest line: the cat's reply that follows is told once.
+  assert.deepEqual(step(tz(act({ threadId: 't2', last: reply('after-reminder', '起来走走吧'), unread: 10 }))).map((n: Any) => n.text), ['起来走走吧']);
   // Words: the cat's name (and the group's), the reply's first line or files, or what waits.
   assert.deepEqual(plain(N.words(got[0], '')), { title: '团子', body: '纸箱让猫觉得安全' });
   assert.deepEqual(plain(N.words({ ...asked[0] }, '周末小组')), { title: '年糕 · 周末小组', body: '有件事等你确认' });
@@ -237,6 +270,43 @@ test('notifications: nothing on first sight, a cat\'s unread latest reply or a n
   assert.equal(N.asked('denied').on, false);
   assert.match(N.asked('denied').said, /浏览器拒绝了通知/);
   assert.match(N.asked('default').said, /没有得到浏览器的允许/);
+  assert.match(N.asked('granted', false).said, /^已打开。这个浏览器没能记住这个设置/);
+  assert.match(N.turnedOff(false), /^已关闭。这个浏览器没能记住这个设置/);
+});
+
+// Review 2026-11-11 (frontend-r5), findings 5, 7 and 8.
+test('notifications know a cat by its native ID, take the first successful read of each part as what was already there, and never tell one request twice when its approvals could not be read', () => {
+  const N = notifyRules();
+  let mem = new Map();
+  const step = (data: Any) => { const out = N.decide(mem, N.chats(data), () => false); mem = out.memory; return plain(out.notes); };
+  const cat = (name: string, activity: Any) => status([{ bot: name, native_id: 'cat-1', activity }]);
+  // Finding 5: renamed between reads, the same cat; a click finds it by its native ID.
+  step(cat('团子', act({ last: reply('m1'), unread: 1 })));
+  const renamed = step(cat('大团子', act({ last: reply('m2', '还在'), unread: 2 })));
+  assert.deepEqual(renamed.map((n: Any) => [n.key, n.id, n.nativeId]), [['bot:cat-1', '大团子', 'cat-1']], 'the rename is not a first sight, and the note carries the stable ID');
+  // Finding 7: the first reads fail; the first successful one only remembers what was there.
+  mem = new Map();
+  const ask = { id: 'approval:F139:p1', kind: 'approval', label: '等你确认', catName: '团子', messageId: 'm-card', proposalId: 'p1' };
+  assert.deepEqual(step(cat('团子', act({ readStatus: 'unavailable', unread: null, items: [], errors: [{ source: 'thread', message: 'x' }] }))), []);
+  assert.deepEqual(step(cat('团子', null)), []);
+  assert.deepEqual(step(cat('团子', act({ last: reply('already-there'), unread: 5, items: [ask] }))), [], 'already there before the first successful read');
+  // Approvals failing at first while messages read: the approvals' own first success is only a baseline too.
+  mem = new Map();
+  step(cat('团子', act({ readStatus: 'partial', errors: [{ source: 'approvals', message: 'x' }], last: reply('m0'), unread: 0 })));
+  assert.deepEqual(step(cat('团子', act({ last: reply('m0'), unread: 0, items: [ask] }))), [], 'a request that was already waiting is not news');
+  // Finding 8: the approvals cannot be read when a request's card message arrives: it waits for them, then is told once, as the request.
+  mem = new Map();
+  step(cat('团子', act({ last: reply('m0'), unread: 0 })));
+  const partial = act({ readStatus: 'partial', errors: [{ source: 'approvals', message: 'x' }], last: reply('m-card', '想设一个定时：每周五写周报'), unread: 1 });
+  assert.deepEqual(step(cat('团子', partial)), [], 'not told as a reply while the approvals are unknown');
+  const told = step(cat('团子', act({ last: reply('m-card', '想设一个定时：每周五写周报'), unread: 1, items: [ask] })));
+  assert.deepEqual(told.map((n: Any) => [n.kind, n.tag]), [['approval', 'msg:m-card']]);
+  assert.deepEqual(step(cat('团子', act({ last: reply('m-card'), unread: 1, items: [ask] }))), []);
+  // An ordinary reply while the approvals stay unreadable is told after a short wait, not never.
+  const later = (id: string) => act({ readStatus: 'partial', errors: [{ source: 'approvals', message: 'x' }], last: reply(id, '普通回复'), unread: 2 });
+  assert.deepEqual(step(cat('团子', later('m9'))), []);
+  assert.deepEqual(step(cat('团子', later('m9'))), []);
+  assert.deepEqual(step(cat('团子', later('m9'))).map((n: Any) => [n.kind, n.tag]), [['reply', 'msg:m9']]);
 });
 
 // ---------------------------------------------------------------- small DOM
@@ -464,9 +534,13 @@ test('a request card is drawn at its message, answered in place, and settles onl
   assert.equal(p.reloads(), 1, 'the conversation is read again for the receipt');
   // The receipt arrives on the same page: the card names the outcome, the receipt is a quiet line.
   p.draw([...history.slice(0, 2), cardMessage('approved'), { id: 'n1', role: 'assistant', notice: true, content: '已记住这个偏好。' }]);
-  assert.match(p.row('m-card').textContent, /已记住 · 回答简短一点，先说结论/);
+  assert.match(p.row('m-card').textContent, /已记住这个偏好 · 回答简短一点，先说结论/);
   const notice = p.row('n1');
   assert.deepEqual([notice.className, notice.textContent], ['sysline ck-notice', '已记住这个偏好。']);
+  // A reminder that came due: the same kind of line, a little more present (the alarm clock), still no speaker.
+  p.draw([...history.slice(0, 2), cardMessage('approved'), { id: 'n2', role: 'assistant', notice: true, reminder: true, content: '提醒：该站起来活动一下了！' }]);
+  const due = p.row('n2');
+  assert.deepEqual([due.className, due.textContent, due.querySelector('svg')!.dataset.icon], ['sysline ck-notice ck-reminder', '提醒：该站起来活动一下了！', 'alarm-clock']);
   assert.ok(p.row('u1') === before[0] && p.row('r1') === before[1], 'the rows above stayed');
 });
 
@@ -524,10 +598,6 @@ test('a request that cannot be agreed here shows its note and the runtime panel,
   assert.ok(card.classList.contains('ck-hit'));
   assert.equal(p.doc.activeElement, card);
   assert.equal(p.cards.find({ proposalId: 'gone', messageId: 'nowhere' }), false);
-  // The status line's label: the server's everyday words stay; an engine tag gives way to the card's title or the plain words.
-  assert.equal(p.cards.label({ proposalId: 'p1', label: '等你确认：设一个定时「喝水提醒」' }), '');
-  assert.equal(p.cards.label({ proposalId: 'p1', label: '等你确认：Taste [x]: 回答简短' }), '团子想记住你的一个偏好');
-  assert.equal(p.cards.label({ proposalId: 'p8', label: '等你确认：Create schedule: 喝水提醒' }), '等你确认：喝水提醒');
 });
 
 const choiceMessage = (block: Any) => ({ id: 'm-pick', role: 'assistant', content: '你想要哪一种？', native: { replyTo: 'u1' }, blocks: [block] });
@@ -579,8 +649,29 @@ test('a pick that did not go out, or went out but was not recorded, stays answer
   assert.deepEqual(p.posts[1].body, { selectedIds: ['home'], expectedThreadId: 't1' });
   p.posts[1].answer({ status: 409, body: { error: '这个选项已经回答过了' } });
   await settle();
-  assert.match(box().textContent, /这个选项已经回答过了/);
+  assert.match(box().textContent, /这个选项已经回答过了，这里不再提供选择。/);
   assert.equal(p.reloads(), 1, 'the conversation is read again so the block shows its recorded answer');
+  // Review 2026-11-11 (frontend-r5), finding 2: after the conflict a click sends no second message.
+  assert.ok(box().querySelectorAll('button.ask-opt').every(b => b.getAttribute('aria-disabled') === 'true'), 'nothing offered');
+  box().querySelectorAll('button.ask-opt')[1].click();
+  assert.equal(p.sends.length, 2, 'no further chat message after the server said it was answered');
+  assert.equal(p.posts.length, 2);
+  // A later drawing of the same (stale) record, e.g. a cached earlier page, still offers nothing.
+  p.draw([choiceMessage(weekend)]);
+  box().querySelectorAll('button.ask-opt')[0].click();
+  assert.equal(p.sends.length, 2);
+  // A read that brings the record shows the answer.
+  p.draw([choiceMessage({ ...weekend, answered: true, selected: ['park'] })]);
+  assert.ok(box().classList.contains('done'));
+  assert.match(box().textContent, /🌳 去公园/);
+  // A 409 because the conversation moved is not that: the pick stays open.
+  const moved = page();
+  moved.draw([choiceMessage(weekend)]);
+  moved.row('m-pick').querySelectorAll('button.ask-opt')[0].click();
+  moved.sends[0].sent();
+  moved.posts[0].answer({ status: 409, body: { error: '会话已变化，请刷新后重试' } });
+  await settle();
+  assert.ok(moved.row('m-pick').querySelectorAll('button.ask-opt').every(b => b.getAttribute('aria-disabled') !== 'true'));
   // The typed option: its own words, Enter sends them.
   const q = page();
   q.draw([choiceMessage(weekend)]);
@@ -664,82 +755,258 @@ test('an unfinished reply ends quietly: 详情 shows the engine\'s reason verbat
 });
 
 // ---------------------------------------------------------------- notifications page
-function notifyPage(opts: { permission?: string; supported?: boolean; answer?: string } = {}) {
-  const doc = new Doc();
-  const pane = doc.createElement('div');
-  pane.setAttribute('data-spane', 'general');
-  doc.body.append(pane);
-  const shown: Array<{ title: string; opts: Any; n: Any }> = [];
-  const store = new Map<string, string>();
-  let asked = 0;
-  function Notification(this: Any, title: string, o: Any) { this.closed = false; this.close = () => { this.closed = true; }; shown.push({ title, opts: o, n: this }); }
-  (Notification as Any).permission = opts.permission ?? 'default';
-  (Notification as Any).requestPermission = () => { asked++; (Notification as Any).permission = opts.answer ?? 'granted'; return Promise.resolve(opts.answer ?? 'granted'); };
-  let focused = 0;
-  const window: Any = { localStorage: { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => store.set(k, v) }, focus: () => { focused++; } };
-  if (opts.supported !== false) window.Notification = Notification;
-  const context = vm.createContext({ window, document: doc, console, JSON, Promise });
-  for (const f of ['chat-notify-rules.js', 'chat-notify.js']) vm.runInContext(read('client/public/' + f), context);
-  const opened: Any[] = [];
-  let sel: Any = { type: 'bot', id: '栗子' };
-  window.ClowderNotify.init({ selection: () => sel, open: (note: Any) => opened.push(note), chatName: () => '' });
-  const toggle = pane.querySelector('[role=switch]')!;
-  const said = pane.querySelector('.ck-notify-said')!;
-  return { doc, pane, toggle, said, shown, store, opened, notify: window.ClowderNotify, asked: () => asked, focused: () => focused, select: (s: Any) => { sel = s; } };
+// One browser with any number of tabs of this page: each tab is its own VM
+// with its own DOM, and they share what a browser shares between tabs. Its
+// storage is kept per tab and reaches the other tabs a moment later (as
+// localStorage does between tab processes), and can be made to fail;
+// BroadcastChannel delivers a tick later; navigator.locks is a real mutex.
+function browser(opts: { permission?: string; answer?: string; supported?: boolean; failing?: boolean; locks?: boolean } = {}) {
+  const tabs: Any[] = [];
+  const shown: Array<{ tab: number; title: string; opts: Any; n: Any }> = [];
+  const lag = 30;
+  let failing = !!opts.failing, asked = 0, perm = opts.permission ?? 'default';
+  const channels: Any[] = [];
+  const queue = new Map<string, Promise<unknown>>();
+  const locks = { request: (name: string, fn: () => unknown) => { const run = (queue.get(name) ?? Promise.resolve()).then(() => fn()); queue.set(name, run.catch(() => {})); return run; } };
+  function tab(over: { visible?: boolean; sel?: Any; stored?: Record<string, string> } = {}) {
+    const index = tabs.length;
+    const doc = new Doc();
+    doc.visibilityState = over.visible === false ? 'hidden' : 'visible';
+    const pane = doc.createElement('div');
+    pane.setAttribute('data-spane', 'general');
+    doc.body.append(pane);
+    const local = new Map<string, string>(Object.entries(over.stored ?? {}));
+    const winListeners: Record<string, Array<(ev: Any) => void>> = {};
+    function Notification(this: Any, title: string, o: Any) { this.closed = false; this.close = () => { this.closed = true; }; shown.push({ tab: index, title, opts: o, n: this }); }
+    Object.defineProperty(Notification, 'permission', { get: () => perm });
+    (Notification as Any).requestPermission = () => { asked++; perm = opts.answer ?? 'granted'; return Promise.resolve(perm); };
+    class Channel { onmessage: ((ev: Any) => void) | null = null; constructor() { channels.push({ tab: index, ch: this }); }
+      postMessage(data: unknown) { for (const c of channels) if (c.tab !== index) setTimeout(() => c.ch.onmessage?.({ data: plain(data) }), 0); } }
+    let focused = 0;
+    const window: Any = {
+      localStorage: {
+        getItem: (k: string) => local.get(k) ?? null,
+        setItem: (k: string, v: string) => {
+          if (failing) throw new Error('QuotaExceededError');
+          local.set(k, v);
+          for (const t of tabs) if (t.index !== index) setTimeout(() => { t.local.set(k, v); for (const fn of t.winListeners.storage ?? []) fn({ key: k, newValue: v }); }, lag);
+        },
+      },
+      focus: () => { focused++; },
+      addEventListener: (type: string, fn: (ev: Any) => void) => { (winListeners[type] ??= []).push(fn); },
+      BroadcastChannel: Channel,
+    };
+    if (opts.supported !== false) window.Notification = Notification;
+    const navigator = opts.locks === false ? {} : { locks };
+    const context = vm.createContext({ window, document: doc, navigator, console, JSON, Promise, setTimeout, Date, Math });
+    for (const f of ['chat-notify-rules.js', 'chat-notify.js']) vm.runInContext(read('client/public/' + f), context);
+    const opened: Any[] = [];
+    let sel: Any = over.sel ?? null, signedIn = true;
+    window.ClowderNotify.init({ selection: () => sel, signedIn: () => signedIn, open: (note: Any) => opened.push(note), chatName: () => '' });
+    const t = {
+      index, doc, local, winListeners, opened, notify: window.ClowderNotify,
+      pane, toggle: pane.querySelector('[role=switch]')!, said: pane.querySelector('.ck-notify-said')!,
+      focused: () => focused, select: (x: Any) => { sel = x; t.notify.tell(); }, signOut: () => { signedIn = false; t.notify.reset(); },
+      show: (state: 'visible' | 'hidden') => { doc.visibilityState = state; doc.dispatch(doc.body, new Ev('visibilitychange')); },
+    };
+    tabs.push(t);
+    return t;
+  }
+  return { tab, tabs, shown, asked: () => asked, fail: (on: boolean) => { failing = on; } };
 }
+const wait = (ms: number) => new Promise((done) => setTimeout(done, ms));
+const tuanzi = (id: string, unread = 1, text = '纸箱让猫觉得安全又暖和') => ({ bots: [{ bot: '团子', native_id: 'cat-1', activity: act({ last: reply(id, text), unread }) }], groups: [] });
 
 test('the switch asks the browser only when turned on, says plainly when it refused or cannot, and is remembered', async () => {
-  const p = notifyPage();
+  const b = browser();
+  const p = b.tab();
   assert.equal(p.toggle.getAttribute('aria-checked'), 'false');
   assert.match(p.pane.textContent, /桌面通知/);
   p.toggle.click();
   await settle();
-  assert.equal(p.asked(), 1);
-  assert.deepEqual([p.toggle.getAttribute('aria-checked'), p.store.get('clowder-bot:notify'), p.said.textContent], ['true', 'on', '已打开。']);
+  assert.equal(b.asked(), 1);
+  assert.deepEqual([p.toggle.getAttribute('aria-checked'), p.local.get('clowder-bot:notify'), p.said.textContent], ['true', 'on', '已打开。']);
   assert.equal(p.notify.wanted(), true);
   p.toggle.click();
-  assert.deepEqual([p.toggle.getAttribute('aria-checked'), p.store.get('clowder-bot:notify')], ['false', 'off']);
-  const refused = notifyPage({ answer: 'denied' });
+  assert.deepEqual([p.toggle.getAttribute('aria-checked'), p.local.get('clowder-bot:notify'), p.said.textContent], ['false', 'off', '已关闭。']);
+  const refused = browser({ answer: 'denied' }).tab();
   refused.toggle.click();
   await settle();
   assert.equal(refused.toggle.getAttribute('aria-checked'), 'false');
   assert.match(refused.said.textContent, /浏览器拒绝了通知/);
-  const blocked = notifyPage({ permission: 'denied' });
+  const blockedBrowser = browser({ permission: 'denied' });
+  const blocked = blockedBrowser.tab();
   blocked.toggle.click();
   await settle();
-  assert.equal(blocked.asked(), 0, 'a refusal is not asked again behind the owner\'s back');
+  assert.equal(blockedBrowser.asked(), 0, 'a refusal is not asked again behind the owner\'s back');
   assert.match(blocked.said.textContent, /浏览器拒绝了通知/);
-  const none = notifyPage({ supported: false });
+  const none = browser({ supported: false }).tab();
   assert.match(none.said.textContent, /这个浏览器不支持桌面通知/);
   none.toggle.click();
   assert.equal(none.toggle.getAttribute('aria-checked'), 'false');
 });
 
+// Review 2026-11-11 (frontend-r5), finding 3.
+test('when the browser cannot remember the switch, it still does what it says on this page and says it was not remembered', async () => {
+  // On from before, then the browser stops keeping anything: 已关闭 really turns it off.
+  const b = browser({ permission: 'granted' });
+  const p = b.tab({ stored: { 'clowder-bot:notify': 'on' } });
+  assert.equal(p.notify.wanted(), true);
+  b.fail(true);
+  p.toggle.click();
+  assert.equal(p.notify.wanted(), false, 'off on this page (and the hidden tab stops reading every 6 s)');
+  assert.equal(p.toggle.getAttribute('aria-checked'), 'false');
+  assert.match(p.said.textContent, /^已关闭。这个浏览器没能记住这个设置/);
+  p.notify.observe(tuanzi('m1'));
+  p.notify.observe(tuanzi('m2'));
+  await wait(10);
+  assert.equal(b.shown.length, 0, 'and nothing is shown');
+  // Turning on with a browser that keeps nothing: on for this page, said plainly.
+  const c = browser({ permission: 'granted', failing: true });
+  const q = c.tab();
+  q.toggle.click();
+  await settle();
+  assert.equal(q.notify.wanted(), true);
+  assert.match(q.said.textContent, /^已打开。这个浏览器没能记住这个设置/);
+});
+
 test('a notification repeats the polled status: the cat\'s name and the reply\'s first line, silent, once; a click focuses the tab and opens that chat; never while off or for the chat in view', async () => {
-  const p = notifyPage({ permission: 'granted' });
-  const data = (id: string, unread = 1) => ({ bots: [{ bot: '团子', activity: act({ last: reply(id, '纸箱让猫觉得安全又暖和'), unread }) }], groups: [] });
-  p.notify.observe(data('m1'));
-  p.notify.observe(data('m2'));
-  assert.equal(p.shown.length, 0, 'off: nothing');
-  p.store.set('clowder-bot:notify', 'on');
-  p.notify.observe(data('m3'));
-  assert.equal(p.shown.length, 1);
-  assert.deepEqual([p.shown[0].title, p.shown[0].opts.body, p.shown[0].opts.silent, p.shown[0].opts.tag], ['团子', '纸箱让猫觉得安全又暖和', true, 'clowder-bot:reply:m3']);
-  p.notify.observe(data('m3'));
-  assert.equal(p.shown.length, 1, 'never twice');
-  p.shown[0].n.onclick();
-  assert.deepEqual([p.focused(), p.opened[0].key, p.shown[0].n.closed], [1, 'bot:团子', true]);
+  const b = browser({ permission: 'granted' });
+  const p = b.tab({ sel: { type: 'bot', id: '栗子', nativeId: 'cat-2' } });
+  p.notify.observe(tuanzi('m1'));
+  p.notify.observe(tuanzi('m2'));
+  await wait(10);
+  assert.equal(b.shown.length, 0, 'off: nothing');
+  p.toggle.click();
+  await settle();
+  p.notify.observe(tuanzi('m3'));
+  await wait(10);
+  assert.equal(b.shown.length, 1);
+  assert.deepEqual([b.shown[0].title, b.shown[0].opts.body, b.shown[0].opts.silent, b.shown[0].opts.tag], ['团子', '纸箱让猫觉得安全又暖和', true, 'clowder-bot:msg:m3']);
+  p.notify.observe(tuanzi('m3'));
+  await wait(300);
+  assert.equal(b.shown.length, 1, 'never twice');
+  b.shown[0].n.onclick();
+  assert.deepEqual([p.focused(), p.opened[0].key, p.opened[0].nativeId, b.shown[0].n.closed], [1, 'bot:cat-1', 'cat-1', true]);
   // The chat in view: nothing; the same chat while the tab is hidden: yes.
-  p.select({ type: 'bot', id: '团子' });
-  p.notify.observe(data('m4'));
-  assert.equal(p.shown.length, 1);
-  p.doc.visibilityState = 'hidden';
-  p.notify.observe(data('m5'));
-  assert.equal(p.shown.length, 2);
-  // Another tab already announced it (this browser's short list): not again.
-  p.store.set('clowder-bot:notified', JSON.stringify(['reply:m6']));
-  p.notify.observe(data('m6'));
-  assert.equal(p.shown.length, 2);
+  p.select({ type: 'bot', id: '团子', nativeId: 'cat-1' });
+  p.notify.observe(tuanzi('m4'));
+  await wait(300);
+  assert.equal(b.shown.length, 1);
+  p.show('hidden');
+  p.notify.observe(tuanzi('m5'));
+  await wait(300);
+  assert.equal(b.shown.length, 2);
+});
+
+// Review 2026-11-11 (frontend-r5), finding 4.
+test('a status read that began before signing out never notifies after it', async () => {
+  const b = browser({ permission: 'granted' });
+  const p = b.tab({ stored: { 'clowder-bot:notify': 'on' } });
+  p.notify.observe(tuanzi('m1'), p.notify.ticket());
+  const before = p.notify.ticket();
+  p.signOut();
+  p.notify.observe(tuanzi('m2', 3, '私人的话'), before);
+  p.notify.observe(tuanzi('m3', 3, '私人的话'));
+  await wait(300);
+  assert.equal(b.shown.length, 0, 'neither the late answer nor any read while signed out');
+});
+
+// Review 2026-11-11 (frontend-r5), finding 6.
+test('tabs of the page agree: no notification for a chat open in another visible tab, and one note is shown by one tab only', async () => {
+  const b = browser({ permission: 'granted' });
+  const on = { 'clowder-bot:notify': 'on' };
+  const shown = b.tab({ visible: true, sel: { type: 'bot', id: '团子', nativeId: 'cat-1' }, stored: on });
+  const hidden = b.tab({ visible: false, sel: { type: 'bot', id: '团子', nativeId: 'cat-1' }, stored: on });
+  for (const t of [shown, hidden]) t.notify.observe(tuanzi('m1'));
+  await wait(20);
+  // The visible tab shows 团子: the hidden tab hears it and stays quiet.
+  hidden.notify.observe(tuanzi('m2'));
+  shown.notify.observe(tuanzi('m2'));
+  await wait(300);
+  assert.equal(b.shown.length, 0, 'the owner is looking at that chat in the other tab');
+  // The visible tab moves to another chat: now a reply in 团子 is news, shown once.
+  shown.select({ type: 'bot', id: '栗子', nativeId: 'cat-2' });
+  await wait(20);
+  hidden.notify.observe(tuanzi('m3'));
+  shown.notify.observe(tuanzi('m3'));
+  await wait(400);
+  assert.equal(b.shown.length, 1, 'one note, though both tabs saw it');
+  // Both tabs hidden and reading at the same moment: still one (they take turns; storage alone lags between tabs).
+  shown.show('hidden');
+  await wait(20);
+  hidden.notify.observe(tuanzi('m4'));
+  shown.notify.observe(tuanzi('m4'));
+  await wait(700);
+  assert.deepEqual(b.shown.map((n) => n.opts.tag), ['clowder-bot:msg:m3', 'clowder-bot:msg:m4']);
+});
+
+// ---------------------------------------------------------------- the real send path
+// app.js's own sendText, run with the shell around it faked: a choice's pick
+// and 再发一次 go through it with a card of their own (chat-cards.js hands
+// `{ sent }`), and leave the composer's draft and quote alone.
+// Review 2026-11-11 (frontend-r5), findings 1 and 10.
+function sendPath(opts: { fail?: boolean } = {}) {
+  const app = read('client/public/app.js');
+  const code = /\n {2}async function sendText\([^)]*\) \{\n[\s\S]*?\n {2}\}\n/.exec(app);
+  assert.ok(code, 'sendText is where the shell keeps it');
+  const doc = new Doc();
+  const calls: Any = { posts: [] as Any[], clearQuote: 0, composerSet: [] as string[], giveBack: 0, quoteBar: 0 };
+  let draft = '我正在写的话';
+  const state: Any = { sel: { type: 'bot', id: '团子' }, replyTo: { seq: 7, thread: 't1' }, pendingSends: [], replyErrors: [], streaming: 0, threadLoad: 0, sig: 'x' };
+  const h = (tag: string, cls = '', text?: string) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const out: Any = {};
+  vm.runInNewContext(code![0] + 'out.sendText = sendText;', {
+    out, state, document: doc, setTimeout, JSON,
+    clearQuote: () => { calls.clearQuote++; state.replyTo = null; },
+    requestKey: () => 'key-1',
+    optimisticMessage: (text: string) => {
+      const row = h('div', 'msg user optimistic'), col = h('div', 'bubble-col');
+      col.append(h('div', 'bubble', text), h('div', 'send-state', '发送中'));
+      row.append(col);
+      doc.body.append(row);
+      return row;
+    },
+    ownerSends: () => 0, announceSend: () => {},
+    live: { expect: () => ({ accept() {}, drop() {} }) }, botCatId: () => 'cat-1',
+    workspace: { threadId: () => 't1', giveBack: () => false },
+    apiFetch: async (_path: string, opt: Any) => {
+      calls.posts.push(JSON.parse(opt.body));
+      if (opts.fail) throw new Error('连不上 clowder-bot');
+      return { ok: true, status: 200, headers: { get: () => 'application/json' }, json: async () => ({ userMessageId: 'u-9' }), text: async () => '' };
+    },
+    liveRules: { receipt: (data: Any) => ({ userMessageId: data.userMessageId || '', error: '' }) },
+    loadThread: async () => {}, authenticated: true, sessionStorage: { setItem() {} },
+    chatList: { giveBack: () => { calls.giveBack++; } },
+    setStatus: () => {}, el: h, zhError: (m: string) => m, errorDetails: () => {}, thread: doc.body,
+    paintQuoteBar: () => { calls.quoteBar++; },
+    composerText: () => draft, composerSet: (t: string) => { calls.composerSet.push(t); draft = t; },
+    composerRefreshHeight: () => {}, syncComposer: () => {}, composerCaretTo: () => {}, input: {},
+  });
+  return { send: out.sendText, calls, state, draft: () => draft, doc };
+}
+
+test('a card\'s own words go out through the real send path without taking the composer\'s quote or draft, and stay with the card when they do not go out', async () => {
+  const ok = sendPath();
+  let sent = 0;
+  await ok.send('我选 🌳 去公园', null, null, null, { sent: () => { sent++; } });
+  assert.equal(sent, 1, 'told once the server took it');
+  assert.equal(ok.calls.posts.length, 1);
+  assert.equal('reply_to' in ok.calls.posts[0], false, 'the composer\'s quote is not the pick\'s');
+  assert.deepEqual([ok.calls.clearQuote, ok.state.replyTo, ok.draft()], [0, { seq: 7, thread: 't1' }, '我正在写的话'], 'quote and draft stay with the composer');
+  // Not sent: the words do not land in the composer or the chat's draft; the bubble says so.
+  const bad = sendPath({ fail: true });
+  let told = 0;
+  await bad.send('再发一次的话', null, null, null, { sent: () => { told++; } });
+  assert.equal(told, 0);
+  assert.deepEqual([bad.calls.composerSet, bad.calls.giveBack, bad.calls.clearQuote, bad.state.replyTo, bad.draft()], [[], 0, 0, { seq: 7, thread: 't1' }, '我正在写的话']);
+  assert.match(bad.doc.body.textContent, /没发出去$/);
+  // The composer's own send still takes its quote (nothing changed for it).
+  const own = sendPath();
+  await own.send('我自己写的话', null, null, null);
+  assert.deepEqual([own.calls.posts[0].reply_to, own.calls.clearQuote], [7, 1]);
+  // And chat-cards.js is handed exactly that path.
+  assert.match(read('client/public/app.js'), /send: \(text, sent\) => sendText\(text, null, null, null, \{ sent \}\),/);
 });
 
 // ---------------------------------------------------------------- wiring
@@ -750,7 +1017,8 @@ test('the page loads the round\'s scripts before app.js and its styles just befo
   assert.ok(at('chat-live.js') < at('chat-cards-rules.js') && at('chat-cards-rules.js') < at('chat-cards.js') && at('chat-cards.js') < at('app.js'));
   assert.ok(at('chat-notify-rules.js') < at('chat-notify.js') && at('chat-notify.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
-  assert.deepEqual(styles.slice(-2), ['chat-cards.css', 'chat-live.css']);
+  // Only 活起来's styles (chat-presence.css) sit between them.
+  assert.deepEqual(styles.slice(-3), ['chat-cards.css', 'chat-presence.css', 'chat-live.css']);
   // Both histories: words, blocks and the ending through chat-cards.js; frames filled right after each keyed commit.
   assert.equal((app.match(/cards\.words\(m, isSilent\(/g) || []).length, 2);
   assert.equal((app.match(/cards\.blocks\(body, m, messages, (true|false)\);/g) || []).length, 2);
@@ -758,13 +1026,18 @@ test('the page loads the round\'s scripts before app.js and its styles just befo
   assert.equal((app.match(/const shown = live\.commit\(inner, [^\n]+\);\n\s+cards\.rendered\(\);/g) || []).length, 2);
   assert.equal((app.match(/cards\.notice\(m, /g) || []).length, 2);
   assert.equal((app.match(/cards\.observe\(selection, /g) || []).length, 2);
-  assert.match(app, /cards\.select\(state\.sel\);/);
-  assert.match(app, /notify\.observe\(data\);/);
-  // A pick and 再发一次 use the normal send path, told when the server took the message.
-  assert.match(app, /async function sendText\(text, pending, images, files, sent\)/);
-  assert.match(app, /markSent\(\);\n\s+try \{ if \(sent\) sent\(\); \}/);
-  assert.match(app, /send: \(text, sent\) => sendText\(text, null, null, null, sent\)/);
+  assert.match(app, /cards\.select\(state\.sel\);\n\s+notify\.tell\(\);/);
+  // Notifications: a status read belongs to the sign-in it began in; signing out resets them (findings 4, 5).
+  assert.match(app, /const notifyTicket = notify\.ticket\(\);\n[^\n]*\n\s+try \{ data = await api\("\/xbot-api\/bots\/status"\)/);
+  assert.match(app, /notify\.observe\(data, notifyTicket\);/);
+  assert.match(app, /authenticated = false;\n\s+notify\.reset\(\);/);
+  assert.match(app, /signedOut: \(\) => \{ forgetOwner\(\); authenticated = false; notify\.reset\(\);/);
+  assert.match(app, /String\(b\.native_id \|\| b\.id \|\| ""\) === note\.nativeId/);
+  // A pick and 再发一次 use the normal send path with a card of their own, told when the server took the message.
+  assert.match(app, /async function sendText\(text, pending, images, files, card\)/);
+  assert.match(app, /markSent\(\);\n\s+try \{ if \(card && card\.sent\) card\.sent\(\); \}/);
   assert.match(app, /confirm: \(item\) => cards\.find\(item\)/);
+  assert.doesNotMatch(app + read('client/public/chat-experience.js'), /approvalLabel/, 'the server names waiting requests in everyday words now');
   // Notifications never touch the document title (the contact list owns its count).
   for (const f of ['chat-notify.js', 'chat-notify-rules.js', 'chat-cards.js']) assert.doesNotMatch(read('client/public/' + f), /document\.title/);
   // Only existing tokens; everyday words only.

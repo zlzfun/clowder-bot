@@ -152,8 +152,6 @@
         if (gen !== S.gen || req !== S.req) return;
         const a = X.activity(data);
         if (!a) throw Object.assign(new Error("状态的返回格式无法识别"), { status: 0 });
-        // A waiting request is named as its card in the chat names it, once that is known (chat-cards.js).
-        if (H.approvalLabel) for (const i of a.items) if (i.kind === "approval") i.label = H.approvalLabel(i) || i.label;
         // Another thread's state never shows here; the transcript names the
         // thread and the next read asks again.
         if (S.threadId && a.threadId && a.threadId !== S.threadId) { S.at = 0; return; }
