@@ -89,6 +89,20 @@ test('a reply that is only a card is a message, in single chats and groups, and 
   assert.deepEqual([page.before, page.hasMore], ['2000:g-card', false]);
   r.native.messages.set(group.id, []);
   assert.equal((await (await r.call(`/groups/${group.id}`)).json()).before, null);
+  // Earlier pages: the cursor of one page asks for the page before it, in a group and in a single chat alike.
+  const line = (id: string, at: number): any => ({ id, type: 'user', catId: null, timestamp: at, content: id });
+  r.native.messages.set(group.id, [1, 2, 3, 4, 5].map(n => line('g' + n, n * 1000)));
+  r.native.messages.set(r.thread.id, [1, 2, 3, 4, 5].map(n => line('m' + n, n * 1000)));
+  r.native.pageLimit = 2;
+  for (const [path, list, ids] of [[`/groups/${group.id}`, (body: any) => body.messages, 'g'], ['/bots/Ada/transcript', (body: any) => body.messages, 'm']] as const) {
+    const pages: string[][] = []; let before: string | null = null, more = true;
+    while (more) {
+      const body: any = await (await r.call(path + (before ? `?before=${encodeURIComponent(before)}` : ''))).json();
+      pages.push(list(body).filter((row: any) => row.native_message_id ?? row.id).map((row: any) => row.native_message_id ?? row.id)); before = body.before; more = body.hasMore;
+    }
+    assert.deepEqual(pages, [[ids + 4, ids + 5], [ids + 2, ids + 3], [ids + 1]], path);
+  }
+  r.native.pageLimit = undefined;
 });
 
 test('an answered choice is recorded on the native block, only for a choice in this conversation', async t => {

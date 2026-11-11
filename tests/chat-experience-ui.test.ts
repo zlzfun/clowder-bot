@@ -979,6 +979,8 @@ function sidebar() {
     lineForBot: (b: Any) => b.description || '没有消息', lineForGroup: (g: Any) => g.members.join(' · '),
     folderStore: () => ({}), groupFace: (g: Any) => ({ sig: g.id }), sectionLabel: () => h('div'),
     toggleNewMenu: () => {}, paintRailStatus: () => {}, sortStatusRows: () => {}, setWorking: () => {},
+    // chat-list.js's line (latest line or draft) is covered by tests/chat-list.test.ts.
+    chatList: { preview: () => null },
     selectBot: (name: string) => { picked.push('bot:' + name); }, selectGroup: (id: string) => { picked.push('group:' + id); },
   });
   // What refreshStatus does with GET /xbot-api/bots/status.
@@ -1040,8 +1042,8 @@ test('the page loads the status-line scripts after workspace.js and before app.j
   const at = (name: string) => scripts.indexOf(name);
   assert.ok(at('workspace.js') < at('chat-experience-rules.js') && at('chat-experience-rules.js') < at('chat-experience.js') && at('chat-experience.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
-  // Only the 开箱即用 extension (quick-create.css), the search palette (palette.css) and the live-reply styles (chat-live.css, last) come after.
-  assert.deepEqual(styles.slice(-4), ['chat-experience.css', 'quick-create.css', 'palette.css', 'chat-live.css']);
+  // Only the 开箱即用 extension (quick-create.css), the search palette (palette.css), 找得到 (chat-list.css, chat-history.css), 资料页与群 (profile.css, mention.css) and the live-reply styles (chat-live.css, last) come after.
+  assert.deepEqual(styles.slice(-9), ['chat-experience.css', 'quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'profile.css', 'mention.css', 'chat-cards.css', 'chat-live.css']);
   // Conversation changes, reads, native events and redraws reach the module.
   assert.match(app, /workspace\.select\(state\.sel\);\n[^\n]*\n\s+experience\.select\(state\.sel\);/);
   assert.equal((app.match(/experience\.observe\(selection, /g) || []).length, 2, 'single chats and groups');
@@ -1056,8 +1058,9 @@ test('the page loads the status-line scripts after workspace.js and before app.j
   assert.doesNotMatch(app, /\/steps|experience\.attend\(|jumpToAttention/);
   assert.doesNotMatch(app, /jumpToApproval|querySelectorAll\("#thread \.approval"\)/);
   // 记忆 is the module's; the group's false promise and the old notes view are gone; no 子代理 headline.
-  assert.match(app, /experience\.memoryView\(state\.sel, data\)/);
-  assert.match(app, /experience\.memoryView\(state\.sel\)/);
+  // A group's drawer (资料页与群, profile-rules.js) is 成员 and 文件: it has no 记忆 tab at all.
+  assert.match(app, /if \(tab === "memory"\) body\.append\(experience\.memoryView\(state\.sel, data\)\);/);
+  assert.match(read('client/public/profile-rules.js'), /group: Object\.freeze\(\[\["members", "成员"\], \["files", "文件"\]\]\)/);
   assert.doesNotMatch(app, /对它说「记住|function libraryView|个子代理/);
   // Reads are confirmed only by the module.
   assert.doesNotMatch(app, /"\/read"/);

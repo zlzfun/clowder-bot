@@ -1,0 +1,44 @@
+/* A conversation over time (chat-history.js): the chat header's ⋯ menu, the
+   quiet row at the top of the history (更早的消息), its dialog for a new
+   conversation, and the suggestions under a cat's greeting. Builds on
+   .icon-btn, .pop/.menu-row, .modal-card and .starters/.starter of app.css
+   and the café layer; only existing tokens, no new colours or fonts. Motion
+   is the existing 180 ms rise and the status spinner, stilled by app.css's
+   prefers-reduced-motion rule. */
+
+/* ⋯ at the right end of the header's column, so the identity chip stays
+   centred; the chip and an update button keep clear of it. */
+.top-inner > .ch-more { position: absolute; right: 0; top: 50%; transform: translateY(-50%); }
+.top-inner > .ch-more[hidden], .main.peer .top-inner > .ch-more { display: none; }
+.top-inner.ch-has-more > .top-title { max-width: calc(100% - 88px); }
+.top-inner.ch-has-more > .update-btn { margin-right: 40px; }
+.ch-menu { width: 188px; }
+
+/* The top of the history: 查看更早的消息, 正在加载…, 没有更早的消息了, or a failure with 重试. */
+.ch-older {
+  display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: var(--x-s2);
+  min-height: 36px; margin: 0 0 var(--x-s3); padding: 0 var(--x-s4);
+  font-size: var(--x-fs-sm); line-height: 18px; color: var(--x-faint); text-align: center;
+}
+.ch-older[data-older="failed"] { color: var(--x-muted); }
+.ch-older-btn {
+  border: 0; background: transparent; color: var(--x-muted); font: inherit;
+  padding: var(--x-s1) var(--x-s4); border-radius: var(--x-r-pill); cursor: pointer;
+  transition: background 160ms ease-out, color 160ms ease-out;
+}
+.ch-older-btn:hover { background: var(--hover); color: var(--x-text); }
+.ch-older .ch-spin { width: 14px; height: 14px; stroke-width: 2.4; animation: stsp 1s linear infinite; }
+
+/* Suggestions under the cat's greeting, in the bubbles' column. */
+.ch-starters.starters {
+  flex-direction: row; flex-wrap: wrap; gap: var(--x-s3);
+  width: auto; margin: var(--x-s4) 0 0 32px; animation: rise 180ms ease-out;
+}
+.ch-starters .starter {
+  width: auto; padding: 7px 14px; border-radius: var(--x-r-pill);
+  font-size: var(--x-fs-ui); line-height: 20px;
+}
+
+/* 开始新对话 */
+.ch-modal .modal-card { width: min(420px, 100%); }
+.ch-note { margin: var(--x-s3) 0 0; font-size: 14px; line-height: 1.6; color: var(--muted); }

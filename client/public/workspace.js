@@ -3,7 +3,7 @@
 // workspace-rules.js and before app.js, which calls init() once and a few
 // hooks: select() when the conversation changes, observe() after each
 // transcript read, cards() for message files, filesView()/tasksView() for the
-// drawer, conversationsView() for a cat's 详情 page and the composer's
+// drawer, conversationsView() for a cat's 资料 page and the composer's
 // attachment calls.
 //
 // - Composer: any file from the picker, a paste or a drop is uploaded at once
@@ -20,12 +20,13 @@
 //   (snapshots) and attachments. The working
 //   directory — its path, read-only browsing and saving one of its files as a
 //   deliverable — stays folded away under 更多文件.
-// - Drawer 详情 (a cat): when the cat has more than one saved conversation, a
-//   folded 历史对话 opens one of them again. It moves between threads the
-//   server already knows for the cat; nothing here creates a thread or project.
+// - Drawer 资料 (a cat): a folded 历史对话, there once the server has listed
+//   the cat's conversations (even with only the one open now), opens one of
+//   them again. It moves between threads the server already knows for the
+//   cat; nothing here creates a thread or project (新对话 is chat-history.js's).
 //   switchTo() runs the same switch from elsewhere (the search palette, for a
 //   message found in an earlier conversation) and says how it ended.
-// - 任务 at the top of the drawer's 任务 page and one summary line above the
+// - 任务 in the drawer's 高级 (profile.js) and one summary line above the
 //   composer: per-Task 负责人, progress and background run, 请求传球 (asking
 //   the owner to pass the Task on), stop/cancel/resume and the recorded
 //   流转记录. Work starts from ordinary chat: nothing here creates a Task or
@@ -156,7 +157,8 @@
   };
   // The conversation whose 更多文件 / 历史对话 fold was left open: redraws, a
   // thread move and reopening the same conversation keep it open.
-  const folds = { more: "", convs: "" };
+  // asked: the cat whose 历史对话 the owner opened from the chat header.
+  const folds = { more: "", convs: "", asked: "" };
   const scopePath = () => R.scope(S.sel);
   const isGroup = () => !!S.sel && S.sel.type === "group";
   const panelOpen = () => !!$("panel") && $("panel").classList.contains("open");
@@ -778,14 +780,15 @@
     paintFiles();
   }
 
-  // --------------------------------------------- 历史对话 (a cat's 详情 page)
-  // The cat's saved conversations (GET conversations). The fold shows only
-  // when there is more than one; opening one asks the server to move the cat
+  // --------------------------------------------- 历史对话 (a cat's 资料 page)
+  // The cat's saved conversations (GET conversations). The fold shows once
+  // the list has been read, even with only the one open now (where the next
+  // 新对话 leaves this one); opening one asks the server to move the cat
   // to that existing thread (PUT conversation with the thread this page saw),
   // and the chat then opens afresh in it. The server refuses while either
   // conversation is busy; the refusal is shown and nothing moves.
   //
-  // The 详情 page is drawn again whenever the transcript changes, and this
+  // The 资料 page is brought up to date whenever the transcript changes, and this
   // fold is the same node each time. A control focused in it before a redraw
   // gets focus back after it, unless the owner has gone elsewhere since.
   let convFocus = "";
@@ -862,7 +865,10 @@
     const root = S.roots.convs;
     if (!root || !root._wc) return;
     const w = root._wc, list = S.convs || [];
-    const show = list.length > 1 && S.convState !== "unavailable";
+    // Always there on the 资料 page (and when asked for by name from the chat
+    // header's 历史对话): even with only the conversation open now, it says
+    // where earlier ones will appear.
+    const show = list.length > 0 && S.convState !== "unavailable";
     root.hidden = !show;
     const current = currentConv(list);
     const sig = JSON.stringify([show, list, current, S.switching && S.switching.id, S.convLine]);
@@ -872,7 +878,7 @@
     const keep = focusKeyIn(root);
     w.label.textContent = "历史对话 · " + list.length;
     w.list.replaceChildren(...list.map((c) => convRow(c, c.id === current)));
-    const line = S.convLine;
+    const line = S.convLine || (list.length === 1 ? { text: "开始新对话后，现在这段会留在这里。", bad: false } : null);
     w.line.textContent = line ? line.text : "";
     w.line.hidden = !line;
     w.line.classList.toggle("ws-bad", !!(line && line.bad));
@@ -906,6 +912,23 @@
     row.append(copy);
     li.append(row);
     return li;
+  }
+
+  // 历史对话 asked for from the chat header's menu: the list is read now and
+  // its fold opens (even with only the current conversation). Resolves to
+  // how many saved conversations the cat has, or null when the list could
+  // not be read (or this is not a cat's chat any more).
+  async function openConversations() {
+    if (!S.sel || isGroup()) return null;
+    const key = S.key;
+    folds.asked = key;
+    folds.convs = key;
+    const root = S.roots.convs;
+    if (root && root._wc) root._wc.fold.open = true;
+    await loadConversations();
+    if (S.key !== key || S.convState !== "ready") return null;
+    paintConvs();
+    return (S.convs || []).length;
   }
 
   function convSay(text, bad) {
@@ -1837,7 +1860,9 @@
   window.ClowderWorkspace = Object.freeze({
     init, select, observe, touch, key: R.key,
     addFiles, filesFrom, carriesFiles, attachReady, attachBusy, takeAttachments: take, giveBack, note: setNote,
-    cards, filesView, tasksView, conversationsView, focusTask, switchTo,
+    cards, filesView, tasksView, conversationsView, openConversations, focusTask, switchTo,
+    // Files waiting in the composer, uploaded or not (they belong to this conversation).
+    pendingCount: () => S.pending.length,
     // Whether a drawer node is this module's live page (the shell keeps it instead of redrawing).
     current: (n) => !!n && (n === S.roots.files || n === S.roots.tasks),
     threadId: () => S.threadId,

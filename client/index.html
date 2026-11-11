@@ -43,6 +43,10 @@ try {
 <link rel="stylesheet" href="/chat-experience.css">
 <link rel="stylesheet" href="/quick-create.css">
 <link rel="stylesheet" href="/palette.css">
+<link rel="stylesheet" href="/chat-list.css">
+<link rel="stylesheet" href="/chat-history.css">
+<link rel="stylesheet" href="/profile.css">
+<link rel="stylesheet" href="/mention.css">
 <link rel="stylesheet" href="/chat-cards.css">
 <link rel="stylesheet" href="/chat-live.css">
 </head>
@@ -74,9 +78,7 @@ try {
 </defs></svg>
 <div id="login" class="gate" hidden>
   <form id="login-form" class="gate-card" novalidate>
-    <div class="mark" aria-hidden="true">
-      <svg viewBox="0 0 100 100"><path d="M16 20 L40 50 L16 80 M84 20 L60 50 L84 80" fill="none" stroke="currentColor" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    </div>
+    <div class="mark" aria-hidden="true"><img src="/brand-mark-256.png" alt="" width="48" height="48"></div>
     <h1>clowder-bot</h1>
     <label class="field">
       <span>登录码</span>
@@ -181,9 +183,8 @@ try {
       <div id="panel-head" class="panel-head">
         <header class="phdr">
           <div id="panel-ident" class="id" hidden></div>
-          <div id="panel-actions" class="acts" role="toolbar" aria-label="Bot 操作" hidden></div>
+          <div id="panel-actions" class="acts" role="toolbar" aria-label="操作" hidden></div>
         </header>
-        <div id="ctxbar" hidden></div>
         <div id="panel-tabs" class="panel-tabs"></div>
       </div>
       <div id="panel-body" class="panel-body"></div>
@@ -242,7 +243,7 @@ try {
    <div class="setpane" data-spane="about">
     <h2>关于</h2>
     <p><a href="/runtime.html" target="_blank" rel="noopener">打开 Clowder AI 运行面板 · 队列、审批、记忆与原生详情</a></p>
-    <div class="aboutlogo"><div class="mark">X</div><div><h3>clowder-bot</h3><div class="v"><span data-settings-version></span></div></div></div>
+    <div class="aboutlogo"><img class="mark" src="/brand-mark-256.png" alt="" width="48" height="48"><div><h3>clowder-bot</h3><div class="v"><span data-settings-version></span></div></div></div>
     <div class="kvrow"><span class="k">版本</span><span id="settings-version-status" aria-live="polite"></span><button id="settings-version" class="v" type="button" title="点击复制" aria-label="版本，点击复制" data-settings-version></button></div>
     <p class="setfoot">版本来自当前运行的 clowder-bot。</p>
    </div>
@@ -270,6 +271,14 @@ try {
 <script src="/quick-create.js"></script>
 <script src="/palette-rules.js"></script>
 <script src="/palette.js"></script>
+<script src="/chat-list-rules.js"></script>
+<script src="/chat-list.js"></script>
+<script src="/chat-history-rules.js"></script>
+<script src="/chat-history.js"></script>
+<script src="/profile-rules.js"></script>
+<script src="/profile.js"></script>
+<script src="/mention-rules.js"></script>
+<script src="/mention.js"></script>
 <script src="/chat-cards-rules.js"></script>
 <script src="/chat-cards.js"></script>
 <script src="/chat-notify-rules.js"></script>

@@ -9,6 +9,7 @@
 //   PREVIEW_PORT=3231 PREVIEW_CATS=0 npm run preview:fixture
 //   curl -X POST :3230/__preview -H 'Content-Type: application/json' -d '{"agents":"login"}'
 //   …  -d '{"speed":3}'  (slower playback)   -d '{"approvals":"failing"}'  (agreeing fails like a broken store)
+//   …  -d '{"page":12}'  (read conversations 12 messages at a time, to see earlier pages load)
 // Typed words steer the canned reply: 长, 文件/查/资料, 慢, 失败, 清单, 选一个, 确认一下, 记住, 提醒/定时;
 // in a group @名字 picks the cat and 大家/@all asks all of them.
 //
@@ -259,6 +260,8 @@ runtime.app.post('/__preview', (req, res) => {
   if (typeof input.agents === 'string') { if (!agentSets[input.agents]) return res.status(400).json({ error: 'agents: ' + Object.keys(agentSets).join(' | ') }); native.runtimes = agentSets[input.agents]!; }
   if (typeof input.speed === 'number' && input.speed > 0 && input.speed <= 20) native.speed = input.speed;
   if (typeof input.approvals === 'string') native.hubFails = input.approvals === 'failing';
+  // {"page": 12}: conversations are read 12 messages at a time, so "earlier messages" can be seen after a few sends; {"page": 0} restores the usual page.
+  if (typeof input.page === 'number') native.pageLimit = input.page >= 2 && input.page <= 200 ? Math.floor(input.page) : undefined;
   res.json({ agents: Object.entries(agentSets).find(([, set]) => set === native.runtimes)?.[0], speed: native.speed, approvals: native.hubFails ? 'failing' : 'working', cats: native.cats.map(cat => cat.name) });
 });
 runtime.app.use(express.static(join(root, 'client/public'), { etag: false, lastModified: false, setHeaders: res => res.setHeader('Cache-Control', 'no-store') }));

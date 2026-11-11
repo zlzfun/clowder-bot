@@ -1,0 +1,24 @@
+/* 群聊输入框里的 @ (mention.js): the list of this group's members and 「全体」
+   above the composer. On the original .pop popover (surface, radius, shadow);
+   rows like a menu's, the highlighted one on --hover. Existing tokens and
+   app.css's rise only; off under reduced motion. Original CSS unchanged. */
+.composer:has(> .mx-pop) { position: relative; }
+.pop.mx-pop {
+  left: 6px; right: auto; width: min(288px, calc(100% - 12px)); min-width: 0;
+  max-height: 252px; overflow-y: auto; overscroll-behavior: contain; padding: 6px;
+  line-height: normal; animation: rise 180ms ease-out;
+}
+.mx-opt {
+  display: flex; align-items: center; gap: var(--x-s4); min-height: 40px; padding: 4px 10px 4px 8px;
+  border-radius: var(--x-r-sm); color: var(--text); font-size: 14px; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.mx-opt[aria-selected="true"] { background: var(--hover); }
+.mx-opt > .avatar { flex: none; width: 26px; height: 26px; }
+.mx-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mx-all { flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--x-fill-2); color: var(--x-muted); }
+.mx-all .icon { width: 15px; height: 15px; }
+.mx-hint { flex: none; margin-left: auto; padding-left: var(--x-s3); font-size: var(--x-fs-sm); color: var(--x-faint); white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) {
+  .pop.mx-pop { animation: none; }
+}
