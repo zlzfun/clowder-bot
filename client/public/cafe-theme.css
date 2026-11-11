@@ -1,7 +1,7 @@
 /* Clowder Café: color overrides, the clay cats' transparent faces (close-up
-   crop, group member face), plus one repair of an upstream select rule (end
-   of file). Load after the original XBot styles. Layout, typography, spacing,
-   and interaction remain owned by app.css. */
+   crop, group member face), plus two repairs of upstream rules (end of file:
+   select focus, the open header chip). Load after the original XBot styles.
+   Layout, typography, spacing, and interaction remain owned by app.css. */
 :root {
   --x-win: #f0e5d6;
   --x-card: #fffbf5;
@@ -181,7 +181,7 @@ html[data-theme="dark"] .avatar.group { overflow: visible; background: transpare
 .avatar.group { --seat-seam: var(--x-win); }
 .main .avatar.group { --seat-seam: var(--bg); }
 .panel .avatar.group { --seat-seam: var(--panel); }
-.top-title:hover:not(:disabled) .avatar.group, .top-title.on .avatar.group { --seat-seam: var(--hover); }
+.top-title:hover:not(:disabled):not(.on) .avatar.group { --seat-seam: var(--hover); }
 .item:hover .avatar.group { --seat-seam: var(--hover); }
 .item:active .avatar.group { --seat-seam: var(--fill-hover); }
 .item.active .avatar.group { --seat-seam: var(--selected); }
@@ -270,3 +270,13 @@ html[data-theme="dark"] .bubble .code-block {
   background-repeat: no-repeat;
   background-position: right 10px center;
 }
+
+/* app.css fills the open header chip (--x-fill-2, --hover under the pointer)
+   and keeps it at 29, over the panel scrim (28), so a pale pill sat undimmed
+   on the dimmed chat. Open, it has no fill and sits one layer under the scrim
+   (still over the sidebar backdrop, 25), dimming with the rest of the header;
+   its group seams fall back to the header surface (.main, above). A click
+   there lands on the scrim, whose handler closes the drawer as the chip's
+   did; the focused chip still toggles on Enter/Space. Closed, it is unchanged. */
+.top-title.on,
+.top-title.on:hover:not(:disabled) { background: transparent; z-index: 27; }

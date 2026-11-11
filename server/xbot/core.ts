@@ -69,9 +69,9 @@ export function createXbotCoreRouter(bridge: BotBridge) {
     res.json({ group: bridge.groupItem(thread, cats), hasMore: page.hasMore,
       messages: bridge.presentMessages(page.messages, cats).map(({ message: m, name, ...presentation }) => ({
         id: m.id, time: new Date(m.timestamp).toISOString(), sender: m.type === 'user' ? 'local' : name,
-        kind: m.type === 'user' ? 'person' : 'bot', text: messageDisplayText(m),
+        kind: m.type === 'user' ? 'person' : 'bot', text: messageDisplayText(m, thread.id),
         status: m.lifecycle?.status ?? (m.isDraft ? 'processing' : 'complete'), attachments: bridge.workspaces.messageFiles(thread.id, m), ...presentation, native: m,
-      })).filter(m => m.native.type !== 'assistant' || m.native.content.trim() !== 'SILENT' || !!m.text || m.attachments.length > 0) });
+      })).filter(m => m.native.type !== 'assistant' || !!m.text.trim() || m.attachments.length > 0 || m.presentation_kind === 'activity') });
   });
   router.post('/bots', async (req, res) => {
     const input = z.object(botBody).strict().superRefine((value, ctx) => {

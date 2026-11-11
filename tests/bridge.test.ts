@@ -11,6 +11,8 @@ import { ApiError } from '../server/errors.js';
 import { ProductStore } from '../server/product-store.js';
 import { NativeFixture } from './native-fixture.js';
 import { NativeClient } from '../server/native/client.js';
+import { messageDisplayText } from '../server/native/message-presentation.js';
+import type { NativeMessage } from '../server/native/types.js';
 
 async function setup(t: any) {
   const dir = mkdtempSync(join(tmpdir(), 'bot-bridge-')), native = new NativeFixture();
@@ -203,6 +205,71 @@ test('group messages expose the same activity and true speaker contract', async 
   assert.equal(page.messages[1].presentation_kind, 'message');
   assert.equal(page.messages[1].speaker.id, bob.id); assert.equal(page.messages[1].sender, 'Bob');
   assert.equal(page.messages[2].speaker.id, ada.id);
+});
+test('chat replies omit native signature tails in direct and group views while keeping the source and user text', async t => {
+  const r = await setup(t), cat = await r.bridge.createBot({ name: '界面验收' }), thread = await r.bridge.direct(cat);
+  const body = '已完成🐈。', signature = '\n\n[界面验收/gpt-6-astra🐾]', content = body + signature;
+  const reply: NativeMessage = {
+    id: 'signed-reply', type: 'assistant', catId: cat.id, timestamp: 2000, content, origin: 'stream',
+    lifecycle: { kind: 'response', status: 'completed', invocationId: 'turn-1' },
+    extra: { outputLayout: {
+      v: 1, status: 'available', owner: { threadId: thread.id, catId: cat.id, turnInvocationId: 'turn-1' },
+      contentRevision: { length: content.length, sha256: createHash('sha256').update(content).digest('hex') },
+      hostTail: { kind: 'cat_signature', producer: 'codex_stream_finalizer', basis: 'runtime_canonical', start: body.length, end: content.length, gluePrefixLength: 2 },
+    } },
+  };
+  const user: NativeMessage = { id: 'user-quote', type: 'user', catId: null, timestamp: 1000, content };
+  r.native.messages.set(thread.id, [user, reply]);
+  const page = await (await r.call('/xbot-api/bots/' + encodeURIComponent(cat.name) + '/transcript')).json();
+  const shown = page.messages.find((m: any) => m.id === reply.id);
+  assert.equal(shown.content, body);
+  assert.equal(JSON.parse(shown.tool_calls[0].function.arguments).text, body);
+  assert.equal(shown.native.content, content);
+  assert.equal(page.messages.find((m: any) => m.id === user.id).content, content);
+  // Available ranges are bound to the exact message, owner and UTF-16 revision.
+  assert.equal(messageDisplayText(reply, 'another-thread'), content);
+  assert.equal(messageDisplayText({ ...reply, content: 'changed' + content }, thread.id), 'changed' + content);
+  assert.equal(messageDisplayText({ ...reply, catId: 'another-cat' }, thread.id), content);
+  assert.equal(messageDisplayText({ ...reply, lifecycle: { kind: 'response', invocationId: 'another-turn' } }, thread.id), content);
+  const peer = await r.bridge.createBot({ name: '同伴' });
+  const group = await (await r.call('/xbot-api/groups', 'POST', { name: '签名测试', members: [cat.name, peer.name] })).json();
+  const groupReply = { ...reply, extra: undefined }; // old records and callbacks have no host range
+  r.native.messages.set(group.id, [user, groupReply,
+    { ...groupReply, id: 'signature-only', content: signature.trim() },
+    { ...groupReply, id: 'signed-silence', content: 'SILENT' + signature },
+  ]);
+  const groupPage = await (await r.call(`/xbot-api/groups/${group.id}`)).json();
+  assert.equal(groupPage.messages.length, 2, 'a signature alone must not leave an empty bubble');
+  assert.equal(groupPage.messages[0].text, content);
+  assert.equal(groupPage.messages[1].text, body);
+  assert.equal(groupPage.messages[1].native.content, content);
+  assert.equal(r.native.messages.get(thread.id)![1]!.content, content);
+});
+test('legacy signature presentation keeps quoted examples and fenced code, and handles newer draft reads', () => {
+  const sign = '[界面验收/gpt-6-astra🐾]';
+  const cases = [
+    ['答复\n\n' + sign, '答复'],
+    ['答复\r\n\r\n' + sign + '\r\n', '答复'],
+    ['答复\n[另一只猫🐾]', '答复'],
+    ['答复\n' + sign + '\n[另一只猫🐾]', '答复'],
+    ['答复\n[界面验收/gpt-', '答复\n[界面验收/gpt-'],
+    ['正文里引用 ' + sign, '正文里引用 ' + sign],
+    [sign + '\n这是一段示例', sign + '\n这是一段示例'],
+    ['> ' + sign, '> ' + sign],
+    ['    ' + sign, '    ' + sign],
+    ['`' + sign + '`', '`' + sign + '`'],
+    ['```text\n' + sign, '```text\n' + sign],
+    ['~~~text\n' + sign, '~~~text\n' + sign],
+    ['````text\n```\n' + sign, '````text\n```\n' + sign],
+    ['```text\n' + sign + '\n```\n\n' + sign, '```text\n' + sign + '\n```'],
+    ['答复\n[文档/说明]', '答复\n[文档/说明]'],
+  ];
+  for (const [content, expected] of cases) {
+    const message: NativeMessage = { id: 'old', type: 'assistant', catId: 'cat', timestamp: 1, content: content! };
+    assert.equal(messageDisplayText(message, 'thread'), expected, content);
+    assert.equal(messageDisplayText({ ...message, isDraft: true }, 'thread'), expected, content);
+    assert.equal(messageDisplayText({ ...message, type: 'user' }, 'thread'), content);
+  }
 });
 test('cancel a member never cancels an active sibling; native queue status is exposed', async t => {
   const r = await setup(t), cat = await r.bridge.createBot({ name: 'Ada' }), thread = await r.bridge.direct(cat);

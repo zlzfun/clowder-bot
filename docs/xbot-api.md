@@ -27,6 +27,8 @@ UI 保留 Bot 名称和文件夹概念，实际成员、执行和历史以 Clowd
 
 `transcript` 为兼容 XBot 渲染器生成的投影，包含原生消息对象和 `native_message_id`。显示用 `send_message_to_user` 行带 `presentation_receipt: true`，不可计入模型工具调用/成本。真实工具轨迹来自 `toolEvents`。Bot 不自行估算或编造 Token。
 
+单聊与群聊的显示正文省去回复末尾的猫爪署名。固定上游 `42017e0` 的 `extra.outputLayout.hostTail` 提供署名范围，适配器核对线程、成员、轮次与正文长度及 SHA-256 后裁掉该范围。有范围但验证失败时保留原文。没有范围的旧记录，只识别 Markdown 代码围栏之外、末尾独占一行的 `[名字/模型🐾]` 或 `[名字🐾]`。用户消息、原生 `native` 对象和历史导出保留原文，新回复与历史读取共用这个展示转换。
+
 单聊与群聊消息包含 `presentation_kind: "message" | "activity"`、`native_cat_id` 和 `speaker`（真实发送成员的 ID、名称和头像元数据；成员不可用时为 null）。只有当前返回页存在同一成员、同一原生 turn 的显式 callback 发言，才将对应 stream 累计记录投影为 `activity`；它不再生成聊天发送回执。前端将其显示为默认折叠的执行过程，正式发言保持原生顺序与各自时间戳。关联依赖精确执行身份，不用文本、时间接近程度或跨成员共享的外层 invocation ID 推断。错误、取消和缺少关联证据的回复继续作为普通消息；跨分页的关联暂不推断。该投影不修改或删除原生历史。
 
 未迁移的跨设备、云账号、语音、应用、完整 skills/plugins 配置返回 supported=false 或明确 4xx/501。定时任务首版提供单猫创建、查看、启停和删除，尚不提供编辑已有计划、手动立即触发和高级调度治理。资料导入里的旧 XBot routines 格式仍拒绝，以免绕过原生计划校验。未读数量目前尚未从原生 read cursor 完整映射，不应将列表零值用于业务统计。

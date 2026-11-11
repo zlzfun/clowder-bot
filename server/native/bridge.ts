@@ -126,7 +126,7 @@ export class BotBridge {
     for (const { message, ...presentation } of this.presentMessages(page.messages, cats)) {
       if (message.type === 'user' && message.id === source) continue;
       const seq = this.store.sequence(thread.id, message.id);
-      const text = messageDisplayText(message);
+      const text = messageDisplayText(message, thread.id);
       const base = { seq, id: message.id, native_message_id: message.id, role: message.type === 'user' ? 'user' : 'assistant',
         content: text, ...presentation, time: new Date(message.timestamp).toISOString(),
         reply_to: message.replyTo && message.replyTo !== source ? this.store.state.messageRefs[thread.id]?.[message.replyTo] ?? 0 : 0,

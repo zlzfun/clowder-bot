@@ -27,7 +27,7 @@
       "file": "app.js",
       "target": "client/public/app.js",
       "sourceSha256": "1248f793493826bf044359c71e7d8772ccc3472d6021d6abb979dff9b6cb29bc",
-      "sha256": "f6b25b41d9aa71d266eba221c73b7914f3bfd8d123ba29830b10c21f440e99eb",
+      "sha256": "802621be3cbc310fd55880d6adda048045bfaf942ca1b344bd9b9369745c6bba",
       "unchanged": false
     },
     {
@@ -563,9 +563,9 @@
     },
     {
       "target": "client/public/cafe-theme.css",
-      "description": "Cat-cafe light/dark color overrides; clay cat faces without a tile (transparent around the traced outline, photos/glyphs/empty seats keep their fill); closer crop of a cat's own clay portrait (data-avatar-bot faces: 1.25x about 50% 40% inside the clipped SVG drawing, circle and unread dot unchanged); group face of up to four members' own round portraits in one compact, slightly overlapping cluster without a tile (lead largest in front, 1px surface-color seams that hug a clay cat's own shape via drop-shadow and stay round for photos, clay art zoomed into its seat), quiet empty seats for unknown members (existing tokens, uploaded photos at their natural cover crop, not recolored); restores app.css's single right-aligned .field select chevron on focus (light chevron copied byte-for-byte), original CSS unchanged",
-      "sha256": "8a7669b56aa715a94f09e994f9a0e9daad330a12339d6ffcad0e9cf5bfa73fdd",
-      "attribution": "2026-11-06 transparent clay faces and cat-hugging group seams authored by local Claude Code (claude-opus-5-5)"
+      "description": "Cat-cafe light/dark color overrides; clay cat faces without a tile (transparent around the traced outline, photos/glyphs/empty seats keep their fill); closer crop of a cat's own clay portrait (data-avatar-bot faces: 1.25x about 50% 40% inside the clipped SVG drawing, circle and unread dot unchanged); group face of up to four members' own round portraits in one compact, slightly overlapping cluster without a tile (lead largest in front, 1px surface-color seams that hug a clay cat's own shape via drop-shadow and stay round for photos, clay art zoomed into its seat), quiet empty seats for unknown members (existing tokens, uploaded photos at their natural cover crop, not recolored); restores app.css's single right-aligned .field select chevron on focus (light chevron copied byte-for-byte); the open header chip without its fill, one layer under the panel scrim so it dims with the header (a click there closes the drawer through the scrim), group seams on the header surface, original CSS unchanged",
+      "sha256": "1c28b282334ce221e9abd2b91d4476310468e58a5285cc39156dcf68be00d3f4",
+      "attribution": "2026-11-06 transparent clay faces and cat-hugging group seams authored by local Claude Code (claude-opus-5-5); 2026-11-07 open header chip under the scrim by local Claude Code (claude-opus-5-5)"
     },
     {
       "target": "client/public/runtime.html",
@@ -696,8 +696,8 @@
     {
       "target": "client/public/chat-experience.js",
       "description": "The chat's one status line (in place of the separate execution and Task lines while GET <scope>/activity answers; the earlier lines stay on a server without it), opening in place onto a short list whose rows find the real message by native message ID or the Task by ID; past six rows 查看其余 N 项 / 收起 shows every listed approval and concurrent item in place, kept open across refreshes of the same conversation; approvals pointing to the existing runtime-panel controls and never approved here; read confirmation by POST <scope>/read only for the newest visible cat reply after it stays in sight on a visible, uncovered page, once, one request at a time; a 404 or 409 refuses that one reply (conversation + thread + message) only, so a newer reply is still confirmed, and 409 reads the activity again; a late answer for a conversation or thread the chat has left leaves no refusal, wait or reload; the cat's 记忆, read only throughout: 关于你 and 你的偏好 folded and read only when opened (GET /xbot-api/memory/profile|taste), loading, failure, no permission, partial, empty and an absent route told apart, each entry's source on demand with its revision (409 asks to read the list again), no editing, confirming or forgetting; 这个对话的便笺 read only as before (no add or delete; a failed read says so with 重试, never as no notes); a group's 记忆 shows no owner records and no promise",
-      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-05 for chat experience 1/3/5 (docs/chat-experience-api.md); review fixes by local Claude Code (claude-opus-5-5) on 2026-11-05: note add/delete removed (memory read only), the status list made fully reachable, read refusals scoped to one reply",
-      "sha256": "cad94cdf8c362e17739aeaa66ee4d0f2488b2b3e083f90d1b3ca04ce10715988"
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-05 for chat experience 1/3/5 (docs/chat-experience-api.md); review fixes by local Claude Code (claude-opus-5-5) on 2026-11-05: note add/delete removed (memory read only), the status list made fully reachable, read refusals scoped to one reply; 2026-11-06 unused sidebar attend() removed by local Claude Code (claude-opus-5-5)",
+      "sha256": "69457ec1b5d23694f73e82814aedc2b1042b64a63d11ac2383a2c53a130214c6"
     },
     {
       "target": "client/public/chat-experience.css",

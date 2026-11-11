@@ -9,7 +9,8 @@ import vm from 'node:vm';
 // as tests/workspace-ui.test.ts: tree, bubbling events, focus, the selectors
 // the modules use; plus a per-element layout box and page visibility) and
 // fake timers, against a fake /xbot-api. app.js is not loaded: its hooks are
-// faked the way it passes them to init(), and static checks cover its wiring.
+// faked the way it passes them to init(), and static checks cover its wiring;
+// only its sidebar row and selection functions run, on the same DOM.
 const read = (path: string) => readFileSync(new URL('../' + path, import.meta.url), 'utf8');
 const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
 const settle = async (turns = 8) => { for (let i = 0; i < turns; i++) await new Promise(resolve => setImmediate(resolve)); };
@@ -151,6 +152,7 @@ class El extends Base {
     let at = p.kids.indexOf(this) + 1;
     for (const item of items) { const n = p.adopt(item); p.kids.splice(at++, 0, n); }
   }
+  replaceWith(n: Base) { const p = this.parent!; p.insertBefore(n, this); this.remove(); }
   replaceChildren(...items: Array<Base | string>) { for (const k of [...this.kids]) k.remove(); this.append(...items); }
   contains(n: unknown): boolean { for (let x = n as Base | null; x; x = x.parent) if (x === this) return true; return false; }
   addEventListener(type: string, fn: (ev: Ev) => unknown) {
@@ -920,6 +922,91 @@ test('这个对话的便笺 is read only like the rest of 记忆: no add or dele
   assert.equal(g.calls.filter(c => c.path.includes('/memory')).length, 0);
 });
 
+// ---------------------------------------------------------------- sidebar rows
+// app.js's own row, status-line and selection functions with the real rules,
+// on a 390px window; what opening a chat loads is faked (selectBot/selectGroup).
+function sidebar() {
+  const app = read('client/public/app.js');
+  const take = (name: string) => {
+    const m = new RegExp(`\\n {2}function ${name}\\([^)]*\\) \\{\\n[\\s\\S]*?\\n {2}\\}\\n`).exec(app);
+    assert.ok(m, name + ' is where the shell keeps it');
+    return m[0];
+  };
+  const unreadOf = /\n {2}const unreadOf = [^\n]+\n/.exec(app)!;
+  const doc = new Doc();
+  const h = (tag: string, id = '') => { const e = doc.createElement(tag); if (id) e.id = id; return e; };
+  const side = h('aside'), backdrop = h('div');
+  side.append(h('div', 'pin-row'), h('div', 'roster'));
+  doc.body.append(side, backdrop, h('div', 'panel-scrim'));
+  const picked: string[] = [];
+  const state: Any = { bots: [], groups: [], folders: [], others: null, sel: null, peer: null, preview: {}, listSig: '' };
+  const stStatus: Any = { map: {}, groups: {} };
+  const out: Any = {};
+  const code = ['el', 'spinIcon', 'workText', 'stDesc', 'attentionLine', 'groupDesc', 'paintStatus', 'listButton', 'botRow', 'renderLists', 'pickBot', 'pickGroup', 'closeDrawer', 'syncBackdrop'].map(take).join('');
+  vm.runInNewContext(code + unreadOf[0] + 'out.renderLists = renderLists; out.paintStatus = paintStatus;', {
+    out, state, stStatus, Node: El, experienceRules: rules(),
+    document: { createElement: (tag: string) => doc.createElement(tag), querySelectorAll: (sel: string) => doc.body.querySelectorAll(sel) },
+    window: { innerWidth: 390 }, sidebar: side, backdrop, panel: h('div'), thread: { querySelector: () => null },
+    $: (id: string) => doc.getElementById(id),
+    rawSvg: () => h('svg'), icon: () => h('svg'), avatar: () => { const a = h('span'); a.className = 'avatar'; a.append(h('svg')); return a; },
+    paintOfBot: () => null, primaryMark: () => h('i'), setTip: () => {}, niceName: String, realPreview: (t: unknown) => (t ? String(t) : ''),
+    lineForBot: (b: Any) => b.description || '没有消息', lineForGroup: (g: Any) => g.members.join(' · '),
+    folderStore: () => ({}), groupFace: (g: Any) => ({ sig: g.id }), sectionLabel: () => h('div'),
+    toggleNewMenu: () => {}, paintRailStatus: () => {}, sortStatusRows: () => {}, setWorking: () => {},
+    selectBot: (name: string) => { picked.push('bot:' + name); }, selectGroup: (id: string) => { picked.push('group:' + id); },
+  });
+  // What refreshStatus does with GET /xbot-api/bots/status.
+  const status = (bots: Any[] = [], groups: Any[] = []) => {
+    stStatus.map = Object.fromEntries(bots.map(b => [b.bot, b]));
+    stStatus.groups = Object.fromEntries(groups.map(g => [g.id, g]));
+    out.renderLists();
+    out.paintStatus();
+  };
+  const find = (sel: string) => { const r = doc.body.querySelector(sel); assert.ok(r, 'no row ' + sel); return r; };
+  return { state, picked, status, find, side, backdrop };
+}
+
+test('a sidebar row is one target: a click on its status line (busy, queued, waiting for the owner) reaches the row, a repaint swaps only the line, and the chat already open only closes the narrow list', () => {
+  const s = sidebar();
+  const CAT = '.item[data-bot="宪宪"]', GROUP = '.item[data-group="g-1"]', PIN = '.pin[data-bot="主猫"]';
+  s.state.bots = [{ name: '宪宪', description: '会写代码' }, { name: '主猫', pinned: true }];
+  s.state.groups = [{ id: 'g-1', name: '设计组', members: ['宪宪', '主猫'] }];
+  s.state.sel = { type: 'bot', id: '主猫' };
+  s.status();
+  const rows = [s.find(CAT), s.find(GROUP)];
+  const line = (sel: string) => s.find(sel).querySelector('.preview')!;
+  const words = (sel: string) => line(sel).children.at(-1)!;
+  const steps: Array<[string, Record<string, number>, RegExp]> = [['running', { running: 1 }, /在处理/], ['queued', { queued: 1 }, /等待执行/], ['awaiting', { approval: 2 }, /2 项等你确认/]];
+  for (const [kind, counts, said] of steps) {
+    const before = [line(CAT), line(GROUP)];
+    s.status([{ bot: '宪宪', state: kind, tool: 'Bash', tool_summary: '', todo: '', activity: activity({ counts }) }], [{ id: 'g-1', thread_id: 'thread-G', activity: activity({ counts }) }]);
+    [CAT, GROUP].forEach((sel, i) => {
+      same(s.find(sel), rows[i], kind + ': the row is repainted in place');
+      assert.notEqual(line(sel), before[i], kind + ': its status line is replaced');
+      assert.match(textOf(line(sel)), said, kind);
+      words(sel).click();
+    });
+  }
+  assert.deepEqual(s.picked, Array(3).fill(['bot:宪宪', 'group:g-1']).flat(), 'each click opens that chat, never anything of its own');
+  // Tapping the chat already open, a busy cat, a group or a pinned cat, with the list open over it.
+  s.picked.length = 0;
+  const open: Array<[Any, string, () => El]> = [[{ type: 'bot', id: '宪宪' }, CAT, () => words(CAT)], [{ type: 'group', id: 'g-1' }, GROUP, () => words(GROUP)], [{ type: 'bot', id: '主猫' }, PIN, () => s.find(PIN).querySelector('.avatar')!]];
+  for (const [sel, row, target] of open) {
+    s.state.sel = sel;
+    s.status([{ bot: '宪宪', state: 'running', activity: activity({ counts: { running: 1 } }) }], [{ id: 'g-1', activity: activity({ counts: { running: 1 } }) }]);
+    s.side.classList.add('open');
+    s.backdrop.hidden = false;
+    target().click();
+    assert.equal(s.side.classList.contains('open'), false, row + ': the list closes onto the chat');
+    assert.equal(s.backdrop.hidden, true, row);
+  }
+  assert.deepEqual(s.picked, [], 'nothing is selected again, so its draft, live reply and pending sends stay');
+  // From another person's chat, the same row comes back to this one.
+  s.state.peer = { slug: 'other' };
+  s.find(PIN).click();
+  assert.deepEqual(s.picked, ['bot:主猫']);
+});
+
 // ---------------------------------------------------------------- wiring
 test('the page loads the status-line scripts after workspace.js and before app.js; the shell wires select, observe, touch, rendered, the sidebar and 记忆, and keeps no false memory promise', () => {
   const html = read('client/index.html'), app = read('client/public/app.js'), css = read('client/public/chat-experience.css');
@@ -935,10 +1022,11 @@ test('the page loads the status-line scripts after workspace.js and before app.j
   assert.equal((app.match(/experience\.rendered\(\);/g) || []).length, 4, 'both histories, drawn or empty');
   // History rows carry the native message ID.
   assert.equal((app.match(/row\.dataset\.mid = /g) || []).length, 3);
-  // The sidebar: groups get a line and a dot; 等你确认 goes through the status line, never by guessing a card.
+  // The sidebar: groups get a line and a dot; 等你确认 is acted on in the chat's status line, never by guessing a card.
+  // A sidebar line is status only (see the sidebar rows test): it reads no steps and jumps nowhere.
   assert.match(app, /function groupDesc\(g\)/);
   assert.match(app, /unreadOf\(stStatus\.groups\[g\.id\]\)/);
-  assert.match(app, /await experience\.attend\(\);/);
+  assert.doesNotMatch(app, /\/steps|experience\.attend\(|jumpToAttention/);
   assert.doesNotMatch(app, /jumpToApproval|querySelectorAll\("#thread \.approval"\)/);
   // 记忆 is the module's; the group's false promise and the old notes view are gone; no 子代理 headline.
   assert.match(app, /experience\.memoryView\(state\.sel, data\)/);

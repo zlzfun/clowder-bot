@@ -1,8 +1,10 @@
+import { createHash } from 'node:crypto';
 import type { NativeMessage } from './types.js';
 
 /** Display-only fallback, shared by direct and group chats. Native records stay untouched. */
-export function messageDisplayText(message: NativeMessage): string {
-  const content = message.type === 'assistant' && message.content.trim() === 'SILENT' ? '' : message.content;
+export function messageDisplayText(message: NativeMessage, threadId: string): string {
+  const text = message.type === 'assistant' ? withoutCatSignature(message, threadId) : message.content;
+  const content = message.type === 'assistant' && text.trim() === 'SILENT' ? '' : text;
   if (content) return content;
   if (message.isDraft || ['queued', 'processing'].includes(message.lifecycle?.status ?? '')) return '正在等待或处理…';
   if (['canceled', 'cancelled'].includes(message.lifecycle?.status ?? '')) return '已停止';
@@ -11,6 +13,39 @@ export function messageDisplayText(message: NativeMessage): string {
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+/** The pinned native outputLayout identifies the host-produced answer suffix. */
+function withoutCatSignature(message: NativeMessage, threadId: string): string {
+  const text = message.content, layout = record(message.extra?.outputLayout);
+  const tail = record(layout.hostTail), owner = record(layout.owner), revision = record(layout.contentRevision);
+  if (layout.hostTail !== undefined) {
+    const start = tail.start;
+    const valid = layout.v === 1 && layout.status === 'available' && message.origin === 'stream'
+      && !message.extra?.isExplicitPost && owner.threadId === threadId && owner.catId === message.catId
+      && typeof owner.turnInvocationId === 'string' && turnKey(message) === JSON.stringify([message.catId, owner.turnInvocationId])
+      && tail.kind === 'cat_signature' && tail.producer === 'codex_stream_finalizer'
+      && ['runtime_canonical', 'provider_observed_fallback'].includes(String(tail.basis))
+      && typeof start === 'number' && Number.isSafeInteger(start) && start >= 0 && start + 2 < text.length && tail.end === text.length
+      && tail.gluePrefixLength === 2 && text.slice(start, start + 2) === '\n\n'
+      && revision.length === text.length && revision.sha256 === createHash('sha256').update(text).digest('hex');
+    return valid ? text.slice(0, start) : text;
+  }
+
+  // Older records and provider-written signatures have no host range. Only a
+  // standalone final paw signature is hidden, outside Markdown code fences.
+  const signature = /(?:^|\r?\n)(?: {0,3}\[[^\[\]\r\n]+🐾\][ \t]*(?:\r?\n|$))+\s*$/u.exec(text);
+  if (!signature) return text;
+  let fence = '';
+  for (const line of text.slice(0, signature.index).split(/\r?\n/)) {
+    const match = /^[ \t>]*(?:(?:[-+*]|\d+[.)])[ \t]+)?(`{3,}|~{3,})(.*)$/.exec(line);
+    if (!match) continue;
+    const marker = match[1]!;
+    if (!fence) {
+      if (marker[0] !== '`' || !match[2]!.includes('`')) fence = marker;
+    } else if (marker[0] === fence[0] && marker.length >= fence.length && !match[2]!.trim()) fence = '';
+  }
+  return fence ? text : text.slice(0, signature.index).trimEnd();
 }
 
 /** Only exact native turn identity may join a stream to its explicit chat posts. */

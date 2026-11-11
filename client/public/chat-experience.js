@@ -3,7 +3,7 @@
 // workspace.js and before app.js, which calls init() once and a few hooks:
 // select() when the conversation changes, observe() after each transcript or
 // group read, touch() on a native event, rendered() after the history is
-// drawn, attend() from the sidebar, and memoryView() for the drawer's 记忆.
+// drawn, and memoryView() for the drawer's 记忆.
 //
 // - Status line (above the composer): one line from GET <scope>/activity in
 //   place of the separate execution and Task lines. What waits for the owner
@@ -415,25 +415,6 @@
     return false;
   }
 
-  // From the sidebar: the conversation is open now; go to what needs the
-  // owner (an approval, else a failure). Without a message coordinate the
-  // line opens on its list instead of guessing.
-  async function attend() {
-    if (!S.sel) return false;
-    const gen = S.gen;
-    if (!S.act) await loadActivity();
-    if (gen !== S.gen || !S.act) { if (gen === S.gen && S.strip && !S.strip.hidden) { S.open = true; paint(); } return false; }
-    const item = S.act.items.find((i) => i.kind === "approval") || S.act.items.find((i) => i.kind === "failure") || null;
-    if (item && item.messageId && findRow(item.messageId)) return locate(item);
-    S.open = true;
-    S.said = null;
-    paint();
-    const list = S.strip && S.strip.querySelector(".cx-list");
-    const first = list && list.querySelector("button, a");
-    (first || (S.strip && S.strip.querySelector(".cx-row")))?.focus({ preventScroll: true });
-    return false;
-  }
-
   // After the history was drawn (or scrolled): what is in sight may differ.
   let scrollTimer = 0;
   function rendered() { paint(); check(); }
@@ -689,7 +670,7 @@
   }
 
   window.ClowderExperience = Object.freeze({
-    init, select, observe, touch, rendered, check, attend, locate, memoryView, paint,
+    init, select, observe, touch, rendered, check, locate, memoryView, paint,
     // Whether the status line is in charge for the open conversation (the
     // earlier execution and Task lines step aside).
     active: () => !!S.sel && S.state !== "unavailable" && S.state !== "idle",

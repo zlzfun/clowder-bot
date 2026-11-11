@@ -224,20 +224,11 @@
     });
   }
 
-  // ---- Bot status: sidebar second line + step-flow popover (bot-status prototype) ----
+  // ---- Bot status: sidebar second line ----
+  // The line only says how the conversation is; it is part of its row, so a
+  // click anywhere on the row opens (or stays in) that chat like any other.
+  // What needs the owner is acted on in the chat's own status line.
   const stStatus = { map: {}, groups: {} };
-  const stpState = { ready: false, open: false, bot: "", row: null, steps: null };
-
-  function tsOf(v) {
-    if (v == null) return 0;
-    const n = Number(v);
-    if (typeof v !== "string" || /^\d+$/.test(v.trim())) {
-      if (!Number.isFinite(n)) return 0;
-      return n > 0 && n < 1e12 ? n * 1000 : n;
-    }
-    const t = new Date(v).getTime();
-    return Number.isNaN(t) ? 0 : t;
-  }
 
   function spinIcon(size) {
     const s = rawSvg('<circle cx="12" cy="12" r="8.5" opacity=".22"/><path d="M12 3.5a8.5 8.5 0 0 1 8.5 8.5"/>', size, 2.8);
@@ -255,18 +246,16 @@
     let sig = kind;
     const line = el("span", "preview");
     if (kind === "awaiting" || kind === "failure" || kind === "unknown") {
-      const sel = { type: "bot", id: name };
-      return { sig: sig + side.text, node: attentionLine(kind, side.text, sel), off: false };
+      return { sig: sig + side.text, node: attentionLine(kind, side.text), off: false };
     }
     if (kind === "running" || kind === "queued") {
-      line.className = "preview st run click";
+      line.className = "preview st run";
       line.append(spinIcon(11));
       const text = el("span");
       const summary = st.todo || workText(st.tool, st.tool_summary) || (kind === "queued" ? "等待执行" : "在处理");
       text.append(summary);
       line.title = summary;
       line.append(text);
-      line.addEventListener("click", (ev) => { ev.stopPropagation(); toggleStp(name, line); });
       sig += summary;
     } else if (kind === "offline") {
       line.className = "preview st off";
@@ -285,14 +274,13 @@
   }
 
   // The second line for what needs the owner (等你确认), a failure, or a state
-  // that cannot be told (never shown as idle). Clicking one opens that
-  // conversation at the item, by its native message coordinate when there is one.
-  function attentionLine(kind, text, sel) {
-    const line = el("span", "preview st " + (kind === "awaiting" ? "wait" : kind === "failure" ? "fail" : "unknown") + (kind === "unknown" ? "" : " click"));
+  // that cannot be told (never shown as idle). It is not a control of its own:
+  // the row opens the chat, whose status line goes to the item.
+  function attentionLine(kind, text) {
+    const line = el("span", "preview st " + (kind === "awaiting" ? "wait" : kind === "failure" ? "fail" : "unknown"));
     if (kind === "awaiting") line.append(el("i", "wd"));
     line.append(el("span", "", text));
     line.title = text;
-    if (kind !== "unknown") line.addEventListener("click", (ev) => { ev.stopPropagation(); jumpToAttention(sel); });
     return line;
   }
 
@@ -302,8 +290,7 @@
     const st = stStatus.groups[g.id] || null;
     const side = st ? experienceRules.side(st) : null;
     const kind = side ? side.kind : "idle";
-    const sel = { type: "group", id: g.id };
-    if (kind === "awaiting" || kind === "failure" || kind === "unknown") return { sig: kind + side.text, node: attentionLine(kind, side.text, sel) };
+    if (kind === "awaiting" || kind === "failure" || kind === "unknown") return { sig: kind + side.text, node: attentionLine(kind, side.text) };
     if (kind === "running" || kind === "queued") {
       const line = el("span", "preview st run");
       const text = kind === "queued" ? "等待执行" : "在处理";
@@ -458,165 +445,6 @@
     renderLists();
     paintStatus();
     await refreshWork();
-    if (stpState.open) stpRefresh().catch(() => {});
-  }
-
-  // From a sidebar 等你确认 / failure line: open that conversation (a bot or a
-  // group) and let the status line go to the item by its native message
-  // coordinate; without one it opens on its list. Nothing is located by guess,
-  // and nothing is approved from here.
-  async function jumpToAttention(sel) {
-    closeStp();
-    try {
-      const open = state.sel && state.sel.type === sel.type && state.sel.id === sel.id && !state.peer;
-      if (open) await loadThread();
-      else if (sel.type === "group") await selectGroup(sel.id);
-      else await selectBot(sel.id);
-    } catch (e) {}
-    if (!state.sel || state.sel.type !== sel.type || state.sel.id !== sel.id) return;
-    await experience.attend();
-  }
-
-  function stpSetup() {
-    if (stpState.ready) return;
-    stpState.ready = true;
-    const shade = el("div", "mshade");
-    shade.id = "mshade";
-    shade.hidden = true;
-    const pop = el("div", "stp");
-    pop.id = "stp";
-    pop.hidden = true;
-    document.body.append(shade, pop);
-    shade.addEventListener("click", closeStp);
-    document.addEventListener("click", (ev) => {
-      if (stpState.open && !pop.contains(ev.target) && !(ev.target instanceof Element && ev.target.closest(".preview.st"))) closeStp();
-    });
-    document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshStatus().catch(() => {}); });
-    window.addEventListener("resize", () => { if (stpState.open) placeStp(); });
-  }
-
-  function closeStp() {
-    if (!stpState.open) return;
-    stpState.open = false;
-    stpState.bot = "";
-    stpState.row = null;
-    stpState.steps = null;
-    const pop = document.getElementById("stp");
-    if (pop) pop.hidden = true;
-    const shade = document.getElementById("mshade");
-    if (shade) shade.hidden = true;
-  }
-
-  function toggleStp(name, line) {
-    if (stpState.open && stpState.bot === name) { closeStp(); return; }
-    openStp(name, line).catch(() => {});
-  }
-
-  async function openStp(name, line) {
-    stpSetup();
-    stpState.open = true;
-    stpState.bot = name;
-    stpState.row = line.closest(".item");
-    stpState.steps = null;
-    const pop = document.getElementById("stp");
-    pop.hidden = false;
-    stpPaint();
-    placeStp();
-    const data = await api("/xbot-api/bots/" + encodeURIComponent(name) + "/steps?n=20").catch(() => null);
-    if (!stpState.open || stpState.bot !== name) return;
-    stpState.steps = (data && data.steps) || [];
-    stpPaint();
-  }
-
-  async function stpRefresh() {
-    const name = stpState.bot;
-    const st = name && stStatus.map[name];
-    // A finished turn keeps its last steps on screen until the popover is closed.
-    if (!stpState.open || !st || st.state !== "running") return;
-    const data = await api("/xbot-api/bots/" + encodeURIComponent(name) + "/steps?n=20").catch(() => null);
-    if (!stpState.open || stpState.bot !== name) return;
-    stpState.steps = (data && data.steps) || [];
-    stpPaint();
-  }
-
-  function stClock(sec) {
-    const s = Math.max(0, Math.round(sec));
-    return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
-  }
-
-  function stDu(sec) {
-    if (sec < 10) return sec.toFixed(1) + "s";
-    if (sec < 60) return Math.round(sec) + "s";
-    return stClock(sec);
-  }
-
-  function stpPaint() {
-    const pop = document.getElementById("stp");
-    if (!pop || !stpState.open) return;
-    const name = stpState.bot;
-    const steps = stpState.steps;
-    const head = el("div", "ph");
-    const hi = el("span", "si");
-    const live = stStatus.map[name] && stStatus.map[name].state === "running";
-    hi.append(live ? spinIcon(14) : rawSvg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 14, 2.4));
-    head.append(hi, el("b", "", niceName(name) + " · 本轮"));
-    const cnt = el("span", "cnt");
-    if (!steps) cnt.textContent = "读取中…";
-    else if (!steps.length) cnt.textContent = "本轮还没有步骤";
-    else {
-      const t0 = tsOf(steps[0].time) || Date.now();
-      cnt.textContent = "第 " + steps.length + " 步 · " + stClock((Date.now() - t0) / 1000);
-    }
-    head.append(cnt);
-    const x = el("button", "x");
-    x.type = "button";
-    x.setAttribute("aria-label", "关闭");
-    x.append(rawSvg('<path d="M6 6l12 12M18 6L6 18"/>', 16, 2.2));
-    x.addEventListener("click", closeStp);
-    head.append(x);
-    const ol = el("ol");
-    for (let i = 0; i < (steps || []).length; i++) {
-      const step = steps[i];
-      const run = /^(run|running|active)/i.test(String(step.state || ""));
-      const li = el("li", run ? "run" : "ok");
-      const si = el("span", "si");
-      si.append(run ? spinIcon(14) : rawSvg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 14, 2.4));
-      const sx = el("div", "sx");
-      const sl = el("div", "sl");
-      sl.append(el("b", "", step.tool === "todo" ? "待办" : String(step.tool || "tool")));
-      // A "detail · result" summary splits into the mono chip and the gray line.
-      const sum = step.tool === "todo" ? (step.state === "done" ? "待办已更新" : step.state === "error" ? "待办更新失败" : "正在更新待办") : String(step.summary || "").trim();
-      const cut = sum.indexOf(" · ");
-      const rest = cut > 0 ? sum.slice(cut + 3) : "";
-      if (sum) sl.append(el("code", "", cut > 0 ? sum.slice(0, cut) : sum));
-      sx.append(sl);
-      if (rest) sx.append(el("div", "sr", rest));
-      li.append(si, sx);
-      const t = tsOf(step.time);
-      const tn = i + 1 < steps.length ? tsOf(steps[i + 1].time) : (run ? Date.now() : 0);
-      if (t && tn > t) li.append(el("span", "du", stDu((tn - t) / 1000)));
-      ol.append(li);
-    }
-    pop.replaceChildren(head, ol);
-  }
-
-  function placeStp() {
-    const pop = document.getElementById("stp");
-    if (!pop || !stpState.open) return;
-    const mob = window.innerWidth <= 767;
-    const shade = document.getElementById("mshade");
-    if (shade) shade.hidden = !mob;
-    pop.style.top = "";
-    pop.style.left = "";
-    if (mob) return;
-    const row = stpState.row && stpState.row.isConnected ? stpState.row : null;
-    const side = sidebar.getBoundingClientRect();
-    let left = side.right + 4;
-    let top = row ? row.getBoundingClientRect().top - 4 : side.top + 12;
-    if (left + pop.offsetWidth > window.innerWidth - 8) left = Math.max(8, window.innerWidth - pop.offsetWidth - 8);
-    if (top + pop.offsetHeight > window.innerHeight - 8) top = Math.max(8, window.innerHeight - pop.offsetHeight - 8);
-    pop.style.left = left + "px";
-    pop.style.top = top + "px";
   }
 
 
@@ -629,7 +457,6 @@
     closeModal();
     closePops();
     closeDrawer();
-    closeStp();
     closeShots();
     panel.classList.remove("open");
     $("panel-scrim").hidden = true;
@@ -4112,10 +3939,7 @@
       const btn = listButton(shown, d.node, open, !open && unreadOf(stStatus.groups[g.id]) > 0, faces.get(g.id), false, shown);
       btn.dataset.group = g.id;
       btn.dataset.stsig = d.sig;
-      btn.addEventListener("click", () => {
-        if (state.sel && state.sel.type === "group" && state.sel.id === g.id && !state.peer) return;
-        selectGroup(g.id);
-      });
+      btn.addEventListener("click", () => pickGroup(g.id));
       roster.append(btn);
     }
     paintStatus();
@@ -4499,14 +4323,9 @@
     }
     if (state.peer) subtitle.classList.remove("peer-note");
     subtitleError = isError;
-    let desc = "";
-    if (!text && state.sel && state.sel.type === "bot") {
-      const bot = (state.bots || []).find((b) => b.name === state.sel.id);
-      desc = (bot && bot.description) || "";
-    }
-    const show = text || desc;
-    subtitle.textContent = show;
-    subtitle.hidden = !show;
+    // The header shows only the cat's name; an empty status hides the subtitle.
+    subtitle.textContent = text || "";
+    subtitle.hidden = !text;
   }
 
   function resetConversation() {
@@ -4565,10 +4384,17 @@
   }
 
   // Clicking the conversation that is already open keeps its live reply and
-  // pending or failed sends instead of resetting it.
+  // pending or failed sends instead of resetting it; on a narrow window it only
+  // closes the list to show that chat. A sidebar row is one target: its face,
+  // name and status line all come here.
   function pickBot(name) {
-    if (state.sel && state.sel.type === "bot" && state.sel.id === name && !state.peer) return;
+    if (state.sel && state.sel.type === "bot" && state.sel.id === name && !state.peer) { closeDrawer(); return; }
     return selectBot(name);
+  }
+
+  function pickGroup(id) {
+    if (state.sel && state.sel.type === "group" && state.sel.id === id && !state.peer) { closeDrawer(); return; }
+    return selectGroup(id);
   }
 
   async function selectBot(name) {
@@ -7232,6 +7058,8 @@
     if (authenticated && subtitleError) setStatus("");
   }, true);
   document.addEventListener("submit", () => { if (authenticated && subtitleError) setStatus(""); }, true);
+  // Coming back to the tab reads the status again.
+  document.addEventListener("visibilitychange", () => { if (authenticated && !document.hidden) refreshStatus().catch(() => {}); });
 
   $("login-form").addEventListener("submit", async (ev) => {
     ev.preventDefault();
@@ -7642,7 +7470,6 @@
     if (panelMore) { closePanelMore(); return; }
     if (!lightbox.hidden) { closeShots(); return; }
     if (!modal.hidden) { closeModal(); return; }
-    if (stpState.open) { closeStp(); return; }
     if (state.replyTo) { clearQuote(); return; }
     if (!$("account-menu").hidden) { closePops(); return; }
     if (panel.classList.contains("open")) {
@@ -7818,7 +7645,6 @@
   });
 
   async function boot() {
-    stpSetup();
     await refreshLists();
     await refreshStatus().catch(() => {});
     await refreshNotes();
