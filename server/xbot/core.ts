@@ -1,6 +1,7 @@
 import express, { type Response } from 'express';
 import { messageDisplayText, replyInProgress } from '../native/message-presentation.js';
 import { liveEvent } from '../native/live.js';
+import { clip } from '../native/text.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { ApiError } from '../errors.js';
@@ -128,7 +129,7 @@ export function createXbotCoreRouter(bridge: BotBridge) {
     const directoryKey = randomUUID();
     // Unnamed, a group is called after its members; it can be renamed later.
     const joined = members.map(c => c.name).join('、');
-    const title = input.name ?? (joined.length > 64 ? joined.slice(0, 63) + '…' : joined);
+    const title = input.name ?? clip(joined, 64);
     const thread = await bridge.newThread(title, members.map(c => c.id), directoryKey, await bridge.workspaces.groupPath(directoryKey));
     store.state.groupThreadIds.push(thread.id); store.save(); res.status(201).json(bridge.groupItem(thread, members));
   });

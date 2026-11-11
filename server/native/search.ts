@@ -41,8 +41,6 @@ export async function searchMessages(bridge: BotBridge, query: string, limit = 3
     for (const id of meta.conversationIds ?? []) add(chat, id, false);
   }
   for (const id of store.state.groupThreadIds) add({ type: 'group', id, name: '' }, id, true);
-  // The opening invitation the app sent for the owner is not something the owner said.
-  const invitations = new Set(Object.values(store.state.bots).flatMap(bot => Object.values(bot.greetingSources ?? {})).filter(id => typeof id === 'string'));
   const capped = targets.slice(0, 80);
   let failed = 0, more = targets.length > capped.length;
   const hits: Array<SearchHit & { order: number }> = [];
@@ -53,7 +51,8 @@ export async function searchMessages(bridge: BotBridge, query: string, limit = 3
       if (page.hasMore) more = true;
       const replies = new Set(bridge.activity.visibleReplies(target.threadId, page.messages).map(message => message.id));
       for (const message of page.messages) {
-        const owner = message.type === 'user' && !invitations.has(message.id);
+        // The opening invitation the app sent for the owner is not something the owner said.
+        const owner = message.type === 'user' && !bridge.isInvitation(target.threadId, message);
         if (!owner && !replies.has(message.id)) continue;
         const found = snippet(messageDisplayText(message, target.threadId), query);
         if (!found) continue;

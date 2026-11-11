@@ -48,13 +48,22 @@ test('a step names the tool and what it works on, never a command or a whole pat
   assert.deepEqual(step('Write', { file_path: '/Users/me/data/native/workspace/cats/bot-1/hello.txt', content: 'secret words' }),
     { kind: 'step', messageId: MID, catId: CAT, tool: 'Write', target: 'hello.txt' });
   assert.deepEqual(step('Read', { file_path: 'C:\\work\\报告.md' }), { kind: 'step', messageId: MID, catId: CAT, tool: 'Read', target: '报告.md' });
-  assert.deepEqual(step('Glob', { path: '/work/src/', pattern: '**/*.ts' }), { kind: 'step', messageId: MID, catId: CAT, tool: 'Glob', target: 'src' });
+  assert.deepEqual(step('Glob', { path: '/work/src/', pattern: '**/*.ts' }), { kind: 'step', messageId: MID, catId: CAT, tool: 'Glob', target: '**/*.ts' });
+  assert.deepEqual(step('Grep', { pattern: 'TODO', path: 'src/app' }), { kind: 'step', messageId: MID, catId: CAT, tool: 'Grep', target: 'TODO' });
+  assert.deepEqual(step('Task', { description: '核对  周报\n数字', prompt: 'long private prompt' }), { kind: 'step', messageId: MID, catId: CAT, tool: 'Task', target: '核对 周报 数字' });
   assert.deepEqual(step('WebFetch', { url: 'https://example.com/a/b?token=1', prompt: 'read it' }), { kind: 'step', messageId: MID, catId: CAT, tool: 'WebFetch', target: 'example.com' });
   assert.deepEqual(step('WebFetch', { url: 'not a url' }), { kind: 'step', messageId: MID, catId: CAT, tool: 'WebFetch' });
   assert.deepEqual(step('WebSearch', { query: '  猫 为什么\n喜欢 纸箱  ' }), { kind: 'step', messageId: MID, catId: CAT, tool: 'WebSearch', target: '猫 为什么 喜欢 纸箱' });
   const long = step('Grep', { pattern: 'x'.repeat(200) }) as { target: string };
   assert.equal(long.target.length, 40); assert.ok(long.target.endsWith('…'));
-  assert.deepEqual(step('Bash', { command: 'cat ~/.ssh/id_rsa', description: '' }), { kind: 'step', messageId: MID, catId: CAT, tool: 'Bash' });
+  // A command line never travels, not even through the description that goes with it.
+  assert.deepEqual(step('Bash', { command: 'cat ~/.ssh/id_rsa', description: 'cat /Users/me/.ssh/id_rsa' }), { kind: 'step', messageId: MID, catId: CAT, tool: 'Bash' });
+  assert.deepEqual(step('Bash', { command: 'ls', description: 'List files' }), { kind: 'step', messageId: MID, catId: CAT, tool: 'Bash' });
+  // Model-written search words and titles are dropped when they carry an absolute path.
+  for (const [tool, input] of [['WebSearch', { query: 'what is in /Users/me/.ssh/id_rsa' }], ['Grep', { pattern: '~/secrets/token' }], ['Task', { description: 'read C:\\Users\\me\\keys' }],
+    ['Task', { description: '看 "/etc/passwd/x"' }], ['Read', { query: 'notes', description: 'x' }], ['SomeOtherTool', { file_path: '/a/b.txt', query: 'q', description: 'd' }]] as const)
+    assert.deepEqual(step(tool, input), { kind: 'step', messageId: MID, catId: CAT, tool }, tool + JSON.stringify(input));
+  assert.deepEqual(step('Task', { description: '整理 src/app 里的测试' }), { kind: 'step', messageId: MID, catId: CAT, tool: 'Task', target: '整理 src/app 里的测试' });
   assert.deepEqual(step('mcp__cat-cafe-collab__cat_cafe_post_message', 'not an object'), { kind: 'step', messageId: MID, catId: CAT, tool: 'mcp__cat-cafe-collab__cat_cafe_post_message' });
   assert.equal(step('', {}), null);
 });
@@ -69,8 +78,14 @@ test('start, thinking and the end of a turn come from the native markers', () =>
   assert.equal(liveEvent({ ...stamp, type: 'system_info', content: 'plain words' }, T), null);
   assert.equal(liveEvent({ ...stamp, type: 'system_info', content: '{broken' }, T), null);
   assert.equal(liveEvent({ ...stamp, type: 'system_info', content: '{"type":"thinking"}' + ' '.repeat(20_000) }, T), null);
-  assert.deepEqual(liveEvent({ ...stamp, type: 'done', isFinal: true }, T), { kind: 'done', messageId: MID, catId: CAT, ok: true });
-  assert.deepEqual(liveEvent({ ...stamp, type: 'error', error: 'boom', errorCode: 'x' }, T), { kind: 'done', messageId: MID, catId: CAT, ok: false });
+  // The end of a turn says only that it ended. Native's `done` also follows a stop or a failure
+  // (PerCatTerminalDispositionCollector: a bare done is no proof of success), so no outcome is claimed here.
+  const ended = { kind: 'done', messageId: MID, catId: CAT };
+  assert.deepEqual(liveEvent({ ...stamp, type: 'done', isFinal: true }, T), ended);
+  assert.deepEqual(liveEvent({ ...stamp, type: 'done', errorCode: 'INVOCATION_CANCELLED' }, T), ended);
+  assert.deepEqual(liveEvent({ ...stamp, type: 'error', error: 'boom', errorCode: 'x' }, T), ended);
+  assert.deepEqual(liveEvent({ ...stamp, type: 'error', error: 'boom', errorDisposition: 'terminal' }, T), ended);
+  assert.equal(liveEvent({ ...stamp, type: 'error', error: 'retrying', errorDisposition: 'transient' }, T), null, 'a transient provider error does not end the reply');
 });
 
 class LiveNative extends NativeFixture {
@@ -115,7 +130,7 @@ test('the thread stream relays each native event unchanged and adds the live lin
     { kind: 'start', messageId: MID, catId: cat.id },
     { kind: 'step', messageId: MID, catId: cat.id, tool: 'Read', target: 'notes.md' },
     { kind: 'text', messageId: MID, catId: cat.id, text: '你好', end: 2 },
-    { kind: 'done', messageId: MID, catId: cat.id, ok: true },
+    { kind: 'done', messageId: MID, catId: cat.id },
   ]);
   // The raw relay is unchanged: one native event each, the live line right after its source.
   assert.deepEqual(events.map(e => e.event), ['native', 'native', 'native', 'live', 'native', 'live', 'native', 'live', 'native', 'live']);
@@ -179,6 +194,15 @@ test('a reply quotes what it answers only when something else came in between', 
   assert.deepEqual(rows.map((m: any) => [m.id, m.reply_to]),
     [['q1', 0], ['a1', 0], ['q2', 0], ['q3', 0], ['a2', seq.q2], ['a3', 0], ['q4', seq.a1]]);
   for (const m of rows) if (m.native.replyTo) assert.ok(m.native.replyTo, 'the native record keeps what it answers');
+  // At the top of a page that continues further back, the message just before is unknown: no quote is guessed.
+  const request = r.native.request.bind(r.native);
+  r.native.request = (async (path: string, options?: any) => {
+    const result: any = await request(path, options);
+    return path.startsWith('/api/messages?') ? { ...result, messages: result.messages.slice(1), hasMore: true } : result;
+  }) as typeof r.native.request;
+  const cut = (await (await r.call('/xbot-api/bots/Ada/transcript')).json()).messages.filter((m: any) => m.id);
+  assert.deepEqual(cut.slice(0, 2).map((m: any) => [m.id, m.reply_to]), [['a1', 0], ['q2', 0]]);
+  assert.equal(cut.find((m: any) => m.id === 'a2').reply_to, seq.q2, 'further down the same page the rule is unchanged');
 });
 
 test('a cat that signed by itself before the host tail loses both lines, in the chat only', () => {

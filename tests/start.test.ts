@@ -6,28 +6,33 @@ import { join } from 'node:path';
 import { once } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { createApp } from '../server/app.js';
+import { ApiError } from '../server/errors.js';
 import { NativeFixture } from './native-fixture.js';
 import { defaultRuntime } from '../server/native/agents.js';
 import type { NativeRuntime } from '../server/native/bridge.js';
 import type { NativeCat } from '../server/native/types.js';
 
-// Native template instantiation as the adapter sees it (patches/0005): the
-// breed is worked out from the Agent, the portrait is taken as given.
+// The unpatched native member creation as the adapter sees it: POST /api/cats
+// with native's own creation identity (journey + key). The same key with the
+// same body returns the member made before; with another body it is refused.
 class StartNative extends NativeFixture {
-  override async request<T>(path: string, options: { method?: string; body?: any } = {}): Promise<T> {
-    if (path !== '/api/bot-cat-templates/instantiate') return super.request(path, options);
-    this.calls.push({ path, method: options.method || 'GET', body: options.body });
+  receipts = new Map<string, { payload: string; id: string }>();
+  override async request<T>(path: string, options: { method?: string; body?: any; headers?: Record<string, string> } = {}): Promise<T> {
+    // Without a creation identity native creates plainly, as the base fixture does.
+    if (path !== '/api/cats' || options.method !== 'POST' || !options.headers) return super.request(path, options);
+    this.calls.push({ path, method: 'POST', body: { ...options.body, headers: options.headers } });
     if (this.fail) throw this.fail;
-    const { name, catConfig: c, idempotencyKey } = options.body, id = 'bot-' + idempotencyKey.slice(0, 8);
-    let cat = this.cats.find(known => known.id === id);
-    if (!cat) {
-      cat = { id, name, displayName: name, breedId: c.runtimeId === 'claude' ? 'ragdoll' : 'maine-coon',
-        roleDescription: c.portrait.roleDescription, personality: c.portrait.personality, teamStrengths: c.portrait.teamStrengths,
-        clientId: c.runtimeId === 'claude' ? 'anthropic' : 'openai', configurationSource: 'native_tool', defaultModel: '',
-        mentionPatterns: ['@' + name], color: { primary: '#888', secondary: '#eee' } } as NativeCat;
-      this.cats.push(cat);
+    const key = options.headers?.['idempotency-key'], journey = options.headers?.['x-cat-cafe-onboarding-journey'], payload = JSON.stringify(options.body);
+    if (!key || !journey || !key.startsWith(`onboarding:${journey}:cat:`)) throw new ApiError(409, 'Invalid member creation request identity', { code: 'member_creation_conflict' });
+    const receipt = this.receipts.get(key);
+    if (receipt) {
+      if (receipt.payload !== payload) throw new ApiError(409, 'This creation request already belongs to a different configuration', { code: 'member_creation_conflict' });
+      return { cat: structuredClone(this.cats.find(cat => cat.id === receipt.id)) } as T;
     }
-    return { cat, sourceTemplate: null } as T;
+    if (this.cats.some(cat => cat.id === options.body.catId)) throw new ApiError(409, 'Member ID is occupied', { code: 'member_creation_conflict' });
+    const cat = { ...options.body, id: options.body.catId, breedId: options.body.catId, configurationRevision: 'r1' } as NativeCat;
+    this.cats.push(cat); this.receipts.set(key, { payload, id: cat.id });
+    return { cat: structuredClone(cat) } as T;
   }
 }
 const runtime = (id: string, clientId: string, status: string | undefined, more: Partial<NativeRuntime> = {}): NativeRuntime =>
@@ -72,33 +77,51 @@ test('the first screen learns whether a chat can start, and what is in the way w
   assert.equal(defaultRuntime([]), undefined);
 });
 
-test('a cat needs only a name: the Agent, model and breed are native defaults, the portrait is a plain helper', async t => {
+test('a cat needs only a name: one unpatched native creation with the Agent’s own defaults and a plain helper portrait', async t => {
   const r = await setup(t);
   r.native.runtimes = [runtime('codex', 'openai', 'unknown'), runtime('claude', 'anthropic', 'configured')];
-  const key = randomUUID();
+  const key = randomUUID(), creations = () => r.native.calls.filter(c => c.path === '/api/cats' && c.method === 'POST');
   const made = await r.call('/xbot-api/bots', 'POST', { name: '团子', simple: {}, idempotencyKey: key });
   assert.equal(made.status, 201);
-  const sent = r.native.calls.find(c => c.path === '/api/bot-cat-templates/instantiate')!.body;
-  assert.equal(sent.name, '团子'); assert.equal(sent.idempotencyKey, key);
-  assert.deepEqual({ ...sent.catConfig, portrait: undefined }, { runtimeId: 'claude', breed: { mode: 'auto' }, model: { mode: 'inherit' }, effort: { mode: 'inherit' }, portrait: undefined });
-  assert.match(sent.catConfig.portrait.roleDescription, /随叫随到/);
-  assert.ok(sent.catConfig.portrait.personality && sent.catConfig.portrait.teamStrengths, 'the breed’s stock engineering portrait is not left to fill in');
-  assert.equal(r.native.calls.some(c => c.path === '/api/cats' && c.method === 'POST'), false, 'one native creation, no second path');
+  const sent = creations()[0]!.body;
+  assert.deepEqual(sent.headers, { 'x-cat-cafe-onboarding-journey': 'clowder-bot-simple', 'idempotency-key': 'onboarding:clowder-bot-simple:cat:' + key });
+  assert.match(sent.catId, /^bot-[0-9a-f]{24}$/);
+  assert.deepEqual([sent.name, sent.displayName, sent.clientId, sent.configurationSource, sent.defaultModel], ['团子', '团子', 'anthropic', 'native_tool', ''],
+    'the logged-in Agent, its own model: nothing is chosen for it');
+  assert.deepEqual(sent.mentionPatterns, ['@团子', '@' + sent.catId]);
+  assert.match(sent.roleDescription, /随叫随到/);
+  assert.ok(sent.personality && sent.teamStrengths, 'a stock engineering portrait is not left to fill in');
+  for (const field of ['breedId', 'cli', 'accountRef', 'carrier', 'provider']) assert.equal(field in sent, false, field);
+  assert.equal(r.native.calls.some(c => c.path.startsWith('/api/bot-cat-templates')), false, 'not the locally patched template route');
   const item = (await (await r.call('/xbot-api/bots')).json()).bots[0];
-  assert.equal(item.name, '团子'); assert.equal(item.avatar_seed, 'cat:ragdoll');
-  // The same request again is the same cat.
-  assert.equal((await (await r.call('/xbot-api/bots', 'POST', { name: '团子', simple: {}, idempotencyKey: key })).json()).native_id, item.native_id);
+  assert.deepEqual([item.name, item.avatar_seed, item.templateId, item.native_id], ['团子', 'cat:ragdoll', 'ragdoll', sent.catId]);
+
+  // The same request again is the same cat, even if the tools look different by then.
+  r.native.runtimes = [runtime('codex', 'openai', 'configured'), runtime('claude', 'anthropic', 'login_required')];
+  const again = await r.call('/xbot-api/bots', 'POST', { name: '团子', simple: {}, idempotencyKey: key });
+  assert.equal(again.status, 201);
+  assert.equal((await again.json()).native_id, sent.catId);
+  assert.deepEqual({ ...creations()[1]!.body }, { ...sent }, 'byte-for-byte the first request, so native replays it');
+  assert.equal(r.native.cats.length, 1);
+  // Another request under the same key is native's to refuse; a second cat of the same name is refused before asking.
+  const other = await r.call('/xbot-api/bots', 'POST', { name: '团子', simple: { about: '别的用途' }, idempotencyKey: key });
+  assert.equal(other.status, 409); assert.match((await other.json()).native.code, /member_creation_conflict/);
+  const twin = await r.call('/xbot-api/bots', 'POST', { name: '团子', simple: {}, idempotencyKey: randomUUID() });
+  assert.equal(twin.status, 409); assert.match((await twin.json()).error, /已经有一只叫这个名字/);
   assert.equal(r.native.cats.length, 1);
 
-  // A chosen face is only the portrait; a line about the cat becomes its role and its short description.
+  // A chosen face is the portrait and its colour; a line about the cat becomes its role and short description.
   const about = '帮我管理每周的读书笔记，\n周五提醒我整理';
   assert.equal((await r.call('/xbot-api/bots', 'POST', { name: '栗子', simple: { face: 'golden-chinchilla', about, agent: 'codex' }, idempotencyKey: randomUUID() })).status, 201);
-  const second = r.native.calls.findLast(c => c.path === '/api/bot-cat-templates/instantiate')!.body.catConfig;
-  assert.equal(second.runtimeId, 'codex'); assert.deepEqual(second.breed, { mode: 'auto' });
-  assert.equal(second.portrait.roleDescription, about);
-  assert.equal(second.portrait.teamStrengths, '帮我管理每周的读书笔记， 周五提醒我整理');
+  const second = creations().at(-1)!.body;
+  assert.equal(second.clientId, 'openai');
+  assert.equal(second.roleDescription, about);
+  assert.equal(second.teamStrengths, '帮我管理每周的读书笔记， 周五提醒我整理');
   const chestnut = (await (await r.call('/xbot-api/bots')).json()).bots.find((b: any) => b.name === '栗子');
-  assert.equal(chestnut.avatar_seed, 'cat:golden-chinchilla'); assert.equal(chestnut.templateId, 'maine-coon');
+  assert.deepEqual([chestnut.avatar_seed, chestnut.templateId], ['cat:golden-chinchilla', 'golden-chinchilla']);
+  // Without a chosen face a Codex cat gets the face that goes with it.
+  await r.call('/xbot-api/bots', 'POST', { name: '年糕', simple: { agent: 'codex' }, idempotencyKey: randomUUID() });
+  assert.equal((await (await r.call('/xbot-api/bots')).json()).bots.find((b: any) => b.name === '年糕').avatar_seed, 'cat:maine-coon');
 });
 
 test('quick creation refuses what it cannot do truthfully', async t => {
@@ -116,7 +139,7 @@ test('quick creation refuses what it cannot do truthfully', async t => {
     { catConfig: { runtimeId: 'codex', breed: { mode: 'auto' }, model: { mode: 'inherit' }, effort: { mode: 'inherit' }, portrait: { roleDescription: 'x' } } }])
     assert.equal((await post({ name: '团子', simple: {}, idempotencyKey: key, ...mixed }))[0], 400, JSON.stringify(mixed));
   assert.equal(r.native.cats.length, 0);
-  assert.equal(r.native.calls.some(c => c.path === '/api/bot-cat-templates/instantiate'), false);
+  assert.equal(r.native.calls.some(c => c.path === '/api/cats' && c.method === 'POST'), false);
 });
 
 test('a group can be made from its members alone and is then called after them', async t => {

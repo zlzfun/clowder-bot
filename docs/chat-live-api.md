@@ -16,9 +16,9 @@
 | --- | --- | --- | --- |
 | `start` | `system_info` 内层 `invocation_created` | `messageId`（取 `lifecycleResponseMessageId`）、`catId` | 这只猫开始写这条回复，此时还没有字 |
 | `thinking` | `system_info` 内层 `thinking` | `messageId`、`catId` | 在想；思考内容不下发 |
-| `step` | `tool_use` | `messageId`、`catId`、`tool`（原生工具名）、`target?` | 正在做一步。`target` 只取文件名、网址的主机名、或压成一行并截到 40 字的查询/说明；命令行和完整路径不下发 |
+| `step` | `tool_use` | `messageId`、`catId`、`tool`（原生工具名）、`target?` | 正在做一步。`target` 只从已知含义的字段取：读写文件的工具取文件名，抓取网页取主机名，搜索取查询词，Grep/Glob 取匹配式，Task/Agent 取任务标题（都压成一行、最多 40 字）。命令行从不下发，包括 Bash 自带的说明；其他工具不取任何字段；模型写的查询词或标题里带绝对路径时整项不下发 |
 | `text` | `text` 且 `origin: 'stream'` | `messageId`、`catId`、`text`（这一片）、`end?`（这一片之后整条回复的原生长度）、`replace?` | 正文增量。`textMode: 'replace'` 时带 `replace: true`，表示整条换成这一片 |
-| `done` | `done` / `error` | `messageId`、`catId`、`ok` | 这一轮结束。成稿以随后读取的会话为准 |
+| `done` | `done`，或未标为 `transient` 的 `error` | `messageId`、`catId` | 这只猫的这条回复不再继续写了。它**不表示成功**：原生在停止和失败之后同样发 `done`（上游 `PerCatTerminalDispositionCollector`：单凭 `done` 不能证明成功）。结局（完成、已停止、没完成）以随后读取的会话为准。标为 `transient` 的错误不算结束 |
 
 - `messageId` 就是会话里那条回复的 `native_message_id`，`catId` 对应 `native_cat_id`。群聊里多只猫同时写时各有各的 `messageId`。
 - `end` 只在原生长度属于这条回复（线程与猫一致、是不小于本片长度的整数）时才有；没有就不猜。
@@ -52,4 +52,6 @@
 
 ## 验证
 
-`tests/live.test.ts`：投影的每种事件、不下发命令与完整路径、SSE 上 `native` 与 `live` 的顺序、进行中的行（单聊与群聊）、引用规则、双重署名。真实运行时的核对见上文「依据」。
+`tests/live.test.ts`：投影的每种事件、不下发命令与绝对路径、结束事件不声称成功、SSE 上 `native` 与 `live` 的顺序、进行中的行（单聊与群聊）、引用规则（含分页边界）、双重署名。真实运行时的核对见上文「依据」。
+
+2026-11-11 请本机 Codex 对这组后端改动做了只读交叉检视，采纳的修正：`done` 不再带成功标记；`step.target` 改为按工具取已知字段；会话「最新一句」与未读按显示文字判断可见（带署名的 `SILENT` 不算）；回执未到的开场邀请不算用户说的话；分页边界不猜引用；截断不切开代理对；只填名字建猫改走未打补丁的上游接口（见 [接口范围](xbot-api.md)「开箱即用」）。

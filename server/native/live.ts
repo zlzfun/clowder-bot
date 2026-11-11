@@ -1,4 +1,5 @@
 import type { NativeEvent } from './types.js';
+import { clip } from './text.js';
 
 /**
  * Display-only projection of the native per-turn events the engine already
@@ -14,31 +15,43 @@ export type LiveEvent =
   | { kind: 'step'; messageId: string; catId: string; tool: string; target?: string }
   /** `end` is the native length (UTF-16 units) of the whole reply after this piece. */
   | { kind: 'text'; messageId: string; catId: string; text: string; end?: number; replace?: true }
-  | { kind: 'done'; messageId: string; catId: string; ok: boolean };
+  /** The reply stopped being produced. How it ended (finished, stopped, failed) is the transcript's to say. */
+  | { kind: 'done'; messageId: string; catId: string };
 
 const record = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const text = (value: unknown, max: number): string | undefined =>
   typeof value === 'string' && value.length > 0 && value.length <= max ? value : undefined;
-const clip = (value: string, max: number) => value.length > max ? value.slice(0, max - 1) + '…' : value;
 
-/** What a step works on, in a form fit for a chat line: a file name, a site, a short query. Never a command or a full path. */
-function stepTarget(input: unknown): string | undefined {
-  const fields = record(input);
-  for (const key of ['file_path', 'path', 'notebook_path', 'filePath']) {
-    const value = fields[key];
-    if (typeof value === 'string' && value.trim()) {
-      const name = value.trim().replace(/[\\/]+$/, '').split(/[\\/]/).pop();
-      if (name) return clip(name, 60);
+/**
+ * What a step works on, in a form fit for a chat line. Only fields whose
+ * meaning is known for that tool are read: a file tool gives a file name, a
+ * fetch its host, a search its query, a delegation its title. A command line
+ * is never passed on, and neither is text that carries an absolute path.
+ */
+function stepTarget(tool: string, input: unknown): string | undefined {
+  const fields = record(input), name = tool.toLowerCase();
+  const line = (value: unknown) => {
+    if (typeof value !== 'string' || !value.trim()) return undefined;
+    const flat = value.trim().replace(/\s+/g, ' ');
+    return /(?:^|[\s"'`(=:])(?:~|\/|[A-Za-z]:\\)[^\s]*[\\/]/.test(flat) ? undefined : clip(flat, 40);
+  };
+  if (/^(read|write|edit|multiedit|notebookedit|notebookread)$/.test(name)) {
+    for (const key of ['file_path', 'notebook_path', 'path', 'filePath']) {
+      const value = fields[key];
+      if (typeof value === 'string' && value.trim()) {
+        const file = value.trim().replace(/[\\/]+$/, '').split(/[\\/]/).pop();
+        if (file) return clip(file, 60);
+      }
     }
+    return undefined;
   }
-  if (typeof fields.url === 'string') {
-    try { return clip(new URL(fields.url).hostname, 60); } catch { return undefined; }
+  if (/^(webfetch|web_fetch)$/.test(name)) {
+    try { return typeof fields.url === 'string' ? clip(new URL(fields.url).hostname, 60) : undefined; } catch { return undefined; }
   }
-  for (const key of ['query', 'pattern', 'description']) {
-    const value = fields[key];
-    if (typeof value === 'string' && value.trim()) return clip(value.trim().replace(/\s+/g, ' '), 40);
-  }
+  if (/^(websearch|web_search)$/.test(name)) return line(fields.query);
+  if (/^(grep|glob)$/.test(name)) return line(fields.pattern);
+  if (/^(task|agent)$/.test(name)) return line(fields.description);
   return undefined;
 }
 
@@ -62,7 +75,7 @@ export function liveEvent(event: NativeEvent, threadId: string): LiveEvent | nul
     case 'tool_use': {
       const tool = text(event.toolName, 120);
       if (!messageId || !tool) return null;
-      const target = stepTarget(event.toolInput);
+      const target = stepTarget(tool, event.toolInput);
       return { kind: 'step', messageId, catId, tool, ...(target ? { target } : {}) };
     }
     case 'system_info': {
@@ -77,8 +90,10 @@ export function liveEvent(event: NativeEvent, threadId: string): LiveEvent | nul
       }
       return null;
     }
-    case 'done': return messageId ? { kind: 'done', messageId, catId, ok: true } : null;
-    case 'error': return messageId ? { kind: 'done', messageId, catId, ok: false } : null;
+    // Native ends a cat's turn with `done` or with an error that is not marked transient.
+    // Neither says the reply succeeded: a `done` also follows a stop or a failure.
+    case 'done': return messageId ? { kind: 'done', messageId, catId } : null;
+    case 'error': return messageId && event.errorDisposition !== 'transient' ? { kind: 'done', messageId, catId } : null;
     default: return null;
   }
 }

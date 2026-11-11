@@ -1,6 +1,7 @@
 import { ApiError } from '../errors.js';
 import { encode, type BotBridge } from './bridge.js';
 import type { NativeCat } from './types.js';
+import { clip } from './text.js';
 
 /**
  * What a cat asked the owner to confirm, in the words of a chat. The request,
@@ -21,7 +22,7 @@ export interface ApprovalCard {
 }
 type Item = Record<string, any>;
 const record = (value: unknown): Item => value && typeof value === 'object' && !Array.isArray(value) ? value as Item : {};
-const words = (value: unknown, max = 400): string => typeof value === 'string' ? (value.trim().length > max ? value.trim().slice(0, max - 1) + '…' : value.trim()) : '';
+const words = (value: unknown, max = 400): string => typeof value === 'string' ? clip(value.trim(), max) : '';
 // The decision routes the Bot may reach; the hub manifest picks one of them per kind of request.
 const decisionBases = /^\/api\/(?:proposals|session-handoff|dispatch-proposals|taste-proposals|profile-updates|person-memory-proposals|entity-proposals|event-memory-corrections|schedule-proposals|eval-repair-proposals)$/;
 const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];

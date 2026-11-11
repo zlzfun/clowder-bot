@@ -82,6 +82,13 @@ class PreviewNative extends NativeFixture {
       }
       return done({ cat, sourceTemplate: null });
     }
+    // Native replays a member creation that carries the same identity; here the same ID is enough.
+    if (url.pathname === '/api/cats' && method === 'POST') {
+      const existing = this.cats.find(cat => cat.id === body.catId);
+      if (existing) return done({ cat: existing });
+      const cat = { ...body, id: body.catId, breedId: body.catId, configurationRevision: 'r1', isDefaultResponder: this.cats.length === 0 } as NativeCat;
+      this.cats.push(cat); return done({ cat });
+    }
     if (url.pathname === '/api/cats/runtime-models') return done({ status: 'live', models: [{ value: 'default', label: '默认', efforts: ['low', 'medium', 'high'].map(value => ({ value, label: value })) }] });
     if (parts[2] === 'cats' && parts[3] && parts.length === 4 && method === 'DELETE') { this.cats = this.cats.filter(cat => cat.id !== parts[3]); return done({ status: 'ok' }); }
     if (parts[2] === 'threads' && parts[3] && parts.length === 4 && method === 'DELETE') { this.threads.delete(parts[3]); return done({ status: 'ok' }); }

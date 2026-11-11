@@ -119,9 +119,30 @@ test('a conversation says what was said last: the owner counts, the invitation, 
   // A reply that is only a file says so by count, not by made-up words.
   r.native.messages.get(r.thread.id)!.push({...r.reply('file',2500,'SILENT'),contentBlocks:[{type:'file',fileName:'report.txt',url:'/uploads/report.txt'}]});
   assert.deepEqual(await last(),{messageId:'file',time:new Date(2500).toISOString(),from:'cat',catId:r.cat.id,catName:'Ada',text:'',files:1});
+  // A signed silence or a signature alone is not a reply, so it neither becomes the line nor counts as unread.
+  const before=await r.bridge.activity.read(r.thread.id);
+  r.native.messages.get(r.thread.id)!.push(r.reply('signed-silent',2600,'SILENT\n\n[Ada/gpt🐾]'),r.reply('signature-only',2700,'[Ada/gpt🐾]'));
+  const after=await r.bridge.activity.read(r.thread.id);
+  assert.equal(after.last!.messageId,'file');assert.equal(after.unread,before.unread);assert.equal(after.latestMessageId,'file');
+  // A cut inside an emoji would leave half a character.
+  r.native.messages.get(r.thread.id)!.push(r.reply('emoji',2800,'a'.repeat(138)+'🐱b'));
+  assert.equal((await last())!.text,'a'.repeat(138)+'…');
   // The status read carries it for each cat; a conversation that cannot be read has none.
-  const status=await(await r.call('/bots/status')).json();assert.equal(status.bots[0].activity.last.messageId,'file');
+  const status=await(await r.call('/bots/status')).json();assert.equal(status.bots[0].activity.last.messageId,'emoji');
   assert.equal(r.bridge.activity.unavailable(r.thread.id).last,null);
+});
+test('an invitation whose receipt has not come back yet is still not something the owner said',async t=>{
+  const r=await setup(t);
+  // Native published the invitation; the adapter has only recorded that it asked.
+  r.store.bot(r.cat.id).greetingSources={[r.thread.id]:{invitationVersion:2}};
+  await r.bridge.greet(r.cat,r.thread.id).catch(()=>{});
+  const sent=r.native.calls.findLast(c=>c.path==='/api/messages'&&c.method==='POST')!.body.content as string;
+  r.store.bot(r.cat.id).greetingSources={[r.thread.id]:{invitationVersion:2}};
+  r.native.messages.set(r.thread.id,[{id:'pending-invite',type:'user',catId:null,timestamp:900,content:sent}]);
+  assert.equal((await r.bridge.activity.read(r.thread.id)).last,null);
+  // The same words typed by the owner in a chat that has no pending invitation are the owner's.
+  r.store.bot(r.cat.id).greetingSources={};
+  assert.equal((await r.bridge.activity.read(r.thread.id)).last!.messageId,'pending-invite');
 });
 test('group replies retain failed and file-only messages without showing silent control markers',async t=>{
   const r=await setup(t),group=await r.bridge.newThread('Group',[r.cat.id]);r.store.state.groupThreadIds.push(group.id);

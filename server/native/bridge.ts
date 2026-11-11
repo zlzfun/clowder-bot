@@ -5,6 +5,7 @@ import type { NativeCat, NativeMessage, NativeThread, NativeTransport } from './
 import { defaultRuntime, runtimeUnavailable, supportsRuntime } from './agents.js';
 import { messageDisplayText, messagePresentation, replyInProgress } from './message-presentation.js';
 import { avatarBreed, type CatConfig, type SourceTemplate } from './cat-templates.js';
+import { clip } from './text.js';
 import { Workspaces } from '../workspaces.js';
 import { NativeFiles } from './files.js';
 import { Activity } from './activity.js';
@@ -78,6 +79,20 @@ export class BotBridge {
       avatar_url: meta.avatarData ? `/xbot-api/bots/${encode(cat.name)}/avatar?v=${meta.avatarUpdated}` : '',
       thread_id: meta.activeThreadId, native_id: cat.id, project_id: meta.projectId ?? null };
   }
+  /**
+   * Whether a user message is the opening invitation the app sent on the owner's
+   * behalf. Known by its native ID once the receipt is in; while the receipt
+   * is still pending, by the exact wording in that conversation.
+   */
+  isInvitation(threadId: string, message: NativeMessage): boolean {
+    if (message.type !== 'user') return false;
+    for (const bot of Object.values(this.store.state.bots)) {
+      const source = bot.greetingSources?.[threadId];
+      if (source === undefined) continue;
+      if (typeof source === 'string' ? source === message.id : [greetingInvitation, legacyGreetingInvitation].includes(message.content)) return true;
+    }
+    return false;
+  }
   thread(id: string): Promise<NativeThread> { return this.native.request(`/api/threads/${encode(id)}`); }
   async direct(cat: NativeCat): Promise<NativeThread> {
     const id = this.store.bot(cat.id).activeThreadId;
@@ -140,8 +155,9 @@ export class BotBridge {
       if (message.type === 'user' && message.id === source) continue;
       const seq = this.store.sequence(thread.id, message.id);
       const text = messageDisplayText(message, thread.id), inProgress = replyInProgress(message);
+      // At the top of a page that continues further back, what came just before is not known; no quote is guessed there.
       const quoted = message.replyTo && message.replyTo !== source
-        && !(message.type !== 'user' && message.replyTo === lastUser) ? message.replyTo : undefined;
+        && !(message.type !== 'user' && (message.replyTo === lastUser || (lastUser === undefined && page.hasMore))) ? message.replyTo : undefined;
       if (message.type === 'user') lastUser = message.id;
       const base = { seq, id: message.id, native_message_id: message.id, role: message.type === 'user' ? 'user' : 'assistant',
         content: text, ...presentation, time: new Date(message.timestamp).toISOString(),
@@ -253,18 +269,7 @@ export class BotBridge {
       if (source || input.catConfig || input.sourceTemplate || input.runtimeId || input.templateId || input.persona !== undefined || input.description !== undefined)
         throw new ApiError(400, '快速创建只需要名字，不能与其他配置混用');
       if (!input.idempotencyKey) throw new ApiError(400, '创建猫猫需要请求标识');
-      const { simple, ...rest } = input, about = simple.about?.trim();
-      // Same native creation as the full form: the local Agent's own defaults
-      // for model and effort, the breed native works out from them.
-      const runtimes = await this.runtimes(true);
-      const runtime = simple.agent ? runtimes.find(r => r.id === simple.agent) : defaultRuntime(runtimes);
-      if (!runtime) throw new ApiError(422, simple.agent ? '找不到选的这个助手程序，请重新选择。' : '这台电脑上还没有可以用的助手程序，装好并登录 Claude Code 或 Codex 后再试。');
-      const unavailable = runtimeUnavailable(runtime);
-      if (unavailable) throw new ApiError(422, unavailable);
-      return this.createBot({ ...rest, ...(simple.face ? { avatar_seed: `cat:${simple.face}` } : {}),
-        catConfig: { runtimeId: runtime.id, breed: { mode: 'auto' }, model: { mode: 'inherit' }, effort: { mode: 'inherit' },
-          portrait: { roleDescription: about || defaultRole, personality: defaultPersonality,
-            teamStrengths: about ? (about.length > 60 ? about.slice(0, 59) + '…' : about).replace(/\s+/g, ' ') : defaultStrengths } } });
+      return this.createSimple(input.name, input.simple, input.idempotencyKey, input.timezone);
     }
     if (input.catConfig) {
       if (source || input.runtimeId || input.templateId || input.persona !== undefined || input.description !== undefined)
@@ -303,6 +308,43 @@ export class BotBridge {
       clientId: runtime.clientId, configurationSource: 'native_tool', defaultModel: '',
     } });
     Object.assign(this.store.bot(cat.id), { templateId: template.id, avatarSeed: input.avatar_seed, timezone: input.timezone });
+    this.store.save();
+    return cat;
+  }
+  /**
+   * A cat from a name alone, on the unpatched native member creation
+   * (POST /api/cats): the local Agent's own model and effort, the colour of the
+   * chosen face, a plain helper portrait. The request carries native's own
+   * creation identity (journey + key), so sending it again returns the same
+   * cat and a different request under the same key is refused by native.
+   */
+  private async createSimple(name: string, simple: NonNullable<CreateBot['simple']>, key: string, timezone?: string): Promise<NativeCat> {
+    const catId = `bot-${createHash('sha256').update(`bot-simple-cat:${key}`).digest('hex').slice(0, 24)}`;
+    const cats = await this.cats(), existing = cats.find(cat => cat.id === catId);
+    if (cats.some(cat => cat.id !== catId && cat.name.toLowerCase() === name.toLowerCase())) throw new ApiError(409, '已经有一只叫这个名字的猫猫了');
+    // A repeat of a request that already made its cat is answered from that cat: what the tools look like now no longer matters.
+    const runtimes = await this.runtimes(!existing);
+    const runtime = existing ? runtimes.find(r => supportsRuntime(r) && r.clientId === existing.clientId)
+      : simple.agent ? runtimes.find(r => r.id === simple.agent) : defaultRuntime(runtimes);
+    if (!runtime) throw new ApiError(422, simple.agent ? '找不到选的这个助手程序，请重新选择。' : '这台电脑上还没有可以用的助手程序，装好并登录 Claude Code 或 Codex 后再试。');
+    const unavailable = existing ? null : runtimeUnavailable(runtime);
+    if (unavailable) throw new ApiError(422, unavailable);
+    const face = simple.face ?? ({ anthropic: 'ragdoll', openai: 'maine-coon', kimi: 'turkish-van' } as Record<string, string>)[runtime.clientId] ?? 'ragdoll';
+    const template = (await this.templates()).templates.find(t => t.id === face);
+    if (!template) throw new ApiError(503, '暂时读不到猫猫的外观资料，请稍后再试');
+    const about = simple.about?.trim();
+    const journey = 'clowder-bot-simple';
+    const { cat } = await this.native.request<{ cat: NativeCat }>('/api/cats', { method: 'POST',
+      headers: { 'x-cat-cafe-onboarding-journey': journey, 'idempotency-key': `onboarding:${journey}:cat:${key}` },
+      body: { catId, name, displayName: name, nickname: name, color: template.color, mentionPatterns: [`@${name}`, `@${catId}`],
+        roleDescription: about || defaultRole, personality: defaultPersonality,
+        teamStrengths: about ? clip(about.replace(/\s+/g, ' '), 60) : defaultStrengths,
+        clientId: runtime.clientId, configurationSource: 'native_tool', defaultModel: '' } }).catch(error => {
+      if (error instanceof ApiError && error.status === 409) throw new ApiError(409, '这次创建和上一次的内容不一样，或者名字已被占用，请重新创建', error.details);
+      throw error;
+    });
+    if (!cat?.id) throw new ApiError(502, '没能确认猫猫是否建好，请刷新后查看');
+    Object.assign(this.store.bot(cat.id), { templateId: face, avatarSeed: `cat:${face}`, ...(timezone ? { timezone } : {}) });
     this.store.save();
     return cat;
   }

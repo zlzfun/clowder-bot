@@ -36,7 +36,7 @@
 ```
 
 - items 是原生事实投影，按待确认、失败、运行、排队、未完成任务排序。没有证据不造状态；`readStatus` 非 ready 时不能推断空闲／全部完成。
-- `last` 取当前返回页里最新的一条：用户消息（应用代发的开场邀请除外）或可见的猫回复（与未读同一口径：草稿、处理中、已停止、`SILENT`、被显式发言取代的执行记录都不算）。`text` 是去掉署名、压成一行、最多 140 字的显示文字；只交付文件的回复 `text` 为空、`files` 为文件数，由前端措辞。它只是同一次原生消息读取的另一种投影，不另存。
+- `last` 取当前返回页里最新的一条：用户消息（应用代发的开场邀请除外，回执未到时按该会话里的邀请原文识别）或可见的猫回复（与未读同一口径：草稿、处理中、已停止、被显式发言取代的执行记录都不算；显示文字为空且没有文件的也不算，例如带署名的 `SILENT` 或只有署名的一行）。`text` 是去掉署名、压成一行、最多 140 字的显示文字；只交付文件的回复 `text` 为空、`files` 为文件数，由前端措辞。它只是同一次原生消息读取的另一种投影，不另存。
 - 审批只投影原生 `resolution:open` 且有当前会话的真实卡片坐标；`messageId` 用于定位。一个 Task 的 doing／blocked 与 invocation running 分开，不凭 Task 推断执行。
 - 现有 `GET /xbot-api/bots/status`（另支持 `/xbot-api/status`）的 bot 项保留旧字段，增加 `thread_id`、`activity`；同时返回 `groups:[{id,thread_id,activity}]`。有当前待审批时 state 为 awaiting；读取不全且没有已证实执行时为 unknown；其他保持 running／queued／idle。仅新消息影响 unread，审批数量独立保留。
 - `POST <scope>/read {expectedThreadId,messageId}` 确认用户实际看到的回复，返回 `{threadId,readMessageId}`；会话变化返回 409，不能确认不属于该会话的消息。GET 不会标已读，后台轮询、隐藏页面、浏览旧消息不能确认最新回复。前端只在页面可见、当前会话、实际看到对应消息时提交，并防旧请求串会话。

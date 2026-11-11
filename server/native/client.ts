@@ -41,8 +41,12 @@ export class NativeClient implements NativeTransport {
     })();
     try { await this.session; } finally { this.session = undefined; }
   }
-  async request<T = Record<string, unknown>>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
+  async request<T = Record<string, unknown>>(path: string, options: { method?: string; body?: unknown; headers?: Record<string, string> } = {}): Promise<T> {
     if (!path.startsWith('/api/') || /[\r\n\\]/.test(path) || new URL(path, this.baseUrl).origin !== this.baseUrl) throw new ApiError(400, 'Invalid native API path');
+    // The only caller-supplied headers are the two that identify a member creation to native.
+    const extra = Object.entries(options.headers ?? {});
+    if (extra.some(([name, value]) => !['idempotency-key', 'x-cat-cafe-onboarding-journey'].includes(name) || !/^[\x21-\x7e]{1,512}$/.test(value)))
+      throw new ApiError(400, 'Invalid native request header');
     // A session is revalidated before every operation, including after native restarts.
     // Failed mutations are never silently retried.
     await this.authenticate();
@@ -50,7 +54,7 @@ export class NativeClient implements NativeTransport {
     try {
       response = await this.fetcher(this.baseUrl + path, {
         method: options.method ?? 'GET',
-        headers: { Cookie: this.cookie, Origin: this.origin, 'x-csrf-token': this.csrf,
+        headers: { ...Object.fromEntries(extra), Cookie: this.cookie, Origin: this.origin, 'x-csrf-token': this.csrf,
           ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
         ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
         redirect: 'error', signal: AbortSignal.timeout(30_000),
