@@ -2,7 +2,7 @@
 
 本地运行的多成员聊天产品：界面沿用 XBot，执行引擎直接运行 [Clowder AI](https://github.com/zts212653/clowder-ai) 的原始代码。Bot 层只负责界面、产品元数据与协议适配。
 
-后续产品方向见 [可探索特性清单](docs/feature-exploration.md)，包含复用边界、聊天体验原则与探索顺序。
+后续产品方向见 [可探索特性清单](docs/feature-exploration.md)，包含复用边界、聊天体验原则与探索顺序。当前这一阶段（用起来像聊天软件、开箱即用）的盘点、分轮计划和进度见 [方向、现状与分轮计划](docs/chat-app-roadmap.md)。
 
 首批聊天体验支持发资料与收文件、查看协作提醒，以及只读查看已保存的资料与偏好；实现范围与限制见 [1、3、5 实施记录](docs/chat-files-collaboration-memory.md#首批实施)。
 
