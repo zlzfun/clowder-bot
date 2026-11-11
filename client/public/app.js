@@ -6438,6 +6438,7 @@
     state.groups = groups.groups || [];
     renderLists();
     refreshBotFaces();
+    syncNoChat();
     warmOne().catch(() => {});
   }
 
@@ -7784,6 +7785,17 @@
     thread.replaceChildren(inner);
   }
 
+  // Every list read keeps the no-chat view in step with the cats: the first one
+  // arriving from elsewhere retires an untouched stage for the no-chat line
+  // (quick.release keeps one with a draft or a request on its way, and points
+  // at the cat); the last one leaving brings the stage back. Other views, and
+  // an open chat, are never touched.
+  function syncNoChat() {
+    if (state.sel) return;
+    const stage = thread.querySelector(".qc-stage"), none = thread.querySelector(".qc-none");
+    if ((stage && state.bots.length && quick.release(stage, state.bots.map((b) => b.name))) || (none && !state.bots.length)) showNoChat();
+  }
+
   function syncPanelDefault() {
     if (state.panelTouched) return;
     let preference = null;
@@ -7883,6 +7895,8 @@
     more: (opener) => openTemplateCreate(opener),
     showList: () => $("menu").click(),
     error: (e) => setStatus(visibleError(e), true),
+    // The 新建 button as it is now (renderLists redraws the pin row): focus returns there after a dialog.
+    opener: () => [document.querySelector("#pin-row .pin.add"), $("rail-new")].find((b) => b && b.getClientRects().length) || null,
   });
   syncSidebar();
   initTheme(); // in the app this also tells the window which theme to use

@@ -91,7 +91,12 @@ class El {
   closest(tag: string): El | null { for (let n: El | null = this; n; n = n.parent) if (n.tagName === tag) return n; return null; }
   focus() { if (this.isConnected && !this.disabled) this.doc.focused = this; }
   select() { this.selected++; }
-  querySelectorAll(sel: string) { const tags = sel.split(',').map(s => s.trim().toUpperCase()); return all(this).filter(e => tags.includes(e.tagName)); }
+  // Tag names or single class names, comma separated: what the module and the shell's no-chat code ask for.
+  querySelectorAll(sel: string) {
+    const parts = sel.split(',').map(s => s.trim());
+    return all(this).filter(e => parts.some(p => (p.startsWith('.') ? e.classList.contains(p.slice(1)) : e.tagName === p.toUpperCase())));
+  }
+  querySelector(sel: string) { return this.querySelectorAll(sel)[0] ?? null; }
   getClientRects() { for (let n: El | null = this; n; n = n.parent) if (n.hidden) return []; return [{}]; }
   getBoundingClientRect() { return { left: 0, top: 0, width: 0, height: 0 }; }
 }
@@ -141,7 +146,7 @@ const START = {
     agents: [tool('codex', 'Codex', 'missing', 'codex login'), tool('claude', 'Claude Code', 'missing', 'claude auth login'), tool('kimi', 'Kimi', 'missing', 'kimi login')] },
 };
 type Call = { path: string; method: string; body?: Any };
-function page(opts: { start?: Any; cats?: string[]; route?: (path: string, method: string, body: Any) => unknown; openCat?: (name: string) => unknown } = {}) {
+function page(opts: { start?: Any; cats?: string[]; route?: (path: string, method: string, body: Any) => unknown; openCat?: (name: string) => unknown; onRefresh?: () => void } = {}) {
   const doc = new Doc();
   const window: Any = { crypto: globalThis.crypto };
   const context = vm.createContext({ window, document: doc, setTimeout: () => 0, clearTimeout: () => {}, console });
@@ -167,13 +172,15 @@ function page(opts: { start?: Any; cats?: string[]; route?: (path: string, metho
     face: (name: string) => { const a = doc.createElement('span'); a.className = 'avatar'; a.dataset.cat = name; return a; },
     cats: () => s.cats,
     copy: async (text: string) => { copied.push(text); return true; },
-    refresh: async () => { refreshed++; },
+    refresh: async () => { refreshed++; opts.onRefresh?.(); },
     openCat: async (name: string) => { opened.push(name); if (opts.openCat) await opts.openCat(name); },
     openGroup: async (id: string) => { groups.push(id); },
     landing: () => null,
     more: (opener: unknown) => { more.push(opener); },
     showList: () => { lists++; },
     error: (e: Error) => { errors.push(e.message); },
+    // The 新建 button as the sidebar has it now (renderLists redraws it).
+    opener: () => live.opener,
   });
   // The shell paints a no-chat view into the history (app.js showNoChat).
   const thread = doc.createElement('div');
@@ -181,8 +188,9 @@ function page(opts: { start?: Any; cats?: string[]; route?: (path: string, metho
   const paint = (view: El) => { const inner = doc.createElement('div'); inner.className = 'thread-inner no-chat'; inner.append(view); thread.replaceChildren(inner); return view; };
   const opener = doc.createElement('button');
   doc.body.append(opener);
+  const live: { opener: El | null } = { opener };
   return {
-    doc, Q, R: window.ClowderQuickCreateRules, s, calls, opened, groups, more, copied, errors, thread, paint, opener,
+    doc, Q, R: window.ClowderQuickCreateRules, s, calls, opened, groups, more, copied, errors, thread, paint, opener, live,
     get refreshed() { return refreshed; }, get lists() { return lists; },
     posts: () => calls.filter(c => c.method === 'POST' && c.path === '/xbot-api/bots'),
     stage: async () => { const v = paint(Q.stage()); await settle(); return v; },
@@ -604,24 +612,277 @@ test('新建群聊: two to ten cats as face chips, in the order picked; the name
   type(name, '  ');
   card.dispatch('submit');
   await settle();
-  assert.deepEqual(p.calls.map(c => c.body), [{ members: ['猫3', '猫1', '猫4', '猫5', '猫6', '猫7', '猫8', '猫9', '猫10', '猫2'] }]);
+  assert.equal(p.calls.length, 1);
+  const { idempotencyKey, ...body } = p.calls[0].body;
+  assert.deepEqual(body, { members: ['猫3', '猫1', '猫4', '猫5', '猫6', '猫7', '猫8', '猫9', '猫10', '猫2'] }, 'no name: the server names it after its members');
+  assert.match(idempotencyKey, UUID);
   assert.equal(p.layer(), null);
   assert.deepEqual(p.groups, ['thread-G']);
 });
 
-test('新建群聊: an unsure answer keeps the dialog, says to look before retrying, and reads the list again', async () => {
-  const p = page({ cats: ['团子', '栗子'], route: (path, method) => { if (path === '/xbot-api/groups' && method === 'POST') throw fail(undefined, '连不上 clowder-bot'); return undefined; } });
+test('新建群聊: an unsure answer keeps the dialog and is resent unchanged under the same key; other members, another order or a name make a new request', async () => {
+  let answer: (() => unknown) | null = () => { throw fail(undefined, '连不上 clowder-bot'); };
+  const p = page({ cats: ['团子', '栗子', '年糕'], route: (path, method) => (path === '/xbot-api/groups' && method === 'POST' && answer ? answer() : undefined) });
   p.Q.openGroup({ opener: p.opener });
   const card = one(p.layer()!, 'qc-card');
-  for (const box of all(card).filter(n => n.type === 'checkbox')) { box.checked = true; box.dispatch('change'); }
+  const boxes = all(card).filter(n => n.type === 'checkbox');
+  const pick = (i: number, on = true) => { boxes[i].checked = on; boxes[i].dispatch('change'); };
+  pick(0); pick(1);
   type(control(card, '群名'), ' 晨会 ');
   card.dispatch('submit');
   await settle();
-  assert.deepEqual(p.calls[0].body, { members: ['团子', '栗子'], name: '晨会' });
   assert.ok(p.layer());
-  assert.equal(visibleText(one(card, 'qc-error')), '没能确认群聊建好没有。先看看列表里有没有它，再决定要不要重试。');
+  assert.equal(visibleText(one(card, 'qc-error')), '没能确认群聊建好没有。不改内容再点一次就好，不会多出一个群。');
   assert.equal(p.refreshed, 1);
-  assert.deepEqual(p.groups, []);
+  card.dispatch('submit');
+  await settle();
+  const keys = () => p.calls.map(c => c.body.idempotencyKey);
+  assert.deepEqual(p.calls[1].body, p.calls[0].body, 'the same members, order and name: the same request');
+  assert.deepEqual({ ...p.calls[0].body, idempotencyKey: 'k' }, { members: ['团子', '栗子'], name: '晨会', idempotencyKey: 'k' });
+  // Another order is another group face and title: a new request.
+  pick(0, false); pick(0);
+  card.dispatch('submit');
+  await settle();
+  assert.deepEqual(p.calls[2].body.members, ['栗子', '团子']);
+  assert.notEqual(keys()[2], keys()[0]);
+  type(control(card, '群名'), '');
+  card.dispatch('submit');
+  await settle();
+  assert.notEqual(keys()[3], keys()[2], 'without the name it is another request');
+  pick(2);
+  answer = null;
+  card.dispatch('submit');
+  await settle();
+  assert.notEqual(keys()[4], keys()[3], 'another member: another request');
+  assert.deepEqual(p.calls[4].body.members, ['栗子', '团子', '年糕']);
+  assert.equal(p.layer(), null);
+  assert.deepEqual(p.groups, ['thread-G']);
+});
+
+// ---------------------------------------------------------------- review fixes (2026-11-11)
+test('a cat whose answer was lost can be sent again unchanged after the list has learned its name: the same key reaches the server', async () => {
+  const made: string[] = [];
+  let lose = true;
+  const p = page({
+    route: (path, method, body) => {
+      if (path !== '/xbot-api/bots' || method !== 'POST') return undefined;
+      if (!made.includes(body.name)) made.push(body.name); // the server made it…
+      if (lose) { lose = false; throw fail(undefined, '连不上 clowder-bot'); } // …but the answer was lost
+      return { name: body.name, native_id: 'bot-1' };
+    },
+    onRefresh: () => { p.s.cats.splice(0, Infinity, ...made); },
+  });
+  const stage = await p.stage();
+  const go = button(stage, '带它回家');
+  go.click();
+  await settle();
+  assert.deepEqual(p.s.cats, ['砚砚'], 'the refreshed list knows the cat');
+  go.click();
+  await settle();
+  const [first, second] = p.posts();
+  assert.ok(second, 'the retry reaches the server instead of stopping at the local name check');
+  assert.deepEqual(second.body, first.body, 'same key, same body: the server answers with the cat it made');
+  assert.equal(one(stage, 'qc-err').textContent, '');
+  assert.deepEqual(p.opened, ['砚砚']);
+  // A changed request is new, and then the name the list knows is taken.
+  const q = page({ route: (path, method, body) => { if (path === '/xbot-api/bots' && method === 'POST') { made.splice(0, Infinity, body.name); throw fail(undefined); } return undefined; }, onRefresh: () => { q.s.cats.splice(0, Infinity, ...made); } });
+  const again = await q.stage();
+  button(again, '带它回家').click();
+  await settle();
+  face(again, '孟加拉猫').click();
+  type(control(again, '名字'), '砚砚');
+  button(again, '带它回家').click();
+  await settle();
+  assert.equal(q.posts().length, 1);
+  assert.equal(one(again, 'qc-err').textContent, '已经有一只叫「砚砚」的猫猫了，换个名字吧');
+});
+
+test('switching the tool keeps keyboard focus on the select, so Tab and Escape still work inside the dialog', async () => {
+  const p = page();
+  const stage = await p.stage();
+  const select = () => one(stage, 'qc-tool-line').querySelectorAll('select')[0];
+  const before = select();
+  before.focus();
+  choose(before, 'claude');
+  assert.equal(p.doc.activeElement, select(), 'focus stays on the tool select');
+  assert.equal(select().value, 'claude');
+  choose(select(), 'codex');
+  assert.equal(p.doc.activeElement.tagName, 'SELECT');
+
+  const q = page({ cats: ['团子'] });
+  q.Q.openCat({ opener: q.opener });
+  await settle();
+  const card = one(q.layer()!, 'qc-card');
+  const pick = one(card, 'qc-tool-line').querySelectorAll('select')[0];
+  pick.focus();
+  choose(pick, 'claude');
+  assert.equal(card.contains(q.doc.activeElement), true);
+  q.doc.activeElement.key('Escape');
+  assert.equal(q.layer(), null, 'Escape from the focused select still closes the dialog');
+  assert.equal(q.doc.activeElement, q.opener);
+});
+
+test('a face the owner picked survives a 422, the blocked view and 重新检测', async () => {
+  const p = page({ route: (path, method) => { if (path === '/xbot-api/bots' && method === 'POST' && p.s.start === START.login) throw fail(422, '请先在本机 Agent 中完成登录'); return undefined; } });
+  const stage = await p.stage();
+  face(stage, '孟加拉猫').click();
+  p.s.start = START.login;
+  button(stage, '带它回家').click();
+  await settle();
+  assert.equal(shown(one(stage, 'qc-need')), true);
+  assert.equal(chosen(stage), null, 'blocked, the row is only a picture');
+  p.s.start = START.ready;
+  button(stage, '重新检测').click();
+  await settle();
+  assert.equal(chosen(stage), '孟加拉猫', 'the owner\'s choice comes back, not the tool\'s default');
+  assert.equal(control(stage, '名字').value, '斑斑');
+  button(stage, '带它回家').click();
+  await settle();
+  assert.equal(p.posts().at(-1)!.body.simple.face, 'bengal');
+});
+
+test('the name boxes admit every name the server accepts (64 characters, some outside the basic plane) and the rules say when one is longer', async () => {
+  const p = page({ cats: ['团子', '栗子'] });
+  const stage = await p.stage();
+  const longest = '𠀀'.repeat(64), group = '😺'.repeat(64);
+  const catName = control(stage, '名字');
+  assert.ok(longest.length <= catName.maxLength, 'a browser counts UTF-16 units: 64 such characters must fit');
+  assert.equal(p.R.nameProblem(longest, []), '');
+  assert.equal(p.R.nameProblem(longest + '𠀀', []), '名字最多 64 个字');
+  p.Q.openGroup({ opener: p.opener });
+  const card = one(p.layer()!, 'qc-card');
+  const groupName = control(card, '群名');
+  assert.ok(group.length <= groupName.maxLength);
+  assert.equal(p.R.groupNameProblem(group), '');
+  assert.equal(p.R.groupNameProblem(group + '😺'), '群名最多 64 个字');
+  card.key('Escape');
+  // The optional line: up to 2000 characters, refused before sending beyond that.
+  p.Q.openCat({ opener: p.opener });
+  await settle();
+  const cat = one(p.layer()!, 'qc-card'), about = control(cat, '它主要帮你做什么');
+  assert.ok('𠀀'.repeat(2000).length <= about.maxLength);
+  type(about, '字'.repeat(2001));
+  cat.dispatch('submit');
+  await settle();
+  assert.equal(p.posts().length, 0);
+  assert.match(visibleText(cat), /这一行最多 2000 个字/);
+  assert.equal(p.doc.activeElement, about);
+});
+
+test('closing a dialog returns focus to the 新建 button the sidebar has now, even after a redraw replaced the one that opened it', async () => {
+  for (const open of ['openCat', 'openGroup'] as const) {
+    const p = page({ cats: ['团子', '栗子'] });
+    p.opener.focus();
+    p.Q[open]({ opener: p.opener });
+    await settle();
+    // renderLists() redraws the pin row: the opener is gone, an equivalent button is there.
+    p.opener.remove();
+    const redrawn = p.doc.createElement('button');
+    p.doc.body.append(redrawn);
+    p.live.opener = redrawn;
+    p.doc.activeElement.key('Escape');
+    assert.equal(p.layer(), null, open);
+    assert.equal(p.doc.activeElement, redrawn, open + ': focus is not left on the page');
+  }
+  // 更多设置 hands the live button to the template creator too.
+  const q = page({ cats: ['团子'] });
+  q.Q.openCat({ opener: q.opener });
+  await settle();
+  q.opener.remove();
+  const redrawn = q.doc.createElement('button');
+  q.doc.body.append(redrawn);
+  q.live.opener = redrawn;
+  button(one(q.layer()!, 'qc-card'), '更多设置').click();
+  assert.deepEqual(q.more, [redrawn]);
+});
+
+test('a first cat arriving from elsewhere retires an untouched stage; one with a draft or a request on its way stays and points at the cat', async () => {
+  // Untouched: the shell may replace it (with the no-chat line).
+  const p = page();
+  const stage = await p.stage();
+  assert.equal(p.Q.release(stage, ['团子']), true);
+  // A typed name stays, with a way to the cat that arrived.
+  const q = page();
+  const typed = await q.stage();
+  type(control(typed, '名字'), '小白');
+  assert.equal(q.Q.release(typed, ['团子']), false);
+  assert.equal(control(typed, '名字').value, '小白');
+  assert.equal(visibleText(one(typed, 'qc-arrived')), '已经有猫猫了：团子。去聊天');
+  button(typed, '去聊天').click();
+  await settle();
+  assert.deepEqual(q.opened, ['团子']);
+  // A picked face counts as a draft; so does focus inside the stage.
+  const r = page();
+  const picked = await r.stage();
+  face(picked, '暹罗猫').click();
+  assert.equal(r.Q.release(picked, ['团子', '栗子', '年糕', '豆包']), false);
+  assert.equal(visibleText(one(picked, 'qc-arrived')), '已经有猫猫了：团子、栗子、年糕等 4 只。去聊天');
+  // A request on its way (perhaps this very cat): nothing changes and nothing is said.
+  let release: () => void = () => {};
+  const s = page({ route: (path, method) => (path === '/xbot-api/bots' && method === 'POST' ? new Promise(done => { release = () => done({ name: '砚砚', native_id: 'b' }); }) : undefined) });
+  const busy = await s.stage();
+  button(busy, '带它回家').click();
+  await settle();
+  assert.equal(s.Q.release(busy, ['砚砚']), false);
+  assert.equal(named(busy, 'qc-arrived').filter(shown).length, 0);
+  release();
+  await settle();
+  assert.deepEqual(s.opened, ['砚砚']);
+  // An unsure request is a pending one too.
+  const u = page({ route: (path, method) => { if (path === '/xbot-api/bots' && method === 'POST') throw fail(undefined); return undefined; } });
+  const unsure = await u.stage();
+  button(unsure, '带它回家').click();
+  await settle();
+  assert.equal(u.Q.release(unsure, ['砚砚']), false);
+});
+
+test('the shell reconciles the no-chat view when the cats change: stage ↔ no-chat line, never over an open chat', () => {
+  const app = read('client/public/app.js');
+  const take = (name: string) => {
+    const m = new RegExp(`\\n {2}(?:async )?function ${name}\\([^)]*\\) \\{\\n[\\s\\S]*?\\n {2}\\}\\n`).exec(app);
+    assert.ok(m, name + ' is where the shell keeps it');
+    return m[0];
+  };
+  assert.match(take('refreshLists'), /renderLists\(\);[\s\S]*syncNoChat\(\);/, 'every list read reconciles');
+  const doc = new Doc();
+  const thread = doc.createElement('div');
+  doc.body.append(thread);
+  const state: Any = { sel: null, bots: [] };
+  const asked: string[][] = [];
+  let free = true;
+  const view = (cls: string) => () => { const v = doc.createElement('div'); v.className = cls; return v; };
+  const quick = { stage: view('qc-stage'), noChat: view('qc-none'), release: (_el: El, names: string[]) => { asked.push(names); return free; } };
+  const out: Any = {};
+  vm.runInNewContext(take('showNoChat') + take('syncNoChat') + 'out.show = showNoChat; out.sync = syncNoChat;', {
+    out, state, thread, quick, el: (tag: string, cls: string) => { const e = doc.createElement(tag); e.className = cls; return e; },
+  });
+  const showing = () => (thread.querySelector('.qc-stage') ? 'stage' : thread.querySelector('.qc-none') ? 'none' : 'other');
+  out.show();
+  assert.equal(showing(), 'stage');
+  const first = thread.querySelector('.qc-stage');
+  out.sync();
+  assert.equal(thread.querySelector('.qc-stage'), first, 'no cats yet: the same stage stays (its draft and request too)');
+  state.bots = [{ name: '团子' }];
+  free = false;
+  out.sync();
+  assert.equal(thread.querySelector('.qc-stage'), first, 'a stage with a draft is kept');
+  assert.deepEqual(asked.at(-1), ['团子']);
+  free = true;
+  out.sync();
+  assert.equal(showing(), 'none', 'an untouched stage gives way to the no-chat line');
+  state.bots = [];
+  out.sync();
+  assert.equal(showing(), 'stage', 'the last cat gone: the stage again');
+  // An open chat is never replaced.
+  state.sel = { type: 'bot', id: '团子' };
+  state.bots = [{ name: '团子' }];
+  out.sync();
+  assert.equal(showing(), 'stage');
+  // Nor any other view (the pre-login hold, a chat's own history).
+  state.sel = null;
+  thread.replaceChildren(doc.createElement('div'));
+  out.sync();
+  assert.equal(showing(), 'other');
 });
 
 // ---------------------------------------------------------------- wiring

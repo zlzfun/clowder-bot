@@ -27,7 +27,7 @@
       "file": "app.js",
       "target": "client/public/app.js",
       "sourceSha256": "1248f793493826bf044359c71e7d8772ccc3472d6021d6abb979dff9b6cb29bc",
-      "sha256": "f05dac3d9ca716b8996d9262b6314bc40a13d9dae91b8b6931c592ff50ca30b3",
+      "sha256": "3bb044b8fa878810967eaec382c89e92c909cd69bfa087db7d03c75521b06e13",
       "unchanged": false
     },
     {
@@ -726,20 +726,20 @@
     {
       "target": "client/public/quick-create-rules.js",
       "description": "Quick creation rules without DOM or network: cat names checked as the adapter's zod label (1–64 characters, letters, digits, space, _ . -; taken names ignoring case) and group names as its groupTitle, the unnamed group's name joined by 、 and clipped like the server's clip(), the face that goes with a tool and the preset nickname made free of taken names, the name following the face until typed, GET /xbot-api/start read as it is (usable tools are the logged-in and the unconfirmed ones, an unchecked login never called ready), what blocks in everyday words with the native login commands, unchanged re-detection, request bodies that always carry the tool shown with a fingerprint for key reuse, and failed requests told apart (409 the name, 422 blocked, no answer or 5xx unsure; adapter words naming a Bot, an Agent or a model not shown)",
-      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 开箱即用 (docs/xbot-api.md「开箱即用」)",
-      "sha256": "f587b3d2d824cade9e348f100af88eb88bee7b0782d6e1ea91cf7ef612288939"
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 开箱即用 (docs/xbot-api.md「开箱即用」); review fixes by local Claude Code (claude-opus-5-5) on 2026-11-11: lost-answer retry under the original key, keyed group creation, tool switch keeps focus, picked face kept across blocked, input caps by code points, live opener for focus return, stage reconciled when the first cat arrives elsewhere",
+      "sha256": "23f9ce39e12caec6358fa6ac1d135c4143c92f5356980f1f48af245e61f2c8e8"
     },
     {
       "target": "client/public/quick-create.js",
       "description": "The first-run 「领一只猫猫回家」 stage (eight clay faces as one radio group, the chosen one stepping forward, the nickname as the name, 带它回家, the quiet tool line with a select when more than one is usable and the unconfirmed-login note with its copyable command), the blocked states with 重新检测 (?refresh=1, says plainly when nothing changed, focus kept), inline creation errors and the same-key retry of an unsure request, the portrait gliding to the header face on success (skipped under reduced motion), the made-but-not-opened state, the no-chat line with 打开列表, the quick 新建猫猫 dialog (optional 它主要帮你做什么 as simple.about, 更多设置 handing over to the unchanged template creator) and the 新建群聊 dialog (face chips in pick order, 2–10 members, optional name whose placeholder is the generated name, unsure answers told to look before retrying); one dialog at a time, Escape, Tab and focus kept inside and returned to the opener",
-      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 开箱即用 (docs/xbot-api.md「开箱即用」)",
-      "sha256": "a046e3ad8782afe6912974e01006ed2643070045c48273bf0c7693e69eabd66f"
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 开箱即用 (docs/xbot-api.md「开箱即用」); review fixes by local Claude Code (claude-opus-5-5) on 2026-11-11: lost-answer retry under the original key, keyed group creation, tool switch keeps focus, picked face kept across blocked, input caps by code points, live opener for focus return, stage reconciled when the first cat arrives elsewhere",
+      "sha256": "ae20588679c20d77acd7ca5aea45fe94ae85d67654436ca75c17b1dd01d38cff"
     },
     {
       "target": "client/public/quick-create.css",
       "description": "Stage, faces with the cushion and caption, name box, action, tool line and select chip, copyable command chips, blocked panel, dialogs on the original modal card, group face chips, the gliding portrait, the hidden composer while no chat is open, phone 4 × 2 faces and reduced motion; only existing tokens and keyframes, original CSS unchanged",
-      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 开箱即用 (docs/xbot-api.md「开箱即用」)",
-      "sha256": "b4c29142e08291a832c456d1240447add1139488971507ba50586a626d87ce5e"
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 开箱即用 (docs/xbot-api.md「开箱即用」); review fixes by local Claude Code (claude-opus-5-5) on 2026-11-11: lost-answer retry under the original key, keyed group creation, tool switch keeps focus, picked face kept across blocked, input caps by code points, live opener for focus return, stage reconciled when the first cat arrives elsewhere",
+      "sha256": "4fd7237d5defa85af9dcf10ebe324287d558de1ec96a0971af51d4c49fbdb393"
     },
     {
       "target": "client/public/palette-rules.js",
