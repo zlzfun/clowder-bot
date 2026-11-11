@@ -1,31 +1,35 @@
 // The live parts of the guide to what clowder-bot can do (showcase/index.html).
 // Everything here only reads: the cats' faces come from the product's own
-// cat-avatars.js, and when the page is served by `npm run showcase` the
-// contact list shows what the staged chats say right now, worded by the
-// product's own chat-list-rules.js, from the same reads the app's sidebar makes
+// cat-avatars.js. Whether the staged chats are behind the page is what the
+// scripted preview itself says (GET /__preview: the showcase, staged); then
+// the contact list shows what they say right now, worded by the product's own
+// chat-list-rules.js, from the same reads the app's sidebar makes
 // (GET /xbot-api/bots, /xbot-api/groups, /xbot-api/bots/status). Without them
-// (the page opened on its own, or another preview behind it) the page reads as
-// it is and says how to start the staged chats.
+// (the page opened on its own, the plain preview, anything else) the page reads
+// as it is and says how to start the staged chats. The rules are in
+// tour-rules.js.
 //
 // Two actions open a chat: 打开这个对话 is a link to /#chat=<name> (the app opens
-// that cat or group chat); 看它现场演示 first asks the showcase to send that
-// chat's demo line (POST /__preview {"play": name}) and then opens it, so the
-// visitor arrives while the cat is still writing. Browser Back comes here again.
+// that cat or group chat); 看它现场演示 is a button: it asks the showcase to
+// send that chat's demo line (POST /__preview {"play": name}) and then opens
+// the chat, so the visitor arrives while the cat is still writing. It is only
+// offered for the chats the showcase can play. Browser Back comes here again.
 // A chat opened from here gets a paw stamped on its face in the list (kept for
 // this tab only).
 (function () {
   "use strict";
+  const T = window.ClowderTourRules;
   // Opened from the checkout (file://), the product's files are next door in client/public.
   const ROOT = location.protocol === "file:" ? "../client/public/" : "/";
   const served = location.protocol === "http:" || location.protocol === "https:";
   // The staged chats (scripts/showcase-scene.ts): each cat's face is its engine template.
   const FACES = { 布偶猫: "ragdoll", 缅因猫: "maine-coon", 暹罗猫: "siamese", 梵花猫: "turkish-van", 小鲸鱼: "dsh", 狸花猫: "dragon-li", 孟加拉猫: "bengal", 金渐层: "golden-chinchilla" };
-  const GROUPS = ["产品评审", "读书会"];
-  const POLL_MS = 8000;
+  const POLL_MS = 8000, READ_MS = 6000;
   const reduce = () => !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
   const node = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+  const chatLink = (name) => "/#chat=" + encodeURIComponent(name);
 
   function load(src) {
     return new Promise((done, fail) => {
@@ -90,79 +94,86 @@
       if (!box || !seen.includes(name) || box.querySelector(".t-stamp")) continue;
       const fresh = !stamped.includes(name) && !reduce() && landing;
       box.append(node("span", "t-stamp" + (fresh ? " t-wait" : "")));
-      $(".t-row-name", row).after(node("span", "t-vh", "（打开过）"));
+      $(".t-row-name", row).append(node("span", "t-vh", "（打开过）"));
       if (fresh) landing.observe(row);
     }
     store.write(STAMPED, Array.from(new Set([...stamped, ...seen])));
   }
 
   // ------------------------------------------------------- the live reads
-  const S = { live: false, bots: [], groups: [], timer: 0 };
-  async function get(path) {
-    const r = await fetch(path, { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } });
+  const S = { live: false, bots: [], groups: [], plays: new Set() };
+  async function get(path, signal) {
+    const r = await fetch(path, { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" }, signal });
     if (!r.ok) throw new Error(path + " " + r.status);
     return r.json();
   }
-  async function readAll() {
-    if (!served) return false;
-    try {
-      const [bots, groups] = await Promise.all([get("/xbot-api/bots"), get("/xbot-api/groups")]);
+  const identity = (signal) => get("/__preview", signal).catch(() => null);
+  // One read: while the staged chats are known to run, what they say now; else
+  // whether they run (and then everything). A failed read changes nothing on
+  // screen, unless the preview itself no longer says the chats are staged.
+  async function read({ signal, current }) {
+    if (!S.live) {
+      const id = await identity(signal);
+      if (!current()) return;
+      if (!T.staged(id)) { setLive(false); return; }
+      const [bots, groups, status] = await Promise.all([get("/xbot-api/bots", signal), get("/xbot-api/groups", signal), get("/xbot-api/bots/status", signal)]);
+      if (!current()) return;
       S.bots = Array.isArray(bots && bots.bots) ? bots.bots : [];
       S.groups = Array.isArray(groups && groups.groups) ? groups.groups : [];
-      // The staged chats are there only if every staged cat and group is.
-      const names = new Set(S.bots.map((b) => b.name)), titles = new Set(S.groups.map((g) => g.name));
-      if (!Object.keys(FACES).every((n) => names.has(n)) || !GROUPS.every((n) => titles.has(n))) return false;
+      S.plays = T.plays(id);
       for (const b of S.bots) {
         const seed = /^cat:([\w-]+)$/.exec(String(b.avatar_seed || ""));
         if (seed) faces[b.name] = seed[1]; else if (b.templateId) faces[b.name] = b.templateId;
       }
-      await readStatus();
-      return true;
-    } catch (e) {
-      return false;
+      setLive(true);
+      paintRows(status);
+      return;
     }
+    let status;
+    try { status = await get("/xbot-api/bots/status", signal); }
+    catch (e) {
+      if (!current()) return; // given up (too slow) or superseded: nothing is concluded
+      const id = await identity(signal);
+      if (current() && !T.staged(id)) setLive(false);
+      return;
+    }
+    if (current()) paintRows(status);
   }
-  async function readStatus() {
-    const status = await get("/xbot-api/bots/status");
-    paintRows(status);
-  }
+  const reads = T.serial(read, { ms: READ_MS, visible: () => document.visibilityState !== "hidden" });
 
   const accentOf = (b) => { const c = b && b.accent && b.accent.primary; return /^#[0-9a-f]{6}$/i.test(String(c || "")) ? c : ""; };
   function paintRows(status) {
     const R = window.ClowderListRules;
-    if (!R) return;
+    if (!R || !status || typeof status !== "object") return;
     const now = Date.now();
     for (const row of $$(".t-row")) {
       const name = row.dataset.row, group = !!row.dataset.group;
       const g = group ? S.groups.find((x) => x.name === name) : null;
       const entry = group ? (status.groups || []).find((x) => g && x.id === g.id) : (status.bots || []).find((x) => x.bot === name);
-      if (!entry) continue;
-      const a = entry.activity || {}, counts = a.counts || {};
-      const l = R.last(entry), u = R.unread(entry), badge = R.badge(u);
+      const view = entry ? T.rowView(entry, group, R, now) : null;
+      // Not read whole: the row keeps what it showed (on first load, its own line).
+      if (!view) continue;
       const time = $(".t-row-time", row);
-      time.textContent = l ? R.ago(l.time, now) : "";
-      if (l) { time.setAttribute("datetime", new Date(l.time).toISOString()); time.title = R.stamp(l.time); }
+      time.textContent = view.time;
+      if (view.iso) { time.setAttribute("datetime", view.iso); time.title = view.stamp; }
       const line = $(".t-row-line", row), sub = $(".t-row-sub", row);
-      if (!line.dataset.about) line.dataset.about = line.textContent;
-      const busy = (counts.running || 0) > 0 || (Array.isArray(a.active) && a.active.length > 0);
-      const waiting = entry.state === "awaiting" || (counts.approval || 0) > 0;
-      if (busy) {
+      if (view.line === "busy") {
         const paws = node("span", "t-paws");
         paws.setAttribute("aria-hidden", "true");
         paws.append(node("i"), node("i"), node("i"));
         line.replaceChildren(paws, document.createTextNode("正在输入…"));
-      } else if (waiting) line.replaceChildren(node("span", "t-row-wait", "等你确认"));
-      else line.textContent = R.preview(l, group) || line.dataset.about;
+      } else if (view.line === "waiting") line.replaceChildren(node("span", "t-row-wait", "等你确认"));
+      else line.textContent = view.said || about(line);
       let count = $(".t-row-count", row);
-      if (badge) {
+      if (view.badge) {
         if (!count) { count = node("span", "t-row-count"); sub.append(count); }
-        count.textContent = badge;
-        count.setAttribute("aria-label", badge + " 条新回复");
+        count.textContent = view.badge;
+        count.setAttribute("aria-label", view.badge + " 条新回复");
       } else if (count) count.remove();
       const box = $(".t-row-face", row);
       let dot = $(".t-row-dot", box);
-      if (u.n > 0 && !dot) { dot = node("span", "t-row-dot"); box.append(dot); }
-      else if (!u.n && dot) dot.remove();
+      if (view.dot && !dot) { dot = node("span", "t-row-dot"); box.append(dot); }
+      else if (!view.dot && dot) dot.remove();
       // The cat's own colour (for its paws here, and behind its picture below).
       const accent = group ? "" : accentOf(S.bots.find((b) => b.name === name));
       if (accent) row.style.setProperty("--t-accent", accent);
@@ -174,8 +185,24 @@
       section.classList.add("t-tinted");
     }
   }
+  // A row's own line (what that chat shows), kept from the page as written.
+  function about(line) {
+    if (line.dataset.about == null) line.dataset.about = line.textContent;
+    return line.dataset.about;
+  }
+  // Not running any more: each row says what it shows again, claiming nothing about the chats.
+  function plainRows() {
+    for (const row of $$(".t-row")) {
+      const line = $(".t-row-line", row);
+      line.textContent = about(line);
+      const time = $(".t-row-time", row);
+      time.textContent = ""; time.removeAttribute("datetime"); time.title = "";
+      for (const n of $$(".t-row-count, .t-row-dot", row)) n.remove();
+    }
+  }
 
   function setLive(live) {
+    const was = S.live;
     S.live = live;
     const chip = $("#live"), text = $(".t-live-text", chip);
     chip.classList.add("on");
@@ -183,22 +210,21 @@
     text.textContent = live ? "示例对话在运行" : "示例对话没在运行";
     $("#off").classList.toggle("on", !live);
     for (const box of $$(".t-actions")) box.hidden = !live;
+    for (const b of $$("button[data-play]")) b.hidden = !(live && S.plays.has(b.dataset.play));
+    if (was && !live) { reads.reset(); plainRows(); }
   }
 
   // ---------------------------------------------------------- the actions
   function wireActions() {
-    for (const a of $$("[data-chat]")) a.href = "/#chat=" + encodeURIComponent(a.dataset.chat);
+    for (const a of $$("a[data-chat]")) a.href = chatLink(a.dataset.chat);
     for (const a of $$("[data-app]")) a.href = "/";
+    for (const b of $$("button[data-play]")) b.hidden = true;
     document.addEventListener("click", (ev) => {
-      const a = ev.target.closest && ev.target.closest("a[data-chat]");
-      if (!a || !S.live) return;
-      saw(a.dataset.chat);
-      if (!a.dataset.play) return;
-      // A new tab or window: the demo starts and the tab opens the chat on its own.
-      if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey || ev.button !== 0) { play(a.dataset.play).catch(() => {}); return; }
-      ev.preventDefault();
-      if (a.getAttribute("aria-busy") === "true") return;
-      start(a);
+      const t = ev.target && ev.target.closest ? ev.target : null;
+      const button = t && t.closest("button[data-play]");
+      if (button) { if (S.live) start(button); return; }
+      const a = t && t.closest("a[data-chat]");
+      if (a && S.live) saw(a.dataset.chat);
     });
   }
   async function play(name) {
@@ -209,23 +235,26 @@
     if (r.ok) return;
     throw new Error(r.status === 404 ? "示例里没有这个对话" : "示例没有收下这句话（" + r.status + "）");
   }
-  async function start(a) {
-    const note = $(".t-note", a.closest(".t-copy"));
-    if (!a.dataset.label) a.dataset.label = a.textContent;
-    a.setAttribute("aria-busy", "true");
-    a.textContent = "正在开始…";
+  // One demo per press: the button is busy until the chat opens (or the showcase said no).
+  async function start(button) {
+    if (button.getAttribute("aria-busy") === "true") return;
+    const name = button.dataset.play, note = $(".t-note", button.closest(".t-copy"));
+    if (!button.dataset.label) button.dataset.label = button.textContent;
+    button.setAttribute("aria-busy", "true");
+    button.textContent = "正在开始…";
     if (note) note.textContent = "";
     try {
-      await play(a.dataset.play);
-      location.assign(a.href);
+      await play(name);
+      saw(name);
+      location.assign(chatLink(name));
     } catch (e) {
-      a.removeAttribute("aria-busy");
-      a.textContent = a.dataset.label;
+      button.removeAttribute("aria-busy");
+      button.textContent = button.dataset.label;
       if (note) note.textContent = "没能开始演示：" + e.message + "。可以先打开这个对话看看。";
     }
   }
   function settleButtons() {
-    for (const a of $$("a[aria-busy]")) { a.removeAttribute("aria-busy"); if (a.dataset.label) a.textContent = a.dataset.label; }
+    for (const b of $$("button[aria-busy]")) { b.removeAttribute("aria-busy"); if (b.dataset.label) b.textContent = b.dataset.label; }
   }
 
   // ------------------------------------------------------------ the motion
@@ -248,33 +277,35 @@
     if (!("IntersectionObserver" in window)) return;
     new IntersectionObserver(([e]) => { back.hidden = e.isIntersecting || e.boundingClientRect.top > 0; }).observe(roster);
   }
+  // Printed (or saved as PDF): every section shown (the pictures are loaded with the page).
+  function printable() {
+    window.addEventListener("beforeprint", () => { for (const n of $$(".t-reveal")) n.classList.add("t-in"); });
+  }
 
   // ------------------------------------------------------------- start up
-  // While the staged chats run: what they say now. When they were not running,
-  // only coming back to the page looks again (not every few seconds).
-  async function refresh(again = false) {
-    if (!S.live) { if (again && served) setLive(await readAll()); return; }
-    try { await readStatus(); } catch (e) { setLive(await readAll()); }
-  }
   async function boot() {
     wireActions();
     reveal();
     backToList();
-    const product = Promise.allSettled([load(ROOT + "cat-avatars.js"), load(ROOT + "chat-list-rules.js")]);
-    await product;
+    printable();
+    for (const line of $$(".t-row-line")) about(line);
+    await Promise.allSettled([load(ROOT + "cat-avatars.js"), load(ROOT + "chat-list-rules.js")]);
     paintFaces();
     paintStamps();
-    setLive(await readAll());
+    // Until the first read the page claims nothing either way (a hidden tab reads when it is seen).
+    if (!served) setLive(false);
+    else await reads.refresh();
     paintFaces();
-    clearInterval(S.timer);
-    S.timer = setInterval(() => { if (document.visibilityState === "visible") refresh(); }, POLL_MS);
-    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") refresh(true).then(paintFaces); });
+    // While the staged chats run, what they say now (only while the page is seen);
+    // when they did not, only coming back to the page looks again.
+    setInterval(() => { if (S.live) reads.refresh(); }, POLL_MS);
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && served) reads.refresh().then(paintFaces); });
     // Back from a chat (the page comes out of the browser's cache): the new stamp, and what the chat says now.
     window.addEventListener("pageshow", (ev) => {
       if (!ev.persisted) return;
       settleButtons();
       paintStamps();
-      refresh(true);
+      if (served) reads.refresh();
     });
   }
   boot();
