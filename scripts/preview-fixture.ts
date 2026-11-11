@@ -10,6 +10,7 @@
 //   curl -X POST :3230/__preview -H 'Content-Type: application/json' -d '{"agents":"login"}'
 //   …  -d '{"speed":3}'  (slower playback)   -d '{"approvals":"failing"}'  (agreeing fails like a broken store)
 //   …  -d '{"page":12}'  (read conversations 12 messages at a time, to see earlier pages load)
+//   curl :3230/__preview   → {preview, scene: "plain" | "showcase", staged, zone, plays[], cats[]} (what this is; changes nothing)
 // Typed words steer the canned reply: 长, 文件/查/资料, 慢, 失败, 清单, 选一个, 确认一下, 记住, 提醒/定时;
 // in a group @名字 picks the cat and 大家/@all asks all of them.
 //
@@ -362,6 +363,10 @@ if (!showcase) for (const [index, name] of ['团子', '栗子', '年糕'].slice(
   await runtime.bridge.createBot({ name, simple: { face: breeds[[7, 1, 2][index]!]!, agent: ['claude', 'codex', 'claude'][index]! }, idempotencyKey: randomUUID() });
 /** The staged scene's demo line for each chat and where it goes, by the chat's name (see `{"play": …}` below). */
 let plays = new Map<string, { line: string; cat?: string; group?: string }>();
+// What this is, readable without changing anything: a tool that clicks through the staged chats (scripts/showcase-shots.mjs)
+// asks here first, so it can never be pointed at a real instance; the guide asks whether the staged chats are behind it.
+runtime.app.get('/__preview', (_req, res) => res.json({ preview: true, scene: showcase ? 'showcase' : 'plain', staged: plays.size > 0,
+  zone: Intl.DateTimeFormat().resolvedOptions().timeZone, plays: [...plays.keys()], cats: native.cats.map(cat => cat.name) }));
 runtime.app.post('/__preview', async (req, res) => {
   const input = req.body ?? {};
   if (typeof input.agents === 'string') { if (!agentSets[input.agents]) return res.status(400).json({ error: 'agents: ' + Object.keys(agentSets).join(' | ') }); native.runtimes = agentSets[input.agents]!; }

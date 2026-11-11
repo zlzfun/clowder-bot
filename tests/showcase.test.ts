@@ -47,6 +47,11 @@ test('the showcase stages one cat per template, and each chat shows what it is t
     return value;
   };
 
+  // It says what it is without being asked to do anything: a tool that clicks through the staged chats checks this first.
+  const identity = await get('/__preview');
+  assert.deepEqual([identity.preview, identity.scene, identity.staged, identity.zone], [true, 'showcase', true, zone]);
+  assert.deepEqual(identity.plays.sort(), [...catTemplates.map(([, name]) => name), '产品评审', '读书会'].sort());
+
   // The cats are the engine's templates: its name, its face, its colour.
   const { bots } = await get('/xbot-api/bots');
   assert.deepEqual(bots.map((bot: any) => [bot.templateId, bot.name]), catTemplates.map(([id, name]) => [id, name]));
