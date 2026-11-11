@@ -1,6 +1,6 @@
 import { ApiError } from '../errors.js';
 import type { BotBridge, QueueView } from './bridge.js';
-import { messagePresentation } from './message-presentation.js';
+import { messageDisplayText, messagePresentation } from './message-presentation.js';
 import type { NativeCat, NativeMessage } from './types.js';
 
 export interface ActivityItem {
@@ -10,6 +10,8 @@ export interface ActivityItem {
 export interface ActivityView {
   threadId: string; readStatus: 'ready'|'partial'|'unavailable'; items: ActivityItem[];
   counts: Record<ActivityItem['kind'], number>; unread: number|null; unreadHasMore: boolean; latestMessageId: string|null;
+  /** The newest thing said in the conversation, for a contact-list line and its order. Null when nothing was said or it cannot be read. */
+  last: { messageId: string; time: string; from: 'owner'|'cat'; catId?: string; catName?: string; text: string; files: number }|null;
   errors: Array<{ source: string; message: string }>;
   active: QueueView['activeInvocations']; queued: QueueView['queue'];
 }
@@ -33,7 +35,7 @@ export class Activity {
   }
   unavailable(threadId: string): ActivityView {
     return { threadId, readStatus: 'unavailable', items: [], counts: { approval: 0, failure: 0, running: 0, queued: 0, task: 0 },
-      unread: null, unreadHasMore: false, latestMessageId: null, active: [], queued: [], errors: [{source:'thread',message:'暂时无法确认进度'}] };
+      unread: null, unreadHasMore: false, latestMessageId: null, last: null, active: [], queued: [], errors: [{source:'thread',message:'暂时无法确认进度'}] };
   }
   async read(threadId: string, cats?: NativeCat[], pending?: Promise<{items: unknown[]}>): Promise<ActivityView> {
     await this.bridge.thread(threadId);
@@ -84,6 +86,16 @@ export class Activity {
           const oldest = data.messages[0] as NativeMessage|undefined;
           view.unreadHasMore = data.hasMore && (!cursor || !!oldest && after(oldest, cursor));
           view.latestMessageId = replies.at(-1)?.id ?? null;
+          // What the owner said counts too, except the opening invitation the app sent on their behalf.
+          const invitations = new Set(Object.values(this.bridge.store.state.bots).flatMap(bot => Object.values(bot.greetingSources ?? {})).filter(id => typeof id === 'string'));
+          const said = [...replies, ...(data.messages as NativeMessage[]).filter(message => message.type === 'user' && !invitations.has(message.id))]
+            .sort((a, b) => orderTime(a) - orderTime(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).at(-1);
+          if (said) {
+            const text = messageDisplayText(said, threadId).replace(/\s+/g, ' ').trim();
+            view.last = { messageId: said.id, time: new Date(said.timestamp).toISOString(), from: said.type === 'user' ? 'owner' : 'cat',
+              ...(said.type === 'user' ? {} : annotate(said.catId)), text: text.length > 140 ? text.slice(0, 139) + '…' : text,
+              files: this.bridge.workspaces.messageFiles(threadId, said).length };
+          }
           for (const message of unread) if (message.lifecycle?.status === 'failed') {
             const who = annotate(message.catId);
             view.items.push({id:`failure:${message.id}`,kind:'failure',threadId,messageId:message.id,...who,

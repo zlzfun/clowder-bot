@@ -97,6 +97,32 @@ test('pending drafts and duplicated execution summaries do not count as new repl
   const withFile=await r.bridge.activity.read(r.thread.id);assert.equal(withFile.unread,2);assert.equal(withFile.latestMessageId,'silent-file');
 });
 
+test('a conversation says what was said last: the owner counts, the invitation, drafts and execution summaries do not',async t=>{
+  const r=await setup(t),last=async()=>(await r.bridge.activity.read(r.thread.id)).last;
+  assert.equal(await last(),null,'nothing said yet');
+  const user=(id:string,timestamp:number,content:string):NativeMessage=>({id,type:'user',catId:null,timestamp,content});
+  // The opening invitation the app sent for the owner is not something the owner said.
+  r.store.bot(r.cat.id).greetingSources={[r.thread.id]:'invite'};
+  r.native.messages.set(r.thread.id,[user('invite',900,'聊天页的开场邀请…')]);
+  assert.equal(await last(),null);
+  r.native.messages.get(r.thread.id)!.push(r.reply('hello',1000,'你好呀，\n我是 Ada。\n\n[Ada/gpt🐾]'));
+  assert.deepEqual(await last(),{messageId:'hello',time:new Date(1000).toISOString(),from:'cat',catId:r.cat.id,catName:'Ada',text:'你好呀， 我是 Ada。',files:0});
+  r.native.messages.get(r.thread.id)!.push(user('ask',2000,'帮我看看这份资料'));
+  assert.deepEqual(await last(),{messageId:'ask',time:new Date(2000).toISOString(),from:'owner',text:'帮我看看这份资料',files:0});
+  // A reply still being written, an execution summary and a silent turn leave the line as it was.
+  const extra={stream:{turnInvocationId:'turn'}};
+  r.native.messages.get(r.thread.id)!.push({...r.reply('draft',2100,'写到一半'),isDraft:true},r.reply('silent',2300,'SILENT'));
+  assert.equal((await last())!.messageId,'ask');
+  r.native.messages.get(r.thread.id)!.push({...r.reply('stream',2350,'过程记录'),origin:'stream',extra},
+    {...r.reply('explicit',2400,'看完了。'+'长'.repeat(200)),origin:'callback',extra:{...extra,isExplicitPost:true}});
+  const long=(await last())!;assert.equal(long.messageId,'explicit');assert.equal(long.text.length,140);assert.ok(long.text.endsWith('…'));
+  // A reply that is only a file says so by count, not by made-up words.
+  r.native.messages.get(r.thread.id)!.push({...r.reply('file',2500,'SILENT'),contentBlocks:[{type:'file',fileName:'report.txt',url:'/uploads/report.txt'}]});
+  assert.deepEqual(await last(),{messageId:'file',time:new Date(2500).toISOString(),from:'cat',catId:r.cat.id,catName:'Ada',text:'',files:1});
+  // The status read carries it for each cat; a conversation that cannot be read has none.
+  const status=await(await r.call('/bots/status')).json();assert.equal(status.bots[0].activity.last.messageId,'file');
+  assert.equal(r.bridge.activity.unavailable(r.thread.id).last,null);
+});
 test('group replies retain failed and file-only messages without showing silent control markers',async t=>{
   const r=await setup(t),group=await r.bridge.newThread('Group',[r.cat.id]);r.store.state.groupThreadIds.push(group.id);
   r.native.messages.set(group.id,[r.reply('silent',1000,'SILENT'),{...r.reply('failed',1100,''),lifecycle:{kind:'response',status:'failed'}},
