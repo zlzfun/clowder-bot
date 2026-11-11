@@ -8,6 +8,7 @@ import { avatarBreed, type CatConfig, type SourceTemplate } from './cat-template
 import { Workspaces } from '../workspaces.js';
 import { NativeFiles } from './files.js';
 import { Activity } from './activity.js';
+import { Approvals } from './approvals.js';
 
 export const encode = encodeURIComponent;
 // A regular conversation request. The native member receives its own name, role
@@ -55,8 +56,10 @@ export class BotBridge {
   readonly workspaces: Workspaces;
   readonly nativeFiles: NativeFiles;
   readonly activity: Activity;
+  readonly approvals: Approvals;
   constructor(readonly native: NativeTransport, readonly store: ProductStore, readonly workspace: string) {
     this.workspaces = new Workspaces(this); this.nativeFiles = new NativeFiles(this); this.activity = new Activity(this);
+    this.approvals = new Approvals(this);
   }
   cats(): Promise<NativeCat[]> { return this.native.request<{ cats: NativeCat[] }>('/api/cats').then(r => r.cats); }
   templates(): Promise<{ templates: RoleTemplate[]; clientDefaults: Record<string, { defaultModel: string; models: string[] }> }> { return this.native.request('/api/cat-templates'); }

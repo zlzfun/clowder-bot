@@ -21,6 +21,17 @@ export function createActivityRouter(bridge: BotBridge) {
       const {thread}=await context(String(req.params.chat));
       res.json(await bridge.activity.read(thread.id));
     });
+    // What cats asked the owner to confirm here, and the owner's answer to one of them.
+    router.get<{chat:string}>(`${scope}/approvals`, async (req,res) => {
+      const {thread}=await context(String(req.params.chat));
+      res.json({threadId:thread.id,approvals:await bridge.approvals.list(thread.id)});
+    });
+    router.post<{chat:string;id:string}>(`${scope}/approvals/:id`, async (req,res) => {
+      const {decision,expectedThreadId}=z.object({decision:z.enum(['approve','reject']),expectedThreadId:z.string().min(1).max(200)}).strict().parse(req.body);
+      const {thread}=await context(String(req.params.chat));
+      if(thread.id!==expectedThreadId)throw new ApiError(409,'会话已变化，请刷新后重试');
+      res.json(await bridge.approvals.decide(thread.id,String(req.params.id),decision));
+    });
     router.post<{chat:string}>(`${scope}/read`, async (req,res) => {
       const {expectedThreadId,messageId}=z.object({expectedThreadId:z.string().min(1).max(200),messageId:z.string().min(1).max(200)}).strict().parse(req.body);
       const {thread,catId}=await context(String(req.params.chat));

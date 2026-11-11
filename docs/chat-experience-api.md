@@ -43,6 +43,36 @@
 - 源码中的 legacy bot.lastReadMessageId 保留，不迁移成可信已读事实；新读位置按 thread 保存。只存展示游标，不持久化第二份任务或消息内容。
 - 首批为应用内状态与未读，无系统推送。任务控制继续使用既有能力，不添加／依赖新运行时补丁。
 
+## 等你确认的事
+
+猫提出需要用户点头的事（记住一个偏好、设一个定时……）时，原生会在会话里发一条带确认卡片的消息，并把它登记在 Approval Hub。此前聊天里只有「等你确认」一行，「去确认」要打开运行面板。适配层现在把它读成聊天里能直接回答的卡片；请求本身、它的生命周期和生效过程仍然全在原生。
+
+`GET /xbot-api/<bots|groups>/:chat/approvals` → `{threadId, approvals[]}`，只含原生 `resolution: open` 且卡片锚定在这个会话里的请求，按创建时间排列：
+
+```ts
+{
+  id: string;            // 原生 proposalId
+  kind: 'preference'|'profile'|'person'|'schedule'|'question'|'other';
+  title: string;         // 「快手想记住你的一个偏好」
+  body: string;          // 要记住的内容 / 「喝水提醒 · 每天 09:00（Asia/Shanghai）」
+  quote?: string;        // 引出这件事的那句原话（原生提供时）
+  catId?: string; catName?: string;
+  messageId: string;     // 承载原生卡片的那条消息，前端在它的位置画这张卡
+  createdAt?: number; expiresAt?: number;
+  state: 'open';
+  approve: {label: string} | null;   // null：不能在聊天里同意
+  reject: {label: string} | null;
+  note?: string;         // 不能在这里处理时说明去哪里
+}
+```
+
+- 措辞按原生登记的来源生成：F221 偏好、F231 资料、F276 人物、F139 定时（触发时间由原生 trigger 读成「每天 09:00」「每周一、周三 18:30」「每 2 小时」；认不出的 cron 原样给出），其余用通用说法。原生摘要里的英文前缀（`Taste […]:`、`Create schedule:`）不出现在正文里。
+- 能否在这里同意取决于原生：`inlineApprovable` 且 `decisionMode: 'approve-reject'`，并且 Hub manifest 给出的 `decisionEndpointBase` 属于 Bot 允许到达的那组提议决定接口。资料更新（F231）原生要求先核对差异，这里只能「不用」；提问类（F306）仍在运行面板回答。
+- `POST …/approvals/:id {decision: 'approve'|'reject', expectedThreadId}` 先重新读取 Hub，确认这件事仍然开着、属于这个会话，再把用户的回答发给 manifest 指定的原生接口。返回 `{id, decision, settled}`：`settled` 是事后重读 Hub 的结果，`true` 表示原生已不再把它列为待确认，`false` 表示已受理但原生还在处理，`null` 表示没能确认。不属于这个会话或已经处理过的 404，不能在这里同意的 409。
+- 原生没能落实时返回原状态码和「这一步没有成功，还没有生效」，原生给出的原因保留在 `native` 里；这件事继续显示为等待确认。读取不会触发任何决定，没有自动同意。
+
+已知限制（2026-11-11 在隔离运行时实测）：同意一条偏好提议（F221）时，原生写入失败并返回 `Vignette write failed`，原因是原生 `FileTasteRepository` 要求运行目录所在的 Git 仓库检出了 `refs/heads/main`，而按 `runtime:prepare` 生成的部署是 detached HEAD（[此前只恢复了只读浏览](chat-files-collaboration-memory.md)）。这属于部署前置条件，不是适配层能绕过的；在它解决之前，聊天里会如实显示「没有成功」，偏好不会被记住。
+
 ## 只读长期记忆
 
 `GET /xbot-api/memory/profile|taste`：
