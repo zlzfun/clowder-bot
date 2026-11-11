@@ -236,8 +236,16 @@ class PreviewNative extends NativeFixture {
     if (proposal) {
       // As native does: the request is its own card message, registered in the hub and anchored to that message.
       const id = 'proposal_' + randomBytes(8).toString('hex');
-      const cardMessage: NativeMessage = { id: this.id(), type: 'assistant', catId: cat.id, timestamp: Date.now(), content: `${proposal.title}：${(proposal.detail as any).takeaway ?? proposal.summary}`,
-        extra: { rich: { v: 1, blocks: [{ id: 'approval-' + id, kind: 'card', v: 1, title: proposal.title, bodyMarkdown: String(proposal.summary), tone: 'info',
+      // The cards in the shapes the real engine writes them (copied from the isolated runtime, 2026-11-11).
+      const detail = proposal.detail as any, name = String(proposal.summary).replace(/^[^:]*:\s*/, '');
+      const card = proposal.feature === 'F139'
+        ? { title: `提议创建定时任务：${name}`, bodyMarkdown: '批准后才会创建并注册该任务；当前尚未产生调度副作用。',
+            fields: [{ label: 'Task ID', value: 'dyn-' + Date.now() }, { label: 'Template', value: 'reminder' }, { label: 'Trigger', value: JSON.stringify(detail.trigger) }, { label: 'Delivery thread', value: threadId }] }
+        : { title: proposal.title, bodyMarkdown: `**猫的判断（假设）：** ${detail.takeaway}\n\n**场景：** 用户明确要求记住的个人偏好\n\n> ${detail.quote}`,
+            fields: [{ label: '维度', value: '真实表达' }, { label: '隐私', value: '敏感' }, { label: '捕捉猫', value: cat.id }] };
+      const cardMessage: NativeMessage = { id: this.id(), type: 'assistant', catId: cat.id, timestamp: Date.now(),
+        content: proposal.feature === 'F139' ? `请求批准创建定时任务「${name}」` : `${proposal.title}：${detail.takeaway}`,
+        extra: { rich: { v: 1, blocks: [{ id: 'approval-' + id, kind: 'card', v: 1, ...card, tone: 'info',
           meta: { approval: { producerId: proposal.feature, canonicalProposalId: id } } }] } } };
       list.push(cardMessage);
       this.hub.push({ proposalId: id, sourceFeatureId: proposal.feature, requesterCatId: cat.id, summary: proposal.summary, detail: proposal.detail, resolution: 'open',
