@@ -663,8 +663,8 @@ test('the page loads the palette after the quick-create scripts and before app.j
   const at = (name: string) => scripts.indexOf(name);
   assert.ok(at('workspace.js') < at('palette.js') && at('chat-experience.js') < at('palette.js') && at('palette-rules.js') < at('palette.js') && at('palette.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
-  // Only the 找得到 styles (chat-list.css, chat-history.css) and chat-live.css (last) follow.
-  assert.deepEqual(styles.slice(-5), ['quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'chat-live.css']);
+  // Only the 找得到 styles (chat-list.css, chat-history.css), 资料页与群 (profile.css, mention.css) and chat-live.css (last) follow.
+  assert.deepEqual(styles.slice(-7), ['quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'profile.css', 'mention.css', 'chat-live.css']);
   // 搜索 sits under the greeting, above the pinned row.
   assert.match(html, /<div id="greeting"[^>]*><\/div>\n\s+<!--[^\n]*-->\n\s+<div class="pal-entry-wrap"><button id="palette-open" class="pal-entry" type="button" aria-haspopup="dialog" aria-label="搜索">/);
   const init = /window\.ClowderPalette\.init\(\{[\s\S]*?\n {2}\}\);/.exec(app)![0];

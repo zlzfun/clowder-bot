@@ -3,7 +3,7 @@
 // workspace-rules.js and before app.js, which calls init() once and a few
 // hooks: select() when the conversation changes, observe() after each
 // transcript read, cards() for message files, filesView()/tasksView() for the
-// drawer, conversationsView() for a cat's 详情 page and the composer's
+// drawer, conversationsView() for a cat's 资料 page and the composer's
 // attachment calls.
 //
 // - Composer: any file from the picker, a paste or a drop is uploaded at once
@@ -20,12 +20,13 @@
 //   (snapshots) and attachments. The working
 //   directory — its path, read-only browsing and saving one of its files as a
 //   deliverable — stays folded away under 更多文件.
-// - Drawer 详情 (a cat): when the cat has more than one saved conversation, a
-//   folded 历史对话 opens one of them again. It moves between threads the
-//   server already knows for the cat; nothing here creates a thread or project.
+// - Drawer 资料 (a cat): a folded 历史对话, there once the server has listed
+//   the cat's conversations (even with only the one open now), opens one of
+//   them again. It moves between threads the server already knows for the
+//   cat; nothing here creates a thread or project (新对话 is chat-history.js's).
 //   switchTo() runs the same switch from elsewhere (the search palette, for a
 //   message found in an earlier conversation) and says how it ended.
-// - 任务 at the top of the drawer's 任务 page and one summary line above the
+// - 任务 in the drawer's 高级 (profile.js) and one summary line above the
 //   composer: per-Task 负责人, progress and background run, 请求传球 (asking
 //   the owner to pass the Task on), stop/cancel/resume and the recorded
 //   流转记录. Work starts from ordinary chat: nothing here creates a Task or
@@ -779,14 +780,15 @@
     paintFiles();
   }
 
-  // --------------------------------------------- 历史对话 (a cat's 详情 page)
-  // The cat's saved conversations (GET conversations). The fold shows only
-  // when there is more than one; opening one asks the server to move the cat
+  // --------------------------------------------- 历史对话 (a cat's 资料 page)
+  // The cat's saved conversations (GET conversations). The fold shows once
+  // the list has been read, even with only the one open now (where the next
+  // 新对话 leaves this one); opening one asks the server to move the cat
   // to that existing thread (PUT conversation with the thread this page saw),
   // and the chat then opens afresh in it. The server refuses while either
   // conversation is busy; the refusal is shown and nothing moves.
   //
-  // The 详情 page is drawn again whenever the transcript changes, and this
+  // The 资料 page is brought up to date whenever the transcript changes, and this
   // fold is the same node each time. A control focused in it before a redraw
   // gets focus back after it, unless the owner has gone elsewhere since.
   let convFocus = "";
@@ -863,10 +865,10 @@
     const root = S.roots.convs;
     if (!root || !root._wc) return;
     const w = root._wc, list = S.convs || [];
-    // Asked for by name (the chat header's 历史对话), it shows even with only
-    // the conversation open now, and says where earlier ones will appear.
-    const asked = folds.asked === S.key;
-    const show = (list.length > 1 || (asked && list.length > 0)) && S.convState !== "unavailable";
+    // Always there on the 资料 page (and when asked for by name from the chat
+    // header's 历史对话): even with only the conversation open now, it says
+    // where earlier ones will appear.
+    const show = list.length > 0 && S.convState !== "unavailable";
     root.hidden = !show;
     const current = currentConv(list);
     const sig = JSON.stringify([show, list, current, S.switching && S.switching.id, S.convLine]);

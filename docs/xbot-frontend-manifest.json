@@ -27,15 +27,15 @@
       "file": "app.js",
       "target": "client/public/app.js",
       "sourceSha256": "1248f793493826bf044359c71e7d8772ccc3472d6021d6abb979dff9b6cb29bc",
-      "sha256": "9db139f29cfe28b1fbcc2573d39050ed8a127146c527edb7f80f04fa66d747bf",
+      "sha256": "a955a9f96bb8534bfaa4a5615bad12345f3dd3b1722d6cc737537fa0427134ad",
       "unchanged": false
     },
     {
       "file": "apple-touch-icon.png",
       "target": "client/public/apple-touch-icon.png",
       "sourceSha256": "c1b9d59f09f745a3be687d945ea2152227b21d0536a7304fb1c61136962194b7",
-      "sha256": "c1b9d59f09f745a3be687d945ea2152227b21d0536a7304fb1c61136962194b7",
-      "unchanged": true
+      "sha256": "1c9a96dbc8151bde143bf994b06296d1f7d6bf98941aa3f4c39dae7f3c3344ca",
+      "unchanged": false
     },
     {
       "file": "apps.css",
@@ -69,15 +69,15 @@
       "file": "favicon-32.png",
       "target": "client/public/favicon-32.png",
       "sourceSha256": "3aeed917b23832321783986f1ce67343034af32cb262345a47bdecead3a451b2",
-      "sha256": "3aeed917b23832321783986f1ce67343034af32cb262345a47bdecead3a451b2",
-      "unchanged": true
+      "sha256": "65bc2b5ba390c0af73b3187238462ed22c51e4f4078642189dbc180067f751a5",
+      "unchanged": false
     },
     {
       "file": "favicon.svg",
       "target": "client/public/favicon.svg",
       "sourceSha256": "fac75a9203bfa318394cbd275a3de20d6aad796ba6681a32f935f6f583e483b8",
-      "sha256": "fac75a9203bfa318394cbd275a3de20d6aad796ba6681a32f935f6f583e483b8",
-      "unchanged": true
+      "sha256": "02746fd9b8e338af79516daf6a2064961dc9018f5e97eb44aa80640478fe9f17",
+      "unchanged": false
     },
     {
       "file": "fonts/MonaSansVF.woff2",
@@ -118,22 +118,22 @@
       "file": "icon-192.png",
       "target": "client/public/icon-192.png",
       "sourceSha256": "0624f3357e2442972ec673eb95eb75d759502f016fec8cd2623bfebebdd0bbd4",
-      "sha256": "0624f3357e2442972ec673eb95eb75d759502f016fec8cd2623bfebebdd0bbd4",
-      "unchanged": true
+      "sha256": "d87f6f07721aa085976f51b820dc019abc1ec8898baa9435f407cb9e0a8f0418",
+      "unchanged": false
     },
     {
       "file": "icon-512.png",
       "target": "client/public/icon-512.png",
       "sourceSha256": "4ce7ad847e33fc64f1ff21992f405f614a1e3c322e5e7275c9f8f7b1a0dcf661",
-      "sha256": "4ce7ad847e33fc64f1ff21992f405f614a1e3c322e5e7275c9f8f7b1a0dcf661",
-      "unchanged": true
+      "sha256": "0f18f5ec7e3d9aac2f096036944db15c3844ecf6f68dcbb15837b3d078d7bac9",
+      "unchanged": false
     },
     {
       "file": "icon-maskable-512.png",
       "target": "client/public/icon-maskable-512.png",
       "sourceSha256": "f713684ffde523bb1985290ce349fdc7c903a33547c61078a7228e6a5094fd9c",
-      "sha256": "f713684ffde523bb1985290ce349fdc7c903a33547c61078a7228e6a5094fd9c",
-      "unchanged": true
+      "sha256": "ad505709524d4c9e10581067aabd9ccf011bb80fcc9dc7b8201632a8eb6c6263",
+      "unchanged": false
     },
     {
       "file": "image-gen.css",
@@ -153,7 +153,7 @@
       "file": "index.html",
       "target": "client/index.html",
       "sourceSha256": "a4160c18e23489fbc6a9e21fe494e1ac52840a67b2e138997400a0b42835b556",
-      "sha256": "5198933dac86565e7699e5bdfeb3a56b8a4d71605deb3a07ac2d4e5dc52db442",
+      "sha256": "0cd4a14c81a6fab376c6b22b7b70561302042aac7e31f1dc48e770da92f3e171",
       "unchanged": false
     },
     {
@@ -677,9 +677,9 @@
     },
     {
       "target": "client/public/workspace.js",
-      "description": "Files, saved conversations and chat Tasks for the chat shell: composer attachments uploaded to the exact native thread (picker, paste, drop; abort on switch; files handed back after a send that did not go out), file cards with download, server-offered preview and an honest missing state, the drawer 文件 page (deliverables and attachments; working-directory path, read-only browsing and mark-as-deliverable folded under 更多文件 and read only once opened; no file-policy claims), the cat 详情 page's folded 历史对话 (switches only between server-known threads with expectedThreadId, pending-attachment confirmation, late answers dropped), 任务 cards on the 任务 page (负责人 from the read Task, progress, background run, 请求传球 as an asynchronous request, stop/cancel/resume via runtime-tasks.js rules, 流转记录) and the dock Task line; no project or workspace management and no Task creation or assignment; reads follow the chat poll and native events, stale answers dropped; owner feedback and pass receipts hold only at the owner revision they were said at, and a late control/pass answer never replaces or repaints a newer read (ownerRevision, then updatedAt); native file cards (成果, unavailable reason in place, no download, preview or picture request while unavailable; URLs built from the encoded ID only), a 成果 section on the 文件 page once the server reads the native record, whose failed read (nativeReadStatus unavailable) keeps the saved snapshots and attachments and offers 重试; focusTask(id) opens 任务 at one Task's card for the status line; switchTo(threadId) runs the same 历史对话 switch from elsewhere (the search palette) under the same rules and reports how it ended ({ok} or {ok:false, text} in the fold's words)",
-      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-04; interaction organization informed by OpenBot at acccbce543a59e8806ed3b60a74b11123b0ce5d2 (file cards with an in-place missing state, per-task resume/reassign/stop), no OpenBot code, text or assets copied; simplified by local Claude Code (claude-opus-5-5) on 2026-11-05 after user review: project/workspace management and manual Task creation/assignment removed, the working directory folded under 更多文件, 历史对话 added; chat experience 1/3/5 by local Claude Code (claude-opus-5-5) on 2026-11-05: native file views on the existing cards, partial native reads, focusTask; switchTo and switch outcomes by local Claude Code (claude-opus-5-5) on 2026-11-11 for search and jump (round 3b)",
-      "sha256": "f483828b0e13acde27b3599a985055ad1f7522a38377f3b41c26eccdba19103f"
+      "description": "Files, saved conversations and chat Tasks for the chat shell: composer attachments uploaded to the exact native thread (picker, paste, drop; abort on switch; files handed back after a send that did not go out), file cards with download, server-offered preview and an honest missing state, the drawer 文件 page (deliverables and attachments; working-directory path, read-only browsing and mark-as-deliverable folded under 更多文件 and read only once opened; no file-policy claims), the cat 资料 page's folded 历史对话, there once the list is read even with one conversation (switches only between server-known threads with expectedThreadId, pending-attachment confirmation, late answers dropped), 任务 cards in the drawer's 高级 (负责人 from the read Task, progress, background run, 请求传球 as an asynchronous request, stop/cancel/resume via runtime-tasks.js rules, 流转记录) and the dock Task line; no project or workspace management and no Task creation or assignment; reads follow the chat poll and native events, stale answers dropped; owner feedback and pass receipts hold only at the owner revision they were said at, and a late control/pass answer never replaces or repaints a newer read (ownerRevision, then updatedAt); native file cards (成果, unavailable reason in place, no download, preview or picture request while unavailable; URLs built from the encoded ID only), a 成果 section on the 文件 page once the server reads the native record, whose failed read (nativeReadStatus unavailable) keeps the saved snapshots and attachments and offers 重试; focusTask(id) opens 任务 at one Task's card for the status line; switchTo(threadId) runs the same 历史对话 switch from elsewhere (the search palette) under the same rules and reports how it ended ({ok} or {ok:false, text} in the fold's words)",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-04; interaction organization informed by OpenBot at acccbce543a59e8806ed3b60a74b11123b0ce5d2 (file cards with an in-place missing state, per-task resume/reassign/stop), no OpenBot code, text or assets copied; simplified by local Claude Code (claude-opus-5-5) on 2026-11-05 after user review: project/workspace management and manual Task creation/assignment removed, the working directory folded under 更多文件, 历史对话 added; chat experience 1/3/5 by local Claude Code (claude-opus-5-5) on 2026-11-05: native file views on the existing cards, partial native reads, focusTask; switchTo and switch outcomes by local Claude Code (claude-opus-5-5) on 2026-11-11 for search and jump (round 3b); 历史对话 always reachable on the 资料 page by local Claude Code (claude-opus-5-5) on 2026-11-11 (资料页与群)",
+      "sha256": "5d4606a8649e289154cfdd09e88680aa8e2dc970fde76d0d8cceb7e657a633f4"
     },
     {
       "target": "client/public/workspace.css",
@@ -787,13 +787,55 @@
       "target": "client/public/chat-history.js",
       "description": "Earlier messages (newest-page reads merged with the pages the owner scrolled back to; a quiet top row: 查看更早的消息 / 正在加载… / 没有更早的消息了 / failure with 重试, changed in place and re-read by the keyed redraw; scrolling near the top loads; answers for a chat or conversation left behind discarded), the chat header's ⋯ menu (新对话 and 历史对话 for a cat, 在对话里查找 only when window.ClowderPalette exists; arrows, Escape back to ⋯), the 新对话 dialog over the existing POST /xbot-api/bots/:name/new (says the old conversation stays under 历史对话 and what the cat remembers is kept; busy, switching and unsure answers said plainly), 历史对话 opening the existing list in 详情, and the suggestions under a cat's greeting that send on a tap",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 找得到, part one (docs/xbot-frontend.md item 30)",
-      "sha256": "6460f3308db5e41f5ab3cae40dce4de2f23423a35efbc13429d652a8c1a0ca1b"
+      "sha256": "2788cb2374d3b774a49f5cfac98b0deaba25033cec2e53bacc482cf852c99026"
     },
     {
       "target": "client/public/chat-history.css",
       "description": "The header ⋯ at the column's right end (the chip stays centred), the history's quiet top row with the status spinner, the suggestions as pills in the bubbles' column with the existing rise, and the new-conversation dialog on the original modal card; existing tokens and keyframes only, original CSS unchanged",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 找得到, part one (docs/xbot-frontend.md item 30)",
       "sha256": "b6294d9383554d9ff64f102dfe0a1d799bbcf18f5de7a3af18cc1273d0b7b442"
+    },
+    {
+      "target": "client/public/profile-rules.js",
+      "description": "资料页与群 rules without DOM or network: the drawer's tabs per kind of chat (a cat 资料/文件/记忆/定时, a group 成员/文件) with the retired 详情/任务/轨迹/上下文 names mapped to where their content now lives (任务 opens 高级), the cat's native colour pair taken only as #rrggbb, no breed row for a cat whose breed is its own ID, 新对话 refusals in everyday words, a group's members matched to the loaded cats (an unnamed cat marked and never sent back), who may leave while two stay, the PATCH members body (the whole new list, added last), the 2–10 limits, the group name rule shared with 新建群聊 (cleared → the members' names), the one-line how-to-talk hint (全体 = @ each member, never the engine's @全体) and group refusals (a 409 is the server's own sentence)",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 资料页与群 (docs/xbot-frontend.md item 31; docs/xbot-api.md group PATCH/DELETE)",
+      "sha256": "544b11849584013593ee69de7ccbd2e6c751fc89a0a724dd82e6b7ce58b092fd"
+    },
+    {
+      "target": "client/public/profile.js",
+      "description": "The drawer's identity head (a cat's portrait on a quiet wash of its own native colour; a group's face, its name edited in place with Enter/Esc and 「N 只猫猫」), the cat 资料 page (职责 or the way to write one, 置顶 as a switch, 新对话 via POST /xbot-api/bots/:name/new with what happens to the conversation and an attachment confirmation, workspace.js's 历史对话, one folded 高级 drawn on first open with the shell's Agent row, 模型与画像, task and run cards, 导出对话 / 复制 ID / 运行面板, 删除猫猫 last), the group 成员 page (faces and names, 添加猫猫 as face chips, 移出 with a second click within three seconds while two stay, PATCH /xbot-api/groups/:id {members}, a 409 shown as the server says and nothing stopped, the how-to-talk line, 高级 with task cards, 删除群聊 with DELETE after a confirmation that the history is kept) and a group row's menu (改名, 删除群聊); pages kept per chat across repaints, one dialog at a time with Escape, Tab and focus kept inside",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 资料页与群 (docs/xbot-frontend.md item 31; docs/xbot-api.md group PATCH/DELETE)",
+      "sha256": "234713d6db8880af511881a0cdf3e9736423e8dea1e32321383433f1931daa49"
+    },
+    {
+      "target": "client/public/profile.css",
+      "description": "资料页与群 styles: the head's accent wash (the cat's own colour mixed down with color-mix, lighter in dark), the in-place group name, the 置顶 row with the existing devices switch, 新对话 and its note, the quiet rule, the 高级 fold, the action chips, the member list with the armed 移出, the hint line, dialogs on the original modal card, 定时's page inset and the brand mark in 关于 and the sign-in card; existing tokens and app.css's rise only, reduced motion respected, original CSS unchanged",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 资料页与群 (docs/xbot-frontend.md item 31; docs/xbot-api.md group PATCH/DELETE)",
+      "sha256": "b1af8134d5c98e97740d0ec5419991c48487adef509f10c2908e6149ea2584f1"
+    },
+    {
+      "target": "client/public/mention-rules.js",
+      "description": "Group composer @ rules without DOM or network: the mention at the caret (after a space, line start or punctuation; never inside an address or across lines; a full-width @ too), members starting with the query first then containing it, 「全体」 with two or more members, and the draft after picking (@名字 and one space; 全体 writes one explicit mention per member not already mentioned, never @全体/@all, because the engine's @all reaches every cat the owner has)",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 资料页与群 (docs/xbot-frontend.md item 31; docs/xbot-api.md group PATCH/DELETE)",
+      "sha256": "f44e55918eb2610bd99b12e2e4cbc116f5f46c0bfda539845f36c59078e5fa4d"
+    },
+    {
+      "target": "client/public/mention.js",
+      "description": "The group composer's @ list above the composer: this group's members and 「全体」, ↑/↓, Enter/Tab to insert, Esc to dismiss until another @, click or tap to insert without losing the caret, IME compositions left alone, listbox/option roles with aria-activedescendant; the edit goes through the composer's own render and undo history; nothing in single chats; the text is sent as typed",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 资料页与群 (docs/xbot-frontend.md item 31; docs/xbot-api.md group PATCH/DELETE)",
+      "sha256": "aebd98d2062bd3160f10f1e336d4c620306dcc928d03398de23eb66e6488f04e"
+    },
+    {
+      "target": "client/public/mention.css",
+      "description": "The @ list on the original .pop popover: menu-like rows, the highlighted one on --hover, faces and the 全体 mark, a quiet hint; existing tokens and app.css's rise only, off under reduced motion, original CSS unchanged",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 资料页与群 (docs/xbot-frontend.md item 31; docs/xbot-api.md group PATCH/DELETE)",
+      "sha256": "d976d506106bb4adcbbe5b29d4027ad7468f2d961d4de84f84a104966a45a5a6"
+    },
+    {
+      "target": "client/public/brand-mark-256.png",
+      "description": "The app's own mark (felt cat-eared speech bubble on coffee brown, rounded, transparent corners) for 关于 and the sign-in card; rendered for the user-chosen icon candidate A in .runtime/dev/icon-lab/final",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 资料页与群 (docs/xbot-frontend.md item 31; docs/xbot-api.md group PATCH/DELETE)",
+      "sha256": "7b4792d6dbed4371aaa369cc0028c68997c810811c7d4014943c720e432de145"
     }
   ]
 }
