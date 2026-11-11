@@ -1,6 +1,6 @@
 // 资料页与群 · 规则层：没有 DOM，也没有网络。profile.js 和测试共用。
 // What goes in which tab of the info drawer, the words it uses, a group's
-// member edit (PATCH /xbot-api/groups/:id {name?, members?}, docs/xbot-api.md)
+// member edit (PATCH /xbot-api/groups/:id {name?, add?, remove?}, docs/xbot-api.md)
 // and how a refused request is said. A group's name follows the same rules as
 // 新建群聊 (quick-create-rules.js, mirroring the server's own `groupTitle`),
 // so that module loads first. Words shown here are everyday Chinese: 猫猫, the
@@ -78,22 +78,21 @@
     return (cats || []).map((c) => c && c.name).filter((n) => n && !inside.has(n));
   }
   const room = (group, cats) => Math.max(0, MAX - known(group, cats).length);
-  // One may leave while at least two stay.
+  // One may leave while at least two stay (as far as this page knows; the
+  // server checks the roster as it is now and refuses with its own words).
   const canRemove = (group, cats, name) => { const list = known(group, cats); return list.includes(name) && list.length - 1 >= MIN; };
-  // The members the group will have: the known ones in their order without
-  // the removed, the added last. A member the server could not name (a cat
-  // that no longer exists) cannot be sent back, so it is left out.
-  function membersBody(group, cats, change) {
-    const remove = new Set((change && change.remove) || []);
-    const next = known(group, cats).filter((n) => !remove.has(n));
-    for (const n of (change && change.add) || []) if (n && !next.includes(n)) next.push(n);
-    return { members: next };
-  }
-  function membersProblem(body) {
-    const n = body && Array.isArray(body.members) ? body.members.length : 0;
-    if (n < MIN) return "群里至少要留两只猫猫";
-    if (n > MAX) return "一个群最多 " + MAX + " 只猫猫";
-    return "";
+  // A member edit says what the owner means — add these cats, take that one
+  // out — never a whole list: the server applies it to the roster as it is
+  // now, one edit at a time, so a page that has not caught up with a change
+  // made elsewhere cannot undo it by sending what it last saw.
+  const addBody = (names) => ({ add: [...new Set((names || []).map(trim).filter(Boolean))] });
+  const removeBody = (name) => ({ remove: [trim(name)] });
+  // The group the server answered with (its record after the edit), or null
+  // when the answer is not one; the page shows that, not what it asked for.
+  function groupFrom(answer, id) {
+    if (!answer || typeof answer !== "object" || !Array.isArray(answer.members)) return null;
+    if (answer.id && answer.id !== id) return null;
+    return Object.assign({}, answer, { id: answer.id || id });
   }
   // A group's name: the 新建群聊 rule; cleared, it takes the members' names,
   // the name an unnamed group gets.
@@ -118,7 +117,7 @@
   root.ClowderProfileRules = Object.freeze({
     trim, plain, key, TABS, tabs, home, tabFor, opensAdvanced,
     accent, ownBreed, NEW_CHAT_NOTE,
-    MIN, MAX, members, known, countText, addable, room, canRemove, membersBody, membersProblem,
+    MIN, MAX, members, known, countText, addable, room, canRemove, addBody, removeBody, groupFrom,
     defaultName, nameProblem, renameBody, HOW_TO_TALK, groupError,
   });
 })(typeof window !== "undefined" ? window : globalThis);

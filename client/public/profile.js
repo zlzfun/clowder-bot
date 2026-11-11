@@ -15,7 +15,8 @@
 // Each page is the same element for the same chat across the drawer's
 // frequent repaints (an open fold, a confirm in progress and focus survive);
 // another chat builds its own. Requests: PATCH /xbot-api/groups/:id
-// {name?, members?} and DELETE /xbot-api/groups/:id (docs/xbot-api.md); 新对话
+// {name} or {add} / {remove} (what the owner means, applied by the server to
+// the roster as it is now) and DELETE /xbot-api/groups/:id (docs/xbot-api.md); 新对话
 // opens chat-history.js's own dialog, the same one as the header's ⋯ menu. A
 // change is shown only once the server has answered; nothing here stops work,
 // routes messages or keeps a copy of the groups.
@@ -66,11 +67,14 @@
 
   // ------------------------------------------------------------ dialogs
   // One at a time, on the original .modal / .modal-card. Escape and Tab stay
-  // inside; closing returns focus to whatever opened it.
+  // inside (while a request is on its way and every button waits, Tab stays
+  // on the card); the page behind is inert until it closes; closing returns
+  // focus to whatever opened it — `opener` may be a function that finds it
+  // again, for a sidebar row the list has drawn anew meanwhile.
   function trapTab(ev, card) {
     const live = [...card.querySelectorAll("button, input, select, textarea, a[href]")]
       .filter((n) => !n.disabled && !n.hidden && n.tabIndex >= 0 && (!n.getClientRects || n.getClientRects().length));
-    if (!live.length) return;
+    if (!live.length) { ev.preventDefault(); card.focus(); return; }
     const first = live[0], last = live[live.length - 1], here = document.activeElement;
     if (ev.shiftKey ? here === first || !live.includes(here) : here === last || !live.includes(here)) {
       ev.preventDefault();
@@ -93,6 +97,9 @@
     card.append(head, body, error, actions);
     root.append(card);
     document.body.append(root);
+    // Nothing behind the dialog can be reached while it is open.
+    const quiet = [...document.body.children].filter((n) => n !== root && !n.inert);
+    for (const n of quiet) n.inert = true;
     let downOnRoot = false;
     const L = {
       card, body, actions, alive: true, busy: false,
@@ -101,8 +108,10 @@
         if (!L.alive || (L.busy && !force)) return;
         L.alive = false;
         root.remove();
+        for (const n of quiet) n.inert = false;
         if (S.layer === L) S.layer = null;
-        const back = opener && opener.isConnected ? opener : H.fallbackFocus && H.fallbackFocus();
+        const found = typeof opener === "function" ? opener() : opener;
+        const back = found && found.isConnected ? found : H.fallbackFocus && H.fallbackFocus();
         if (back && back.focus) back.focus({ preventScroll: true });
       },
     };
@@ -164,6 +173,7 @@
       root.append(portrait, tx);
       P = S.head = { key, sel, root, portrait, title, name, label, sub, faceSig: null, edit: null, group };
     }
+    P.sel = sel;
     P.group = group;
     const sig = H.groupFaceSig(group);
     if (P.faceSig !== sig) { P.faceSig = sig; P.portrait.replaceChildren(H.groupFace(group, "lg")); }
@@ -200,33 +210,39 @@
       paintGroupSub(P);
       if (refocus) P.name.focus({ preventScroll: true });
     };
-    const save = async () => {
+    // byKey: Enter (focus stays with the name); otherwise the field was left
+    // (Tab, a click elsewhere) and focus goes where the owner sent it.
+    const save = async (byKey) => {
       if (E.busy || E.done) return;
       const value = input.value;
-      if (R.trim(value) === R.trim(group.name)) { finish(true); return; }
+      if (R.trim(value) === R.trim(group.name)) { finish(byKey); return; }
       const problem = R.nameProblem(value);
-      if (problem) { sayHead(P, problem); input.focus(); return; }
+      if (problem) { sayHead(P, problem); if (byKey) input.focus(); return; }
       E.busy = true;
       input.readOnly = true;
       setText(P.sub, "正在保存…");
+      let answer;
       try {
-        await H.api("/xbot-api/groups/" + enc(group.id), { method: "PATCH", body: R.renameBody(value, group, H.cats()) });
+        answer = await H.api("/xbot-api/groups/" + enc(group.id), { method: "PATCH", body: R.renameBody(value, group, H.cats()) });
       } catch (err) {
         E.busy = false;
         input.readOnly = false;
         if (E.done) return;
         sayHead(P, R.groupError(err, "rename").text);
-        if (document.activeElement !== input) input.focus();
+        if (byKey && document.activeElement !== input) input.focus();
         return;
       }
       E.busy = false;
       const back = document.activeElement === input;
+      const record = R.groupFrom(answer, group.id);
+      if (record && S.head === P) P.group = record;
       finish(back);
-      await H.groupChanged(group.id);
+      if (record && S.head === P) groupHead(P.sel, record);
+      await H.groupChanged(group.id, record);
     };
     input.addEventListener("keydown", (ev) => {
       if (ev.isComposing || ev.keyCode === 229) return;
-      if (ev.key === "Enter") { ev.preventDefault(); save(); }
+      if (ev.key === "Enter") { ev.preventDefault(); save(true); }
       else if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); if (!E.busy) finish(true); }
     });
     input.addEventListener("input", () => {
@@ -235,7 +251,7 @@
       P.sub.classList.remove("bad");
       P.sub.removeAttribute("role");
     });
-    input.addEventListener("blur", () => { if (!E.busy && !E.done) save(); });
+    input.addEventListener("blur", () => { if (!E.busy && !E.done) save(false); });
     input.focus();
     if (input.select) input.select();
   }
@@ -247,11 +263,27 @@
   // 改群名 from the drawer's action row: the same edit in place.
   function renameHere() { if (S.head && S.head.group && !S.head.edit) editName(S.head); }
 
+  // The selection to act for: the shell's current one when it is this chat.
+  function current(P) {
+    const now = H.selected ? H.selected() : null;
+    return now && R.key(now) === P.key ? now : P.sel;
+  }
+  // A group's freshest record: the shell's list (replaced by every poll) or
+  // what this page last drew.
+  function latest(P) {
+    const id = P.group && P.group.id;
+    const found = id && H.groups ? (H.groups() || []).find((g) => g && g.id === id) : null;
+    return found || P.group;
+  }
+
   // ------------------------------------------------------------ 资料 (a cat)
   function catPage(sel, data) {
     const key = R.key(sel);
     let P = S.cat;
     if (!P || P.key !== key) P = S.cat = buildCat(sel, key);
+    // The same chat may come back as a new selection (a 新对话, a history
+    // switch reopen it): the page acts for the one the shell has now.
+    P.sel = sel;
     paintCat(P, data || { name: sel.id });
     return P.root;
   }
@@ -272,7 +304,8 @@
     const pinCopy = node("span", "pf-row-copy");
     const pinTitle = node("span", "pf-row-title", "置顶");
     pinTitle.id = uid("pin");
-    pinCopy.append(pinTitle, node("span", "pf-row-hint", "放在列表最上面"));
+    const pinHint = node("span", "pf-row-hint", "放在列表最上面");
+    pinCopy.append(pinTitle, pinHint);
     const pinSwitch = button("g7-switch pf-switch", null, () => togglePin(P));
     pinSwitch.setAttribute("role", "switch");
     pinSwitch.setAttribute("aria-labelledby", pinTitle.id);
@@ -285,7 +318,7 @@
     // server and says why it cannot while the cat is busy), or open a saved
     // one (workspace.js's 历史对话).
     const convs = node("section", "psec pf-convs");
-    const fresh = labelled("secondary pf-new", "plus", "新对话", (ev) => H.newConversation(P.sel, ev.currentTarget));
+    const fresh = labelled("secondary pf-new", "plus", "新对话", (ev) => H.newConversation(current(P), ev.currentTarget));
     fresh.setAttribute("aria-haspopup", "dialog");
     const note = node("p", "pf-note", R.NEW_CHAT_NOTE);
     const slot = node("div", "pf-convs-slot");
@@ -298,7 +331,7 @@
     foot.append(remove);
 
     root.append(duty, pin, pinLine, convs, node("div", "pf-rule"), fold.box, foot);
-    Object.assign(P, { root, duty, dutyText, dutyNone, pinSwitch, pinLine, fresh, slot, fold, remove });
+    Object.assign(P, { root, duty, dutyText, dutyNone, pinSwitch, pinHint, pinLine, fresh, slot, fold, remove });
     return P;
   }
 
@@ -361,15 +394,17 @@
     if (href && P.runtime.getAttribute("href") !== href) P.runtime.setAttribute("href", href);
   }
 
-  // The list says whether the cat is pinned; while a change is on its way the
-  // switch shows the one asked for, inert but not disabled (focus stays on it).
+  // The switch says what the list says, and only that: while a change is on
+  // its way it keeps the confirmed state, is busy and inert (not disabled, so
+  // focus stays on it) and the line under 置顶 says what is being saved.
   function paintPin(P) {
     const name = P.data.name || P.sel.id;
     const bot = H.cats().find((b) => b && b.name === name);
-    const on = P.pinBusy ? P.pinWant : bot ? !!bot.pinned : !!P.data.pinned;
+    const on = bot ? !!bot.pinned : !!P.data.pinned;
     P.pinSwitch.setAttribute("aria-checked", String(on));
-    if (P.pinBusy) P.pinSwitch.setAttribute("aria-disabled", "true");
-    else P.pinSwitch.removeAttribute("aria-disabled");
+    if (P.pinBusy) { P.pinSwitch.setAttribute("aria-disabled", "true"); P.pinSwitch.setAttribute("aria-busy", "true"); }
+    else { P.pinSwitch.removeAttribute("aria-disabled"); P.pinSwitch.removeAttribute("aria-busy"); }
+    setText(P.pinHint, P.pinBusy ? (P.pinWant ? "正在置顶…" : "正在取消置顶…") : "放在列表最上面");
   }
   async function togglePin(P) {
     if (P.pinBusy) return;
@@ -393,6 +428,7 @@
     const key = R.key(sel);
     let P = S.group;
     if (!P || P.key !== key) P = S.group = buildGroup(sel, key);
+    P.sel = sel;
     P.group = group;
     paintGroupPage(P);
     return P.root;
@@ -492,22 +528,22 @@
     }
     clearTimeout(P.arm.timer);
     P.arm = null;
-    await changeMembers(P, { remove: [name] }, "已把「" + name + "」移出群聊。", btn);
+    await changeMembers(P, R.removeBody(name), "已把「" + name + "」移出群聊。", btn);
   }
 
-  // A members change: the whole new list, as the server wants it.
-  async function changeMembers(P, change, done, focusBack) {
-    const group = P.group, body = R.membersBody(group, H.cats(), change);
-    const problem = R.membersProblem(body);
-    if (problem) { say(P.line, problem, true); return false; }
+  // A members change says what the owner means ({remove: [name]}); the server
+  // applies it to the roster as it is now and answers with the group, which
+  // the page then shows (and hands to the shell for the list and header).
+  async function changeMembers(P, body, done, focusBack) {
+    const group = latest(P);
     P.busy = true;
     say(P.line, "");
     // The pressed control turns disabled: hold focus on the page meanwhile.
     if (focusBack && focusBack === document.activeElement) P.root.focus({ preventScroll: true });
     paintGroupPage(P);
-    let ok = true;
+    let ok = true, record = null;
     try {
-      await H.api("/xbot-api/groups/" + enc(group.id), { method: "PATCH", body });
+      record = R.groupFrom(await H.api("/xbot-api/groups/" + enc(group.id), { method: "PATCH", body }), group.id);
     } catch (err) {
       ok = false;
       const what = R.groupError(err, "members");
@@ -516,7 +552,8 @@
     }
     P.busy = false;
     if (ok) {
-      await H.groupChanged(group.id);
+      if (record && S.group === P) P.group = record;
+      await H.groupChanged(group.id, record);
       if (S.group === P) say(P.line, done, false);
     }
     if (S.group === P) {
@@ -528,7 +565,7 @@
 
   // 添加猫猫: the cats not yet in the group, as face chips (the 新建群聊 look).
   function openAdd(P, opener) {
-    const group = P.group, cats = H.cats(), choices = R.addable(group, cats), room = R.room(group, cats);
+    const group = latest(P), cats = H.cats(), choices = R.addable(group, cats), room = R.room(group, cats);
     const L = dialog("添加猫猫", opener);
     const cancel = button("secondary", "取消", () => L.close());
     if (!choices.length || !room) {
@@ -575,9 +612,9 @@
       if (L.busy || !picked.length) return;
       busy(L, true, [cancel, go]);
       sync();
-      const body = R.membersBody(P.group, H.cats(), { add: picked });
-      let failed = null;
-      try { await H.api("/xbot-api/groups/" + enc(group.id), { method: "PATCH", body }); }
+      // Only who to add: the server adds them to the roster as it is now.
+      let failed = null, record = null;
+      try { record = R.groupFrom(await H.api("/xbot-api/groups/" + enc(group.id), { method: "PATCH", body: R.addBody(picked) }), group.id); }
       catch (err) { failed = R.groupError(err, "members"); }
       if (!L.alive) return;
       if (failed) {
@@ -589,9 +626,10 @@
         return;
       }
       L.busy = false;
+      if (record && S.group === P) P.group = record;
       L.close(true);
-      await H.groupChanged(group.id);
-      if (S.group === P) say(P.line, "已添加「" + picked.join("」「") + "」。", false);
+      await H.groupChanged(group.id, record);
+      if (S.group === P) { paintGroupPage(P); say(P.line, "已添加「" + picked.join("」「") + "」。", false); }
     });
     sync();
     boxes[0].focus();
@@ -625,7 +663,8 @@
       if (problem) { err.textContent = problem; input.setAttribute("aria-invalid", "true"); input.focus(); return; }
       busy(L, true, [cancel, go]);
       input.readOnly = true;
-      try { await H.api("/xbot-api/groups/" + enc(group.id), { method: "PATCH", body: R.renameBody(input.value, group, H.cats()) }); }
+      let record = null;
+      try { record = R.groupFrom(await H.api("/xbot-api/groups/" + enc(group.id), { method: "PATCH", body: R.renameBody(input.value, group, H.cats()) }), group.id); }
       catch (e) {
         if (!L.alive) return;
         busy(L, false, [cancel, go]);
@@ -637,7 +676,7 @@
       if (!L.alive) return;
       L.busy = false;
       L.close(true);
-      await H.groupChanged(group.id);
+      await H.groupChanged(group.id, record);
     });
     input.focus();
     if (input.select) input.select();
@@ -674,20 +713,41 @@
     cancel.focus();
   }
 
-  // A sidebar group row's menu (the shell places it like a cat row's menu).
+  // A sidebar group row's menu (the shell places it like a cat row's menu and
+  // focuses its first item). ↑/↓/Home/End move, Enter or Space picks, Esc and
+  // Tab close it; focus goes back to the group's row, found again by the
+  // group's id if the list has drawn it anew meanwhile (so does a dialog the
+  // menu opened, when it closes).
   function groupMenu(group) {
     const menu = node("div", "pop panel-more pf-group-menu");
     menu.setAttribute("role", "menu");
+    menu.setAttribute("aria-label", R.trim(group.name) || "群聊");
+    const row = () => (H.groupRow ? H.groupRow(group.id) : null);
+    const back = () => { const r = row(); if (r && r.focus) r.focus({ preventScroll: true }); };
     const item = (iconName, text, run, danger) => {
-      const row = button("menu-row" + (danger ? " danger" : ""));
-      row.setAttribute("role", "menuitem");
-      row.append(H.icon(iconName), node("span", "", text));
-      row.addEventListener("click", (ev) => { ev.stopPropagation(); const back = H.menuAnchor && H.menuAnchor(); H.closePops(); run(back); });
-      menu.append(row);
+      const b = button("menu-row" + (danger ? " danger" : ""));
+      b.setAttribute("role", "menuitem");
+      b.append(H.icon(iconName), node("span", "", text));
+      b.addEventListener("click", (ev) => { ev.stopPropagation(); H.closePops(); run(row); });
+      menu.append(b);
     };
-    item("pencil", "改名", (back) => renameGroup(group, back));
+    item("pencil", "改名", (opener) => renameGroup(group, opener));
     menu.append(node("div", "mgap"));
-    item("trash", "删除群聊", (back) => removeGroup(group, back), true);
+    item("trash", "删除群聊", (opener) => removeGroup(group, opener), true);
+    menu.addEventListener("keydown", (ev) => {
+      const items = [...menu.children].filter((n) => n.tagName === "BUTTON");
+      const at = items.indexOf(document.activeElement);
+      const to = { ArrowDown: at + 1, ArrowUp: at < 0 ? items.length - 1 : at - 1, Home: 0, End: items.length - 1 }[ev.key];
+      if (to !== undefined) {
+        ev.preventDefault();
+        items[(to + items.length) % items.length].focus();
+      } else if (ev.key === "Escape" || ev.key === "Tab") {
+        ev.preventDefault();
+        H.closePops();
+        back();
+      } else return;
+      ev.stopPropagation();
+    });
     return menu;
   }
 

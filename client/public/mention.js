@@ -7,6 +7,12 @@
 // a click or a tap inserts too. Picking writes `@名字 ` at the caret as one
 // undoable edit. The text is sent as it is; the engine routes it. Single chats
 // never show the list.
+//
+// The list never acts on what it saw earlier: before a key or a click picks,
+// it reads the draft, the caret and the group's members again (the composer's
+// own undo changes the draft without an input event; a member can be renamed
+// or leave meanwhile), and a change the composer makes by itself refreshes or
+// closes it. A send, by Enter or by the Ctrl/⌘+Enter shortcut, closes it.
 (() => {
   "use strict";
   const R = window.ClowderMentionRules;
@@ -35,6 +41,13 @@
     // Capture on the form: these keys are the list's before the composer
     // turns Enter into a send, or the page turns Esc into closing the drawer.
     composer.addEventListener("keydown", onKey, true);
+    composer.addEventListener("submit", () => { S.dismissed = -1; close(); }, true);
+    // Changes that come with no input event (undo/redo, a draft set by the
+    // shell): read the draft again once the caret is placed.
+    if (typeof MutationObserver === "function") {
+      new MutationObserver(() => { if (open()) Promise.resolve().then(update); })
+        .observe(input, { childList: true, characterData: true, subtree: true });
+    }
     input.addEventListener("input", (ev) => { if (!ev.isComposing) update(); });
     input.addEventListener("compositionstart", () => { S.composing = true; });
     input.addEventListener("compositionend", () => { S.composing = false; update(); });
@@ -113,9 +126,15 @@
     }
   }
 
+  // Pick what the list shows at row i — after reading everything again: the
+  // same item must still be offered for the mention now at the caret.
   function pick(i) {
-    const item = S.items[i], at = S.at;
-    if (!item || !at) return;
+    const want = S.items[i];
+    if (!want) return;
+    update();
+    const now = open() ? S.items.findIndex((it) => it.kind === want.kind && it.name === want.name) : -1;
+    if (now < 0) return;
+    const item = S.items[now], at = S.at;
     const next = R.insert(H.text(), at, item, S.names);
     S.dismissed = -1;
     close();
@@ -123,15 +142,26 @@
     H.apply(next.text, next.caret);
   }
 
+  const KEYS = ["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"];
   function onKey(ev) {
     if (!open() || ev.target !== H.input || ev.isComposing || ev.keyCode === 229) return;
-    if (ev.altKey || ev.ctrlKey || ev.metaKey) return;
+    // Ctrl/⌘+Enter sends: the list goes with it.
+    if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { close(); return; }
+    if (ev.altKey || ev.ctrlKey || ev.metaKey || !KEYS.includes(ev.key)) return;
+    // The draft may have changed under the list: with no mention left at the
+    // caret the list closes and the key is the composer's again.
+    const want = S.items[S.active];
+    update();
+    if (!open()) return;
     const n = S.items.length;
     if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
       S.active = (S.active + (ev.key === "ArrowDown" ? 1 : n - 1)) % n;
       mark();
     } else if ((ev.key === "Enter" || ev.key === "Tab") && !ev.shiftKey) {
-      pick(S.active);
+      // The row the owner saw highlighted, if it is still offered; if it is
+      // not (renamed, left the group), the key only shows the list as it is now.
+      const i = want ? S.items.findIndex((it) => it.kind === want.kind && it.name === want.name) : -1;
+      if (i >= 0) pick(i);
     } else if (ev.key === "Escape") {
       S.dismissed = S.at ? S.at.start : -1;
       close();
