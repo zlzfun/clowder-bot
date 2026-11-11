@@ -10,8 +10,8 @@ import { clip } from './text.js';
  */
 export type ChatBlock =
   | { id: string; kind: 'card'; title: string; body?: string; tone?: 'info' | 'success' | 'warning' | 'danger'; fields?: Array<{ label: string; value: string }>;
-      /** Set when the card is a native request for the owner's confirmation (see approvals.ts). */
-      approval?: { id: string } }
+      /** Set when the card is a native request for the owner's confirmation (see approvals.ts); `state` once the engine's receipt on the same page says how it was answered. */
+      approval?: { id: string; state?: 'approved' | 'rejected' | 'closed' } }
   | { id: string; kind: 'checklist'; title?: string; items: Array<{ id: string; text: string; checked: boolean }> }
   | { id: string; kind: 'choices'; mode: 'single' | 'multiple' | 'confirm'; title?: string; description?: string;
       options: Array<{ id: string; label: string; emoji?: string; description?: string; custom?: true }>;

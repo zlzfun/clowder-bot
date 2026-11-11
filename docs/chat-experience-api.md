@@ -58,7 +58,7 @@ type ChatBlock =
   | {id; kind:'diff'; file; diff};
 ```
 
-- `card.approval.id` 是原生提议的 ID：这张卡是一条「等你确认的事」，与下一节 `approvals[].id` 对应，前端在这里画确认卡而不是原生卡片的原文。
+- `card.approval.id` 是原生提议的 ID：这张卡是一条「等你确认的事」，与下一节 `approvals[].id` 对应，前端在这里画确认卡而不是原生卡片的原文。用户回答之后，原生会往会话里发一条回执（来自 approval hub 的 connector 消息，原话是「审批结果：品味提案 proposal_… 已批准。」）：回执和卡片在同一页时，`card.approval.state` 是 `approved`／`rejected`／`closed`；回执这一行本身改成聊天里的说法（「已记住这个偏好。」「定时没有改动。」等，带 `notice: true`），原生记录不变。没有 `state` 的卡片是否还在等待，以下一节的列表为准。
 - `choices` 对应原生的 interactive 块。作答沿用原生网页的做法：把选择写成一句普通的聊天消息发出去（措辞规则见上游 `InteractiveBlock.tsx` 的 `buildSelectionMessage`：有 `template` 时把 `{selection}` 换成所选项，否则「我选了：…」，confirm 是「确认／取消」），再用 `POST <scope>/messages/:messageId/blocks/:blockId/answer {selectedIds, expectedThreadId}` 记到原生块上（转发 `PATCH /api/messages/:id/block-state`，`disabled: true`）。两步各自成败：消息已发出但记录失败时，选项仍可再点，不把它显示成已作答。
 - `diff` 只给文件名和差异正文。音频、图集、HTML 小组件暂时不画，只计入 `blocks_hidden`，前端要说明「还有 N 项暂时无法显示」，不能当作没有。文件块仍走原有的文件投影。
 - 只有块、没有文字的回复现在也是一行，计入未读和 `last`（`last.text` 取第一块的标题）。

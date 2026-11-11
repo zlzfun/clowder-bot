@@ -23,6 +23,8 @@
 // - Drawer 详情 (a cat): when the cat has more than one saved conversation, a
 //   folded 历史对话 opens one of them again. It moves between threads the
 //   server already knows for the cat; nothing here creates a thread or project.
+//   switchTo() runs the same switch from elsewhere (the search palette, for a
+//   message found in an earlier conversation) and says how it ended.
 // - 任务 at the top of the drawer's 任务 page and one summary line above the
 //   composer: per-Task 负责人, progress and background run, 请求传球 (asking
 //   the owner to pass the Task on), stop/cancel/resume and the recorded
@@ -946,44 +948,69 @@
     });
   }
 
+  // What became of a switch, for a caller that asked from elsewhere (switchTo):
+  // {ok: true} once the cat talks in that thread (its chat reopened when
+  // needed); {ok: false, text} when it stayed, in the words the fold shows;
+  // {ok: false} when it did not go ahead (the owner kept the files, or the
+  // conversation changed meanwhile).
+  function refuse(text) { convSay(text, true); return { ok: false, text }; }
+
   async function switchConversation(c, opener) {
-    if (!S.sel || isGroup() || S.switching) return;
+    if (!S.sel || isGroup()) return { ok: false };
+    if (S.switching) return { ok: false, text: "正在切换对话，切换好后再试。" };
     const sel = S.sel, gen = S.gen, title = convTitle(c);
     // Already there: nothing to move; the list is read again.
-    if (c.id === S.threadId) { loadConversations(); return; }
-    if (H.busy()) { convSay("这条消息还在发送，发出后再切换。", true); return; }
-    if (!(S.threadId || (S.view && S.view.threadId))) { convSay("还没读到当前对话，稍后再切换。", true); return; }
+    if (c.id === S.threadId) { loadConversations(); return { ok: true }; }
+    if (H.busy()) return refuse("这条消息还在发送，发出后再切换。");
+    if (!(S.threadId || (S.view && S.view.threadId))) return refuse("还没读到当前对话，稍后再切换。");
     const holding = S.pending.length;
-    if (holding && !(await confirmDrop(holding, title, opener))) return;
+    if (holding && !(await confirmDrop(holding, title, opener))) return { ok: false };
     // The dialog may have stayed open across a move: ask from where the chat is now.
     const expected = S.threadId || (S.view && S.view.threadId) || "";
-    if (gen !== S.gen || S.switching || !expected) return;
-    if (c.id === expected) { loadConversations(); return; }
+    if (gen !== S.gen || S.switching || !expected) return { ok: false };
+    if (c.id === expected) { loadConversations(); return { ok: true }; }
     S.switching = { id: c.id };
     S.convLine = null;
     paintConvs();
     paintComposer();
     try {
       const view = await H.api(scopePath() + "/conversation", { method: "PUT", body: { threadId: c.id, expectedThreadId: expected } });
-      if (gen !== S.gen) return;
+      if (gen !== S.gen) return { ok: false };
       S.switching = null;
       paintComposer();
       const landed = view && typeof view === "object" && view.threadId ? String(view.threadId) : "";
       H.toast("已切换到「" + title + "」");
       // A read already confirmed that thread while asking: the chat is there, nothing to reopen.
-      if (landed && landed === S.threadId) { paintConvs(); loadConversations(); return; }
+      if (landed && landed === S.threadId) { paintConvs(); loadConversations(); return { ok: true }; }
       // The cat now talks in that thread: its conversation opens afresh.
       await H.reselect(sel);
+      return { ok: true };
     } catch (e) {
-      if (gen !== S.gen) return;
+      if (gen !== S.gen) return { ok: false };
       S.switching = null;
       paintComposer();
       const known = e.status === 409 || e.status === 404 || e.status === 403;
-      convSay(e.status === 409 ? R.said(e, "当前对话或要打开的对话还有任务在执行，暂时不能切换")
-        : known ? R.said(e, "这段对话已不可用") : "没能切换：" + H.visibleError(e, "稍后再试"), true);
+      const out = refuse(e.status === 409 ? R.said(e, "当前对话或要打开的对话还有任务在执行，暂时不能切换")
+        : known ? R.said(e, "这段对话已不可用") : "没能切换：" + H.visibleError(e, "稍后再试"));
       // The list or the thread may have changed under it: read both again.
       if (known) { loadConversations(); loadView(); }
+      return out;
     }
+  }
+
+  // 历史对话 asked from elsewhere (the search palette): the same switch, to
+  // one of the open cat's saved conversations by its thread ID, under the same
+  // rules and in the same words. The list is read first, so only a
+  // conversation the server lists is opened, under its own title.
+  async function switchTo(threadId, opener) {
+    if (!S.sel || isGroup()) return { ok: false, text: "先打开这只猫的对话，再切换。" };
+    if (threadId && threadId === S.threadId) return { ok: true };
+    const gen = S.gen;
+    await loadConversations();
+    if (gen !== S.gen) return { ok: false };
+    const c = (S.convs || []).find((x) => x.id === threadId);
+    if (!c) return { ok: false, text: S.convState === "error" ? "没能读取历史对话，稍后再试。" : "这段对话已不在这只猫的历史对话里。" };
+    return switchConversation(c, opener);
   }
 
   // --------------------------------------------------------------- 文件 page
@@ -1831,7 +1858,7 @@
   window.ClowderWorkspace = Object.freeze({
     init, select, observe, touch, key: R.key,
     addFiles, filesFrom, carriesFiles, attachReady, attachBusy, takeAttachments: take, giveBack, note: setNote,
-    cards, filesView, tasksView, conversationsView, openConversations, focusTask,
+    cards, filesView, tasksView, conversationsView, openConversations, focusTask, switchTo,
     // Files waiting in the composer, uploaded or not (they belong to this conversation).
     pendingCount: () => S.pending.length,
     // Whether a drawer node is this module's live page (the shell keeps it instead of redrawing).

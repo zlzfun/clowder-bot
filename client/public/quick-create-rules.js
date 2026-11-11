@@ -31,6 +31,14 @@
     if ((taken || []).some((n) => trim(n).toLowerCase() === lower)) return "已经有一只叫「" + value + "」的猫猫了，换个名字吧";
     return "";
   }
+  // A browser's maxlength counts UTF-16 units: every name the server accepts
+  // (64 characters, each at most two units) fits in this many, and the rules
+  // here say when one is too long.
+  const NAME_INPUT_MAX = 128;
+  // The optional line about what a cat mainly helps with: at most 2000
+  // characters (server `simpleCat.about`), so its box admits twice that.
+  const ABOUT_INPUT_MAX = 4000;
+  const aboutProblem = (text) => (length(trim(text)) > 2000 ? "这一行最多 2000 个字" : "");
   // A group's name is a native thread title: free text, 1–64 after trimming,
   // no < > or control characters (server `groupTitle`). Empty is allowed: the
   // server then names the group after its members.
@@ -179,18 +187,20 @@
     if (!status || status >= 500) return { kind: "unsure", text: "没能确认猫猫建好没有。不改内容再点一次就好，不会多出一只。" };
     return { kind: "form", text: plain(message) ? message : "没能建好，请检查名字后再试。" };
   }
-  // A failed POST /xbot-api/groups carries no request identity: when unsure,
-  // look before trying again.
+  // A failed POST /xbot-api/groups. The request carries an idempotencyKey (it
+  // names the group's directory and keys its native thread creation), so an
+  // unsure answer is sent again unchanged under the same key and arrives at
+  // the same group.
   function groupError(err) {
     const status = err && err.status, message = String((err && err.message) || "");
-    if (!status || status >= 500) return { kind: "unsure", text: "没能确认群聊建好没有。先看看列表里有没有它，再决定要不要重试。" };
+    if (!status || status >= 500) return { kind: "unsure", text: "没能确认群聊建好没有。不改内容再点一次就好，不会多出一个群。" };
     if (status === 404) return { kind: "form", text: "有只猫猫找不到了，刷新列表后再试。" };
     return { kind: "form", text: plain(message) ? message : "没能建群，请稍后再试。" };
   }
   const startError = (err) => (plain(err && err.message) ? String(err.message) : "没能读取这台电脑的情况");
 
   root.ClowderQuickCreateRules = Object.freeze({
-    trim, nameProblem, groupNameProblem, groupName, freeName, defaultFace, suggestName, followsFace,
+    trim, nameProblem, groupNameProblem, groupName, freeName, defaultFace, suggestName, followsFace, NAME_INPUT_MAX, ABOUT_INPUT_MAX, aboutProblem,
     start, choices, choiceOf, loginCommand, sameStart, need, TOOL_LINE, unconfirmed,
     catBody, groupBody, fingerprint, MAX_MEMBERS, catError, groupError, startError,
   });

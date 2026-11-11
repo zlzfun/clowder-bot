@@ -10,6 +10,7 @@
     "dev": "concurrently -k -n api,web \"node --watch --env-file-if-exists=.env --import tsx server/index.ts\" \"vite --host 127.0.0.1\"",
     "dev:server": "node --watch --env-file-if-exists=.env --import tsx server/index.ts",
     "build": "tsc --noEmit && vite build",
+    "app": "node --env-file-if-exists=.env scripts/app.mjs",
     "start": "node --env-file-if-exists=.env --import tsx server/index.ts",
     "preview:fixture": "node --import tsx scripts/preview-fixture.ts",
     "test": "node --import tsx --test tests/*.test.ts",

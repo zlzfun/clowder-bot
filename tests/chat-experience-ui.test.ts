@@ -1042,8 +1042,8 @@ test('the page loads the status-line scripts after workspace.js and before app.j
   const at = (name: string) => scripts.indexOf(name);
   assert.ok(at('workspace.js') < at('chat-experience-rules.js') && at('chat-experience-rules.js') < at('chat-experience.js') && at('chat-experience.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
-  // Only the 开箱即用 (quick-create.css) and 找得到 (chat-list.css, chat-history.css) extensions and the live-reply styles (chat-live.css, last) come after.
-  assert.deepEqual(styles.slice(-5), ['chat-experience.css', 'quick-create.css', 'chat-list.css', 'chat-history.css', 'chat-live.css']);
+  // Only the 开箱即用 extension (quick-create.css), the search palette (palette.css), 找得到 (chat-list.css, chat-history.css) and the live-reply styles (chat-live.css, last) come after.
+  assert.deepEqual(styles.slice(-6), ['chat-experience.css', 'quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'chat-live.css']);
   // Conversation changes, reads, native events and redraws reach the module.
   assert.match(app, /workspace\.select\(state\.sel\);\n[^\n]*\n\s+experience\.select\(state\.sel\);/);
   assert.equal((app.match(/experience\.observe\(selection, /g) || []).length, 2, 'single chats and groups');

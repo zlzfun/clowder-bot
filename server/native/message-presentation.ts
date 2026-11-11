@@ -1,6 +1,56 @@
 import { createHash } from 'node:crypto';
 import type { NativeMessage } from './types.js';
 
+/**
+ * The member check's refusals (patches/0001) as a chat can say them. The
+ * engine records each one in the thread as a system line with internal ids
+ * ("Error: Member bot-… is not in the execution roster of thread …"); a
+ * mention that reaches cats outside the conversation (the engine's @all means
+ * every cat the owner has) leaves one per cat. Refusals that follow the same
+ * owner message are told once, by name: the first keeps the line, the others
+ * are folded into it (null). Other messages are not in the map.
+ */
+export function rosterRefusals(messages: NativeMessage[], nameOf: (catId: string) => string | undefined, group: boolean): Map<string, string | null> {
+  const told = new Map<string, string | null>();
+  let first: string | undefined, names: string[] = [];
+  for (const message of messages) {
+    if (message.type === 'user') { first = undefined; names = []; continue; }
+    const refused = message.type === 'system' ? /^Error: Member (\S+) is not in the execution roster of thread \S+$/.exec(message.content.trim())?.[1] : undefined;
+    if (!refused) continue;
+    const name = nameOf(refused) ?? '有只猫猫';
+    if (!names.includes(name)) names.push(name);
+    told.set(message.id, null);
+    first ??= message.id;
+    told.set(first, `${names.join('、')}不在这个${group ? '群' : '对话'}里，没有回答。`);
+  }
+  return told;
+}
+
+/**
+ * The engine's receipt after the owner answered a request for confirmation: a
+ * connector message from its approval hub that names the request, the card
+ * message it belonged to and how it was resolved ("审批结果：品味提案 proposal_…
+ * 已批准。" in the engine's words).
+ */
+export function approvalReceipt(message: NativeMessage): { proposalId: string; producerId: string; state: 'approved' | 'rejected' | 'closed'; cardMessageId?: string } | undefined {
+  if (message.type !== 'connector') return undefined;
+  const source = record(message.source), receipt = record(record(source.meta).approvalDecisionReceipt);
+  if (source.connector !== 'approval-hub' || receipt.kind !== 'approval_decision_receipt' || typeof receipt.canonicalProposalId !== 'string') return undefined;
+  const card = record(receipt.approvalCardRef).messageId;
+  return { proposalId: receipt.canonicalProposalId, producerId: typeof receipt.producerId === 'string' ? receipt.producerId : '',
+    state: receipt.resolution === 'accepted' ? 'approved' : receipt.resolution === 'rejected' ? 'rejected' : 'closed',
+    ...(typeof card === 'string' ? { cardMessageId: card } : {}) };
+}
+/** That receipt in the chat's words. */
+export function approvalReceiptText(receipt: NonNullable<ReturnType<typeof approvalReceipt>>): string {
+  const said: Record<string, [string, string]> = {
+    F221: ['已记住这个偏好。', '没有记这个偏好。'], F231: ['已更新关于你的资料。', '没有更新关于你的资料。'],
+    F276: ['已记下这个人。', '没有记这个人。'], F139: ['定时已按你的确认处理。', '定时没有改动。'],
+  };
+  const [yes, no] = said[receipt.producerId] ?? ['已同意。', '已拒绝。'];
+  return receipt.state === 'approved' ? yes : receipt.state === 'rejected' ? no : '这件事已经结束。';
+}
+
 /** A reply the engine is still producing: an unpublished draft or a response that has not settled. */
 export function replyInProgress(message: NativeMessage): boolean {
   return message.type === 'assistant'
@@ -27,13 +77,26 @@ export function replyEnding(message: NativeMessage): { how: 'stopped' | 'failed'
  * may be nothing: the row then carries `in_progress` and the chat draws a
  * typing indicator instead of placeholder words.
  */
-export function messageDisplayText(message: NativeMessage, threadId: string): string {
-  const text = message.type === 'assistant' ? withoutCatSignature(message, threadId) : message.content;
+export function messageDisplayText(message: NativeMessage, threadId: string, catName?: string): string {
+  const text = message.type === 'assistant' ? withoutLeadingSignature(withoutCatSignature(message, threadId), catName) : message.content;
   const content = message.type === 'assistant' && text.trim() === 'SILENT' ? '' : text;
   if (content || replyInProgress(message)) return content;
   if (['canceled', 'cancelled'].includes(message.lifecycle?.status ?? '')) return '已停止';
   if (message.lifecycle?.status === 'interrupted') return '中途被打断，没有写完';
   return message.lifecycle?.status === 'failed' ? '这次没完成，请查看详情' : '';
+}
+
+/**
+ * Some models open a reply with the paw signature instead of closing with it
+ * ("[快手/Haiku🐾]  今天…", seen in real group replies). It is hidden only when
+ * it is the speaking cat's own name and words follow it (on the same line or,
+ * as in "[快手/Haiku🐾]\n\n7", on the next), so a reply that quotes another
+ * cat's signature, or mentions one further inside, keeps its text.
+ */
+function withoutLeadingSignature(text: string, catName?: string): string {
+  if (!catName || !text.startsWith('[')) return text;
+  const match = /^\[([^\[\]\r\n/]{1,80})(?:\/[^\[\]\r\n]{0,80})?\s?🐾\]\s+(?=\S)/u.exec(text);
+  return match && match[1]!.trim() === catName ? text.slice(match[0].length) : text;
 }
 
 function record(value: unknown): Record<string, unknown> {

@@ -1117,6 +1117,29 @@ test('opening a saved conversation names the thread it saw; a busy refusal stays
   assert.ok(!p.calls.some(c => c.path.includes('/projects') || (c.method === 'PUT' && c.path.endsWith('/workspace')) || c.path.endsWith('/new')), 'never a project, a workspace switch or a new thread');
 });
 
+test('the same switch asked from elsewhere (the search palette, by thread) keeps its rules and says how it ended', async () => {
+  const p = historyCat();
+  p.ws.select(ada);
+  p.ws.observe(ada, p.server.thread, true);
+  await settle();
+  assert.deepEqual(plain(await p.ws.switchTo('thread-A')), { ok: true }, 'already there: nothing to move');
+  // Only a conversation the server lists for the cat.
+  assert.deepEqual(plain(await p.ws.switchTo('thread-X')), { ok: false, text: '这段对话已不在这只猫的历史对话里。' });
+  assert.equal(p.count('PUT', '/xbot-api/bots/Ada/conversation'), 0);
+  // Busy: refused by the server, in its words; the chat stays.
+  p.server.busy.add('thread-P');
+  assert.deepEqual(plain(await p.ws.switchTo('thread-P')), { ok: false, text: '请先完成或停止会话中的任务' });
+  assert.deepEqual(p.calls.filter(c => c.method === 'PUT').at(-1)!.body, { threadId: 'thread-P', expectedThreadId: 'thread-A' });
+  assert.deepEqual(p.reselected, []);
+  p.server.busy.clear();
+  assert.deepEqual(plain(await p.ws.switchTo('thread-P')), { ok: true });
+  assert.deepEqual(p.toasts, ['已切换到「官网改版」']);
+  assert.deepEqual(p.reselected, [ada], 'resolved once the chat reopened there');
+  // A group keeps its one thread.
+  p.ws.select(team);
+  assert.equal((await p.ws.switchTo('thread-P')).ok, false);
+});
+
 test('files waiting to be sent are asked about first: keeping them sends nothing, switching drops them with the old thread', async () => {
   const p = historyCat();
   const node = await openCat(p);
@@ -1546,7 +1569,7 @@ test('the page loads the workspace scripts before app.js and their styles last; 
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
   // After every upstream and earlier style; only the status-line/memory, 开箱即用, 找得到 and live-reply extensions (which build on it) follow.
   assert.ok(styles.indexOf('workspace.css') > styles.indexOf('chat-presentation.css'));
-  assert.deepEqual(styles.slice(styles.indexOf('workspace.css') + 1), ['chat-experience.css', 'quick-create.css', 'chat-list.css', 'chat-history.css', 'chat-live.css']);
+  assert.deepEqual(styles.slice(styles.indexOf('workspace.css') + 1), ['chat-experience.css', 'quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'chat-live.css']);
   assert.doesNotMatch(app, /\/paste"/);
   assert.match(app, /\["files", "文件"\]/);
   // 详情 appends the module's 历史对话 node only when it gives one (cats, never groups).

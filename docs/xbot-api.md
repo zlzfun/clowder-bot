@@ -37,6 +37,7 @@ UI 保留 Bot 名称和文件夹概念，实际成员、执行和历史以 Clowd
 - 请求体只有成员本身的字段：`catId`、名字与别名、所选猫脸对应角色模板的颜色、职责／性格／简介、`clientId`、`configurationSource: 'native_tool'`、`defaultModel: ''`。模型与推理强度不写，沿用该 Agent 的本机默认。不传 `breedId`，由原生按新成员处理；头像只存在 Bot 的展示数据里。
 - Agent 取 `simple.agent` 或上面的默认。`face` 只决定头像和颜色（八张猫脸之一；不选时按 Agent 取对应的那张）。`about` 是用户写的一句用途，成为职责与简介；不写时用一段通用的「随叫随到的伙伴」职责。
 - 幂等用上游成员创建自带的请求身份：请求头 `x-cat-cafe-onboarding-journey: clowder-bot-simple` 与 `idempotency-key: onboarding:clowder-bot-simple:cat:<idempotencyKey>`（`config/member-create-receipt.ts`）。`catId` 由 `idempotencyKey` 推导，所以同一个键、同样的内容重发得到同一只猫；同一个键换了内容由原生拒绝（409）。重发时如果那只猫已经在，就不再按当前的 Agent 检测结果拦截。这一路径 2026-11-11 在隔离运行时上实测过创建、重放和冲突。
+- 绑定 Claude Code 的猫，成员记录里带一组默认的「额外 CLI 参数」（上游成员编辑里的 `cliConfigArgs`，受支持的成员级设置）：`--settings {"skillOverrides":{"schedule":"off","loop":"off"}} --disallowedTools RemoteTrigger,CronCreate,CronDelete,CronList`，关掉 CLI 自带的云端定时，让「每天 9 点提醒我」走引擎的定时工具和它的确认。Codex 没有自带定时，不写参数。同样的默认值用于 `PUT /bots/:name/agent` 换 Agent；带 `catConfig` 的完整创建在成员建好后补一次 `PATCH /api/cats/:id`（成员已有参数时不动，补不上也不影响创建）。设置 JSON 里不能有空白：上游按空白切分参数。只影响此后新建或重新绑定的猫，已有的猫不改。
 - 必须带 `idempotencyKey`；不能与 `catConfig`、`runtimeId`、`templateId`、`persona`、`description` 混用。没有可用 Agent 时 422，说明要先装好并登录；同名 409。
 
 `POST /xbot-api/groups` 带 `members` 时 `name` 可省略，群名取成员名用「、」连接（超过 64 字截断），之后可改名。可带 `idempotencyKey`（UUID）：它同时是群目录的名字和原生 Thread 创建的幂等键，应答丢失后用同一个键重发得到同一个群，不会建出第二个。群名是原生 Thread 标题，按自由文本校验；不带 `members` 时同一路由仍是建侧栏分组，分组名沿用原来的字符限制。
@@ -47,6 +48,8 @@ UI 保留 Bot 名称和文件夹概念，实际成员、执行和历史以 Clowd
 
 - 范围是用户自己的会话：每只猫当前的对话和它的历史对话（`current:false`，需要先从历史对话里打开）、所有群聊；各取最新一页（200 条）原生消息，搜索时当场读取，不建索引、不留副本。
 - 可见口径与聊天一致：用户消息（应用代发的开场邀请除外）和可见的猫回复；草稿、处理中、`SILENT`、被显式发言取代的执行记录不算，匹配的是去掉署名后的显示文字，不区分大小写。
+- 猫的回复按显示出来的文字匹配和摘录：标题、列表、引用、表格、粗体、行内代码、链接地址这些 Markdown 记号不出现在 `snippet` 里（`server/native/text.ts` 的 `plainLine`），`match` 指向去掉记号后的位置；只在带记号的原文里才匹配得上的词（例如搜 `` `npm ci` ``）按原文摘录。用户自己打的字不改。会话列表的预览行 `activity.last.text` 用同一规则。
+- `GET /xbot-api/bots/:name/search?q=` 与 `GET /xbot-api/groups/:id/search?q=` 是同一个搜索，只看这一个聊天当前的对话，返回形状相同；用于「在这个聊天里找」，不会被别的聊天的结果挤掉。
 - `more` 表示还有没返回的匹配，或有会话存在更早、这次没看的消息；`failed` 是没能读取的会话数，前端要如实说明，不当作「没有结果」。
 - 固定上游自带的消息检索（`/api/evidence/search?resultUnit=message`）依赖证据索引，2026-11-11 在隔离运行时和现有实例上实测都返回空（`passages_count: 0`，未配置嵌入模型），所以这里没有用它；索引可用后可以改为调用原生检索，接口形状不变。
 
@@ -60,7 +63,7 @@ UI 保留 Bot 名称和文件夹概念，实际成员、执行和历史以 Clowd
 
 回复进行中的呈现见 [回复的实时呈现：接口约定](chat-live-api.md)：同一条 SSE 在原生事件之后追加精简的 `live` 事件（开始、思考、步骤、正文增量、结束），会话行用 `in_progress` 标出还在写的回复，不再用占位文字；紧跟在问题后面的回复不重复引用上一句。
 
-单聊与群聊的显示正文省去回复末尾的猫爪署名。固定上游 `42017e0` 的 `extra.outputLayout.hostTail` 提供署名范围，适配器核对线程、成员、轮次与正文长度及 SHA-256 后裁掉该范围。有范围但验证失败时保留原文。没有范围的旧记录，只识别 Markdown 代码围栏之外、末尾独占一行的 `[名字/模型🐾]` 或 `[名字🐾]`。用户消息、原生 `native` 对象和历史导出保留原文，新回复与历史读取共用这个展示转换。
+单聊与群聊的显示正文省去回复末尾的猫爪署名。固定上游 `42017e0` 的 `extra.outputLayout.hostTail` 提供署名范围，适配器核对线程、成员、轮次与正文长度及 SHA-256 后裁掉该范围。有范围但验证失败时保留原文。没有范围的旧记录，只识别 Markdown 代码围栏之外、末尾独占一行的 `[名字/模型🐾]` 或 `[名字🐾]`。有的模型把署名写在回复开头（真实群聊里出现过「[快手/Haiku🐾]」独占第一行、正文在后面）：署名里的名字就是发言的这只猫、且后面还有正文时，开头这一段也不显示；别的猫的署名、不在开头的都保留。用户消息、原生 `native` 对象和历史导出保留原文，新回复与历史读取共用这个展示转换。
 
 单聊与群聊消息包含 `presentation_kind: "message" | "activity"`、`native_cat_id` 和 `speaker`（真实发送成员的 ID、名称和头像元数据；成员不可用时为 null）。只有当前返回页存在同一成员、同一原生 turn 的显式 callback 发言，才将对应 stream 累计记录投影为 `activity`；它不再生成聊天发送回执。前端将其显示为默认折叠的执行过程，正式发言保持原生顺序与各自时间戳。关联依赖精确执行身份，不用文本、时间接近程度或跨成员共享的外层 invocation ID 推断。错误、取消和缺少关联证据的回复继续作为普通消息；跨分页的关联暂不推断。该投影不修改或删除原生历史。
 

@@ -10,9 +10,11 @@
 //               placeholder is the name the group gets without one.
 // Requests: GET /xbot-api/start (重新检测 adds ?refresh=1), POST /xbot-api/bots
 // {name, simple:{face, about?, agent}, idempotencyKey} and POST
-// /xbot-api/groups {members, name?}. A cat or a group exists only once the
-// server answers; a cat request that may or may not have landed is sent again
-// unchanged under the same key, which returns that cat rather than a second.
+// /xbot-api/groups {members, name?, idempotencyKey}. A cat or a group exists
+// only once the server answers; a request that may or may not have landed is
+// sent again unchanged under the same key, which returns that cat or group
+// rather than a second. release() lets app.js retire an untouched stage when
+// the first cat arrives from elsewhere.
 // What blocks creation is said in everyday words; nothing is a demo.
 (() => {
   "use strict";
@@ -137,14 +139,22 @@
   function toolLine(onChange) {
     const box = node("div", "qc-tool"), line = node("p", "qc-tool-line"), note = node("p", "qc-tool-note");
     box.append(line, note);
-    let select = null;
+    let select = null, offered = "";
     function render(s, id) {
       const list = R.choices(s), chosen = R.choiceOf(s, id) || list[0];
-      line.replaceChildren();
       note.replaceChildren();
-      select = null;
       box.hidden = !chosen;
-      if (!chosen) return;
+      if (!chosen) { line.replaceChildren(); select = null; offered = ""; return; }
+      paintNote(s, chosen);
+      // The same tools on offer: only the choice changes, in place, so a
+      // keyboard user's focus stays on the select. Rebuilt otherwise, with
+      // focus carried over.
+      const next = list.length > 1 ? list.map((c) => c.id + "\n" + c.label + "\n" + c.confirmed).join("\n\n") : "";
+      if (select && next === offered) { select.value = chosen.id; return; }
+      const refocus = line.contains(document.activeElement);
+      line.replaceChildren();
+      select = null;
+      offered = next;
       line.append(R.TOOL_LINE[0]);
       if (list.length > 1) {
         const pick = node("span", "qc-pick");
@@ -161,6 +171,9 @@
         line.append(pick);
       } else line.append(node("b", "", chosen.label));
       line.append(R.TOOL_LINE[1]);
+      if (refocus && select) select.focus();
+    }
+    function paintNote(s, chosen) {
       note.hidden = chosen.confirmed;
       if (!chosen.confirmed) {
         const command = R.loginCommand(s, chosen.id);
@@ -177,35 +190,41 @@
   // hold: where focus waits while a request is on its way (the dialog's card).
   function catFlow({ dialog, alive, hold, onBusy = () => {}, onState = () => {}, done }) {
     const h = hooks();
-    let s = null, agent = null, faceTouched = false, suggested = "", busy = false, attempt = null, loads = 0, refused = "";
+    // picked: the face the owner chose, kept apart from the row, which shows no
+    // choice while something blocks creation and gets it back afterwards.
+    let s = null, agent = null, faceTouched = false, picked = null, suggested = "", busy = false, attempt = null, loads = 0, refused = "", kind = "";
     const root = node(dialog ? "div" : "form", "qc-flow");
     root.tabIndex = -1;
     if (!dialog) {
       root.setAttribute("novalidate", "");
       root.addEventListener("submit", (ev) => { ev.preventDefault(); submit(); });
     }
-    const faces = lineup({ compact: dialog, onPick: (id) => { faceTouched = true; follow(id); } });
+    const faces = lineup({ compact: dialog, onPick: (id) => { faceTouched = true; picked = id; follow(id); } });
 
     const fields = node("div", "qc-fields");
     const nameBox = node("div", dialog ? "field qc-field" : "qc-namebox");
     const nameLab = node("label", dialog ? "" : "qc-label", "名字"), nameIn = node("input", dialog ? "" : "qc-input"), nameErr = node("p", "qc-err");
-    nameIn.type = "text"; nameIn.maxLength = 64; nameIn.autocomplete = "off"; nameIn.spellcheck = false;
+    // The real limit (64 characters) is the rules'; the box only stops a runaway paste.
+    nameIn.type = "text"; nameIn.maxLength = R.NAME_INPUT_MAX; nameIn.autocomplete = "off"; nameIn.spellcheck = false;
     nameIn.id = uid("name"); nameLab.htmlFor = nameIn.id;
     nameErr.id = uid("name-err"); nameErr.setAttribute("role", "alert");
     nameIn.setAttribute("aria-describedby", nameErr.id);
     nameIn.addEventListener("input", () => { nameError(""); showError(""); });
     nameBox.append(nameLab, nameIn, nameErr);
     fields.append(nameBox);
-    let aboutIn = null;
+    let aboutIn = null, aboutErr = null;
     if (dialog) {
       const box = node("div", "field qc-field"), lab = node("label", "");
       lab.append("它主要帮你做什么", node("span", "qc-opt", "可不填"));
       aboutIn = node("input", "");
-      aboutIn.type = "text"; aboutIn.maxLength = 2000; aboutIn.autocomplete = "off";
+      aboutIn.type = "text"; aboutIn.maxLength = R.ABOUT_INPUT_MAX; aboutIn.autocomplete = "off";
       aboutIn.placeholder = "比如：帮我改简历、陪我练口语";
       aboutIn.id = uid("about"); lab.htmlFor = aboutIn.id;
-      aboutIn.addEventListener("input", () => showError(""));
-      box.append(lab, aboutIn);
+      aboutErr = node("p", "qc-err");
+      aboutErr.id = uid("about-err"); aboutErr.setAttribute("role", "alert");
+      aboutIn.setAttribute("aria-describedby", aboutErr.id);
+      aboutIn.addEventListener("input", () => { aboutErr.textContent = ""; aboutIn.removeAttribute("aria-invalid"); showError(""); });
+      box.append(lab, aboutIn, aboutErr);
       fields.append(box);
     }
     const tool = toolLine((id) => {
@@ -229,7 +248,8 @@
     const laterBox = node("div", "qc-later");
     root.append(faces.element, wait, fields, needBox, laterBox);
 
-    function show(kind) {
+    function show(next) {
+      kind = next;
       wait.hidden = kind !== "loading" && kind !== "failed";
       fields.hidden = kind !== "ready";
       needBox.hidden = kind !== "blocked";
@@ -299,7 +319,8 @@
       } else if (how === "refused") showError(refused);
       tool.render(next, agent);
       if (wasReady) return;
-      const face = faceTouched && faces.get() ? faces.get() : R.defaultFace(agent, faceIds());
+      // Back from blocked (or first time ready): the owner's own face if they picked one.
+      const face = faceTouched && picked ? picked : R.defaultFace(agent, faceIds());
       show("ready");
       faces.set(face);
       follow(face);
@@ -346,11 +367,17 @@
     }
     async function submit() {
       if (busy || !s || !s.ready || fields.hidden) return;
-      const problem = R.nameProblem(nameIn.value, h.cats());
-      if (problem) { nameError(problem); nameIn.focus(); return; }
       const body = R.catBody({ name: nameIn.value, face: faces.get(), agent, about: aboutIn ? aboutIn.value : "" });
       const print = R.fingerprint(body);
-      if (!attempt || attempt.print !== print) attempt = { print, key: requestKey() };
+      // The same request as one whose answer was lost goes back under its key
+      // even when the refreshed list now knows the name: that cat may be this
+      // request's own, and the server answers with it instead of a second one.
+      const again = !!attempt && attempt.print === print;
+      const problem = R.nameProblem(nameIn.value, again ? [] : h.cats());
+      if (problem) { nameError(problem); nameIn.focus(); return; }
+      const long = aboutIn ? R.aboutProblem(aboutIn.value) : "";
+      if (long) { aboutErr.textContent = long; aboutIn.setAttribute("aria-invalid", "true"); aboutIn.focus(); return; }
+      if (!again) attempt = { print, key: requestKey() };
       showError("");
       setBusy(true);
       let result;
@@ -359,6 +386,8 @@
         if (!alive()) return;
         setBusy(false);
         const what = R.catError(err, body.name, (R.choiceOf(s, agent) || {}).label);
+        // A refused request made no cat: the next one is new, checked against the list again.
+        if (what.kind !== "unsure") attempt = null;
         if (what.kind === "name") { nameError(what.text); nameIn.focus(); quietly(h.refresh); }
         else if (what.kind === "blocked") { refused = what.text; await load("refused"); }
         else { showError(what.text); go.focus(); if (what.kind === "unsure") quietly(h.refresh); }
@@ -379,7 +408,14 @@
       show("later");
       open.focus();
     }
-    return { element: root, go, start: () => load("first"), submit, later };
+    return {
+      element: root, go, start: () => load("first"), submit, later,
+      // For cats arriving from elsewhere (release): a request in flight or a cat
+      // already made here; and whether the owner has a draft (their own face or
+      // name) or a request whose answer was lost.
+      waiting: () => busy || kind === "later",
+      kept: () => faceTouched || !R.followsFace(nameIn.value, suggested) || !!attempt,
+    };
   }
 
   // ---- the hand-over ----
@@ -429,10 +465,13 @@
   // only when the chat could not be opened; the cat exists either way.
   function arrive(name, face, picture) {
     const h = hooks(), flight = handOff(picture, face);
+    arriving++;
     const opened = Promise.resolve().then(() => h.openCat(name));
     if (flight) flight.land(() => h.landing(name));
-    return opened.catch((err) => { if (flight) flight.cancel(); throw err; });
+    return opened.finally(() => { arriving--; }).catch((err) => { if (flight) flight.cancel(); throw err; });
   }
+  // A cat made here is on its way into its chat: the list may already show it.
+  let arriving = 0;
 
   // ---- the views ----
   // No cats yet: the main area is where the first one is brought home.
@@ -455,9 +494,39 @@
         });
       },
     });
-    root.append(title, sub, flow.element);
+    // Cats that arrived from elsewhere while this stage holds a draft (release).
+    const arrived = node("p", "qc-arrived");
+    arrived.setAttribute("role", "status");
+    arrived.hidden = true;
+    root.append(title, sub, arrived, flow.element);
+    stages.set(root, {
+      flow,
+      point(names) {
+        const shownNames = names.slice(0, 3).join("、") + (names.length > 3 ? "等 " + names.length + " 只" : "");
+        arrived.replaceChildren("已经有猫猫了：" + shownNames + "。", button("text-btn qc-go-chat", "去聊天", () => {
+          Promise.resolve().then(() => h.openCat(names[0])).catch((err) => h.error(err));
+        }));
+        arrived.hidden = false;
+      },
+    });
     flow.start();
     return root;
+  }
+
+  // The first cat arrived from elsewhere (another tab) while the stage is up;
+  // app.js asks on every list read. An untouched stage may go (true: the shell
+  // shows the no-chat line, so the list's chat is in reach on a phone too). One
+  // with a draft — the owner's own face or name, focus inside it, or a request
+  // whose answer was lost — stays and points at the cats instead. A request in
+  // flight, or a cat made here and on its way, changes nothing and says nothing.
+  const stages = new WeakMap();
+  function release(view, names) {
+    const one = stages.get(view);
+    if (!one) return true;
+    if (arriving || one.flow.waiting()) return false;
+    if (!one.flow.kept() && !view.contains(document.activeElement)) return true;
+    one.point(names);
+    return false;
   }
 
   // Cats, but no chat open. Right on a phone too, where the list is a drawer.
@@ -469,8 +538,14 @@
   }
 
   // One quick dialog at a time, on the original .modal / .modal-card. Escape,
-  // Tab and every other key stay inside; focus goes back to the opener.
+  // Tab and every other key stay inside; focus goes back to the opener, or,
+  // when a list redraw replaced it meanwhile, to the 新建 button there now.
   let layer = null;
+  function liveOpener(opener) {
+    if (opener && opener.isConnected) return opener;
+    const now = H && H.opener ? H.opener() : null;
+    return now && now.isConnected ? now : null;
+  }
   function trapTab(ev, card) {
     const live = [...card.querySelectorAll("button, input, select, textarea")]
       .filter((n) => !n.disabled && !n.hidden && n.tabIndex >= 0 && (!n.getClientRects || n.getClientRects().length));
@@ -503,7 +578,8 @@
         L.alive = false;
         root.remove();
         if (layer === L) layer = null;
-        if (opener && opener.isConnected && opener.focus) opener.focus({ preventScroll: true });
+        const back = liveOpener(opener);
+        if (back && back.focus) back.focus({ preventScroll: true });
       },
     };
     root.addEventListener("keydown", (ev) => {
@@ -522,7 +598,7 @@
   function openCat({ opener } = {}) {
     const h = hooks(), from = opener || document.activeElement;
     const L = dialog("新建猫猫", from);
-    const more = button("text-btn qc-more", "更多设置", () => { if (L.busy) return; L.close(true); h.more(from); });
+    const more = button("text-btn qc-more", "更多设置", () => { if (L.busy) return; L.close(true); h.more(liveOpener(from) || from); });
     const cancel = button("secondary", "取消", () => L.close());
     const flow = catFlow({
       dialog: true,
@@ -557,7 +633,9 @@
     }
     // Members in the order they were picked: the first sits in front of the group's face.
     const picked = [];
-    let busy = false;
+    // One key per request body (members in order, name): an unsure answer is
+    // sent again unchanged under it and arrives at the same group.
+    let busy = false, attempt = null;
     const hint = node("p", "qc-hint");
     hint.id = uid("hint");
     hint.setAttribute("aria-live", "polite");
@@ -581,7 +659,7 @@
     });
     const nameBox = node("div", "field qc-field"), lab = node("label", ""), nameIn = node("input", ""), nameErr = node("p", "qc-err");
     lab.append("群名", node("span", "qc-opt", "可不填"));
-    nameIn.type = "text"; nameIn.maxLength = 64; nameIn.autocomplete = "off";
+    nameIn.type = "text"; nameIn.maxLength = R.NAME_INPUT_MAX; nameIn.autocomplete = "off";
     nameIn.id = uid("group-name"); lab.htmlFor = nameIn.id;
     nameErr.setAttribute("role", "alert");
     nameIn.addEventListener("input", () => { nameErr.textContent = ""; nameIn.removeAttribute("aria-invalid"); showError(""); });
@@ -615,15 +693,17 @@
       if (busy || picked.length < 2) return;
       const problem = R.groupNameProblem(nameIn.value);
       if (problem) { nameErr.textContent = problem; nameIn.setAttribute("aria-invalid", "true"); nameIn.focus(); return; }
-      const body = R.groupBody(picked, nameIn.value);
+      const body = R.groupBody(picked, nameIn.value), print = R.fingerprint(body);
+      if (!attempt || attempt.print !== print) attempt = { print, key: requestKey() };
       showError("");
       setBusy(true);
       let group;
-      try { group = await h.api("/xbot-api/groups", { method: "POST", body }); }
+      try { group = await h.api("/xbot-api/groups", { method: "POST", body: { ...body, idempotencyKey: attempt.key } }); }
       catch (err) {
         if (!L.alive) return;
         setBusy(false);
         const what = R.groupError(err);
+        if (what.kind !== "unsure") attempt = null;
         showError(what.text);
         go.focus();
         if (what.kind === "unsure") quietly(h.refresh);
@@ -643,7 +723,7 @@
 
   window.ClowderQuickCreate = Object.freeze({
     init: (value) => { H = value; },
-    stage, noChat, openCat, openGroup,
+    stage, noChat, openCat, openGroup, release,
     close: () => { if (layer) layer.close(true); },
   });
 })();

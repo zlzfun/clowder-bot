@@ -2,8 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { ApiError } from '../errors.js';
 import { ProductStore } from '../product-store.js';
 import type { NativeCat, NativeMessage, NativeThread, NativeTransport } from './types.js';
-import { defaultRuntime, runtimeUnavailable, supportsRuntime } from './agents.js';
-import { messageDisplayText, messagePresentation, replyEnding, replyInProgress } from './message-presentation.js';
+import { defaultRuntime, memberCliArgs, runtimeUnavailable, supportsRuntime } from './agents.js';
+import { approvalReceipt, approvalReceiptText, messageDisplayText, messagePresentation, replyEnding, replyInProgress, rosterRefusals } from './message-presentation.js';
 import { avatarBreed, type CatConfig, type SourceTemplate } from './cat-templates.js';
 import { clip } from './text.js';
 import { messageBlocks } from './blocks.js';
@@ -158,11 +158,16 @@ export class BotBridge {
     // A reply names the message it answers. Right under that message the quote
     // only repeats it, so it is shown when something else came in between.
     let lastUser: string | undefined;
+    // A cat that was addressed but does not belong to this conversation: said once by name (see rosterRefusals).
+    const refusals = rosterRefusals(page.messages, id => cats.find(cat => cat.id === id)?.name, false);
+    const decided = this.decisions(page.messages);
     for (const { message, ...presentation } of this.presentMessages(page.messages, cats)) {
       if (message.type === 'user' && message.id === source) continue;
-      const seq = this.store.sequence(thread.id, message.id);
-      const text = messageDisplayText(message, thread.id), inProgress = replyInProgress(message);
-      const rich = message.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(message), ending = replyEnding(message);
+      if (refusals.get(message.id) === null) continue;
+      const seq = this.store.sequence(thread.id, message.id), receipt = approvalReceipt(message);
+      const refusal = refusals.get(message.id) ?? (receipt ? approvalReceiptText(receipt) : undefined);
+      const text = refusal ?? messageDisplayText(message, thread.id, presentation.speaker?.name), inProgress = replyInProgress(message);
+      const rich = message.type === 'user' ? { blocks: [], hidden: 0 } : this.withDecisions(messageBlocks(message), decided), ending = replyEnding(message);
       // At the top of a page that continues further back, what came just before is not known; no quote is guessed there.
       const quoted = message.replyTo && message.replyTo !== source
         && !(message.type !== 'user' && (message.replyTo === lastUser || (lastUser === undefined && page.hasMore))) ? message.replyTo : undefined;
@@ -171,7 +176,7 @@ export class BotBridge {
         content: text, ...presentation, time: new Date(message.timestamp).toISOString(),
         reply_to: quoted ? this.store.state.messageRefs[thread.id]?.[quoted] ?? 0 : 0,
         status: message.lifecycle?.status ?? (message.isDraft ? 'processing' : 'complete'), ...(inProgress ? { in_progress: true } : {}),
-        ...(ending ? { ended: ending } : {}),
+        ...(ending ? { ended: ending } : {}), ...(refusal ? { notice: true } : {}),
         attachments: this.workspaces.messageFiles(thread.id, message),
         // Cards, checklists and choices the cat attached; `blocks_hidden` counts what the chat cannot draw yet.
         ...(rich.blocks.length ? { blocks: rich.blocks } : {}), ...(rich.hidden ? { blocks_hidden: rich.hidden } : {}), native: message };
@@ -240,6 +245,15 @@ export class BotBridge {
     this.greetingRequests.set(key, request);
     try { return await request; } finally { this.greetingRequests.delete(key); }
   }
+  /** How the requests for confirmation on this page were answered, from the engine's own receipts. */
+  decisions(messages: NativeMessage[]): Map<string, 'approved' | 'rejected' | 'closed'> {
+    return new Map(messages.map(approvalReceipt).filter(receipt => !!receipt).map(receipt => [receipt!.proposalId, receipt!.state]));
+  }
+  /** A request card says how it was answered when the receipt is on the same page. */
+  withDecisions<T extends ReturnType<typeof messageBlocks>>(rich: T, decided: Map<string, 'approved' | 'rejected' | 'closed'>): T {
+    for (const block of rich.blocks) if (block.kind === 'card' && block.approval && decided.has(block.approval.id)) block.approval.state = decided.get(block.approval.id);
+    return rich;
+  }
   presentMessages(messages: NativeMessage[], cats: NativeCat[]) {
     const kinds = messagePresentation(messages);
     return messages.map(message => {
@@ -289,9 +303,17 @@ export class BotBridge {
         method: 'POST', body: { name: input.name, catConfig: input.catConfig,
           ...(input.sourceTemplate ? { sourceTemplate: input.sourceTemplate } : {}), idempotencyKey: input.idempotencyKey ?? randomUUID() },
       });
-      const cat = result.cat;
+      let cat = result.cat;
       if (!cat?.id || !cat.breedId) throw new ApiError(502, '原生创建结果缺少猫猫身份');
-      const identity = avatarBreed(cat.breedId);
+      // The template route creates the member without the default CLI arguments (see memberCliArgs);
+      // they are added as a second native step. If that step fails the cat exists and works, only
+      // without them, and re-selecting its Agent in the profile applies them.
+      const args = memberCliArgs(cat.clientId);
+      if (args.length && !(Array.isArray(cat.cliConfigArgs) && cat.cliConfigArgs.length)) {
+        cat = await this.native.request<{ cat: NativeCat }>(`/api/cats/${encode(cat.id)}`, { method: 'PATCH',
+          body: { expectedRevision: cat.configurationRevision, cliConfigArgs: args } }).then(updated => updated.cat?.id ? updated.cat : cat).catch(() => cat);
+      }
+      const identity = avatarBreed(cat.breedId ?? result.cat.breedId!);
       Object.assign(this.store.bot(cat.id), { templateId: identity, avatarSeed: input.avatar_seed || `cat:${identity}`,
         timezone: input.timezone, ...(result.sourceTemplate ? { sourceTemplate: result.sourceTemplate } : {}) });
       this.store.save();
@@ -317,6 +339,7 @@ export class BotBridge {
       personality: source?.personality ?? template.personality,
       teamStrengths: input.description ?? source?.teamStrengths ?? template.teamStrengths,
       clientId: runtime.clientId, configurationSource: 'native_tool', defaultModel: '',
+      ...(memberCliArgs(runtime.clientId).length ? { cliConfigArgs: memberCliArgs(runtime.clientId) } : {}),
     } });
     Object.assign(this.store.bot(cat.id), { templateId: template.id, avatarSeed: input.avatar_seed, timezone: input.timezone });
     this.store.save();
@@ -351,7 +374,8 @@ export class BotBridge {
       body: { catId, name, displayName: name, nickname: name, color: template.color, mentionPatterns: [`@${name}`, `@${catId}`],
         roleDescription: about || defaultRole, personality: defaultPersonality,
         teamStrengths: about ? clip(about.replace(/\s+/g, ' '), 60) : defaultStrengths,
-        clientId: runtime.clientId, configurationSource: 'native_tool', defaultModel: '' } }).catch(error => {
+        clientId: runtime.clientId, configurationSource: 'native_tool', defaultModel: '',
+        ...(memberCliArgs(runtime.clientId).length ? { cliConfigArgs: memberCliArgs(runtime.clientId) } : {}) } }).catch(error => {
       if (error instanceof ApiError && error.status === 409) throw new ApiError(409, '这次创建和上一次的内容不一样，或者名字已被占用，请重新创建', error.details);
       throw error;
     });

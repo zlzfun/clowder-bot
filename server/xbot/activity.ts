@@ -18,6 +18,13 @@ export function createActivityRouter(bridge: BotBridge) {
       if (kind === 'groups') return {thread:await bridge.group(name),catId:undefined};
       const cat = await bridge.cat(name); return {thread:await bridge.direct(cat),catId:cat.id};
     };
+    // The same search inside one chat's current conversation.
+    router.get<{chat:string}>(`${scope}/search`, async (req, res) => {
+      const query = z.string().trim().min(1).max(100).parse(req.query.q);
+      if (kind === 'groups') { const thread = await bridge.group(String(req.params.chat)); return void res.json(await searchMessages(bridge, query, 30, { chat: { type: 'group', id: thread.id, name: '' }, threadId: thread.id })); }
+      const cat = await bridge.cat(String(req.params.chat)), thread = await bridge.direct(cat);
+      res.json(await searchMessages(bridge, query, 30, { chat: { type: 'bot', id: cat.id, name: cat.name }, threadId: thread.id }));
+    });
     router.get<{chat:string}>(`${scope}/activity`, async (req,res) => {
       const {thread}=await context(String(req.params.chat));
       res.json(await bridge.activity.read(thread.id));

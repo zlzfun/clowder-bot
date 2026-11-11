@@ -4931,9 +4931,10 @@
   }
 
   let toastTimer = 0;
-  function showToast(text) {
+  // A done thing shows a check; a note (the search palette's) passes "info".
+  function showToast(text, iconName = "check") {
     const box = $("toast");
-    box.replaceChildren(icon("check"), el("span", "", text));
+    box.replaceChildren(icon(iconName), el("span", "", text));
     box.hidden = false;
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { box.hidden = true; }, 3000);
@@ -6399,6 +6400,7 @@
     state.groups = groups.groups || [];
     renderLists();
     refreshBotFaces();
+    syncNoChat();
   }
 
   async function refreshNotes() {
@@ -7239,6 +7241,38 @@
     if (open) loadPanel().catch(() => {});
   });
 
+  // Search and jump (palette.js): ⌘K / Ctrl+K or 搜索 at the top of the
+  // sidebar opens it, Alt+↑ / Alt+↓ step through the chats in sidebar order.
+  // It sees the chats and opens them, switches a cat's conversation and runs
+  // its default actions only through these hooks.
+  window.ClowderPalette.init({
+    api, icon, visibleError, composer: input,
+    chats: () => [
+      ...state.bots.map((b) => ({ type: "bot", id: b.name, name: niceName(b.name), nativeId: b.native_id || b.id || "" })),
+      ...state.groups.map((g) => ({ type: "group", id: g.id, name: niceName(g.name || g.id), members: (g.members || []).map(niceName) })),
+    ],
+    // The sidebar's rows top to bottom (a collapsed folder's cats are not shown there).
+    order: () => [...document.querySelectorAll("#pin-row [data-bot], #roster [data-bot], #roster [data-group]")]
+      .filter((n) => !n.closest("[hidden]"))
+      .map((n) => (n.dataset.group ? { type: "group", id: n.dataset.group } : { type: "bot", id: n.dataset.bot })),
+    face: (chat, size) => (chat.type === "group"
+      ? avatar("", groupFace(state.groups.find((g) => g.id === chat.id) || { id: chat.id }), size)
+      : avatar(chat.id, paintOf(chat.id), size)),
+    selection: () => (state.peer ? null : state.sel),
+    open: (sel) => (sel.type === "group" ? pickGroup(sel.id) : pickBot(sel.id)),
+    // The open chat's history as drawn, for finding a message in it.
+    history: (sel) => [...thread.children].find((n) => n.classList.contains("thread-inner") && n.dataset.chat === chatKey(sel)) || null,
+    switchConversation: (threadId) => workspace.switchTo(threadId),
+    newCat: (opener) => openNewBot(opener),
+    newGroup: (opener) => openNewGroup(opener),
+    settings: () => openSettings("general", { home: settingsNarrow.matches }),
+    theme: () => (document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light"),
+    setTheme: (mode) => applyTheme(mode),
+    note: (text) => showToast(text, "info"),
+    focusComposer: () => { if (window.innerWidth >= 768) input.focus({ preventScroll: true }); },
+    blocked: () => shell.hidden,
+  });
+
   // The remote conversation is a full panel at z-index 12; this drawer sits at
   // 30, so it would cover its header and composer. Close it when one opens.
   window.addEventListener("xbot:remote-open", () => {
@@ -7679,6 +7713,17 @@
     thread.replaceChildren(inner);
   }
 
+  // Every list read keeps the no-chat view in step with the cats: the first one
+  // arriving from elsewhere retires an untouched stage for the no-chat line
+  // (quick.release keeps one with a draft or a request on its way, and points
+  // at the cat); the last one leaving brings the stage back. Other views, and
+  // an open chat, are never touched.
+  function syncNoChat() {
+    if (state.sel) return;
+    const stage = thread.querySelector(".qc-stage"), none = thread.querySelector(".qc-none");
+    if ((stage && state.bots.length && quick.release(stage, state.bots.map((b) => b.name))) || (none && !state.bots.length)) showNoChat();
+  }
+
   function syncPanelDefault() {
     if (state.panelTouched) return;
     let preference = null;
@@ -7778,6 +7823,8 @@
     more: (opener) => openTemplateCreate(opener),
     showList: () => $("menu").click(),
     error: (e) => setStatus(visibleError(e), true),
+    // The 新建 button as it is now (renderLists redraws the pin row): focus returns there after a dialog.
+    opener: () => [document.querySelector("#pin-row .pin.add"), $("rail-new")].find((b) => b && b.getClientRects().length) || null,
   });
   // 找得到 (chat-list.js): rows read the status poll's latest lines; drafts
   // move between the composer and the chat they were written in.
