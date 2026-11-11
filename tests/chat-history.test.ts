@@ -126,6 +126,7 @@ function page() {
     sendBusy: () => app.sendBusy,
     working: () => app.working,
     pendingFiles: () => app.files,
+    threadId: () => app.shown || '',
     conversations: async () => app.convs,
     openDetails: async () => { app.details++; },
     place: (anchor: El, menu: El) => { app.placed++; doc.body.append(menu); },
@@ -384,7 +385,33 @@ test('新对话 refused or unsure: busy in the server\'s eyes is said plainly, a
   assert.ok(p.doc.querySelector('.ch-modal'), 'the owner decides');
 });
 
-test('历史对话 opens the cat\'s 详情 on its saved conversations and puts focus there; a list that cannot be read is said', async () => {
+const app_shown = (p: Any, thread: string) => { p.app.shown = thread; };
+
+test('新对话 from another entry (the drawer\'s 资料) is the same dialog: it names the conversation on screen, a changed one is said and read again, and focus returns to that entry', async () => {
+  const p = page();
+  const cat = { type: 'bot', id: '团子' };
+  p.open(cat);
+  const entry = p.h('button', 'pf-new');
+  p.panel.append(entry);
+  app_shown(p, 'T1');
+  p.window.ClowderHistory.newConversation(cat, entry);
+  let d = p.doc.querySelector('.ch-modal')!;
+  assert.equal(text(d.querySelector('h2')), '和团子开始新对话');
+  d.key('Escape');
+  assert.ok(p.doc.activeElement === entry, 'focus back on the drawer\'s 新对话');
+  p.window.ClowderHistory.newConversation(cat, entry);
+  d = p.doc.querySelector('.ch-modal')!;
+  d.querySelector('button[type="submit"]')!.click();
+  assert.deepEqual(plain(p.calls[0]), { path: '/xbot-api/bots/%E5%9B%A2%E5%AD%90/new', opt: { method: 'POST', body: { expectedThreadId: 'T1' } } });
+  // The conversation changed under the page (one that did start, or one opened elsewhere): said, and the chat read again.
+  p.fail(Object.assign(new Error('会话已变化，请刷新后重试'), { status: 409 }));
+  await p.settle();
+  assert.equal(text(d.querySelector('.error')), '这段对话刚换过了。先看一眼对话，再决定要不要开新对话。');
+  assert.equal(p.app.reloads, 1);
+  assert.deepEqual(p.app.reopened, []);
+});
+
+test('历史对话 opens the cat\'s 资料 on its saved conversations and puts focus there; a list that cannot be read is said', async () => {
   const p = page();
   p.open({ type: 'bot', id: '团子' });
   const fold = p.h('details', 'ws-conv-fold'), sum = p.h('summary');
@@ -434,14 +461,15 @@ test('the shell joins earlier pages in both reads, draws the top row and suggest
   assert.match(app, /live\.select\(chatKey\(state\.sel\)\);\n[^\n]*\n\s+chatHistory\.select\(state\.sel\);/);
   assert.match(app, /send: \(text\) => sendText\(text, null, \[\], null\)/);
   assert.match(app, /working: \(\) => !!state\.streaming \|\| chatWorking\(\)/);
-  // 历史对话 is the existing list, opened on request even with one conversation.
+  // 历史对话 is the existing list, there once read (on 资料 and when asked for), even with one conversation.
   assert.match(ws, /async function openConversations\(\)/);
-  assert.match(ws, /const show = \(list\.length > 1 \|\| \(asked && list\.length > 0\)\) && S\.convState !== "unavailable";/);
+  assert.match(ws, /const show = list\.length > 0 && S\.convState !== "unavailable";/);
   // The only request the module adds besides earlier pages is the existing new-conversation route.
   const mod = read('client/public/chat-history.js');
   assert.equal((mod.match(/H\.api\(/g) || []).length, 2);
   assert.match(mod, /H\.api\(R\.pagePath\(sel, cursor\)\)/);
-  assert.match(mod, /H\.api\("\/xbot-api\/bots\/" \+ encodeURIComponent\(sel\.id\) \+ "\/new", \{ method: "POST" \}\)/);
+  assert.match(mod, /H\.api\("\/xbot-api\/bots\/" \+ encodeURIComponent\(sel\.id\) \+ "\/new", expected \? \{ method: "POST", body: \{ expectedThreadId: expected \} \} : \{ method: "POST" \}\)/);
+  assert.match(app, /threadId: \(\) => workspace\.threadId\(\),/);
   // What the owner reads (every string with Chinese in it) speaks of 猫猫 and 对话, never the engine.
   const said = [...(mod + read('client/public/chat-list.js') + read('client/public/chat-list-rules.js') + read('client/public/chat-history-rules.js')).matchAll(/"([^"\n]*\p{Script=Han}[^"\n]*)"/gu)].map(m => m[1]);
   assert.ok(said.length > 20);
