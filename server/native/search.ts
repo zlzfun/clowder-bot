@@ -1,5 +1,6 @@
 import type { BotBridge } from './bridge.js';
 import { messageDisplayText } from './message-presentation.js';
+import { plainLine } from './text.js';
 import type { NativeCat, NativeMessage } from './types.js';
 
 export interface SearchHit {
@@ -12,9 +13,16 @@ export interface SearchHit {
 }
 const orderTime = (message: NativeMessage) => message.timelineOrderAt ?? message.timestamp;
 
-/** The words around the first match, on one line, with where the match sits in them. */
-export function snippet(text: string, query: string): { snippet: string; match: [number, number] } | null {
-  const line = text.replace(/\s+/g, ' ').trim(), at = line.toLowerCase().indexOf(query.toLowerCase());
+/**
+ * The words around the first match, on one line, with where the match sits in
+ * them. A cat's reply (`markdown`) is searched as the words it shows, without
+ * its Markdown marks; a phrase that only matches with the marks (someone
+ * looking for "`npm ci`") is still found in the text as written.
+ */
+export function snippet(text: string, query: string, markdown = false): { snippet: string; match: [number, number] } | null {
+  const written = text.replace(/\s+/g, ' ').trim(), wanted = query.toLowerCase();
+  const shown = markdown ? plainLine(text) : written;
+  const line = shown.toLowerCase().includes(wanted) ? shown : written, at = line.toLowerCase().indexOf(wanted);
   if (at < 0) return null;
   const from = Math.max(0, at - 24), to = Math.min(line.length, at + query.length + 72);
   const head = from > 0 ? '…' : '';
@@ -27,7 +35,7 @@ export function snippet(text: string, query: string): { snippet: string; match: 
  * way the chat shows them. No index and no copy is kept. Conversations that
  * could not be read are counted, never silently skipped.
  */
-export async function searchMessages(bridge: BotBridge, query: string, limit = 30) {
+export async function searchMessages(bridge: BotBridge, query: string, limit = 30, only?: { chat: SearchHit['chat']; threadId: string }) {
   const { store } = bridge, cats = await bridge.cats();
   const targets: Array<{ chat: SearchHit['chat']; threadId: string; current: boolean }> = [];
   const seen = new Set<string>();
@@ -35,12 +43,16 @@ export async function searchMessages(bridge: BotBridge, query: string, limit = 3
     if (!threadId || seen.has(threadId)) return;
     seen.add(threadId); targets.push({ chat, threadId, current });
   };
-  for (const cat of cats) {
-    const meta = store.bot(cat.id), chat = { type: 'bot' as const, id: cat.id, name: cat.name };
-    add(chat, meta.activeThreadId, true);
-    for (const id of meta.conversationIds ?? []) add(chat, id, false);
+  // Within one chat: only the conversation that is open in it, so its matches are not crowded out by other chats.
+  if (only) add(only.chat, only.threadId, true);
+  else {
+    for (const cat of cats) {
+      const meta = store.bot(cat.id), chat = { type: 'bot' as const, id: cat.id, name: cat.name };
+      add(chat, meta.activeThreadId, true);
+      for (const id of meta.conversationIds ?? []) add(chat, id, false);
+    }
+    for (const id of store.state.groupThreadIds) add({ type: 'group', id, name: '' }, id, true);
   }
-  for (const id of store.state.groupThreadIds) add({ type: 'group', id, name: '' }, id, true);
   const capped = targets.slice(0, 80);
   let failed = 0, more = targets.length > capped.length;
   const hits: Array<SearchHit & { order: number }> = [];
@@ -55,7 +67,7 @@ export async function searchMessages(bridge: BotBridge, query: string, limit = 3
         const owner = message.type === 'user' && !bridge.isInvitation(target.threadId, message);
         if (!owner && !replies.has(message.id)) continue;
         const cat: NativeCat | undefined = owner ? undefined : cats.find(known => known.id === message.catId);
-        const found = snippet(messageDisplayText(message, target.threadId, cat?.name), query);
+        const found = snippet(messageDisplayText(message, target.threadId, cat?.name), query, !owner);
         if (!found) continue;
         hits.push({ chat, threadId: target.threadId, current: target.current, messageId: message.id, time: new Date(message.timestamp).toISOString(),
           from: owner ? 'owner' : 'cat', ...(cat ? { catName: cat.name } : {}), ...found, order: orderTime(message) });
