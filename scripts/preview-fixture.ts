@@ -8,6 +8,9 @@
 //   npm run preview:fixture            → http://127.0.0.1:3230
 //   PREVIEW_PORT=3231 PREVIEW_CATS=0 npm run preview:fixture
 //   curl -X POST :3230/__preview -H 'Content-Type: application/json' -d '{"agents":"login"}'
+//   …  -d '{"speed":3}'  (slower playback)   -d '{"approvals":"failing"}'  (agreeing fails like a broken store)
+// Typed words steer the canned reply: 长, 文件/查/资料, 慢, 失败, 清单, 选一个, 确认一下, 记住, 提醒/定时;
+// in a group @名字 picks the cat and 大家/@all asks all of them.
 //
 // Never linked from production and never a fallback: the replies are canned
 // and say so. State lives in a temporary directory that is removed on exit.
@@ -47,6 +50,8 @@ class PreviewNative extends NativeFixture {
   listeners = new Map<string, Set<(event: NativeEvent) => void>>();
   turns = new Map<string, { threadId: string; catId: string; invocationId: string; stop: boolean }>();
   speed = 1; counter = 0; epoch = randomUUID(); seq = new Map<string, number>();
+  /** What cats asked the owner to confirm (the native Approval Hub), and whether deciding should fail like a broken store. */
+  hub: Array<Record<string, any>> = []; hubFails = false;
   constructor() { super(); this.runtimes = agentSets.ready!; }
   override async subscribe(id: string, listener: (event: NativeEvent) => void) {
     const set = this.listeners.get(id) ?? new Set(); set.add(listener); this.listeners.set(id, set);
@@ -92,6 +97,25 @@ class PreviewNative extends NativeFixture {
     if (url.pathname === '/api/cats/runtime-models') return done({ status: 'live', models: [{ value: 'default', label: '默认', efforts: ['low', 'medium', 'high'].map(value => ({ value, label: value })) }] });
     if (parts[2] === 'cats' && parts[3] && parts.length === 4 && method === 'DELETE') { this.cats = this.cats.filter(cat => cat.id !== parts[3]); return done({ status: 'ok' }); }
     if (parts[2] === 'threads' && parts[3] && parts.length === 4 && method === 'DELETE') { this.threads.delete(parts[3]); return done({ status: 'ok' }); }
+    if (url.pathname === '/api/approval-hub/pending') return done({ items: this.hub.filter(item => item.resolution === 'open'),
+      manifest: [{ id: 'F221', decisionEndpointBase: '/api/taste-proposals' }, { id: 'F139', decisionEndpointBase: '/api/schedule-proposals' }, { id: 'F231', decisionEndpointBase: '/api/profile-updates' }] });
+    const decision = /^\/api\/(?:taste-proposals|schedule-proposals|profile-updates)\/([^/]+)\/(approve|reject)$/.exec(url.pathname);
+    if (decision && method === 'POST') {
+      const item = this.hub.find(candidate => candidate.proposalId === decodeURIComponent(decision[1]!) && candidate.resolution === 'open');
+      if (!item) throw new ApiError(404, 'Proposal not found');
+      // The real engine fails this way when its taste store cannot be written (see docs/chat-app-roadmap.md).
+      if (this.hubFails && decision[2] === 'approve') throw new ApiError(500, 'Vignette write failed', { error: 'Vignette write failed', detail: 'preview: the store is switched to failing' });
+      item.resolution = decision[2] === 'approve' ? 'approved' : 'rejected';
+      this.emit(item.navigation.approvalCardRef.threadId, { type: 'thread_updated' });
+      return done({ ok: true });
+    }
+    if (parts[2] === 'messages' && parts[4] === 'block-state' && method === 'PATCH') {
+      for (const list of this.messages.values()) for (const message of list) if (message.id === parts[3]) {
+        const block = ((message.extra?.rich as any)?.blocks ?? []).find((candidate: any) => candidate.id === body.blockId);
+        if (block) Object.assign(block, { disabled: body.disabled, selectedIds: body.selectedIds });
+      }
+      return done({ status: 'ok' });
+    }
     if (url.pathname === '/api/schedule/tasks' && method === 'GET') return done({ tasks: [], botScheduleVersion: 1, botSchedulerReady: true });
     if (parts[2] === 'threads' && parts[4] === 'task-progress') return done({});
     if (parts[2] === 'threads' && parts[4] === 'queue' && method === 'GET') return done({ queue: [], queueRevision: 1,
@@ -131,12 +155,25 @@ class PreviewNative extends NativeFixture {
       else steps.push(['Read', { file_path: '/preview/workspace/说明.md' }], ['WebSearch', { query: '猫 为什么 喜欢 纸箱' }], ['Write', { file_path: '/preview/workspace/结果.md', content: '…' }]);
       reply = '看过说明、查了资料，也把要点写进了 `结果.md`。\n\n简单说：纸箱让猫觉得**安全又暖和**。';
     } else { if (/慢/.test(text)) think = 6000; reply = `收到：「${text.slice(0, 40)}」。\n\n这是预览环境里的固定回复，不是真的猫在回答。`; }
-    return { steps, reply: reply + `\n\n[${cat.name}/preview🐾]`, fail, think };
+    // What a cat can attach besides words (docs/chat-experience-api.md「卡片、清单与选项」).
+    const blocks: Array<Record<string, unknown>> = [];
+    let proposal: Record<string, unknown> | undefined;
+    if (/清单/.test(text)) { reply = '列好了：'; blocks.push({ id: 'list-' + randomBytes(3).toString('hex'), kind: 'checklist', v: 1, title: '今天要做的事',
+      items: [{ id: 'a', text: '给猫添水', checked: true }, { id: 'b', text: '回两封邮件' }, { id: 'c', text: '下午三点的会' }] }); }
+    else if (/选一个|选项/.test(text)) { reply = '你想要哪一种？'; blocks.push({ id: 'pick-' + randomBytes(3).toString('hex'), kind: 'interactive', v: 1, interactiveType: 'select', title: '周末安排',
+      options: [{ id: 'home', label: '在家看书', emoji: '📚' }, { id: 'park', label: '去公园', emoji: '🌳' }, { id: 'other', label: '别的', customInput: true }], messageTemplate: '我选 {selection}' }); }
+    else if (/确认一下/.test(text)) { reply = '要我现在开始吗？'; blocks.push({ id: 'ok-' + randomBytes(3).toString('hex'), kind: 'interactive', v: 1, interactiveType: 'confirm', title: '开始整理资料',
+      options: [{ id: '__confirm__', label: '开始' }, { id: '__cancel__', label: '先不用' }] }); }
+    else if (/记住/.test(text)) { reply = '好，这个我想记下来，等你点头。'; proposal = { feature: 'F221', title: '提议捕捉品味信号', summary: 'Taste [authentic-expression]: 回答简短、先说结论',
+      detail: { takeaway: '回答简短一点，先说结论', quote: text.slice(0, 60), privacy: 'sensitive' } }; }
+    else if (/提醒|定时/.test(text)) { reply = '可以，我来设一个定时，等你确认。'; proposal = { feature: 'F139', title: '提议新建定时任务', summary: 'Create schedule: 喝水提醒',
+      detail: { mutationKind: 'create', trigger: { type: 'cron', expression: '0 9 * * *', timezone: 'Asia/Shanghai' } } }; }
+    return { steps, reply: reply + `\n\n[${cat.name}/preview🐾]`, fail, think, blocks, proposal };
   }
   async turn(threadId: string, cat: NativeCat, user: NativeMessage) {
     const list = this.messages.get(threadId)!, invocationId = randomUUID(), key = `${threadId}:${cat.id}:${invocationId}`;
     const state = { threadId, catId: cat.id, invocationId, stop: false }; this.turns.set(key, state);
-    const { steps, reply, fail, think } = this.script(cat, user.content);
+    const { steps, reply, fail, think, blocks, proposal } = this.script(cat, user.content);
     const message: NativeMessage = { id: this.id(), type: 'assistant', catId: cat.id, timestamp: Date.now(), content: '', origin: 'stream', replyTo: user.id,
       lifecycle: { kind: 'response', status: 'processing', invocationId }, toolEvents: [] };
     const stamp = { catId: cat.id, messageId: message.id, invocationId: 'outer-' + invocationId, turnInvocationId: invocationId };
@@ -185,8 +222,22 @@ class PreviewNative extends NativeFixture {
     if (codex) status('done');
     if (state.stop) { message.content = written; settle('canceled'); this.emit(threadId, { type: 'done', ...stamp, isFinal: true, timestamp: Date.now() }, true); return; }
     if (fail) { message.content = ''; settle('failed'); this.emit(threadId, { type: 'error', ...stamp, error: 'preview failure', timestamp: Date.now() }, true); return; }
-    message.content = written; settle('completed');
+    message.content = written;
+    if (blocks.length) message.extra = { ...message.extra, rich: { v: 1, blocks } };
+    settle('completed');
     this.emit(threadId, { type: 'done', ...stamp, isFinal: true, timestamp: Date.now() }, true);
+    if (proposal) {
+      // As native does: the request is its own card message, registered in the hub and anchored to that message.
+      const id = 'proposal_' + randomBytes(8).toString('hex');
+      const cardMessage: NativeMessage = { id: this.id(), type: 'assistant', catId: cat.id, timestamp: Date.now(), content: `${proposal.title}：${(proposal.detail as any).takeaway ?? proposal.summary}`,
+        extra: { rich: { v: 1, blocks: [{ id: 'approval-' + id, kind: 'card', v: 1, title: proposal.title, bodyMarkdown: String(proposal.summary), tone: 'info',
+          meta: { approval: { producerId: proposal.feature, canonicalProposalId: id } } }] } } };
+      list.push(cardMessage);
+      this.hub.push({ proposalId: id, sourceFeatureId: proposal.feature, requesterCatId: cat.id, summary: proposal.summary, detail: proposal.detail, resolution: 'open',
+        inlineApprovable: true, decisionMode: 'approve-reject', createdAt: Date.now(), expiresAt: Date.now() + 7 * 86400000,
+        navigation: { state: 'anchored', approvalCardRef: { threadId, messageId: cardMessage.id } } });
+      this.emit(threadId, { type: 'thread_updated' });
+    }
   }
 }
 
@@ -201,7 +252,8 @@ runtime.app.post('/__preview', (req, res) => {
   const input = req.body ?? {};
   if (typeof input.agents === 'string') { if (!agentSets[input.agents]) return res.status(400).json({ error: 'agents: ' + Object.keys(agentSets).join(' | ') }); native.runtimes = agentSets[input.agents]!; }
   if (typeof input.speed === 'number' && input.speed > 0 && input.speed <= 20) native.speed = input.speed;
-  res.json({ agents: Object.entries(agentSets).find(([, set]) => set === native.runtimes)?.[0], speed: native.speed, cats: native.cats.map(cat => cat.name) });
+  if (typeof input.approvals === 'string') native.hubFails = input.approvals === 'failing';
+  res.json({ agents: Object.entries(agentSets).find(([, set]) => set === native.runtimes)?.[0], speed: native.speed, approvals: native.hubFails ? 'failing' : 'working', cats: native.cats.map(cat => cat.name) });
 });
 runtime.app.use(express.static(join(root, 'client/public'), { etag: false, lastModified: false, setHeaders: res => res.setHeader('Cache-Control', 'no-store') }));
 runtime.app.get('/', (_req, res) => { res.setHeader('Cache-Control', 'no-store'); res.sendFile(join(root, 'client/index.html')); });
