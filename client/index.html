@@ -42,6 +42,7 @@ try {
 <link rel="stylesheet" href="/workspace.css">
 <link rel="stylesheet" href="/chat-experience.css">
 <link rel="stylesheet" href="/quick-create.css">
+<link rel="stylesheet" href="/palette.css">
 <link rel="stylesheet" href="/chat-live.css">
 </head>
 <body>
@@ -96,6 +97,8 @@ try {
     <div id="side-grip" class="sgrip" aria-hidden="true"></div>
     <div class="side-scroll">
       <div id="greeting" class="greeting" aria-live="polite"></div>
+      <!-- Search and jump (palette.js): the ⌘K palette's way in. -->
+      <div class="pal-entry-wrap"><button id="palette-open" class="pal-entry" type="button" aria-haspopup="dialog" aria-label="搜索"><span class="pal-entry-label">搜索</span></button></div>
       <div id="pin-row" class="pin-row"></div>
       <nav id="roster" class="list" aria-label="Bot"></nav>
       <nav id="remote-roster" class="list g7-remote" aria-label="其他电脑上的 Bot" hidden></nav>
@@ -264,6 +267,8 @@ try {
 <script src="/chat-live.js"></script>
 <script src="/quick-create-rules.js"></script>
 <script src="/quick-create.js"></script>
+<script src="/palette-rules.js"></script>
+<script src="/palette.js"></script>
 <script src="/account.js"></script>
 <script src="/app.js"></script>
 <script src="/devices.js"></script>
