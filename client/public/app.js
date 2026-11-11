@@ -4970,9 +4970,10 @@
   }
 
   let toastTimer = 0;
-  function showToast(text) {
+  // A done thing shows a check; a note (the search palette's) passes "info".
+  function showToast(text, iconName = "check") {
     const box = $("toast");
-    box.replaceChildren(icon("check"), el("span", "", text));
+    box.replaceChildren(icon(iconName), el("span", "", text));
     box.hidden = false;
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { box.hidden = true; }, 3000);
@@ -7308,6 +7309,38 @@
     rememberPanel(open);
     panelOpen(open);
     if (open) loadPanel().catch(() => {});
+  });
+
+  // Search and jump (palette.js): ⌘K / Ctrl+K or 搜索 at the top of the
+  // sidebar opens it, Alt+↑ / Alt+↓ step through the chats in sidebar order.
+  // It sees the chats and opens them, switches a cat's conversation and runs
+  // its default actions only through these hooks.
+  window.ClowderPalette.init({
+    api, icon, visibleError, composer: input,
+    chats: () => [
+      ...state.bots.map((b) => ({ type: "bot", id: b.name, name: niceName(b.name), nativeId: b.native_id || b.id || "" })),
+      ...state.groups.map((g) => ({ type: "group", id: g.id, name: niceName(g.name || g.id), members: (g.members || []).map(niceName) })),
+    ],
+    // The sidebar's rows top to bottom (a collapsed folder's cats are not shown there).
+    order: () => [...document.querySelectorAll("#pin-row [data-bot], #roster [data-bot], #roster [data-group]")]
+      .filter((n) => !n.closest("[hidden]"))
+      .map((n) => (n.dataset.group ? { type: "group", id: n.dataset.group } : { type: "bot", id: n.dataset.bot })),
+    face: (chat, size) => (chat.type === "group"
+      ? avatar("", groupFace(state.groups.find((g) => g.id === chat.id) || { id: chat.id }), size)
+      : avatar(chat.id, paintOf(chat.id), size)),
+    selection: () => (state.peer ? null : state.sel),
+    open: (sel) => (sel.type === "group" ? pickGroup(sel.id) : pickBot(sel.id)),
+    // The open chat's history as drawn, for finding a message in it.
+    history: (sel) => [...thread.children].find((n) => n.classList.contains("thread-inner") && n.dataset.chat === chatKey(sel)) || null,
+    switchConversation: (threadId) => workspace.switchTo(threadId),
+    newCat: (opener) => openNewBot(opener),
+    newGroup: (opener) => openNewGroup(opener),
+    settings: () => openSettings("general", { home: settingsNarrow.matches }),
+    theme: () => (document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light"),
+    setTheme: (mode) => applyTheme(mode),
+    note: (text) => showToast(text, "info"),
+    focusComposer: () => { if (window.innerWidth >= 768) input.focus({ preventScroll: true }); },
+    blocked: () => shell.hidden,
   });
 
   // The remote conversation is a full panel at z-index 12; this drawer sits at
