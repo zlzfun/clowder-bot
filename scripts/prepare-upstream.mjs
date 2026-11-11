@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, renameSync, copyFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fingerprint, lock } from './upstream-source.mjs';
 import { nativeDataDir } from '../shared/data-location.mjs';
@@ -20,7 +20,21 @@ if (git('rev-parse', 'HEAD') !== lock.commit) throw new Error('Submodule revisio
 if (git('status', '--porcelain')) throw new Error('Upstream checkout must remain pristine. Put reviewed changes in patches/.');
 const digest = fingerprint();
 const marker = resolve(build, '.bot-build-source');
-const runtimeLock = resolve(nativeDataDir(root), 'runtime.lock');
+const dataDir = nativeDataDir(root);
+const runtimeLock = resolve(dataDir, 'runtime.lock');
+// Native keeps the owner's taste memory in the Git worktree that has `main`
+// checked out, which it finds from the build's own repository (pinned
+// upstream TasteRepository.ts; no setting moves it). A build that is its own
+// throwaway repository has no such worktree, so nothing could be remembered,
+// and anything written into the build would be lost on the next rebuild. The
+// repository therefore lives in the data directory and every build is a linked
+// worktree of it, the layout upstream uses for its own runtime.
+const home = resolve(dataDir, 'taste-home');
+const sameDir = (a, b) => { try { return realpathSync(a) === realpathSync(b); } catch { return false; } };
+const ofHome = dir => {
+  const result = spawnSync('git', ['-C', dir, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8' });
+  return result.status === 0 && sameDir(result.stdout.trim(), resolve(home, '.git'));
+};
 for (const file of [runtimeLock, resolve(build, '.bot-runtime.lock'), resolve(root, '.runtime/native-runtime.lock')]) {
   if (!existsSync(file)) continue;
   const owner = JSON.parse(readFileSync(file, 'utf8'));
@@ -31,28 +45,37 @@ for (const file of [runtimeLock, resolve(build, '.bot-runtime.lock'), resolve(ro
   try { process.kill(owner.pid, 0); } catch (e) { if (e.code === 'ESRCH') alive = false; else if (e.code !== 'EPERM') throw e; }
   if (alive) throw new Error('Stop the native runtime before rebuilding. Its persistent data is preserved.');
 }
-if (!existsSync(marker) || !existsSync(resolve(build, '.git')) || readFileSync(marker, 'utf8').trim() !== digest) {
+if (!existsSync(marker) || !existsSync(resolve(build, '.git')) || readFileSync(marker, 'utf8').trim() !== digest || !ofHome(build)) {
   const staging = `${build}.staging`;
   mkdirSync(resolve(root, '.runtime'), { recursive: true });
-  rmSync(staging, { recursive: true, force: true });
-  mkdirSync(staging);
-  // An independent index/HEAD prevents native revision discovery from picking up
-  // the parent Bot repository. Git objects are shared read-only with the submodule.
-  // A partial/shallow submodule may not contain blobs from other branch tips.
-  // Use its already-verified object database without asking upload-pack for those tips.
-  command('git', ['init', '--quiet', staging]);
   const sourceGit = git('rev-parse', '--absolute-git-dir');
-  writeFileSync(resolve(staging, '.git/objects/info/alternates'), resolve(sourceGit, 'objects') + '\n');
-  if (existsSync(resolve(sourceGit, 'shallow'))) copyFileSync(resolve(sourceGit, 'shallow'), resolve(staging, '.git/shallow'));
-  command('git', ['checkout', '--detach', lock.commit], staging);
+  const inHome = (...args) => command('git', ['-C', home, ...args]);
+  if (!existsSync(resolve(home, '.git'))) {
+    mkdirSync(home, { recursive: true, mode: 0o700 });
+    command('git', ['init', '--quiet', '--initial-branch=main', home]);
+    inHome('config', 'user.name', 'clowder-bot'); inHome('config', 'user.email', 'clowder-bot@localhost');
+    inHome('-c', 'commit.gpgsign=false', 'commit', '--quiet', '--no-verify', '--allow-empty', '-m', 'Home of this install: the main worktree native taste memory lives in');
+  }
+  // The home's own index/HEAD keep native revision discovery away from the parent
+  // Bot repository. Git objects are shared read-only with the submodule; a
+  // partial/shallow submodule may not contain blobs from other branch tips, so
+  // its already-verified object database is used without asking upload-pack.
+  writeFileSync(resolve(home, '.git/objects/info/alternates'), resolve(sourceGit, 'objects') + '\n');
+  if (existsSync(resolve(sourceGit, 'shallow'))) copyFileSync(resolve(sourceGit, 'shallow'), resolve(home, '.git/shallow'));
+  mkdirSync(resolve(home, 'docs/taste/vignettes'), { recursive: true });
+  rmSync(staging, { recursive: true, force: true });
+  inHome('worktree', 'prune');
+  inHome('worktree', 'add', '--quiet', '--detach', staging, lock.commit);
   for (const patch of lock.patches) {
     command('git', ['apply', '--check', resolve(root, patch)], staging);
     command('git', ['apply', resolve(root, patch)], staging);
   }
   writeFileSync(resolve(staging, '.bot-build-source'), digest + '\n');
-  // Only generated code/dependencies are replaced. Runtime data lives in data/.
+  // Only generated code/dependencies are replaced. Runtime data, the home
+  // repository and what native wrote into its main worktree stay where they are.
   rmSync(build, { recursive: true, force: true });
-  renameSync(staging, build);
+  inHome('worktree', 'prune');
+  inHome('worktree', 'move', staging, build);
 }
 if (!process.argv.includes('--source-only')) {
   rmSync(resolve(build, '.bot-build-complete'), { force: true });

@@ -91,7 +91,7 @@ type ChatBlock =
 - `POST …/approvals/:id {decision: 'approve'|'reject', expectedThreadId}` 先重新读取 Hub，确认这件事仍然开着、属于这个会话，再把用户的回答发给 manifest 指定的原生接口。返回 `{id, decision, settled}`：`settled` 是事后重读 Hub 的结果，`true` 表示原生已不再把它列为待确认，`false` 表示已受理但原生还在处理，`null` 表示没能确认。不属于这个会话或已经处理过的 404，不能在这里同意的 409。
 - 原生没能落实时返回原状态码和「这一步没有成功，还没有生效」，原生给出的原因保留在 `native` 里；这件事继续显示为等待确认。读取不会触发任何决定，没有自动同意。
 
-已知限制（2026-11-11 在隔离运行时实测）：同意一条偏好提议（F221）时，原生写入失败并返回 `Vignette write failed`，原因是原生 `FileTasteRepository` 要求运行目录所在的 Git 仓库检出了 `refs/heads/main`，而按 `runtime:prepare` 生成的部署是 detached HEAD（[此前只恢复了只读浏览](chat-files-collaboration-memory.md)）。这属于部署前置条件，不是适配层能绕过的；在它解决之前，聊天里会如实显示「没有成功」，偏好不会被记住。
+偏好提议（F221）能否落实取决于部署：原生把偏好存在「构建所在 Git 仓库里检出了 `main` 的工作树」中。2026-11-11 起 `runtime:prepare` 按这个要求建构建目录（见 [维护说明](upstream-maintenance.md)「偏好仓库」），在隔离运行时上实测同意后 `settled: true`、`/xbot-api/memory/taste` 读到该条。还没按新布局重建的实例上，同意会失败并返回 `Vignette write failed`，聊天里如实显示「没有成功」；公开（非敏感）偏好需要 `origin`，没有配置时同样如实失败。
 
 ## 只读长期记忆
 

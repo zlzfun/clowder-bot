@@ -33,6 +33,23 @@
 - 搬之后新建的猫工作在 `~/.clowder-bot-dev/native/workspace/cats/<猫>`：会话记录里没有本仓库的 `CLAUDE.md`、没有记忆索引，个人钩子也没有输出；同样一句话的首轮输入从约 3.9 万 token 降到约 2.9 万。
 - 构建目录里指向数据目录的两个链接（`data`、`.cat-cafe`）经旧路径上的链接仍然解析到新位置，`runtime:start` 的校验通过，不需要重新构建。
 
+## 偏好仓库
+
+原生把用户的偏好（Taste）存在 Git 里：`FileTasteRepository` 从 API 进程所在的构建目录出发，用 `git worktree list` 找「同一个仓库里检出了 `refs/heads/main` 的工作树」，在那里读写 `private/taste/`（敏感偏好，不进 Git）和 `docs/taste/vignettes/`（公开偏好，另需向 `origin/main` 推送）。它不读任何环境变量或配置（固定上游 `domains/taste/services/TasteRepository.ts`）。
+
+此前每次构建都是独立 `git init` 出来的 detached HEAD，没有分支，所以猫提出「记住这个偏好」后，同意时原生返回 `Vignette write failed`，什么也存不下。把构建目录自己切到 `main` 能读不能久存：下一次重建会连同已保存的偏好一起删掉；用符号链接指到数据目录则被读取端的真实路径校验拒绝。
+
+现在的布局（只改启动与构建脚本，不改引擎）：
+
+- 数据目录下有一个长期的 Git 仓库 `<native 数据目录>/taste-home`，检出 `main`（一个空提交起步），对象库通过 alternates 借用子模块的，和以前构建目录的做法一样。
+- `runtime:prepare` 把每次构建建成它的链接工作树（`git worktree add --detach <构建目录> <固定提交>`，再打补丁、安装、编译），与上游自己「主检出在 main、运行时是链接工作树」的布局一致。重建只替换构建目录并重新登记工作树；仓库、`main` 工作树和原生写进去的偏好文件都在数据目录里，不受影响。
+- 构建不是这个仓库的工作树时（旧构建），`runtime:prepare` 会重建一次；`runtime:start` 遇到还没接上的构建只提示，不拒绝启动。
+- 没有配置 `origin`。敏感偏好（猫标为 sensitive 的，实测的那条就是）可以保存；公开偏好的发布会失败并回到待确认，聊天里如实显示没有成功。要不要给它配一个本地裸仓库作 `origin` 由使用者决定，绝不能指向 Clowder AI 的公开仓库（上游 F221 明确公开偏好只属于私有的 home 仓库）。
+
+2026-11-11 在隔离运行时上验证：按新布局重建后，同意一条真实的偏好提议返回已落实，`GET /xbot-api/memory/taste` 读到该条，文件在 `taste-home/private/taste/`；随后改动锁文件强制重建，文件还是同一个（inode 未变），重启后仍能读到；`verify:upstream` 通过。现有实例要等下一次 `runtime:prepare`（需要先停运行时，约五分钟）后才接上。
+
+仍然登记为上游需求：私有偏好应当和 Profile 一样放在数据目录，或提供受支持的定位方式，而不是依赖运行目录的 Git 布局。
+
 ## 差异台账
 
 | 编号 | 改动位置 | 原因/影响 | 退出条件 |
@@ -45,7 +62,7 @@
 | A001 | `server/native/`、`server/xbot/` | Bot 名称/单聊/群聊/显示回执映射原生概念。无自研上下文、队列或 A2A。 | 将来官方插件可提供同等 HTTP/事件扩展时，替换宿主连接。 |
 | P006 | `patches/0006-bot-schedules.patch` | 由 `CAT_CAFE_BOT_SCHEDULES=1` 启用：schedule 列表补充 reminder 归属、正文、版本与调度器就绪状态；owner 创建接受 UUID 并在原生定义表及审计事务去重；Bot 一次任务结束/错过后保留 disabled 定义和线程账本，拒绝恢复过期计划；通过原生原子 private input 投递完整任务正文；核心调度器启动后再等待可选插件激活。未新增调度器或存储。 | 上游提供同等字段、幂等、历史保留、正文投递及启动就绪保证后删除。 |
 | A002 | `server/product-store.ts` | 只保存 UI 元数据和原生引用；单进程原子写。 | 官方插件提供产品配置持久化时替换此存储。 |
-| D001 | `scripts/start-runtime.mjs` | 独立配置/数据/workspace/Redis/API/指标端口、专属 cookie/userId；用上游 bootstrap 生成 MCP。避免与用户现有 Clowder 实例串线。 | 官方嵌入部署或插件生命周期接管时移除本启动器。 |
+| D001 | `scripts/start-runtime.mjs`、`scripts/prepare-upstream.mjs` | 独立配置/数据/workspace/Redis/API/指标端口、专属 cookie/userId；用上游 bootstrap 生成 MCP。避免与用户现有 Clowder 实例串线。构建目录是数据目录里偏好仓库的链接工作树（见「偏好仓库」），数据默认在检出之外（见「数据位置」）。 | 官方嵌入部署或插件生命周期接管时移除本启动器。 |
 | U001 | `client/public/app.js`、`runtime.*` | UI 显示原生排队状态、订阅事件、选择原生执行工具；独立面板承接原生特有概念。 | 随 Bot 产品迭代，不向核心反向渗透。 |
 
 P001 是执行策略，不是文件系统、记忆库的多租户 ACL。这里只支持本机单用户产品。上游所有高级执行面并未被 Bot 代理公开；未来新增通道必须验证仍经过该准入入口。

@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { createServer, createConnection } from 'node:net';
 import { once } from 'node:events';
@@ -20,6 +20,13 @@ const data = nativeDataDir(root);
   if (repository) console.warn(`提示：运行数据在代码仓库 ${repository} 里（${data}）。猫每一轮都会读到这个仓库写给开发者的 CLAUDE.md / AGENTS.md，回答会受影响，也更慢更贵。建议把数据放到仓库之外，见 docs/upstream-maintenance.md「数据位置」。`);
 }
 const workspace = join(data, 'workspace');
+{
+  // Native finds the owner's taste memory through the build's Git repository (see prepare-upstream.mjs).
+  const common = spawnSync('git', ['-C', binary, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8' });
+  let linked = false;
+  try { linked = common.status === 0 && realpathSync(common.stdout.trim()) === realpathSync(join(data, 'taste-home', '.git')); } catch {}
+  if (!linked) console.warn('提示：这个构建还没有接到数据目录里的偏好仓库，猫提出「记住这个偏好」时保存不了。停止运行时后重新执行 npm run runtime:prepare 即可接上，已有数据不受影响。');
+}
 const apiPort = Number(process.env.BOT_NATIVE_PORT || 4331);
 const redisPort = Number(process.env.BOT_REDIS_PORT || 6392);
 const metricsPort = Number(process.env.BOT_METRICS_PORT || 9492);
