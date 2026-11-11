@@ -100,6 +100,8 @@
   // (upstream calls dsh 小鲸鱼). With no faces (the templates could not be
   // read) every portrait is offered without words, and a cat of the owner's own
   // can still be made.
+  // Each offered face keeps its `rev` (which version of the portrait the hint
+  // shows), sent back with a creation from that face.
   function offer(faces, presets) {
     const own = new Map((presets || []).filter((p) => p && p.id).map((p) => [p.id, p]));
     const out = [], seen = new Set();
@@ -107,9 +109,30 @@
       const p = face && own.get(face.id);
       if (!p || seen.has(p.id)) continue;
       seen.add(p.id);
-      out.push({ id: p.id, label: p.label, hint: trait(face) });
+      out.push({ id: p.id, label: p.label, rev: face.rev || "", hint: trait(face) });
     }
-    return out.length ? out : [...own.values()].map((p) => ({ id: p.id, label: p.label, hint: null }));
+    return out.length ? out : [...own.values()].map((p) => ({ id: p.id, label: p.label, rev: "", hint: null }));
+  }
+  // Whether a cat can be made at all. The server needs a face's template even
+  // for a custom cat (its colour), so when /start says it read none this
+  // client can draw (faces is []), creation would only be refused: the
+  // screens say so instead of offering it. A server that sends no faces at
+  // all (null: older than faces[]) is not second-guessed.
+  function usable(faces, presets) {
+    if (faces == null) return true;
+    const own = new Set((presets || []).filter((p) => p && p.id).map((p) => p.id));
+    return faces.some((f) => f && own.has(f.id));
+  }
+  // What stands in the way when the cats' details cannot be read, in the
+  // same shape as need() (item 28's blocked view, with 重新检测).
+  function facesNeed() {
+    return {
+      kind: "faces",
+      title: "暂时读不到猫猫的资料",
+      body: "猫猫们的样子和性格现在读不出来，暂时建不了猫猫。",
+      commands: [],
+      unchanged: "重新检测过了，还是读不到猫猫的资料。",
+    };
   }
   // One calm line, cut at a pause (、，；space) near the end when it is too
   // long, never mid-way through a word when a pause is close by.
@@ -153,12 +176,13 @@
     const chosen = raw.agent && typeof raw.agent.id === "string" && raw.agent.id
       ? { id: raw.agent.id, label: trim(raw.agent.label) || raw.agent.id, confirmed: raw.agent.confirmed === true } : null;
     const ready = raw.ready === true && !!chosen;
-    // faces[]: {id, name?, role?, personality?, strengths?}; [] when the templates could not be read.
-    const faces = (Array.isArray(raw.faces) ? raw.faces : [])
+    // faces[]: {id, rev, name?, role?, personality?, strengths?}; [] when the
+    // templates could not be read; null when the server sends no faces at all.
+    const faces = !Array.isArray(raw.faces) ? null : raw.faces
       .filter((f) => f && typeof f.id === "string" && f.id)
       .map((f) => {
         const face = { id: f.id };
-        for (const k of ["name", "role", "personality", "strengths"]) if (typeof f[k] === "string" && trim(f[k])) face[k] = trim(f[k]);
+        for (const k of ["rev", "name", "role", "personality", "strengths"]) if (typeof f[k] === "string" && trim(f[k])) face[k] = trim(f[k]);
         return face;
       });
     return {
@@ -182,9 +206,10 @@
   }
   const choiceOf = (s, id) => choices(s).find((c) => c.id === id) || null;
   const loginCommand = (s, id) => ((s && s.agents.find((a) => a.id === id)) || {}).loginCommand || "";
-  // Re-detecting changed nothing the owner could see.
+  // Re-detecting changed nothing the owner could see (the tools, and which faces could be read).
   function sameStart(a, b) {
-    const sig = (s) => [s.ready, s.blocked, s.agent && s.agent.id, s.agent && s.agent.confirmed, ...s.agents.map((x) => x.id + ":" + x.state)].join("|");
+    const sig = (s) => [s.ready, s.blocked, s.agent && s.agent.id, s.agent && s.agent.confirmed, ...s.agents.map((x) => x.id + ":" + x.state),
+      s.faces ? "faces:" + s.faces.map((f) => f.id).join(",") : "faces?"].join("|");
     return !!a && !!b && sig(a) === sig(b);
   }
   const joinOr = (labels) => (labels.length <= 1 ? labels[0] || "" : labels.slice(0, -1).join("、") + " 或 " + labels[labels.length - 1]);
@@ -222,10 +247,14 @@
   // The tool shown is always sent, so a retry is the same request. A face's
   // own cat sends only the face: words of the owner's own would silently make
   // it custom on the server, so they go only with `custom: true`, and then
-  // only what was written (empty is a plain helper).
-  function catBody({ name, face, agent, custom, about, personality }) {
+  // only what was written (empty is a plain helper). A face's own cat carries
+  // the `rev` of the portrait the owner was shown, so the server makes that
+  // cat or says it changed (face_changed); a custom cat takes only the looks
+  // and has no portrait to compare.
+  function catBody({ name, face, rev, agent, custom, about, personality }) {
     const simple = {};
     if (face) simple.face = face;
+    if (!custom && face && rev) simple.rev = rev;
     if (custom) {
       simple.custom = true;
       const what = trim(about), temper = trim(personality);
@@ -251,8 +280,16 @@
   // only reused for the identical body, so a 409 here is the name. No status
   // or a 5xx is unsure: the cat may exist, and the same request again returns
   // it rather than a second one.
+  // Two refusals the server names by code, before it asks the engine for
+  // anything (so neither is unsure, and neither is the name): face_changed —
+  // the portrait changed since the screen read it, so the screen reads it
+  // again and the owner has another look; faces_unavailable — the cats'
+  // details could not be read, so nothing was made.
+  const FACE_CHANGED = "这只猫猫的介绍刚刚更新了，再看一眼，合适就再点一次。";
   function catError(err, name, tool) {
-    const status = err && err.status, message = String((err && err.message) || "");
+    const status = err && err.status, message = String((err && err.message) || ""), code = err && err.code;
+    if (code === "face_changed") return { kind: "changed", text: FACE_CHANGED };
+    if (code === "faces_unavailable") return { kind: "unavailable", text: "刚才没能读到猫猫的资料，这次没有建。" };
     if (status === 409) return { kind: "name", text: trim(name) ? "已经有一只叫「" + trim(name) + "」的猫猫了，换个名字吧" : "已经有一只叫这个名字的猫猫了，换个名字吧" };
     if (status === 422) return { kind: "blocked", text: "刚才没能建好：" + (trim(tool) || "这个工具") + " 现在用不了。" };
     if (!status || status >= 500) return { kind: "unsure", text: "没能确认猫猫建好没有。不改内容再点一次就好，不会多出一只。" };
@@ -278,7 +315,7 @@
 
   root.ClowderQuickCreateRules = Object.freeze({
     trim, nameProblem, groupNameProblem, groupName, freeName, defaultFace, suggestName, followsFace, NAME_INPUT_MAX, ABOUT_INPUT_MAX, aboutProblem,
-    PERSONALITY_INPUT_MAX, personalityProblem, offer, trait, clipLine, TRAIT_MAX, OWN_NOTE,
+    PERSONALITY_INPUT_MAX, personalityProblem, offer, usable, facesNeed, trait, clipLine, TRAIT_MAX, OWN_NOTE, FACE_CHANGED,
     start, choices, choiceOf, loginCommand, sameStart, need, TOOL_LINE, unconfirmed,
     catBody, groupBody, fingerprint, MAX_MEMBERS, catError, groupError, startError, createdNotice,
   });

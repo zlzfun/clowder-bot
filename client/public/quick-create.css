@@ -88,6 +88,8 @@
 .qc-trait-line:first-child { color: var(--x-text-2); }
 .qc-trait.own .qc-trait-line { color: var(--x-muted); }
 .qc-trait-who { margin-right: var(--x-s2); font-weight: 600; color: var(--x-text); }
+/* The portrait changed since the screen read it: a quiet line beside the new words. */
+.qc-fresh { margin: 0; font-size: var(--x-fs-sm); line-height: 1.5; color: var(--x-text-2); animation: fade 180ms ease-out; }
 .qc-mode { display: inline-flex; align-items: center; gap: var(--x-s1); min-height: 28px; padding: 0 10px; font-size: var(--x-fs-sm); color: var(--x-muted); }
 .qc-mode .icon { width: 13px; height: 13px; flex: none; }
 .qc-mode[aria-pressed="true"] { background: var(--x-fill-1); color: var(--x-text-2); }
@@ -239,5 +241,5 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .qc-portrait, .qc-portrait::before, .qc-face-name, .qc-stage.leaving > * { transition: none; }
-  .qc-stage, .qc-wait-text, .qc-trait-line, .qc-own:not([hidden]) { animation: none; }
+  .qc-stage, .qc-wait-text, .qc-trait-line, .qc-fresh, .qc-own:not([hidden]) { animation: none; }
 }

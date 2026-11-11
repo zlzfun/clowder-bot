@@ -135,7 +135,8 @@ const face = (root: El, label: string) => { const f = faces(root).find(x => x.ge
 const visibleText = (root: El): string => root.hidden ? '' : root.kids.map(k => (k instanceof El ? visibleText(k) : k.textContent)).join('');
 
 // ---------------------------------------------------------------- the page
-const fail = (status: number | undefined, message = 'request failed') => Object.assign(new Error(message), status ? { status } : {});
+// As app.js api() throws: the status, and the answer's `code` when it has one.
+const fail = (status: number | undefined, message = 'request failed', code?: string) => Object.assign(new Error(message), status ? { status } : {}, code ? { code } : {});
 const tool = (id: string, label: string, state: string, loginCommand: string) => ({ id, label, state, loginCommand });
 const START = {
   ready: { cats: 0, ready: true, agent: { id: 'codex', label: 'Codex', confirmed: true }, blocked: null, checkedAt: 1,
@@ -159,10 +160,16 @@ function page(opts: { start?: Any; cats?: string[]; route?: (path: string, metho
   const s = { start: opts.start ?? START.ready, cats: [...(opts.cats ?? [])] };
   const calls: Call[] = [], opened: string[] = [], groups: string[] = [], more: Any[] = [], copied: string[] = [], errors: string[] = [], notices: Any[] = [];
   let refreshed = 0, lists = 0;
-  const api = async (path: string, opt: { method?: string; body?: unknown } = {}) => {
+  const api = async (path: string, opt: { method?: string; body?: unknown; serverError?: boolean } = {}) => {
     const call: Call = { path, method: opt.method || 'GET', ...(opt.body === undefined ? {} : { body: plain(opt.body) }) };
     calls.push(call);
-    const custom = opts.route ? await opts.route(path, call.method, call.body) : undefined;
+    let custom;
+    try { custom = opts.route ? await opts.route(path, call.method, call.body) : undefined; }
+    catch (err: Any) {
+      // As the shell's apiFetch does (checked against app.js below): a 5xx loses its words and its code unless the caller asks for them.
+      if (err && err.status >= 500 && !opt.serverError) throw fail(err.status, '服务出了点问题，请稍后再试。');
+      throw err;
+    }
     if (custom !== undefined) return plain(custom);
     if (path.startsWith('/xbot-api/start')) return plain(s.start);
     if (path === '/xbot-api/bots' && call.method === 'POST') return { name: call.body.name, native_id: 'bot-new' };
@@ -1013,8 +1020,9 @@ test('the shell loads the module before app.js and its styles after every earlie
 // /start's faces[] as the server itself builds it (startSummary) from the
 // engine's real eight templates (tests/native-fixture.ts, read from the pinned
 // upstream), so these tests read what the first screen will really get.
-async function realFaces(): Promise<Any[]> {
-  const templates = catTemplates.map(([id, name, roleDescription, personality, teamStrengths]) => ({ id, name, roleDescription, personality, teamStrengths, color: { primary: '#888888', secondary: '#eeeeee' } }));
+// `edit` changes the engine's templates first (say, a portrait edited upstream), so the server computes its own `rev`.
+async function realFaces(edit: (templates: Any[]) => Any[] = t => t): Promise<Any[]> {
+  const templates = edit(catTemplates.map(([id, name, roleDescription, personality, teamStrengths]) => ({ id, name, roleDescription, personality, teamStrengths, color: { primary: '#888888', secondary: '#eeeeee' } })));
   const bridge: Any = { runtimes: async () => [], cats: async () => [], templates: async () => ({ templates }), faceTemplates: async () => faceTemplates({ templates }) };
   return plain((await startSummary(bridge)).faces);
 }
@@ -1041,10 +1049,10 @@ test('the faces offered are /start\'s faces[], in its order, limited to portrait
     assert.deepEqual(every.map((f: Any) => f.id), plain(presets.map(p => p.id)));
     assert.ok(every.every((f: Any) => f.hint === null));
   }
-  // faces[] is read defensively: anything malformed is no face; words are trimmed.
-  assert.deepEqual(plain(R.start({ ...START.ready, faces: 'oops' }).faces), []);
-  assert.deepEqual(plain(R.start({ ...START.ready }).faces), []);
-  assert.deepEqual(plain(R.start({ ...START.ready, faces: [null, { id: 3 }, { id: 'dsh', role: '  ', personality: ' 细心 ', strengths: 7 }] }).faces), [{ id: 'dsh', personality: '细心' }]);
+  // faces[] is read defensively: anything malformed is no face; words are trimmed; no faces at all (an older server) is null, not [].
+  assert.equal(R.start({ ...START.ready, faces: 'oops' }).faces, null);
+  assert.equal(R.start({ ...START.ready }).faces, null);
+  assert.deepEqual(plain(R.start({ ...START.ready, faces: [null, { id: 3 }, { id: 'dsh', rev: ' ab12 ', role: '  ', personality: ' 细心 ', strengths: 7 }] }).faces), [{ id: 'dsh', rev: 'ab12', personality: '细心' }]);
 });
 
 test('the hint is the template\'s own words: its personality, then 擅长 its strengths (else its role), clipped at a pause when too long', async () => {
@@ -1116,7 +1124,8 @@ test('the first screen offers the server\'s faces and says briefly what the chos
   assert.equal(voice(stage).textContent, said, 'typing says nothing');
   button(stage, '带它回家').click();
   await settle();
-  assert.deepEqual(p.posts()[0].body.simple, { face: 'bengal', agent: 'codex' }, 'the face\'s own cat: the face alone');
+  const bengal = (await realFaces()).find(f => f.id === 'bengal');
+  assert.deepEqual(p.posts()[0].body.simple, { face: 'bengal', rev: bengal.rev, agent: 'codex' }, 'the face\'s own cat: the face and the portrait shown, no words of the owner\'s');
   // An untouched face that follows the tool changes the hint too, silently.
   const q = page({ start: await withFaces() });
   const other = await q.stage();
@@ -1126,7 +1135,7 @@ test('the first screen offers the server\'s faces and says briefly what the chos
   assert.equal(voice(other).textContent, '');
 });
 
-test('fewer or more faces than eight, or none: the row follows faces[], and without words the cat — or a custom one — can still be made, with nothing alarming said', async () => {
+test('fewer or more faces than eight: the row follows faces[]', async () => {
   const real = await realFaces();
   // Three faces, in another order and without the tool's own (Codex → 缅因猫): the first is chosen.
   const p = page({ start: { ...START.ready, faces: [real[6], real[0], real[2]] } });
@@ -1147,23 +1156,15 @@ test('fewer or more faces than eight, or none: the row follows faces[], and with
   face(row, '猫0').key('Home');
   assert.equal(chosen(row), '猫11');
   assert.deepEqual(hint(row), ['猫11的性格', '擅长陪伴']);
-  // None: every portrait, no hint and no empty lines kept, no alarm; the cat can be made, and 自定义 is there.
-  const r = page({ start: { ...START.ready, faces: [] } });
-  const bare = await r.stage();
-  assert.equal(faces(bare).length, 8);
-  assert.deepEqual(hint(bare), []);
-  assert.equal(one(bare, 'qc-about').classList.contains('described'), false);
-  assert.doesNotMatch(visibleText(bare), /读不到|没能|失败|出错|暂时/);
-  button(bare, '带它回家').click();
+  // A server that sends no faces at all (older than faces[]) is not second-guessed: every portrait, no words, creation as before.
+  const r = page({ start: START.ready });
+  const old = await r.stage();
+  assert.equal(faces(old).length, 8);
+  assert.deepEqual(hint(old), []);
+  assert.equal(one(old, 'qc-about').classList.contains('described'), false, 'no empty lines kept');
+  button(old, '带它回家').click();
   await settle();
-  assert.deepEqual(r.posts()[0].body.simple, { face: 'maine-coon', agent: 'codex' });
-  const t = page({ start: { ...START.ready, faces: [] } });
-  const helper = await t.stage();
-  button(helper, '自定义').click();
-  assert.deepEqual(hint(helper), [t.R.OWN_NOTE]);
-  button(helper, '带它回家').click();
-  await settle();
-  assert.deepEqual(t.posts()[0].body.simple, { face: 'maine-coon', custom: true, agent: 'codex' }, 'both lines empty: a plain helper');
+  assert.deepEqual(r.posts()[0].body.simple, { face: 'maine-coon', agent: 'codex' }, 'no rev to send');
 });
 
 test('自定义: a quiet switch makes a cat of the owner\'s own; the row then picks only its looks, two optional lines appear, and switching back and forth loses nothing', async () => {
@@ -1239,7 +1240,7 @@ test('a lost answer is retried with the identical body under its own key, after 
   lose = false;
   go.click(); await settle(); // the face's own cat again: still key A, and it lands
   const [a1, a2, c1, c2, a3] = p.posts().map(c => c.body);
-  assert.deepEqual(a1.simple, { face: 'maine-coon', agent: 'codex' });
+  assert.deepEqual(a1.simple, { face: 'maine-coon', rev: (await realFaces()).find(f => f.id === 'maine-coon').rev, agent: 'codex' });
   assert.deepEqual(a2, a1, 'same body, same key');
   assert.deepEqual(c1.simple, { face: 'maine-coon', custom: true, agent: 'codex' });
   assert.notEqual(c1.idempotencyKey, a1.idempotencyKey, 'another mode is another request');
@@ -1362,4 +1363,224 @@ test('the row wraps for any number of faces, the hint keeps to two lines (three 
   // The new motion: the existing keyframes, 180 ms.
   assert.match(css, /\.qc-trait-line \{[^}]*animation: fade 180ms ease-out;/);
   assert.match(css, /\.qc-own:not\(\[hidden\]\) \{ animation: rise 180ms ease-out; \}/);
+  assert.match(css, /\.qc-fresh \{[^}]*animation: fade 180ms ease-out;/);
+  assert.match(still, /\.qc-fresh/);
+});
+
+// ---------------------------------------------------------------- review fixes (2026-11-12)
+// A /xbot-api that keeps the engine's templates the way the server does (b53ae808): /start lists them with their
+// rev (or [] while they cannot be read); a creation from a face whose portrait changed since is refused before
+// anything is made (409 face_changed), and while the templates cannot be read nothing can be made, custom or not
+// (503 faces_unavailable).
+function engine(initial: Any[]) {
+  const e = { faces: initial, readable: true, made: [] as Any[] };
+  const route = (path: string, method: string, body: Any) => {
+    if (path.startsWith('/xbot-api/start')) return { ...START.ready, faces: e.readable ? e.faces : [] };
+    if (path !== '/xbot-api/bots' || method !== 'POST') return undefined;
+    const face = e.readable && e.faces.find(f => f.id === body.simple.face);
+    if (!face) throw fail(503, '暂时读不到猫猫的资料，这次没有创建，请稍后再试', 'faces_unavailable');
+    if (!body.simple.custom && body.simple.rev && body.simple.rev !== face.rev) throw fail(409, '这只猫猫的介绍刚刚更新了，请再看一眼后重试', 'face_changed');
+    e.made.push(body);
+    return { name: body.name, native_id: 'bot-' + e.made.length };
+  };
+  return { e, route };
+}
+const edited = (id: string, change: Any) => realFaces(t => t.map(x => (x.id === id ? { ...x, ...change } : x)));
+
+test('review fixes (rules): a face\'s own cat carries the rev it showed and a custom one none; face_changed and faces_unavailable are refusals, not the name or an unsure creation; with no readable face nothing can be made', async () => {
+  const { R, doc } = page();
+  const real = await realFaces(), maine = real.find(f => f.id === 'maine-coon');
+  assert.match(maine.rev, /^[0-9a-f]{16}$/);
+  const presets = presetsOf(doc);
+  assert.equal(plain(R.offer(R.start({ ...START.ready, faces: real }).faces, presets)).find((f: Any) => f.id === 'maine-coon').rev, maine.rev);
+  const m = /const simpleCat = (z\.object\([\s\S]*?\)\.strict\(\));/.exec(read('server/xbot/core.ts'))!;
+  const simpleCat = new Function('z', 'catFaces', 'return ' + m[1])(z, catFaces);
+  const own = plain(R.catBody({ name: '砚砚', face: 'maine-coon', rev: maine.rev, agent: 'codex' }));
+  assert.deepEqual(own.simple, { face: 'maine-coon', rev: maine.rev, agent: 'codex' });
+  assert.equal(simpleCat.safeParse(own.simple).success, true, 'the server\'s own schema takes it');
+  assert.deepEqual(plain(R.catBody({ name: '砚砚', face: 'maine-coon', rev: maine.rev, agent: 'codex', custom: true })).simple, { face: 'maine-coon', custom: true, agent: 'codex' }, 'a custom cat has no portrait to compare');
+  assert.notEqual(R.fingerprint(own), R.fingerprint(R.catBody({ name: '砚砚', face: 'maine-coon', rev: 'ffffffffffffffff', agent: 'codex' })), 'another portrait is another request');
+  // The code decides, not the status.
+  assert.deepEqual(plain(R.catError(fail(409, '这只猫猫的介绍刚刚更新了，请再看一眼后重试', 'face_changed'), '砚砚')), { kind: 'changed', text: R.FACE_CHANGED });
+  assert.equal(R.catError(fail(409, '已经有一只叫这个名字的猫猫了'), '砚砚').kind, 'name', 'a 409 without the code is still the name');
+  const gone = R.catError(fail(503, '暂时读不到猫猫的资料，这次没有创建，请稍后再试', 'faces_unavailable'), '砚砚');
+  assert.deepEqual(plain(gone), { kind: 'unavailable', text: '刚才没能读到猫猫的资料，这次没有建。' });
+  assert.equal(R.catError(fail(503, '服务出了点问题'), '砚砚').kind, 'unsure', 'a 503 without the code stays unsure');
+  // Whether anything can be made at all.
+  assert.equal(R.usable(real, presets), true);
+  assert.equal(R.usable([], presets), false, 'the templates could not be read');
+  assert.equal(R.usable([{ id: 'sphynx' }], presets), false, 'none this client can draw');
+  assert.equal(R.usable(null, presets), true, 'a server older than faces[] is not second-guessed');
+  const need = plain(R.facesNeed());
+  assert.equal(need.title, '暂时读不到猫猫的资料');
+  assert.doesNotMatch(JSON.stringify(need), /Agent|Bot|模型|模板/);
+  // 重新检测 notices the faces coming back.
+  assert.equal(R.sameStart(R.start({ ...START.ready, faces: [] }), R.start({ ...START.ready, faces: [] })), true);
+  assert.equal(R.sameStart(R.start({ ...START.ready, faces: [] }), R.start({ ...START.ready, faces: real })), false);
+});
+
+test('review fixes: the fake api drops a 5xx\'s code unless asked, exactly as the shell\'s apiFetch does, so the faces_unavailable tests below test the real path', () => {
+  const app = read('client/public/app.js');
+  const apiFetch = /async function apiFetch\(path, opt, serverError\) \{[\s\S]*?\n {2}\}\n/.exec(app)![0];
+  assert.match(apiFetch, /if \(res\.status >= 500 && !serverError\) \{\s*const err = new Error\("服务出了点问题，请稍后再试。"\);/);
+  assert.match(app, /const res = await apiFetch\(path, \{[\s\S]*?\}, opt\.serverError\);/);
+  assert.match(app, /if \(typeof data\.code === "string"\) err\.code = data\.code;/);
+});
+
+test('review fixes: creating from a face sends the rev of the portrait whose hint is on screen; 自定义 sends none', async () => {
+  const real = await realFaces();
+  const p = page({ start: { ...START.ready, faces: real } });
+  const stage = await p.stage();
+  face(stage, '暹罗猫').click();
+  button(stage, '带它回家').click();
+  await settle();
+  assert.deepEqual(p.posts()[0].body.simple, { face: 'siamese', rev: real.find(f => f.id === 'siamese').rev, agent: 'codex' });
+  const q = page({ start: { ...START.ready, faces: real } });
+  const custom = await q.stage();
+  button(custom, '自定义').click();
+  button(custom, '带它回家').click();
+  await settle();
+  assert.deepEqual(q.posts()[0].body.simple, { face: 'maine-coon', custom: true, agent: 'codex' });
+});
+
+test('review fixes: a portrait changed since the screen read it (face_changed) is read again and shown with a quiet note; nothing is sent by itself, and the next try is a new request', async () => {
+  const { e, route } = engine(await realFaces());
+  const p = page({ route });
+  const stage = await p.stage();
+  assert.deepEqual(hint(stage), ['严谨认真，注重细节，会直言不讳地指出问题', '擅长 Review、找 bug、coding 落地']);
+  // Upstream edits 缅因猫's portrait while the screen is open.
+  e.faces = await edited('maine-coon', { personality: '更严谨了，什么都要再看一遍', teamStrengths: '把关' });
+  const go = button(stage, '带它回家');
+  go.click();
+  await settle();
+  assert.equal(p.posts().length, 1, 'not sent again by itself');
+  assert.deepEqual(e.made, []);
+  assert.equal(p.calls.filter(c => c.path.startsWith('/xbot-api/start')).length, 2, 'the faces are read again');
+  assert.equal(chosen(stage), '缅因猫', 'still the face the owner had');
+  assert.deepEqual(hint(stage), ['更严谨了，什么都要再看一遍', '擅长把关']);
+  assert.equal(visibleText(one(stage, 'qc-fresh')), p.R.FACE_CHANGED);
+  assert.equal(voice(stage).textContent, p.R.FACE_CHANGED + '更严谨了，什么都要再看一遍。擅长把关');
+  assert.equal(control(stage, '名字').getAttribute('aria-invalid'), null, 'not a taken name');
+  assert.equal(shown(one(stage, 'qc-error')), false, 'nor an error');
+  assert.equal(p.refreshed, 0, 'nor an unsure creation');
+  assert.equal(p.doc.activeElement, go);
+  // The owner has looked: the next try carries the new rev under a new key and makes the cat.
+  go.click();
+  await settle();
+  const [first, second] = p.posts().map(c => c.body);
+  assert.equal(second.simple.rev, e.faces.find(f => f.id === 'maine-coon').rev);
+  assert.notEqual(second.idempotencyKey, first.idempotencyKey, 'the refused body left no key behind');
+  assert.equal(e.made.length, 1);
+  assert.deepEqual(p.opened, ['砚砚']);
+  // Picking a face puts the note away.
+  const t = engine(await realFaces());
+  const q = page({ route: t.route });
+  const other = await q.stage();
+  t.e.faces = await edited('maine-coon', { personality: '换了个性子' });
+  button(other, '带它回家').click();
+  await settle();
+  assert.equal(shown(one(other, 'qc-fresh')), true);
+  face(other, '布偶猫').click();
+  assert.equal(shown(one(other, 'qc-fresh')), false);
+});
+
+test('review fixes: faces_unavailable is said plainly — nothing was made — with 重新检测, never as an unsure creation; its key is dropped', async () => {
+  const { e, route } = engine(await realFaces());
+  const p = page({ route });
+  const stage = await p.stage();
+  button(stage, '自定义').click(); // a custom cat needs the template's colour too
+  e.readable = false;
+  button(stage, '带它回家').click();
+  await settle();
+  const need = one(stage, 'qc-need');
+  assert.equal(shown(need), true);
+  assert.match(visibleText(need), /^暂时读不到猫猫的资料/);
+  assert.equal(visibleText(one(need, 'qc-note')), '刚才没能读到猫猫的资料，这次没有建。');
+  assert.doesNotMatch(visibleText(stage), /没能确认|不改内容/);
+  assert.equal(shown(one(stage, 'qc-fields')), false, 'no form that could only be refused');
+  assert.equal(p.refreshed, 0, 'not an unsure creation: the list is not searched for it');
+  button(stage, '重新检测').click();
+  await settle();
+  assert.equal(visibleText(one(stage, 'qc-note')), '重新检测过了，还是读不到猫猫的资料。');
+  e.readable = true;
+  button(stage, '重新检测').click();
+  await settle();
+  assert.equal(shown(one(stage, 'qc-fields')), true);
+  assert.equal(button(stage, '自定义').getAttribute('aria-pressed'), 'true', '自定义 is still on');
+  assert.equal(p.doc.activeElement, control(stage, '名字'));
+  button(stage, '带它回家').click();
+  await settle();
+  const [first, second] = p.posts().map(c => c.body);
+  assert.deepEqual(second.simple, first.simple);
+  assert.notEqual(second.idempotencyKey, first.idempotencyKey, 'a refusal leaves no key behind');
+  assert.equal(e.made.length, 1);
+  // A passing outage: /start reads the faces at once, so the form stays and says it may be pressed again.
+  const t = engine(await realFaces());
+  let once = true;
+  const q = page({ route: (path, method, body) => { if (path === '/xbot-api/bots' && method === 'POST' && once) { once = false; throw fail(503, '暂时读不到猫猫的资料，这次没有创建，请稍后再试', 'faces_unavailable'); } return t.route(path, method, body); } });
+  const form = await q.stage();
+  button(form, '带它回家').click();
+  await settle();
+  assert.equal(shown(one(form, 'qc-fields')), true);
+  assert.equal(visibleText(one(form, 'qc-error')), '刚才没能读到猫猫的资料，这次没有建。现在读到了，再点一次就好。');
+  button(form, '带它回家').click();
+  await settle();
+  assert.notEqual(q.posts()[1].body.idempotencyKey, q.posts()[0].body.idempotencyKey);
+  assert.equal(t.e.made.length, 1);
+});
+
+test('review fixes: when /start could read no faces, the screens say the cats\' details cannot be read and offer 重新检测, not a creation the server would refuse', async () => {
+  const { e, route } = engine(await realFaces());
+  e.readable = false;
+  const p = page({ route });
+  const stage = await p.stage();
+  assert.match(visibleText(one(stage, 'qc-need')), /^暂时读不到猫猫的资料猫猫们的样子和性格现在读不出来/);
+  assert.equal(all(stage).some(n => n.tagName === 'BUTTON' && ['带它回家', '自定义'].includes(n.textContent) && shown(n)), false);
+  assert.equal(one(stage, 'qc-faces').getAttribute('aria-hidden'), 'true', 'the row is only a picture');
+  stage.dispatch('submit');
+  await settle();
+  assert.equal(p.posts().length, 0, 'nothing is sent that could only be refused');
+  button(stage, '重新检测').click();
+  await settle();
+  assert.equal(p.calls.at(-1)!.path, '/xbot-api/start?refresh=1');
+  assert.equal(visibleText(one(stage, 'qc-note')), '重新检测过了，还是读不到猫猫的资料。');
+  e.readable = true;
+  button(stage, '重新检测').click();
+  await settle();
+  assert.equal(shown(one(stage, 'qc-fields')), true);
+  assert.deepEqual(hint(stage), ['严谨认真，注重细节，会直言不讳地指出问题', '擅长 Review、找 bug、coding 落地']);
+  assert.equal(p.doc.activeElement, control(stage, '名字'));
+  button(stage, '带它回家').click();
+  await settle();
+  assert.equal(e.made.length, 1);
+  // The 新建猫猫 dialog says the same, with 更多设置 still there.
+  e.readable = false;
+  const q = page({ cats: ['团子'], route });
+  q.Q.openCat({ opener: q.opener });
+  await settle();
+  const card = one(q.layer()!, 'qc-card');
+  assert.match(visibleText(card), /暂时读不到猫猫的资料/);
+  assert.ok(button(card, '更多设置'));
+  assert.equal(all(card).some(n => n.tagName === 'BUTTON' && n.textContent === '创建' && shown(n)), false);
+});
+
+test('review fixes: a re-read that keeps the tool and the chosen face but brings new words shows them at once, without announcing them', async () => {
+  const { e, route } = engine(await realFaces());
+  let refuse = true;
+  const p = page({ route: (path, method, body) => { if (path === '/xbot-api/bots' && method === 'POST' && refuse) { refuse = false; throw fail(422, '请先在本机 Agent 中完成登录'); } return route(path, method, body); } });
+  const stage = await p.stage();
+  face(stage, '暹罗猫').click();
+  const said = voice(stage).textContent;
+  // A 422 makes the screen read /start again: the same tool, the same ids, new words for 暹罗猫.
+  e.faces = await edited('siamese', { personality: '安静了一些，但还是很有想法' });
+  button(stage, '带它回家').click();
+  await settle();
+  assert.equal(shown(one(stage, 'qc-fields')), true, 'the tool is usable: the form stays');
+  assert.equal(chosen(stage), '暹罗猫');
+  assert.deepEqual(hint(stage), ['安静了一些，但还是很有想法', '擅长审美、前端设计风格、打破常规'], 'without clicking the face again');
+  assert.equal(voice(stage).textContent, said, 'not announced: nobody chose anything');
+  button(stage, '带它回家').click();
+  await settle();
+  assert.equal(p.posts().at(-1)!.body.simple.rev, e.faces.find(f => f.id === 'siamese').rev, 'and the next try is for the words on screen');
+  assert.equal(e.made.length, 1);
 });
