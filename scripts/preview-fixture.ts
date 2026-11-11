@@ -127,7 +127,8 @@ class PreviewNative extends NativeFixture {
       '| 项目 | 状态 |', '| --- | --- |', '| 流式文字 | 正在写 |', '| 停止 | 随时可以 |', '',
       ...Array.from({ length: 6 }, (_, i) => `第 ${i + 1} 段。猫喜欢纸箱，是因为四面围合的空间让它觉得安全，瓦楞纸又保暖，钻进去像自带一个小暖窝；而且纸箱是家里的新东西，可以啃、可以挠、可以占领。`)].join('\n');
     else if (/文件|查|资料/.test(text)) {
-      steps.push(['Read', { file_path: '/preview/workspace/说明.md' }], ['WebSearch', { query: '猫 为什么 喜欢 纸箱' }], ['Write', { file_path: '/preview/workspace/结果.md', content: '…' }]);
+      if (cat.clientId === 'openai') steps.push(['command_execution', { command: "/bin/zsh -lc 'cat 说明.md'" }], ['file_change', { status: 'completed', changes: [{ path: '/preview/workspace/结果.md', kind: { type: 'add' } }] }]);
+      else steps.push(['Read', { file_path: '/preview/workspace/说明.md' }], ['WebSearch', { query: '猫 为什么 喜欢 纸箱' }], ['Write', { file_path: '/preview/workspace/结果.md', content: '…' }]);
       reply = '看过说明、查了资料，也把要点写进了 `结果.md`。\n\n简单说：纸箱让猫觉得**安全又暖和**。';
     } else { if (/慢/.test(text)) think = 6000; reply = `收到：「${text.slice(0, 40)}」。\n\n这是预览环境里的固定回复，不是真的猫在回答。`; }
     return { steps, reply: reply + `\n\n[${cat.name}/preview🐾]`, fail, think };
@@ -150,14 +151,18 @@ class PreviewNative extends NativeFixture {
     this.emit(threadId, { type: 'queue_updated', action: 'processing' });
     info({ type: 'invocation_created', invocationId }, { messageId: undefined, lifecycleResponseMessageId: message.id });
     await wait(300 * this.speed);
-    info({ type: 'thinking', catId: cat.id, text: '' });
+    // The two carriers mark thinking differently: Claude Code with a system_info, Codex with a transient status.
+    const codex = cat.clientId === 'openai';
+    const status = (content: string) => this.emit(threadId, { type: 'status', ...stamp, content, timestamp: Date.now() }, true);
+    const thinking = () => codex ? status('thinking') : info({ type: 'thinking', catId: cat.id, text: '' });
+    thinking();
     for (let waited = 0; waited < think && !state.stop; waited += 100) await wait(100 * this.speed);
     for (const [toolName, toolInput] of steps) {
       if (state.stop) break;
       this.emit(threadId, { type: 'tool_use', ...stamp, toolName, toolInput, toolUseId: 'toolu_' + randomBytes(6).toString('hex'), timestamp: Date.now() }, true);
       (message.toolEvents as unknown[]).push({ type: 'tool_use', toolName, label: toolName, detail: JSON.stringify(toolInput) });
       await wait(900 * this.speed);
-      info({ type: 'thinking', catId: cat.id, text: '' });
+      thinking();
     }
     // The stream runs ahead of the persisted draft, as on the real runtime (a draft is flushed about every two seconds).
     let written = '', flushed = Date.now();
@@ -167,10 +172,17 @@ class PreviewNative extends NativeFixture {
       written += piece;
       this.emit(threadId, { type: 'text', ...stamp, origin: 'stream', content: piece, textMode: 'append', timestamp: Date.now(),
         extra: { outputLayout: { v: 1, owner: { threadId, catId: cat.id, turnInvocationId: invocationId }, contentRevision: { length: written.length, sha256: '' }, status: 'unavailable' } } }, true);
+      if (codex) {
+        status('streaming');
+        // Codex also sends the whole reply so far at the end of each paragraph and once more at the end.
+        if (piece.includes('\n') || written.length === reply.length) this.emit(threadId, { type: 'text', ...stamp, origin: 'stream', content: written, textMode: 'replace', timestamp: Date.now(),
+          extra: { outputLayout: { v: 1, owner: { threadId, catId: cat.id, turnInvocationId: invocationId }, contentRevision: { length: written.length, sha256: '' }, status: 'unavailable' } } }, true);
+      }
       if (Date.now() - flushed > 1800 * this.speed) { message.content = written; message.isDraft = true; flushed = Date.now(); }
       if (fail && written.length > 4) break;
       await wait(35 * this.speed);
     }
+    if (codex) status('done');
     if (state.stop) { message.content = written; settle('canceled'); this.emit(threadId, { type: 'done', ...stamp, isFinal: true, timestamp: Date.now() }, true); return; }
     if (fail) { message.content = ''; settle('failed'); this.emit(threadId, { type: 'error', ...stamp, error: 'preview failure', timestamp: Date.now() }, true); return; }
     message.content = written; settle('completed');
@@ -182,8 +194,9 @@ const native = new PreviewNative();
 const runtime = createApp({ native, workspace, dataFile: join(dir, 'presentation.json'), staticDir: join(dir, 'no-static'),
   allowedOrigins: [`http://127.0.0.1:${port}`, `http://localhost:${port}`] });
 // Seeded cats come from the same quick creation the first screen uses.
+// 团子 answers the way Claude Code does, 栗子 the way Codex does (see turn()).
 for (const [index, name] of ['团子', '栗子', '年糕'].slice(0, Math.max(0, Math.min(3, Number(process.env.PREVIEW_CATS ?? 2)))).entries())
-  await runtime.bridge.createBot({ name, simple: { face: breeds[[7, 1, 2][index]!]! }, idempotencyKey: randomUUID() });
+  await runtime.bridge.createBot({ name, simple: { face: breeds[[7, 1, 2][index]!]!, agent: ['claude', 'codex', 'claude'][index]! }, idempotencyKey: randomUUID() });
 runtime.app.post('/__preview', (req, res) => {
   const input = req.body ?? {};
   if (typeof input.agents === 'string') { if (!agentSets[input.agents]) return res.status(400).json({ error: 'agents: ' + Object.keys(agentSets).join(' | ') }); native.runtimes = agentSets[input.agents]!; }
