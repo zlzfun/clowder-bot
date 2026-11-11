@@ -2744,8 +2744,14 @@
     return day + " " + clockTime(time);
   }
 
+  // The rows that take part in the time dividers: messages, run lines, and the
+  // quiet notice lines (chat-cards.js: a reminder that came due, a receipt, a
+  // refusal), so a notice that opens a new stretch of time comes after its
+  // divider, and the reply that follows it shares that divider.
+  const TIMED_ROWS = [".msg[data-time]", ".routine-line[data-time]", ".ck-notice[data-time]"];
+
   function addTimeDivider(inner, row, previous) {
-    const last = previous || Array.from(inner.querySelectorAll(".msg[data-time], .routine-line[data-time]")).at(-1)?.dataset.time;
+    const last = previous || Array.from(inner.querySelectorAll(TIMED_ROWS.join(", "))).at(-1)?.dataset.time;
     const label = timeDivider(last, row.dataset.time);
     if (label) inner.append(el("div", "tdiv", label));
   }
@@ -2753,7 +2759,7 @@
   // Single and group chats alike.
   function addTimeDividers(inner) {
     let previous;
-    for (const row of inner.querySelectorAll(":scope > .msg[data-time], :scope > .routine-line[data-time]")) {
+    for (const row of inner.querySelectorAll(TIMED_ROWS.map((s) => ":scope > " + s).join(", "))) {
       const label = row.dataset.timed ? "" : timeDivider(previous, row.dataset.time);
       if (label) row.before(el("div", "tdiv", label));
       previous = row.dataset.time;
@@ -7383,10 +7389,35 @@
     let remembered = "";
     try { remembered = sessionStorage.getItem("xbot-selected-bot") || ""; } catch (e) {}
     const home = state.bots.find((b) => b.name === remembered) || state.bots.find((b) => b.primary) || state.bots[0];
-    if (!state.sel && home) await selectBot(home.name);
+    // A link to a chat (/#chat=<name>) opens that chat instead of the remembered one.
+    const linked = openLinked();
+    if (linked) await linked;
+    else if (!state.sel && home) await selectBot(home.name);
     else if (!state.sel) showNoChat();
+    linkReady = true;
     syncPanelDefault();
   }
+
+  // A link that opens a chat: /#chat=<name> (chat-list-rules.js linkName) opens
+  // the cat with that name, else the group chat with it, the way a row of the
+  // list opens it (pickBot / pickGroup: a chat already open stays as it is,
+  // and the one left keeps its draft). The fragment leaves the address first,
+  // so a reload or a later switch is not sent back to that chat. A name nothing
+  // answers to opens nothing and says so once. #login-code and every other
+  // fragment are left alone. Returns the opening when a chat is opened.
+  function openLinked() {
+    const name = listRules.linkName(location.hash);
+    if (name === null) return null;
+    try { history.replaceState(history.state, "", location.pathname + location.search); } catch (e) { /* the fragment stays */ }
+    if (!name) return null;
+    const target = listRules.linked(name, state.bots, state.groups);
+    if (!target) { quietNote(listRules.linkMissing(name)); return null; }
+    return Promise.resolve(target.type === "group" ? pickGroup(target.id) : pickBot(target.id));
+  }
+  // …and the same when the address changes to one while the app is open (after
+  // boot, which reads the first one itself).
+  let linkReady = false;
+  window.addEventListener("hashchange", () => { if (linkReady && !shell.hidden) openLinked(); });
 
   // No chat open (quick-create.js): with no cats yet, the stage where the first
   // one is brought home; otherwise one line pointing at the list. The no-chat

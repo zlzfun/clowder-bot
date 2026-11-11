@@ -729,7 +729,10 @@ test('group chats get the same day and time separators as single chats (app.js\'
   const doc = new Doc();
   const el = (tag: string, cls: string, words?: string) => { const n = doc.createElement(tag); n.className = cls; if (words) n.textContent = words; return n; };
   const out: Any = {};
-  vm.runInNewContext(['clockTime', 'timeDivider', 'addTimeDividers'].map(take).join('') + 'out.addTimeDividers = addTimeDividers;', { out, el, Date, Number });
+  // The rows that take part in the dividers are one list both divider functions read (item 36: notices too).
+  const rows = /\n {2}const TIMED_ROWS = [^\n]*\n/.exec(app);
+  assert.ok(rows, 'app.js names the rows that take part in the dividers');
+  vm.runInNewContext(['clockTime', 'timeDivider'].map(take).join('') + rows![0] + take('addTimeDividers') + 'out.addTimeDividers = addTimeDividers;', { out, el, Date, Number, Array });
   const inner = el('div', 'thread-inner grpchat');
   const at = (days: number, h: number, m: number) => { const d = new Date(); d.setDate(d.getDate() - days); d.setHours(h, m, 0, 0); return d.toISOString(); };
   const row = (time: string) => { const r = el('div', 'msg bot'); r.dataset.time = time; return r; };
