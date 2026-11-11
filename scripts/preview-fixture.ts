@@ -256,7 +256,8 @@ runtime.app.post('/__preview', (req, res) => {
   res.json({ agents: Object.entries(agentSets).find(([, set]) => set === native.runtimes)?.[0], speed: native.speed, approvals: native.hubFails ? 'failing' : 'working', cats: native.cats.map(cat => cat.name) });
 });
 runtime.app.use(express.static(join(root, 'client/public'), { etag: false, lastModified: false, setHeaders: res => res.setHeader('Cache-Control', 'no-store') }));
-runtime.app.get('/', (_req, res) => { res.setHeader('Cache-Control', 'no-store'); res.sendFile(join(root, 'client/index.html')); });
+// `root` keeps a dot-directory in the checkout's own path (a worktree under .claude/) from being refused.
+runtime.app.get('/', (_req, res) => { res.setHeader('Cache-Control', 'no-store'); res.sendFile('index.html', { root: join(root, 'client') }); });
 const server = runtime.app.listen(port, '127.0.0.1', () => console.log(`preview (scripted fixture, no engine): http://127.0.0.1:${port}`));
 const close = () => { void runtime.close().finally(() => server.close(() => { rmSync(dir, { recursive: true, force: true }); process.exit(0); })); };
 for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, close);
