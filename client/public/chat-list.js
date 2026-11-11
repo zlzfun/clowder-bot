@@ -342,6 +342,14 @@
   // quote go back to that chat's draft, unless the owner wrote a new one there.
   function giveBack(sel, text, quote) {
     if (!sel || !sel.id) return false;
+    // Already open again (the owner came back before the answer): the words go
+    // into an empty composer, the quote waits for the next read to fit.
+    if (isOpenChat(sel) && H) {
+      if (H.composer.text().trim()) return false;
+      H.composer.set(text);
+      if (sel.type === "bot" && quote && !H.composer.quote()) open.quote = quote;
+      return true;
+    }
     const key = draftKeyOf(sel);
     if (!key || drafts.get(key)) return false;
     if (drafts.put(key, text, sel.type === "bot" ? quote : null)) { save(); return true; }
@@ -364,6 +372,21 @@
     const text = key ? H.composer.text() : "";
     const quote = key && sel.type === "bot" ? H.composer.quote() || (open && open.quote) : null;
     save(key && (text.trim() || quote) ? { key, text, quote } : null);
+  }
+
+  // ------------------------------------------------------------- stale
+  // The status could not be read (the whole request failed): the rows keep
+  // what was last read, and one quiet line over the list says so until a
+  // read succeeds. The title keeps the last known count.
+  let staleLine = null;
+  function stale(on) {
+    const roster = document.getElementById("roster");
+    if (!staleLine && on && roster && roster.parentElement) {
+      staleLine = node("p", "cl-stale", "状态没能刷新，下面是上次读到的，可能已经变化。");
+      staleLine.setAttribute("role", "status");
+      roster.parentElement.insertBefore(staleLine, roster);
+    }
+    if (staleLine) staleLine.hidden = !on;
   }
 
   // -------------------------------------------------------------------- init

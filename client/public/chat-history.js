@@ -75,9 +75,12 @@
     if (threadId && P.thread && threadId !== P.thread) reset(key);
     if (threadId) P.thread = threadId;
     const before = data && typeof data.before === "string" ? data.before : "";
+    // The native page boundary before and now: where the newest page shows no
+    // rows to join on, it says whether the page still meets the rows held.
+    const seam = { was: P.latest.before, now: before };
     P.latest = { before, more: !!(data && data.hasMore === true) && !!before };
     if (holding()) {
-      const kept = R.stitch(P.held, P.was, rows);
+      const kept = R.stitch(P.held, P.was, rows, seam);
       // More than a page came in meanwhile: the earlier pages no longer meet
       // the newest one, so they go rather than show with a hole in them.
       if (kept === null) { reset(key); P.thread = threadId; P.latest = { before, more: !!(data && data.hasMore === true) && !!before }; }
@@ -115,12 +118,14 @@
       row.append(node("span", "", "没能加载更早的消息" + (v.error ? "：" + v.error : "")), b);
     } else row.append(node("span", "", "没有更早的消息了"));
   }
+  // true when a row was drawn: an empty view then has earlier records to offer.
   function top(inner) {
     const v = view();
-    if (!v || !inner) return;
+    if (!v || !inner) return false;
     const row = node("div", "ch-older");
     fill(row, v);
     inner.prepend(row);
+    return true;
   }
   // The open history's top row on screen.
   function onScreen() {
@@ -150,6 +155,11 @@
     const cursor = nextCursor();
     if (!sel || keyOf(sel) !== P.key || P.state === "loading" || !cursor) return;
     const gen = P.gen;
+    // The first earlier page belongs to the newest page as it was when asked
+    // for (its cursor is that page's first message). Polls may move the newest
+    // page on meanwhile; the answer is joined to that snapshot, and the next
+    // newest-page read stitches from it, or starts over if they no longer meet.
+    const base = holding() ? null : { rows: P.was.slice(), before: cursor };
     P.state = "loading";
     paintTop();
     try {
@@ -159,7 +169,11 @@
       if (!page) throw new Error("没有读到消息");
       // The cat moved to another conversation meanwhile: start over there.
       if (page.thread && P.thread && page.thread !== P.thread) { reset(P.key); H.reload(); return; }
-      P.held = R.prepend(page.rows, P.held, P.was);
+      if (base) {
+        P.held = R.prepend(page.rows, [], base.rows);
+        P.was = base.rows;
+        P.latest = { before: base.before, more: true };
+      } else P.held = R.prepend(page.rows, P.held, P.was);
       P.cursor = page.before;
       P.more = page.more;
       P.loaded++;
@@ -269,7 +283,9 @@
     syncMenu();
     if (!list.length) return;
     closeMenu(false);
-    menu = node("div", "pop folder-menu ch-menu");
+    // Its own class: the sidebar's redraw removes every .folder-menu, and this
+    // menu belongs to the header.
+    menu = node("div", "pop ch-menu");
     menu.setAttribute("role", "menu");
     menu.setAttribute("aria-label", "更多");
     for (const it of list) {
@@ -322,6 +338,8 @@
     const root = node("div", "modal ch-modal");
     const card = node("form", "modal-card");
     card.noValidate = true;
+    // Focus can rest on the card itself while both buttons wait on a request.
+    card.tabIndex = -1;
     card.setAttribute("role", "dialog");
     card.setAttribute("aria-modal", "true");
     const h = node("h2", "", title);
@@ -339,15 +357,26 @@
     card.append(h, ...body, err, acts);
     root.append(card);
     document.body.append(root);
+    // Everything behind the dialog is out of reach (inert) while it is open,
+    // so Tab never wanders there, even with both buttons disabled.
+    const benched = [...document.body.children].filter((n) => n !== root && !n.inert);
+    for (const n of benched) n.inert = true;
     let alive = true, busy = false, down = false;
     const d = {
       alive: () => alive,
       error(text) { err.textContent = text || ""; err.hidden = !text; },
-      busy(on) { busy = on; ok.disabled = on; no.disabled = on; card.setAttribute("aria-busy", String(on)); },
+      busy(on) {
+        // Focus moves to the card before its buttons are disabled, and back to
+        // the confirm button when the request has settled.
+        if (on && card.contains(document.activeElement)) card.focus({ preventScroll: true });
+        busy = on; ok.disabled = on; no.disabled = on; card.setAttribute("aria-busy", String(on));
+        if (!on && alive && (document.activeElement === card || !card.contains(document.activeElement))) ok.focus({ preventScroll: true });
+      },
       close(force) {
         if (!alive || (busy && !force)) return;
         alive = false;
         root.remove();
+        for (const n of benched) n.inert = false;
         if (layer === d) layer = null;
         if (opener && opener.isConnected) opener.focus({ preventScroll: true });
         else if (more && more.isConnected && !more.hidden) more.focus({ preventScroll: true });
@@ -359,8 +388,10 @@
       if (ev.key === "Escape") { ev.preventDefault(); d.close(); }
       else if (ev.key === "Tab") {
         const list = [...card.querySelectorAll("button")].filter((b) => !b.disabled);
-        if (list.length && ev.shiftKey && document.activeElement === list[0]) { ev.preventDefault(); list.at(-1).focus(); }
-        else if (list.length && !ev.shiftKey && document.activeElement === list.at(-1)) { ev.preventDefault(); list[0].focus(); }
+        if (!list.length) { ev.preventDefault(); card.focus({ preventScroll: true }); }
+        else if (!card.contains(document.activeElement) || document.activeElement === card) { ev.preventDefault(); (ev.shiftKey ? list.at(-1) : list[0]).focus(); }
+        else if (ev.shiftKey && document.activeElement === list[0]) { ev.preventDefault(); list.at(-1).focus(); }
+        else if (!ev.shiftKey && document.activeElement === list.at(-1)) { ev.preventDefault(); list[0].focus(); }
       }
       ev.stopPropagation();
     });

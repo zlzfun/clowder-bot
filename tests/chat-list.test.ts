@@ -91,22 +91,39 @@ test('the greeting names the owner only when the server knows a name, never the 
   assert.equal(L.greetName('小林'), '小林');
 });
 
-test('drafts: words and a quote are kept per chat; an empty one is no draft; taking one back lets go of it; a saved copy reads back the same', () => {
+test('drafts: words and a quote are kept per chat; a quote keeps its conversation and one without it is not kept; a cat is keyed by its native ID; an old name key moves once', () => {
   const L = rules();
   const d = L.drafts();
-  assert.equal(d.put('bot:团子', '还没写完', { seq: 4, text: '原话' }), true);
-  assert.equal(d.put('bot:团子', '还没写完', { seq: 4, text: '原话' }), false, 'unchanged');
+  const q = { seq: 4, text: '原话', thread: 'T1' };
+  assert.equal(d.put('cat:c1', '还没写完', q), true);
+  assert.equal(d.put('cat:c1', '还没写完', q), false, 'unchanged');
   assert.equal(d.put('group:g', '   ', null), false, 'blank words and no quote: nothing to keep');
   assert.equal(d.get('group:g'), null);
-  assert.equal(d.put('bot:栗子', '', { seq: 'x' }), false, 'a quote without a message number is not a quote');
-  assert.equal(L.draftLine(d.get('bot:团子')), '还没写完');
-  assert.equal(L.draftLine({ text: ' ', quote: { seq: 2, text: '' } }), '引用了一条消息');
+  assert.equal(d.put('cat:c2', '', { seq: 'x', thread: 'T1' }), false, 'a quote without a message number is not a quote');
+  assert.equal(d.put('cat:c2', '', { seq: 3, text: 'x' }), false, 'nor one that does not say which conversation its number belongs to');
+  assert.equal(L.draftLine(d.get('cat:c1')), '还没写完');
+  assert.equal(L.draftLine({ text: ' ', quote: q }), '引用了一条消息');
   const copy = L.drafts(JSON.parse(JSON.stringify(d.toJSON())));
-  assert.deepEqual(plain(copy.get('bot:团子')), { text: '还没写完', quote: { seq: 4, text: '原话' } });
-  assert.deepEqual(plain(copy.take('bot:团子')), { text: '还没写完', quote: { seq: 4, text: '原话' } });
-  assert.equal(copy.get('bot:团子'), null);
-  assert.equal(d.put('bot:团子', '', null), true, 'emptied: the draft goes');
-  assert.equal(d.get('bot:团子'), null);
+  assert.deepEqual(plain(copy.take('cat:c1')), { text: '还没写完', quote: q });
+  assert.equal(copy.get('cat:c1'), null);
+  assert.equal(d.put('cat:c1', '', null), true, 'emptied: the draft goes');
+  assert.equal(d.get('cat:c1'), null);
+  // The quote fits only the conversation it was taken in.
+  assert.equal(L.quoteFits(q, 'T1'), true);
+  assert.equal(L.quoteFits(q, 'T2'), false);
+  assert.equal(L.quoteFits(q, ''), false);
+  // Keys: a cat by its native ID when known, else its name; a group by its ID.
+  assert.equal(L.draftKey({ type: 'bot', id: '团子' }, 'c1'), 'cat:c1');
+  assert.equal(L.draftKey({ type: 'bot', id: '团子' }, ''), 'bot:团子');
+  assert.equal(L.draftKey({ type: 'group', id: 'g1' }, 'ignored'), 'group:g1');
+  // An old name-keyed draft moves to the lasting key, never over a newer one.
+  const old = L.drafts({ 'bot:团子': { text: '旧的' }, 'bot:栗子': { text: '旧' }, 'cat:c2': { text: '新的' } });
+  assert.equal(old.move('bot:团子', 'cat:c1'), true);
+  assert.deepEqual(plain(old.get('cat:c1')), { text: '旧的', quote: null });
+  assert.equal(old.get('bot:团子'), null);
+  assert.equal(old.move('bot:栗子', 'cat:c2'), true);
+  assert.deepEqual(plain(old.get('cat:c2')), { text: '新的', quote: null }, 'the newer draft stays');
+  assert.equal(old.move('bot:none', 'cat:c3'), false);
 });
 
 // ---------------------------------------------------------------- the module
@@ -143,9 +160,11 @@ function page(opts: Opts = {}) {
   const entries: Any = { bots: {}, groups: {} };
   const composer = { text: '', quote: null as Any };
   const app: Any = { sel: null };
+  const ids: Record<string, string> = { 团子: 'c1', 栗子: 'c2', 年糕: 'c3' };
   list.init({
     entries: () => entries,
     selected: () => app.sel,
+    catId: (name: string) => ids[name] || '',
     composer: {
       text: () => composer.text,
       set: (t: string) => { composer.text = t; },
@@ -179,7 +198,7 @@ function page(opts: Opts = {}) {
   const order = () => roster.querySelectorAll('.item').map((r: El) => r.dataset.bot || r.dataset.group);
   const advance = (ms: number) => { now += ms; for (const t of timers) while (t.at <= now) { t.at += t.every; t.fn(); } };
   const pagehide = () => (winListeners.get('pagehide') ?? []).forEach(fn => fn());
-  return { doc, list, roster, entries, composer, app, build, order, row, storage, advance, pagehide, clock: () => now, h };
+  return { doc, list, roster, entries, composer, app, build, order, row, storage, advance, pagehide, ids, clock: () => now, h };
 }
 
 test('a row\'s second line is the draft left in that chat (never in the open one), else the latest line said there; a failed read keeps the line it last read', () => {
@@ -324,12 +343,14 @@ test('a row that moves glides from where it was (180 ms), not under reduced moti
   }
 });
 
-test('each chat keeps its own draft and quote: leaving takes them along, another chat starts empty, coming back brings them; a chat opened again in place keeps the words but not the quote; a reload keeps them for the tab', () => {
+test('each chat keeps its own draft and quote: leaving takes them along, another chat starts empty, coming back brings the words at once and the quote once a read shows the same conversation; a reload keeps them for the tab', () => {
   const p = page();
   const cat = { type: 'bot', id: '团子' }, other = { type: 'bot', id: '栗子' }, group = { type: 'group', id: 'g1' };
+  const quote = { seq: 7, text: '上一句', thread: 'T1' };
   p.app.sel = cat;
+  p.list.enter(cat);
   p.composer.text = '帮我把这段';
-  p.composer.quote = { seq: 7, text: '上一句' };
+  p.composer.quote = quote;
   p.list.leave(cat);
   p.app.sel = other;
   p.list.enter(other);
@@ -341,19 +362,16 @@ test('each chat keeps its own draft and quote: leaving takes them along, another
   p.list.enter(group);
   assert.equal(p.composer.text, '');
   p.composer.text = '大家好';
-  p.composer.quote = { seq: 2, text: 'x' };
+  p.composer.quote = { seq: 2, text: 'x', thread: 'G' };
   p.list.leave(group);
   assert.deepEqual(plain(p.list.draft(group)), { text: '大家好', quote: null }, 'a group has no quote');
   p.app.sel = cat;
   p.list.enter(cat);
   assert.equal(p.composer.text, '帮我把这段');
-  assert.deepEqual(plain(p.composer.quote), { seq: 7, text: '上一句' });
+  assert.equal(p.composer.quote, null, 'the quote waits for a read of this chat');
   assert.equal(p.list.draft(cat), null, 'the open chat\'s words live in the composer, not as a draft');
-  // 新对话 / another saved conversation: the same chat opened again in place.
-  p.list.leave(cat);
-  p.list.enter(cat);
-  assert.equal(p.composer.text, '帮我把这段');
-  assert.equal(p.composer.quote, null, 'the quoted message belonged to the conversation before');
+  p.list.read(cat, 'T1');
+  assert.deepEqual(plain(p.composer.quote), quote, 'the same conversation: the quote is back');
   // A reload: the tab's copy brings back every draft, the open chat's too.
   p.pagehide();
   const saved = JSON.parse(p.storage.get('clowder-drafts:v1')!);
@@ -361,7 +379,119 @@ test('each chat keeps its own draft and quote: leaving takes them along, another
   q.app.sel = cat;
   q.list.enter(cat);
   assert.equal(q.composer.text, '帮我把这段');
+  q.list.read(cat, 'T1');
+  assert.deepEqual(plain(q.composer.quote), quote);
   assert.equal(text(q.list.preview('bot', '栗子').node), '草稿：群里也说一声');
+});
+
+test('a quote never lands in another conversation of the same cat: after a 新对话, a saved conversation opened again, or a move made elsewhere, it is dropped; one in the composer goes when a read shows the chat moved', () => {
+  const p = page();
+  const cat = { type: 'bot', id: '团子' }, other = { type: 'bot', id: '栗子' };
+  p.app.sel = cat;
+  p.list.enter(cat);
+  p.composer.text = '接着说';
+  p.composer.quote = { seq: 3, text: '那一句', thread: 'T1' };
+  // Opened again in place (a new or another saved conversation): the chat reads T2.
+  p.list.leave(cat);
+  p.list.enter(cat);
+  p.list.read(cat, 'T2');
+  assert.equal(p.composer.text, '接着说', 'the words stay');
+  assert.equal(p.composer.quote, null, 'the quote belonged to T1');
+  // Away and back after the cat was moved elsewhere (another tab), and after a reload.
+  p.composer.quote = { seq: 3, text: '那一句', thread: 'T2' };
+  p.list.leave(cat);
+  p.app.sel = other;
+  p.list.enter(other);
+  p.app.sel = cat;
+  p.list.enter(cat);
+  p.list.read(cat, 'T3');
+  assert.equal(p.composer.quote, null);
+  p.composer.quote = { seq: 3, text: '那一句', thread: 'T3' };
+  p.pagehide();
+  const q = page({ saved: { 'clowder-drafts:v1': JSON.parse(p.storage.get('clowder-drafts:v1')!) } });
+  q.app.sel = cat;
+  q.list.enter(cat);
+  q.list.read(cat, 'T4');
+  assert.equal(q.composer.quote, null, 'after a reload too');
+  // A quote taken here, then the chat moved under it: the next read takes it away.
+  q.composer.quote = { seq: 9, text: '这句', thread: 'T4' };
+  q.list.read(cat, 'T4');
+  assert.deepEqual(plain(q.composer.quote), { seq: 9, text: '这句', thread: 'T4' });
+  q.list.read(cat, 'T5');
+  assert.equal(q.composer.quote, null);
+});
+
+test('a draft belongs to the cat, not its name: a rename keeps it, a deleted cat\'s goes, and a new cat reusing the name starts empty; an old name-keyed draft is moved over', () => {
+  const p = page();
+  const cat = { type: 'bot', id: '团子' };
+  p.app.sel = cat;
+  p.list.enter(cat);
+  p.composer.text = '改名前写的';
+  p.composer.quote = { seq: 1, text: 'q', thread: 'T1' };
+  // Renamed 团子 → 汤圆: the list already knows only the new name when the chat reopens.
+  delete p.ids['团子'];
+  p.ids['汤圆'] = 'c1';
+  p.list.leave(cat);
+  const renamed = { type: 'bot', id: '汤圆' };
+  p.app.sel = renamed;
+  p.list.enter(renamed);
+  p.list.read(renamed, 'T1');
+  assert.equal(p.composer.text, '改名前写的', 'the words follow the cat');
+  assert.deepEqual(plain(p.composer.quote), { seq: 1, text: 'q', thread: 'T1' }, 'its conversation is the same: the quote stays');
+  // Away, then the cat is deleted: its draft goes; a new cat with that name starts empty.
+  p.list.leave(renamed);
+  p.app.sel = { type: 'bot', id: '栗子' };
+  p.list.enter(p.app.sel);
+  assert.ok(p.list.draft(renamed));
+  p.list.forget(renamed);
+  assert.equal(p.list.draft(renamed), null);
+  p.ids['汤圆'] = 'c9';
+  assert.equal(p.list.draft(renamed), null, 'the new cat with the old name has nothing');
+  assert.equal(p.list.preview('bot', '汤圆'), null);
+  // A draft saved under the old name key (before drafts were kept by ID) moves to the cat.
+  const q = page({ saved: { 'clowder-drafts:v1': { 'bot:年糕': { text: '旧版存的' } } } });
+  assert.equal(text(q.list.preview('bot', '年糕').node), '草稿：旧版存的');
+  assert.deepEqual(plain(q.list.draft({ type: 'bot', id: '年糕' })), { text: '旧版存的', quote: null });
+  assert.ok(!('bot:年糕' in JSON.parse(q.storage.get('clowder-drafts:v1')!)), 'stored under the cat\'s ID now');
+});
+
+test('a send that did not go out gives its words and quote back to its own chat: to the draft when the owner left, to an empty composer when they came back, never over newer words', () => {
+  const p = page();
+  const cat = { type: 'bot', id: '团子' }, other = { type: 'bot', id: '栗子' };
+  const quote = { seq: 5, text: '原话', thread: 'T1' };
+  p.app.sel = other;
+  p.list.enter(other);
+  assert.equal(p.list.giveBack(cat, '没发出去的', quote), true);
+  assert.deepEqual(plain(p.list.draft(cat)), { text: '没发出去的', quote });
+  assert.equal(p.list.giveBack(cat, '另一条', quote), false, 'a draft already there stays');
+  // Back in the chat before the answer: an empty composer takes the words; the quote waits for a read.
+  p.list.leave(other);
+  p.app.sel = cat;
+  p.list.enter(cat);
+  p.composer.text = '';
+  assert.equal(p.list.giveBack(cat, '又没发出去', quote), true);
+  assert.equal(p.composer.text, '又没发出去');
+  p.list.read(cat, 'T1');
+  assert.deepEqual(plain(p.composer.quote), quote);
+  p.composer.text = '新写的';
+  assert.equal(p.list.giveBack(cat, '旧的', quote), false);
+  assert.equal(p.composer.text, '新写的');
+});
+
+test('when the status cannot be read, one quiet line over the list says it shows the last read until a read succeeds', () => {
+  const p = page();
+  p.list.stale(false);
+  assert.equal(p.doc.querySelector('.cl-stale'), null, 'nothing until a read fails');
+  p.list.stale(true);
+  const line = p.doc.querySelector('.cl-stale')!;
+  assert.equal(text(line), '状态没能刷新，下面是上次读到的，可能已经变化。');
+  assert.equal(line.getAttribute('role'), 'status');
+  assert.ok(line.nextSibling === p.roster, 'right above the list (the list redraws without touching it)');
+  p.build(['团子']);
+  p.list.stale(true);
+  assert.equal(p.doc.querySelectorAll('.cl-stale').length, 1);
+  p.list.stale(false);
+  assert.equal(line.hidden, true);
 });
 
 // ---------------------------------------------------------------- app.js
@@ -389,5 +519,92 @@ test('the shell reads the sidebar lines from the status poll only: no transcript
   assert.match(app, /const who = listRules\.greetName\(state\.ownerName\);/);
   assert.match(app, /" 只猫猫"/);
   assert.doesNotMatch(app, /个 Bot"\), el\("span", "g", " 在忙/);
+  // Review fixes: a failed status read is said (and cleared by the next one); quotes carry
+  // their conversation and are checked on each read; drafts by native ID; a deleted cat's draft goes.
+  assert.match(app, /try \{ data = await api\("\/xbot-api\/bots\/status"\); \} catch \(e\) \{ chatList\.stale\(true\); throw e; \}\n\s+chatList\.stale\(false\);/);
+  assert.match(app, /state\.replyTo = \{ seq: n, text: String\(text \|\| ""\)\.trim\(\), thread: workspace\.threadId\(\) \|\| "" \};/);
+  assert.match(app, /state\.chatRead = read;\n[^\n]*\n\s+chatList\.read\(selection, read\.threadId\);/);
+  assert.match(app, /catId: \(name\) => botCatId\(name\),/);
+  assert.match(app, /method: "DELETE" \}\);\n\s+chatList\.forget\(\{ type: "bot", id: name \}\);/);
   assert.doesNotMatch(css.replace(/\/\*[\s\S]*?\*\//g, ''), /#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i);
+});
+
+// app.js's own sendText, with what it calls faked: the quote leaves the
+// composer when the send is dispatched, and comes back only if it did not go out.
+function sendHarness() {
+  const app = read('client/public/app.js');
+  const m = /\n {2}async function sendText\([^)]*\) \{\n[\s\S]*?\n {2}\}\n/.exec(app);
+  assert.ok(m, 'sendText is where the shell keeps it');
+  const out: Any = {};
+  const composer = { text: '' };
+  const state: Any = { sel: { type: 'bot', id: '团子' }, replyTo: null, pendingSends: [], replyErrors: [], streaming: 0, threadLoad: 0, sig: '' };
+  const calls: Any[] = [], givenBack: Any[] = [];
+  let answer: Any = null;
+  const marker = () => ({ className: '', isConnected: true, replaceChildren() {}, remove() {} });
+  const sandbox: Any = {
+    out, state, document: { createTextNode: (t: string) => t }, JSON, Date, Math, setTimeout: () => 0,
+    sessionStorage: { setItem() {} }, authenticated: true, input: {}, thread: { querySelector: () => null },
+    requestKey: () => 'k1', ownerSends: () => 0, announceSend() {}, botCatId: () => 'c1', setStatus() {}, zhError: (x: string) => x,
+    el: () => ({ append() {}, addEventListener() {} }), errorDetails() {}, composerCaretTo() {}, composerRefreshHeight() {}, syncComposer() {},
+    composerText: () => composer.text, composerSet: (t: string) => { composer.text = t; },
+    optimisticMessage: () => { const mk = marker(); return { dataset: {}, classList: { remove() {} }, querySelector: (sel: string) => (sel === '.send-state' ? mk : null) }; },
+    live: { expect: () => ({ accept() {}, drop() {} }) },
+    liveRules: { receipt: () => ({ userMessageId: 'u1' }) },
+    workspace: { threadId: () => 'T1', giveBack: () => false },
+    clearQuote: () => { state.replyTo = null; }, paintQuoteBar() {},
+    chatList: { giveBack: (...a: Any[]) => givenBack.push(a) },
+    loadThread: async () => {},
+    apiFetch: (path: string, opt: Any) => { calls.push({ path, body: JSON.parse(opt.body) }); return new Promise((resolve) => { answer = resolve; }); },
+  };
+  vm.runInNewContext(m![0] + 'out.sendText = sendText;', sandbox);
+  return { send: out.sendText, state, composer, calls, givenBack, respond: (r: Any) => answer(r) };
+}
+const accepted = () => ({ ok: true, status: 200, headers: { get: () => 'application/json' }, json: async () => ({ userMessageId: 'u1' }), text: async () => '' });
+const refused = () => ({ ok: false, status: 400, headers: { get: () => 'application/json' }, json: async () => ({ error: '不行' }), text: async () => '' });
+
+test('a quoted send takes its quote along at once: switching chats before the answer leaves no quote behind; a send that does not go out brings the quote back to its own chat (composer or draft), never onto newer words', async () => {
+  const quote = { seq: 5, text: '原话', thread: 'T1' };
+  // Accepted after the owner moved to another chat.
+  let h = sendHarness();
+  h.state.replyTo = quote;
+  let done = h.send('好的', null, [], null);
+  assert.equal(h.state.replyTo, null, 'gone from the composer when sent, so leaving the chat cannot keep it as a draft');
+  assert.equal(h.calls[0].body.reply_to, 5);
+  assert.equal(h.calls[0].body.expectedThreadId, 'T1');
+  h.state.sel = { type: 'bot', id: '栗子' };
+  h.respond(accepted());
+  await done;
+  assert.deepEqual(h.givenBack, [], 'it went out: nothing comes back anywhere');
+  // Refused while still here, the composer empty: words and quote come back.
+  h = sendHarness();
+  h.state.replyTo = quote;
+  done = h.send('好的', null, [], null);
+  h.respond(refused());
+  await done;
+  assert.equal(h.composer.text, '好的');
+  assert.deepEqual(plain(h.state.replyTo), quote);
+  // Refused while newer words are already in the composer: the quote does not land on them.
+  h = sendHarness();
+  h.state.replyTo = quote;
+  done = h.send('好的', null, [], null);
+  h.composer.text = '另一句';
+  h.respond(refused());
+  await done;
+  assert.equal(h.state.replyTo, null);
+  // Refused after the owner left: words and quote go back to that chat's draft.
+  h = sendHarness();
+  h.state.replyTo = quote;
+  const from = h.state.sel;
+  done = h.send('好的', null, [], null);
+  h.state.sel = { type: 'bot', id: '栗子' };
+  h.respond(refused());
+  await done;
+  assert.equal(h.givenBack.length, 1);
+  assert.ok(h.givenBack[0][0] === from);
+  assert.deepEqual(plain(h.givenBack[0].slice(1)), ['好的', quote]);
+  // A quote from another conversation is never sent as one.
+  h = sendHarness();
+  h.state.replyTo = { seq: 5, text: '原话', thread: 'T0' };
+  h.send('好的', null, [], null);
+  assert.equal('reply_to' in h.calls[0].body, false);
 });
