@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { once } from 'node:events';
 import { createApp } from '../server/app.js';
 import { NativeFixture } from './native-fixture.js';
-import { blockLine, messageBlocks } from '../server/native/blocks.js';
+import { blockLine, messageBlocks, requestLine } from '../server/native/blocks.js';
 import type { NativeMessage } from '../server/native/types.js';
 
 // Block shapes follow upstream packages/shared/src/types/rich.ts at the pinned
@@ -25,7 +25,8 @@ test('a cat’s cards, lists, choices and diffs come through as chat blocks; wha
     { id: 'song', kind: 'audio', v: 1, url: '/a.wav' }, { id: 'w', kind: 'html_widget', v: 1, html: '<b>x</b>' },
     { id: 'pics', kind: 'media_gallery', v: 1, items: [] }, { kind: 'card', title: 'no id' }, { id: 'empty', kind: 'checklist', items: [] }, 'junk'] } }));
   assert.deepEqual(blocks, [
-    { id: 'taste-proposal-p1', kind: 'card', title: '提议捕捉品味信号', body: '**猫的判断：** 偏好简短', tone: 'info', fields: [{ label: '维度', value: '真实表达' }], approval: { id: 'p1' } },
+    { id: 'taste-proposal-p1', kind: 'card', title: '提议捕捉品味信号', body: '**猫的判断：** 偏好简短', tone: 'info', fields: [{ label: '维度', value: '真实表达' }],
+      approval: { id: 'p1', kind: 'preference', title: '想记住你的一个偏好', body: '偏好简短' } },
     { id: 'todo', kind: 'checklist', title: '今天', items: [{ id: 'a', text: '买猫粮', checked: true }, { id: 'b', text: '洗碗', checked: false }] },
     { id: 'pick', kind: 'choices', mode: 'multiple', title: '选口味', max: 2, template: '我要 {selection}', answered: false, selected: [],
       options: [{ id: 'fish', label: '鱼', emoji: '🐟' }, { id: 'meat', label: '肉', description: '牛肉' }, { id: 'other', label: '别的', custom: true }] },
@@ -44,7 +45,17 @@ test('a cat’s cards, lists, choices and diffs come through as chat blocks; wha
     options: [{ id: 'start', label: '开始引导', action: { type: 'callback', endpoint: '/api/guide-actions/start' } }, { id: 'skip', label: '跳过' }] }] } })), { blocks: [], hidden: 1 });
   assert.deepEqual(messageBlocks(reply({})), { blocks: [], hidden: 0 });
   assert.deepEqual(messageBlocks(reply({ rich: 'nope' })), { blocks: [], hidden: 0 });
-  assert.equal(blockLine(blocks), '提议捕捉品味信号');
+  assert.equal(blockLine(blocks), '想记住你的一个偏好：偏好简短', 'a request is named in the chat’s words, not by the engine’s card title');
+  // The engine's schedule card, as it really writes it: the name after the colon, the trigger as JSON in a field.
+  const schedule = (title: string, trigger: unknown, producerId = 'F139') => (messageBlocks(reply({ rich: { blocks: [{ id: 's', kind: 'card', v: 1, title,
+    bodyMarkdown: '批准后才会创建并注册该任务；当前尚未产生调度副作用。', fields: [{ label: 'Task ID', value: 'dyn-1' }, { label: 'Trigger', value: typeof trigger === 'string' ? trigger : JSON.stringify(trigger) }],
+    meta: { approval: { producerId, canonicalProposalId: 'sp1' } } }] } })).blocks[0] as any).approval;
+  assert.deepEqual(schedule('提议创建定时任务：每周五写周报', { type: 'cron', expression: '0 17 * * 5', timezone: 'Asia/Singapore' }),
+    { id: 'sp1', kind: 'schedule', title: '想设一个定时', body: '每周五写周报 · 每周五 17:00（Asia/Singapore）' });
+  assert.deepEqual(schedule('提议删除定时任务：喝水提醒', 'not json'), { id: 'sp1', kind: 'schedule', title: '想取消一个定时', body: '喝水提醒' });
+  assert.deepEqual(schedule('一件别的事', {}, 'F999'), { id: 'sp1', kind: 'other', title: '有件事等你确认', body: '一件别的事' });
+  assert.equal(requestLine(reply({ rich: { blocks: [card] } })), '想记住你的一个偏好：偏好简短');
+  assert.equal(requestLine(reply({ rich: { blocks: [checklist] } })), undefined);
   assert.equal(blockLine(blocks.slice(2)), '选口味'); assert.equal(blockLine(blocks.slice(3)), 'app.ts'); assert.equal(blockLine([]), '');
   assert.equal(blockLine([{ id: 'x', kind: 'checklist', items: [{ id: 'a', text: '买猫粮', checked: false }] }]), '买猫粮');
 });
@@ -77,6 +88,13 @@ test('a reply that is only a card is a message, in single chats and groups, and 
   assert.equal(view.unread, 2, 'what is a row in the chat is a reply to be read');
   r.native.messages.set(r.thread.id, r.native.messages.get(r.thread.id)!.slice(0, 3));
   assert.equal((await r.bridge.activity.read(r.thread.id)).last!.text, '发来了暂时无法显示的内容');
+  // A request for confirmation is previewed (and found by search) in the chat's words, not by the engine's own text of that message.
+  r.native.messages.get(r.thread.id)!.push({ id: 'request', type: 'assistant', catId: r.cat.id, timestamp: 5000, content: '提议捕捉品味信号：authentic-expression', extra: { rich: { v: 1, blocks: [card] } } });
+  assert.equal((await r.bridge.activity.read(r.thread.id)).last!.text, '想记住你的一个偏好：偏好简短');
+  const hits = await (await r.call('/search?q=' + encodeURIComponent('偏好'))).json();
+  assert.deepEqual(hits.results.map((hit: any) => [hit.messageId, hit.snippet]), [['request', '想记住你的一个偏好：偏好简短']]);
+  assert.deepEqual((await (await r.call('/search?q=' + encodeURIComponent('品味信号'))).json()).results, [], 'the engine’s wording is not what was said');
+  r.native.messages.get(r.thread.id)!.pop();
   r.native.messages.set(r.thread.id, r.native.messages.get(r.thread.id)!.slice(0, 2));
   assert.deepEqual((await r.bridge.activity.read(r.thread.id)).last, { messageId: 'list', time: new Date(2000).toISOString(), from: 'cat', catId: r.cat.id, catName: 'Ada', text: '今天', files: 0 });
 
@@ -156,8 +174,9 @@ test('the engine’s receipt for an answered request reads as a plain line and m
     { id: 'other', type: 'connector', catId: null, timestamp: 4000, content: '别的连接器消息', source: { connector: 'feishu' } }]);
   const rows = (await (await r.call('/bots/Ada/transcript')).json()).messages.filter((m: any) => m.id);
   const of = (id: string) => rows.find((m: any) => m.id === id);
-  assert.deepEqual(['card', 'card2', 'card3', 'card4', 'card5', 'card6'].map(id => of(id).blocks[0].approval),
-    [{ id: 'p1', state: 'approved' }, { id: 'p2', state: 'rejected' }, { id: 'p3', state: 'closed' }, { id: 'p4' }, { id: 'p5' }, { id: 'p6' }]);
+  assert.deepEqual(['card', 'card2', 'card3', 'card4', 'card5', 'card6'].map(id => [of(id).blocks[0].approval.id, of(id).blocks[0].approval.state ?? null]),
+    [['p1', 'approved'], ['p2', 'rejected'], ['p3', 'closed'], ['p4', null], ['p5', null], ['p6', null]]);
+  assert.deepEqual([of('card').blocks[0].approval.kind, of('card2').blocks[0].approval.kind], ['preference', 'schedule'], 'a settled card still says what was asked');
   assert.deepEqual(['r1', 'r2', 'r3', 'other'].map(id => [of(id).content, of(id).notice ?? false]),
     [['已记住这个偏好。', true], ['定时没有改动。', true], ['这件事已经结束。', true], ['别的连接器消息', false]]);
   assert.match(of('r1').native.content, /审批结果/, 'the native record keeps the engine’s wording');
@@ -166,5 +185,5 @@ test('the engine’s receipt for an answered request reads as a plain line and m
   const group = await (await r.call('/groups', 'POST', { members: ['Ada', 'Bob'] })).json();
   r.native.messages.set(group.id, [request('card', 'p1'), receipt('r1', 'p1', 'F221', 'accepted')]);
   const page = await (await r.call(`/groups/${group.id}`)).json();
-  assert.deepEqual(page.messages.map((m: any) => [m.id, m.blocks?.[0]?.approval ?? null, m.notice ? m.text : null]), [['card', { id: 'p1', state: 'approved' }, null], ['r1', null, '已记住这个偏好。']]);
+  assert.deepEqual(page.messages.map((m: any) => [m.id, m.blocks?.[0]?.approval ?? null, m.notice ? m.text : null]), [['card', { id: 'p1', kind: 'preference', title: '想记住你的一个偏好', body: '偏好简短', state: 'approved' }, null], ['r1', null, '已记住这个偏好。']]);
 });

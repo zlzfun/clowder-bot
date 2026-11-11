@@ -1,5 +1,6 @@
 import type { NativeMessage } from './types.js';
-import { clip } from './text.js';
+import { clip, plainLine } from './text.js';
+import { triggerWords } from './trigger-words.js';
 
 /**
  * What a cat attached to a message besides words and files, as the chat can
@@ -10,17 +11,49 @@ import { clip } from './text.js';
  */
 export type ChatBlock =
   | { id: string; kind: 'card'; title: string; body?: string; tone?: 'info' | 'success' | 'warning' | 'danger'; fields?: Array<{ label: string; value: string }>;
-      /** Set when the card is a native request for the owner's confirmation (see approvals.ts); `state` once the engine's receipt on the same page says how it was answered. */
-      approval?: { id: string; state?: 'approved' | 'rejected' | 'closed' } }
+      /**
+       * Set when the card is a native request for the owner's confirmation (see approvals.ts): what it
+       * asks for in the chat's words, read from the card itself so it can still be said once the request
+       * is settled (`title` has no subject: "想设一个定时"); `state` once the engine's receipt on the
+       * same page says how it was answered.
+       */
+      approval?: { id: string; kind: RequestKind; title: string; body?: string; state?: 'approved' | 'rejected' | 'closed' } }
   | { id: string; kind: 'checklist'; title?: string; items: Array<{ id: string; text: string; checked: boolean }> }
   | { id: string; kind: 'choices'; mode: 'single' | 'multiple' | 'confirm'; title?: string; description?: string;
       options: Array<{ id: string; label: string; emoji?: string; description?: string; custom?: true }>;
       max?: number; template?: string; answered: boolean; selected: string[] }
   | { id: string; kind: 'diff'; file: string; diff: string };
 
+export type RequestKind = 'preference' | 'profile' | 'person' | 'schedule' | 'question' | 'other';
 const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const text = (value: unknown, max: number): string | undefined => typeof value === 'string' && value.trim() ? clip(value, max) : undefined;
 const tones = ['info', 'success', 'warning', 'danger'] as const;
+
+/**
+ * What a native request card asks for, in the chat's words. The engine writes these cards for its own
+ * web client ("提议创建定时任务：每周五写周报", a Trigger field holding JSON, "提议捕捉品味信号");
+ * the producer says which kind it is, the card's own title, body and fields say the rest.
+ */
+function requestWords(producer: unknown, block: Record<string, unknown>): { kind: RequestKind; title: string; body?: string } {
+  const heading = text(block.title, 300) ?? '', colon = heading.search(/[：:]/);
+  const label = colon >= 0 ? clip(heading.slice(colon + 1).trim(), 80) : '';
+  const said = plainLine(typeof block.bodyMarkdown === 'string' ? block.bodyMarkdown : '');
+  const body = (value: string) => value ? { body: clip(value, 400) } : {};
+  switch (producer) {
+    case 'F139': {
+      const field = (Array.isArray(block.fields) ? block.fields : []).map(record).find(entry => entry.label === 'Trigger');
+      let when = '';
+      try { when = typeof field?.value === 'string' ? triggerWords(JSON.parse(field.value)) : ''; } catch { /* not a trigger the card spells out */ }
+      const remove = /删除|取消|移除|停用/.test(colon >= 0 ? heading.slice(0, colon) : heading);
+      return { kind: 'schedule', title: remove ? '想取消一个定时' : '想设一个定时', ...body([label, when].filter(Boolean).join(' · ')) };
+    }
+    case 'F221': return { kind: 'preference', title: '想记住你的一个偏好', ...body(said.replace(/^猫的判断[：:]\s*/, '')) };
+    case 'F231': return { kind: 'profile', title: '想更新关于你的资料', ...body(said) };
+    case 'F276': return { kind: 'person', title: '想记下一位相关的人', ...body(said) };
+    case 'F306': return { kind: 'question', title: '有件事要问你', ...body(said || label || heading) };
+    default: return { kind: 'other', title: '有件事等你确认', ...body(label || heading) };
+  }
+}
 
 /** How the engine's receipt says a request for confirmation was answered (see message-presentation.ts approvalReceipt). */
 export interface ApprovalDecision { proposalId: string; producerId: string; state: 'approved' | 'rejected' | 'closed'; cardMessageId?: string }
@@ -46,7 +79,7 @@ export function messageBlocks(message: NativeMessage, decided: ApprovalDecision[
         .map(field => ({ label: clip(field.label as string, 80), value: clip(field.value as string, 400) }));
       blocks.push({ id, kind: 'card', title: text(block.title, 300)!, ...(text(block.bodyMarkdown, 8000) ? { body: text(block.bodyMarkdown, 8000)! } : {}),
         ...(tones.includes(block.tone as never) ? { tone: block.tone as typeof tones[number] } : {}), ...(fields.length ? { fields } : {}),
-        ...(proposal ? { approval: { id: proposal, ...(state ? { state } : {}) } } : {}) });
+        ...(proposal ? { approval: { id: proposal, ...requestWords(approval.producerId, block), ...(state ? { state } : {}) } } : {}) });
     } else if (block.kind === 'checklist' && Array.isArray(block.items)) {
       const items = block.items.map(record).filter(item => typeof item.id === 'string' && typeof item.text === 'string').slice(0, 100)
         .map(item => ({ id: item.id as string, text: clip(item.text as string, 500), checked: item.checked === true }));
@@ -84,9 +117,21 @@ export function messageBlocks(message: NativeMessage, decided: ApprovalDecision[
   return { blocks, hidden };
 }
 
+/**
+ * A message that carries a request for confirmation, as one line in the chat's words ("想设一个定时：每周五
+ * 写周报 · 每周五 17:00"). The engine's own text of such a message ("请求批准创建定时任务「…」",
+ * "提议捕捉品味信号：…") is written for its web client; previews and search use this line instead.
+ */
+export function requestLine(message: NativeMessage): string | undefined {
+  if (message.type !== 'assistant') return undefined;
+  const request = messageBlocks(message).blocks.find(block => block.kind === 'card' && block.approval);
+  return request ? blockLine([request]) : undefined;
+}
+
 /** One line for a contact-list preview when a message has no words: what its first block is called. */
 export function blockLine(blocks: ChatBlock[]): string {
   const first = blocks[0];
   if (!first) return '';
+  if (first.kind === 'card' && first.approval) return first.approval.title + (first.approval.body ? `：${first.approval.body}` : '');
   return first.kind === 'diff' ? first.file : first.title ?? (first.kind === 'checklist' ? first.items[0]!.text : first.kind === 'choices' ? first.options.map(option => option.label).join(' / ') : '');
 }

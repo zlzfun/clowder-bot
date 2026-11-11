@@ -2,6 +2,8 @@ import { ApiError } from '../errors.js';
 import { encode, type BotBridge } from './bridge.js';
 import type { NativeCat } from './types.js';
 import { clip } from './text.js';
+import { triggerWords } from './trigger-words.js';
+export { triggerWords };
 
 /**
  * What a cat asked the owner to confirm, in the words of a chat. The request,
@@ -25,28 +27,6 @@ const record = (value: unknown): Item => value && typeof value === 'object' && !
 const words = (value: unknown, max = 400): string => typeof value === 'string' ? clip(value.trim(), max) : '';
 // The decision routes the Bot may reach; the hub manifest picks one of them per kind of request.
 const decisionBases = /^\/api\/(?:proposals|session-handoff|dispatch-proposals|taste-proposals|profile-updates|person-memory-proposals|entity-proposals|event-memory-corrections|schedule-proposals|eval-repair-proposals)$/;
-const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-
-/** A native schedule trigger in everyday words; an expression it does not recognise is shown as it is. */
-export function triggerWords(trigger: unknown): string {
-  const t = record(trigger);
-  if (t.type === 'once' && typeof t.fireAt === 'number')
-    return new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(t.fireAt));
-  if (t.type === 'interval' && typeof t.ms === 'number' && t.ms > 0) {
-    const minutes = Math.round(t.ms / 60000);
-    return minutes % 1440 === 0 ? `每 ${minutes / 1440} 天` : minutes % 60 === 0 ? `每 ${minutes / 60} 小时` : `每 ${minutes} 分钟`;
-  }
-  if (t.type === 'cron' && typeof t.expression === 'string') {
-    const zone = typeof t.timezone === 'string' && t.timezone ? `（${t.timezone}）` : '';
-    const match = /^(\d{1,2}) (\d{1,2}) \* \* (\*|[0-6](?:,[0-6])*)$/.exec(t.expression.trim());
-    if (!match) return `按计划 ${t.expression}${zone}`;
-    const clock = `${match[2]!.padStart(2, '0')}:${match[1]!.padStart(2, '0')}`;
-    const days = match[3] === '*' ? '每天' : '每' + [...new Set(match[3]!.split(',').map(Number))].sort().map(day => weekdays[day]).join('、');
-    return `${days} ${clock}${zone}`;
-  }
-  return '按原生计划';
-}
-
 /**
  * A pending request in a few everyday words, for the one-line status above the
  * composer and the contact list ("等你确认：…"). The hub's own summaries are in

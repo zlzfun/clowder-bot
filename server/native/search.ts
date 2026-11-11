@@ -1,6 +1,7 @@
 import type { BotBridge } from './bridge.js';
 import { messageDisplayText } from './message-presentation.js';
 import { plainLine } from './text.js';
+import { requestLine } from './blocks.js';
 import type { NativeCat, NativeMessage } from './types.js';
 
 export interface SearchHit {
@@ -67,7 +68,7 @@ export async function searchMessages(bridge: BotBridge, query: string, limit = 3
         const owner = message.type === 'user' && !bridge.isInvitation(target.threadId, message);
         if (!owner && !replies.has(message.id)) continue;
         const cat: NativeCat | undefined = owner ? undefined : cats.find(known => known.id === message.catId);
-        const found = snippet(messageDisplayText(message, target.threadId, cat?.name), query, !owner);
+        const found = snippet(requestLine(message) ?? messageDisplayText(message, target.threadId, cat?.name), query, !owner);
         if (!found) continue;
         hits.push({ chat, threadId: target.threadId, current: target.current, messageId: message.id, time: new Date(message.timestamp).toISOString(),
           from: owner ? 'owner' : 'cat', ...(cat ? { catName: cat.name } : {}), ...found, order: orderTime(message) });

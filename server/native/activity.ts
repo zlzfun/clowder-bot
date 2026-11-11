@@ -3,7 +3,7 @@ import type { BotBridge, QueueView } from './bridge.js';
 import { messageDisplayText, messagePresentation } from './message-presentation.js';
 import type { NativeCat, NativeMessage } from './types.js';
 import { clip, plainLine } from './text.js';
-import { blockLine, messageBlocks } from './blocks.js';
+import { blockLine, messageBlocks, requestLine } from './blocks.js';
 import { approvalLine } from './approvals.js';
 
 export interface ActivityItem {
@@ -98,7 +98,8 @@ export class Activity {
           if (said) {
             // A reply that is only a card or a list is named after it.
             const rich = said.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(said);
-            const words = messageDisplayText(said, threadId, names.find(cat => cat.id === said.catId)?.name);
+            // A request for confirmation is said in the chat's words, not in the engine's text of that message.
+            const words = requestLine(said) ?? messageDisplayText(said, threadId, names.find(cat => cat.id === said.catId)?.name);
             // A cat writes Markdown; the list shows its words. What the owner typed stays as typed.
             const text = ((said.type === 'user' ? words : plainLine(words) || words) || blockLine(rich.blocks) || (rich.hidden ? '发来了暂时无法显示的内容' : '')).replace(/\s+/g, ' ').trim();
             view.last = { messageId: said.id, time: new Date(said.timestamp).toISOString(), from: said.type === 'user' ? 'owner' : 'cat',
