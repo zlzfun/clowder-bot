@@ -32,6 +32,11 @@ a.setrow.about-link:focus-visible { outline: 2px solid var(--accent); outline-of
 a.setrow.about-link > .ic { flex: none; color: var(--x-muted); }
 .setsec.about-tech { margin-top: var(--x-s7); }
 
+/* ---- The toast with a longer note (a creation's notice, finding a message):
+   centred with left: 50%, it could only use half the column, so on a phone
+   two sentences ran down seven narrow lines. Short toasts look the same. */
+.toast { width: max-content; max-width: min(560px, calc(100% - 32px)); }
+
 /* ---- Audit: siblings that differed. */
 /* The drawer's pages share one left edge: 文件 sat 4px further left (16px)
    than 资料, 记忆 and 定时 (20px). */

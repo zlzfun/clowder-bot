@@ -2738,7 +2738,9 @@
     if (Number.isFinite(prev.getTime()) && prev.toDateString() === current.toDateString() && current - prev < 30 * 60000) return "";
     const yesterday = new Date(now);
     yesterday.setDate(yesterday.getDate() - 1);
-    const day = current.toDateString() === now.toDateString() ? "今天" : current.toDateString() === yesterday.toDateString() ? "昨天" : current.getFullYear() + "/" + (current.getMonth() + 1) + "/" + current.getDate();
+    // Older days read like the sidebar's times: 11月3日, with the year only when it is not this year.
+    const date = (current.getFullYear() === now.getFullYear() ? "" : current.getFullYear() + "年") + (current.getMonth() + 1) + "月" + current.getDate() + "日";
+    const day = current.toDateString() === now.toDateString() ? "今天" : current.toDateString() === yesterday.toDateString() ? "昨天" : date;
     return day + " " + clockTime(time);
   }
 
@@ -4894,7 +4896,7 @@
     const copy = item("clipboard", "复制名字", () => copyBotID(name));
     copy.append(el("span", "v mono", name));
     if (state.app) item("folder-open", "打开工作目录", () => openWorkdir(name));
-    item("folder-open", "查看生成的图片", () => openGenerated(name));
+    // 查看生成的图片 is gone: this server has no …/generated route, so the item only ever failed.
     item("download", "导出对话", () => openExport(name));
     menu.append(el("div", "mgap"));
     item("trash", "删除猫猫", () => confirmDelete(name), { danger: true });
@@ -4956,33 +4958,6 @@
     } catch (e) {
       setStatus(visibleError(e), true);
     }
-  }
-
-  async function openGenerated(name) {
-    const route = "/xbot-api/bots/" + encodeURIComponent(name);
-    try {
-      const data = await api(route + "/generated");
-      openModal("生成的图片", [
-        { type: "note", label: "图片保存在运行 clowder-bot 的电脑上。" },
-        { name: "path", label: "工作区 generated/", value: data.path },
-      ], async () => {
-        if (!await copyText(data.path)) throw new Error("复制失败，请手动选择路径。");
-        showToast("已复制路径");
-      }, "复制路径", inputs => {
-        inputs.path.readOnly = true;
-        $("modal-cancel").textContent = "关闭";
-        if (data.can_open) {
-          const open = el("button", "secondary", "打开目录"); open.type = "button";
-          open.onclick = async () => {
-            open.disabled = true;
-            try { await api(route + "/open-workdir?folder=generated", {method:"POST"}); }
-            catch (e) { modalError.hidden = false; modalError.textContent = visibleError(e); }
-            finally { open.disabled = false; }
-          };
-          modalFields.append(open);
-        }
-      });
-    } catch (e) { setStatus(visibleError(e), true); }
   }
 
   let toastTimer = 0;
@@ -5990,14 +5965,15 @@
 
   function openFork(src) {
     openModal("复刻猫猫", [
-      { name: "name", label: "标识", placeholder: "reviewer" },
-      { name: "role", label: "角色", multiline: true },
-      { name: "group", label: "群" },
+      // Everyday labels: the new cat's name, what it does (its role) and the sidebar folder (分组, not a 群聊).
+      { name: "name", label: "名字", placeholder: "比如：审稿员" },
+      { name: "role", label: "它负责什么", multiline: true },
+      { name: "group", label: "分组（可不填）" },
     ], async (v) => {
       const name = (v.name || "").trim();
       const role = (v.role || "").trim();
       if (!name) throw new Error("需要一个名字");
-      if (!role) throw new Error("需要一个角色");
+      if (!role) throw new Error("写一句它负责什么");
       const body = { name: name, role: role };
       const group = (v.group || "").trim();
       if (group) body.group = group;

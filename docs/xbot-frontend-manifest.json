@@ -27,7 +27,7 @@
       "file": "app.js",
       "target": "client/public/app.js",
       "sourceSha256": "1248f793493826bf044359c71e7d8772ccc3472d6021d6abb979dff9b6cb29bc",
-      "sha256": "885dfc8f57c5305205d12768dc2c950c396e3387d601cd3c4ed58e708ef3856a",
+      "sha256": "5eee60e2691beb68d617d834d816ce72018329996a650234bf4834c5dc64a879",
       "unchanged": false
     },
     {
@@ -901,7 +901,7 @@
       "target": "client/public/polish.css",
       "description": "Styles for 6a: the found message's quiet ring that follows its bubble and a flash that reads in dark mode, 设置 → 关于's runtime link as a settings row, and the consistency fixes from the audit; existing tokens and keyframes only",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 打磨 6a · one voice and a clean finish (docs/xbot-frontend.md item 33)",
-      "sha256": "cc7c5f40adc46e3582d9f35c8e7b38b615cde56284405e7c776645fc6bb0250d"
+      "sha256": "924b38de8bd19a90a82bd35901b216beb60c01008c524f8f6d4935ce1768538e"
     }
   ]
 }

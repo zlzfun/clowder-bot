@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-import { Doc, El } from './fake-dom.ts';
+import { Doc, El } from './fake-dom.js';
 
 // Finding a message further back than the loaded history (chat-locate-rules.js,
 // chat-locate.js; docs/xbot-frontend.md item 33). The rules run in a bare VM;

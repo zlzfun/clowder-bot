@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-import { Doc, El } from './fake-dom.ts';
+import { Doc, El } from './fake-dom.js';
 
 // A line break a cat wrote inside a paragraph stays a line break
 // (docs/xbot-frontend.md item 33). The reply renderer is app.js's own
@@ -16,7 +16,7 @@ const read = (path: string) => readFileSync(new URL('../' + path, import.meta.ur
 type Any = any;
 const app = read('client/public/app.js');
 const take = (name: string) => {
-  const m = new RegExp(`\\n {2}function ${name}\\([^)]*\\) \\{\\n[\\s\\S]*?\\n {2}\\}\\n`).exec(app);
+  const m = new RegExp(`\\n {2}function ${name}\\([^\\n]*\\) \\{\\n[\\s\\S]*?\\n {2}\\}\\n`).exec(app);
   assert.ok(m, name + ' is where the renderer keeps it');
   return m[0];
 };
@@ -77,6 +77,18 @@ test('the live reply and the settled bubble draw through the same renderer', () 
   assert.match(take('botBubble'), /appendBotContent\(body, displayText\(said\)\)/);
   assert.match(take('appendBotContent'), /const bubble = el\("div", "prose bot-bubble"\);\n\s+appendMarkdown\(bubble, stripBotImages\(text\)\);/);
   assert.match(take('appendBlocks'), /appendInline\(p, para\.join\("\\n"\)\);\n\s+\/\/ [^\n]*\n\s+presentation\.lineBreaks\(p\);/);
+});
+
+test('the history\'s day separators read like the sidebar\'s times: 今天, 昨天, 11月3日, and the year only for another year', () => {
+  const out: Any = {};
+  vm.runInNewContext(take('clockTime') + take('timeDivider') + 'out.divider = timeDivider;', { out, Date, Number });
+  const now = new Date(2026, 10, 11, 23, 0);
+  assert.equal(out.divider('', new Date(2026, 10, 11, 9, 5).toISOString(), now), '今天 09:05');
+  assert.equal(out.divider('', new Date(2026, 10, 10, 14, 5).toISOString(), now), '昨天 14:05');
+  assert.equal(out.divider('', new Date(2026, 10, 3, 14, 5).toISOString(), now), '11月3日 14:05');
+  assert.equal(out.divider('', new Date(2025, 10, 3, 14, 5).toISOString(), now), '2025年11月3日 14:05');
+  // Within half an hour of the line before, on the same day: no separator.
+  assert.equal(out.divider(new Date(2026, 10, 3, 14, 0).toISOString(), new Date(2026, 10, 3, 14, 5).toISOString(), now), '');
 });
 
 test('lineBreaks leaves code and formulas alone and adds one break per newline', () => {
