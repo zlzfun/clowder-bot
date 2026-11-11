@@ -26,8 +26,9 @@
 //   named for what they are: 这个对话的便笺. Nothing here edits, adds,
 //   deletes, confirms or forgets.
 //
-// Nothing here schedules, approves or completes anything. Approvals are made
-// with the existing controls (the runtime panel); the line only points there.
+// Nothing here schedules, approves or completes anything. A request is
+// answered on its own card in the history (chat-cards.js); the line's 去确认
+// goes there, or to the runtime panel when the card is not drawn.
 (() => {
   "use strict";
   const X = window.ClowderExperienceRules;
@@ -151,6 +152,8 @@
         if (gen !== S.gen || req !== S.req) return;
         const a = X.activity(data);
         if (!a) throw Object.assign(new Error("状态的返回格式无法识别"), { status: 0 });
+        // A waiting request is named as its card in the chat names it, once that is known (chat-cards.js).
+        if (H.approvalLabel) for (const i of a.items) if (i.kind === "approval") i.label = H.approvalLabel(i) || i.label;
         // Another thread's state never shows here; the transcript names the
         // thread and the next read asks again.
         if (S.threadId && a.threadId && a.threadId !== S.threadId) { S.at = 0; return; }
@@ -375,6 +378,18 @@
     t.title = text;
     li.append(t);
     const acts = node("span", "cx-acts");
+    // A request with its card in the history (chat-cards.js): 去确认 goes to
+    // that card, which answers it in place; only a card that is not drawn
+    // falls back to the runtime panel (the link's own target).
+    if (item.kind === "approval" && H.confirm) {
+      const go = runtimeLink("去确认");
+      go.dataset.cxFocus = "confirm:" + item.id;
+      go.setAttribute("aria-label", "去确认：" + text);
+      go.addEventListener("click", (ev) => { if (H.confirm(item)) ev.preventDefault(); });
+      acts.append(go);
+      li.append(acts);
+      return li;
+    }
     // A Task opens at its card (its source message is only where it began).
     if (item.messageId && !(item.kind === "task" && item.taskId)) {
       const b = button("text-btn ws-link", "查看", () => locate(item), "在对话里查看：" + text);
