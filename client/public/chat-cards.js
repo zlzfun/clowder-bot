@@ -253,13 +253,16 @@
   }
 
   // A receipt of the engine reworded, or a refusal said once by name: a quiet
-  // centred line, not a bubble from a "系统" speaker.
+  // centred line, not a bubble from a "系统" speaker. A reminder that came due
+  // (reminder: true, 「提醒：…」) is a little more present: the alarm clock of
+  // a schedule card before its words, on a soft pill; the cat's reply follows.
   function notice(m, text) {
-    const row = node("div", "sysline ck-notice");
+    const row = node("div", "sysline ck-notice" + (m.reminder ? " ck-reminder" : ""));
     if (m.seq) row.dataset.seq = String(m.seq);
     const id = m.native_message_id || m.id;
     if (id) row.dataset.mid = String(id);
     if (m.time) row.dataset.time = String(m.time);
+    if (m.reminder) row.append(icon("alarm-clock"));
     const label = node("span", "label", String(text || ""));
     label.title = String(text || "");
     row.append(label);
@@ -503,19 +506,6 @@
     S.locate = { key: keyOf(sel), item, until: Date.now() + 10000 };
     if (S.locate.key === S.key && find(item)) S.locate = null;
   }
-  // What the status line says for a waiting request (an activity item). The
-  // server's own everyday words stay; a label that still leads with the
-  // engine's English tag is named as its card names it once listed, else by
-  // the summary's words without the tag. "": keep the server's label.
-  function label(item) {
-    const raw = R.oneLine(item && item.label).replace(/^等你确认[：:]?\s*/, "");
-    const said = R.summary(raw);
-    if (said === raw) return "";
-    const id = item && item.proposalId ? String(item.proposalId) : "";
-    const i = id ? S.list.get(id) || seen.get(id) : null;
-    if (i && i.title) return i.title;
-    return said ? "等你确认：" + said : "";
-  }
 
   // ------------------------------------------------------------- 选项
   function pickOf(key) {
@@ -645,9 +635,11 @@
     row.append(badge, field, send);
     return row;
   }
+  // A pick in flight, or one the server says was already answered: nothing more is taken.
+  const closed = (p) => p.phase === "sending" || p.phase === "recording" || p.phase === "conflict";
   function toggle(key, id) {
     const p = pickOf(key);
-    if (p.phase === "sending" || p.phase === "recording") return;
+    if (closed(p)) return;
     const at = p.picks.indexOf(id);
     if (at >= 0) p.picks.splice(at, 1);
     else {
@@ -662,7 +654,7 @@
   // on the native block. Each step says how it went.
   async function choose(key, fact, ids, custom) {
     const b = fact.block, p = pickOf(key);
-    if (!R.canPick(b, ids) || p.phase === "sending" || p.phase === "recording") return;
+    if (!R.canPick(b, ids) || closed(p)) return;
     const text = R.choiceMessage(b, ids, custom);
     Object.assign(p, { phase: "sending", ids: ids.slice(), text, error: null });
     repaint();
@@ -694,10 +686,16 @@
     if (res.ok && data && data.answered === true) {
       Object.assign(p, { phase: "recorded", selected: Array.isArray(data.selected) ? data.selected.map(String) : ids.slice(), error: null });
       announce("已记下这次选择");
+    } else if (res.status === 409 && !/会话|对话/.test(String(data && data.error || ""))) {
+      // Already answered: nothing is offered again on this page (another
+      // pick would only send another message). The conversation is read
+      // again; the block shows its record once a read of its message has it
+      // (a block on an earlier page keeps saying it was answered).
+      Object.assign(p, { phase: "conflict", error: R.failure(data, "这个选项已经回答过了") });
+      if (H.reload) H.reload();
     } else if (res.status === 409 || res.status === 400) {
-      // Refused for what it is (already answered, not a valid pick): the
-      // server's own sentence; an answered block shows its record after a read.
-      Object.assign(p, { phase: "refused", error: R.failure(data, res.status === 409 ? "这个选项已经回答过了" : "这次选择没有被接受") });
+      // Not a valid pick, or the conversation moved: the server's own sentence; the pick stays open.
+      Object.assign(p, { phase: "refused", error: R.failure(data, "这次选择没有被接受") });
       if (res.status === 409 && H.reload) H.reload();
     } else {
       Object.assign(p, { phase: "unrecorded", error: R.failure(data, "暂时没能记下") });
@@ -729,7 +727,7 @@
   }
 
   window.ClowderCards = Object.freeze({
-    init, select, observe, words, blocks, ending, notice, rendered, find, locateSoon, label,
+    init, select, observe, words, blocks, ending, notice, rendered, find, locateSoon,
     // For tests and diagnostics only: what this page holds, never a record.
     peek: () => ({ list: [...S.list.keys()], listState: S.listState, decisions: [...decisions].map(([id, d]) => ({ id, ...d })) }),
   });
