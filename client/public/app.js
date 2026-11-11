@@ -930,6 +930,9 @@
   // control's look and 回到最新 (chat-live.js); init() is near the end.
   const live = window.ClowderLive;
   const liveRules = window.ClowderLiveRules;
+  // 开箱即用 (quick-create.js): the first-run stage, the no-chat line and the
+  // quick 新建猫猫 / 新建群聊 dialogs; init() is near the end, after experience.init.
+  const quick = window.ClowderQuickCreate;
   // An empty single chat's greeting invitation (chat-presentation.js): one
   // POST per chat thread for the page's life, never retried by itself. Its
   // outcome redraws only the line of the chat it was sent for, if that chat is still
@@ -4001,13 +4004,13 @@
       btn.addEventListener("click", () => pickBot(b.name));
       pins.append(btn);
     }
-    // One 新建 for the sidebar: 新建猫猫 or 新建群组 (the 群组 "+" merged in).
+    // One 新建 for the sidebar: 新建猫猫 or 新建群聊 (the 群组 "+" merged in).
     const add = el("button", "pin add");
     add.type = "button";
-    add.setAttribute("aria-label", "新建猫猫或群组");
+    add.setAttribute("aria-label", "新建猫猫或群聊");
     add.setAttribute("aria-haspopup", "menu");
     add.setAttribute("aria-expanded", "false");
-    setTip(add, "新建猫猫或群组", "right");
+    setTip(add, "新建猫猫或群聊", "right");
     const face = el("span", "plus-face");
     face.append(icon("plus"));
     add.append(face, el("span", "pin-name pin-label", "新建"));
@@ -4034,7 +4037,7 @@
     }
     if (state.others && state.others.length) roster.append(othersFolder());
 
-    // No groups, no header: 新建 already offers 新建群组.
+    // No groups, no header: 新建 already offers 新建群聊.
     if (state.groups.length) roster.append(sectionLabel("群组"));
     for (const g of state.groups) {
       const open = state.sel && state.sel.type === "group" && state.sel.id === g.id;
@@ -4095,7 +4098,11 @@
       menu.append(b);
     };
     item("plus", "新建猫猫", () => openNewBot(anchor));
-    item("users-plus", "新建群组", openNewGroup);
+    item("users-plus", "新建群聊", () => openNewGroup(anchor));
+    // Escape closes only the menu and returns to 新建 (closeNewMenu).
+    menu.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); closeNewMenu(); }
+    });
     anchor.setAttribute("aria-expanded", "true");
     placeMenu(anchor, menu, "below");
     menu.querySelector("button").focus();
@@ -5099,7 +5106,7 @@
       await refreshLists();
       const home = state.bots.find((b) => b.primary) || state.bots[0];
       if (home) await selectBot(home.name);
-      else paintPanel();
+      else { paintPanel(); showNoChat(); }
     }, "删除");
   }
 
@@ -7043,10 +7050,20 @@
     }, "下载");
   }
 
-  // 新建猫猫 is the template module's own layer (cat-templates.js): it reads the
-  // templates and Agents, sends the one create request, and keeps a single
-  // layer open. Here it only hands back to the shell once the cat exists.
+  // 新建猫猫 opens the quick dialog (quick-create.js: a face, a name, 创建); its
+  // 更多设置 hands over to the template creator below. Each module sends its
+  // own create request; the shell only opens the cat it made.
   function openNewBot(opener) {
+    closePops();
+    if (!modal.hidden) closeModal();
+    if (!quick) { openTemplateCreate(opener); return; }
+    quick.openCat({ opener: opener && opener.isConnected ? opener : document.activeElement });
+  }
+
+  // The template creator is the template module's own layer (cat-templates.js):
+  // it reads the templates and Agents, sends the one create request, and keeps
+  // a single layer open. Here it only hands back to the shell once the cat exists.
+  function openTemplateCreate(opener) {
     closePops();
     if (!window.ClowderCatTemplates) { setStatus("新建猫猫暂不可用", true); return; }
     if (!modal.hidden) closeModal();
@@ -7063,17 +7080,12 @@
     });
   }
 
-  function openNewGroup() {
-    openModal("新建群组", [
-      { name: "name", label: "名字", placeholder: "晨会" },
-      { name: "members", label: "成员", type: "checks", options: state.bots.map((b) => [b.name, niceName(b.name)]) },
-    ], async (v) => {
-      const members = v.members || [];
-      if (members.length < 2) throw new Error("至少选两个 Bot");
-      const g = await api("/xbot-api/groups", { method: "POST", body: { name: (v.name || "").trim(), members: members } });
-      await refreshLists();
-      if (g.id) await selectGroup(g.id);
-    });
+  // 新建群聊 is the quick dialog's (quick-create.js): cats as face chips, an
+  // optional name; it sends the create request and hands back the new group.
+  function openNewGroup(opener) {
+    closePops();
+    if (!modal.hidden) closeModal();
+    quick.openGroup({ opener: opener && opener.isConnected ? opener : document.activeElement });
   }
 
   // Files waiting in the composer belong to workspace.js: any file from the
@@ -7725,13 +7737,18 @@
     try { remembered = sessionStorage.getItem("xbot-selected-bot") || ""; } catch (e) {}
     const home = state.bots.find((b) => b.name === remembered) || state.bots.find((b) => b.primary) || state.bots[0];
     if (!state.sel && home) await selectBot(home.name);
-    else if (!state.sel) {
-      const inner = el("div", "thread-inner");
-      inner.append(emptyState("选一个对话", "左边是你的 Bot。"));
-      thread.replaceChildren(inner);
-    }
+    else if (!state.sel) showNoChat();
     for (let i = 0; i < state.bots.length + state.groups.length; i++) await warmOne();
     syncPanelDefault();
+  }
+
+  // No chat open (quick-create.js): with no cats yet, the stage where the first
+  // one is brought home; otherwise one line pointing at the list. The no-chat
+  // mark hides the composer (quick-create.css), which would send nowhere.
+  function showNoChat() {
+    const inner = el("div", "thread-inner no-chat");
+    inner.append(state.bots.length ? quick.noChat() : quick.stage());
+    thread.replaceChildren(inner);
   }
 
   function syncPanelDefault() {
@@ -7819,10 +7836,25 @@
     },
     focusComposer: () => { if (window.innerWidth >= 768) input.focus({ preventScroll: true }); },
   });
+  // 开箱即用 (quick-create.js) draws with these and opens what it made.
+  quick.init({
+    api, icon,
+    face: (name) => avatar(name, paintOf(name)),
+    cats: () => (state.bots || []).map((b) => b.name),
+    copy: (text) => copyText(text),
+    refresh: () => refreshLists(),
+    openCat: async (name) => { await refreshLists(); await selectBot(name); },
+    openGroup: async (id) => { await refreshLists(); await selectGroup(id); },
+    // Where the chat shows the new cat's face: its portrait glides there.
+    landing: (name) => [...document.querySelectorAll("#title .avatar[data-avatar-bot]")].find((a) => a.dataset.avatarBot === name) || null,
+    more: (opener) => openTemplateCreate(opener),
+    showList: () => $("menu").click(),
+    error: (e) => setStatus(visibleError(e), true),
+  });
   syncSidebar();
   initTheme(); // in the app this also tells the window which theme to use
   syncComposer();
-  const hold = el("div", "thread-inner");
+  const hold = el("div", "thread-inner no-chat");
   hold.append(emptyState("clowder-bot", "登录之后，对话在这里继续。"));
   thread.replaceChildren(hold);
 
