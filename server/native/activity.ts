@@ -4,6 +4,7 @@ import { messageDisplayText, messagePresentation } from './message-presentation.
 import type { NativeCat, NativeMessage } from './types.js';
 import { clip, plainLine } from './text.js';
 import { blockLine, messageBlocks } from './blocks.js';
+import { approvalLine } from './approvals.js';
 
 export interface ActivityItem {
   id: string; kind: 'approval'|'failure'|'running'|'queued'|'task'; label: string; threadId: string;
@@ -117,7 +118,7 @@ export class Activity {
               || typeof card.messageId !== 'string' || typeof item.proposalId !== 'string') continue;
             view.items.push({id:`approval:${item.sourceFeatureId}:${item.proposalId}`,kind:'approval',threadId,
               messageId:card.messageId,proposalId:item.proposalId,...annotate(item.requesterCatId),
-              label:typeof item.summary === 'string' && item.summary.trim() ? `等你确认：${item.summary.slice(0,160)}` : '等你确认'});
+              label:approvalLine(item) ? `等你确认：${approvalLine(item)}` : '等你确认'});
           }
         }
         ready++;

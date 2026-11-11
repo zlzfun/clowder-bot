@@ -13,6 +13,7 @@ UI 保留 Bot 名称和文件夹概念，实际成员、执行和历史以 Clowd
 | 找聊过的话 | `GET /search?q=` 当场读取每个会话最新一页原生消息并按聊天里的可见口径过滤，见下文「搜索」 |
 | 发消息/回复引用 | `/api/messages`，原生 ID 与幂等键 |
 | 历史/导出 | 原生消息；主界面最近 200 条，导出完整分页。单聊 `transcript` 与群聊 `GET /groups/:id` 都返回 `hasMore` 和上一页的游标 `before`，带 `?before=` 读更早的一页 |
+| 新对话 | `POST /bots/:name/new`：原生新建一个 Thread，旧对话留在历史对话里；可带 `{expectedThreadId}`（页面正在显示的对话），与当前对话不一致时 409，不新建 |
 | 状态/停止 | 原生 queue、activeInvocations、withdraw、cancel；单成员取消不取消兄弟任务 |
 | 笔记 | 原生 `/api/memory` 会话 KV；旧 shared/bot scope 明确拒绝 |
 | 上下文压缩 | 原生 compact-native；工具不支持时保留原生错误 |

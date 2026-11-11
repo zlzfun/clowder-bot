@@ -270,7 +270,11 @@ export function createXbotCoreRouter(bridge: BotBridge) {
   });
   router.post('/groups/:id/stop', async (req, res) => res.json(await bridge.stop((await bridge.group(req.params.id)).id)));
   router.post('/bots/:name/new', async (req, res) => {
-    const cat = await bot(req.params.name), thread = await bridge.workspaces.newConversation(cat);
+    // Optional: the conversation the page is showing. A view that is no longer current must not start a new one.
+    const { expectedThreadId } = z.object({ expectedThreadId: z.string().min(1).max(200).optional() }).strict().parse(req.body ?? {});
+    const cat = await bot(req.params.name);
+    if (expectedThreadId && (await bridge.direct(cat)).id !== expectedThreadId) throw new ApiError(409, '会话已变化，请刷新后重试');
+    const thread = await bridge.workspaces.newConversation(cat);
     res.json({ status: 'ok', conversation_id: thread.id });
   });
   router.post('/bots/:name/compact', async (req, res) => {
