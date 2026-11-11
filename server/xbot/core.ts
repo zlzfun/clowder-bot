@@ -133,16 +133,35 @@ export function createXbotCoreRouter(bridge: BotBridge) {
     store.state.groupThreadIds.push(thread.id); store.save(); res.status(201).json(bridge.groupItem(thread, members));
   });
   router.patch('/groups/:name', async (req, res) => {
-    const input = z.object({ name: groupTitle }).strict().parse(req.body);
+    const input = z.object({ name: groupTitle.optional(), members: z.array(z.string()).min(2).max(10).optional() }).strict()
+      .refine(value => value.name !== undefined || value.members !== undefined, { message: '没有要修改的内容' }).parse(req.body);
     const index = store.state.folders.indexOf(req.params.name);
     if (index >= 0) {
-      label.parse(input.name);
-      if (store.state.folders.includes(input.name) && input.name !== req.params.name) throw new ApiError(409, '分组已存在');
-      store.state.folders[index] = input.name;
-      for (const meta of Object.values(store.state.bots)) if (meta.folder === req.params.name) meta.folder = input.name;
-      store.save();
-    } else await native.request(`/api/threads/${encode((await bridge.group(req.params.name)).id)}`, { method: 'PATCH', body: { title: input.name } });
-    res.json({ name: input.name });
+      if (input.members) throw new ApiError(400, '分组没有成员设置');
+      const name = label.parse(input.name);
+      if (store.state.folders.includes(name) && name !== req.params.name) throw new ApiError(409, '分组已存在');
+      store.state.folders[index] = name;
+      for (const meta of Object.values(store.state.bots)) if (meta.folder === req.params.name) meta.folder = name;
+      store.save(); return res.json({ name });
+    }
+    // A group chat: its name is the native thread title, its members the native preferredCats.
+    const thread = await bridge.group(req.params.name), update: Record<string, unknown> = {};
+    if (input.name !== undefined) update.title = input.name;
+    if (input.members) {
+      const members = await Promise.all(input.members.map(name => bot(name)));
+      if (new Set(members.map(c => c.id)).size !== members.length) throw new ApiError(400, '成员不能重复');
+      const kept = new Set(members.map(c => c.id)), leaving = (thread.preferredCats ?? []).filter(id => !kept.has(id));
+      if (leaving.length) {
+        // Leaving the group does not stop what a cat is doing there; say so instead of pretending it did.
+        const work = await bridge.queue(thread.id);
+        const busy = leaving.find(id => work.activeInvocations.some(i => i.catId === id)
+          || work.queue.some(entry => entry.targetCatId === id || entry.targetCats?.includes(id)));
+        if (busy) throw new ApiError(409, '有猫猫还在这个群里处理事情，等它做完或先停止，再把它移出');
+      }
+      update.preferredCats = members.map(c => c.id);
+    }
+    await native.request(`/api/threads/${encode(thread.id)}`, { method: 'PATCH', body: update });
+    res.json({ ...bridge.groupItem(await bridge.thread(thread.id), await bridge.cats()), name: input.name ?? thread.title ?? '群聊' });
   });
   router.delete('/groups/:name', async (req, res) => {
     if (store.state.folders.includes(req.params.name)) {

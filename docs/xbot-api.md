@@ -9,7 +9,8 @@ UI 保留 Bot 名称和文件夹概念，实际成员、执行和历史以 Clowd
 | 本地 Agent 接入 | `/agents` 原生发现；`/bots/:name/agent` 绑定执行者并恢复原生默认继承 |
 | 单聊/新会话 | 原生 Thread，preferredCats 为该成员；新建保留旧会话 |
 | 首次单聊的问候 | `POST /xbot-api/bots/:name/greeting` 以 `expectedThreadId` 绑定已打开的单聊，向这只猫发起一次普通的原生聊天请求 |
-| 群聊 | 原生 Thread，preferredCats 为显式成员；消息路由保持原生；不填名字时以成员名命名 |
+| 群聊 | 原生 Thread，preferredCats 为显式成员；消息路由保持原生；不填名字时以成员名命名。`PATCH /groups/:id {name?, members?}` 改原生标题与 preferredCats；要移出的猫在群里还有进行中或排队的事时 409，不替用户停止 |
+| 找聊过的话 | `GET /search?q=` 当场读取每个会话最新一页原生消息并按聊天里的可见口径过滤，见下文「搜索」 |
 | 发消息/回复引用 | `/api/messages`，原生 ID 与幂等键 |
 | 历史/导出 | 原生消息；主界面最近 200 条，导出完整分页 |
 | 状态/停止 | 原生 queue、activeInvocations、withdraw、cancel；单成员取消不取消兄弟任务 |
@@ -36,6 +37,15 @@ UI 保留 Bot 名称和文件夹概念，实际成员、执行和历史以 Clowd
 - 必须带 `idempotencyKey`，同一个键重发得到同一只猫；不能与 `catConfig`、`runtimeId`、`templateId`、`persona`、`description` 混用。没有可用 Agent 时 422，说明要先装好并登录。
 
 `POST /xbot-api/groups` 带 `members` 时 `name` 可省略，群名取成员名用「、」连接（超过 64 字截断），之后可改名。群名是原生 Thread 标题，按自由文本校验；不带 `members` 时同一路由仍是建侧栏分组，分组名沿用原来的字符限制。
+
+## 搜索
+
+`GET /xbot-api/search?q=<1–100 字>` 返回 `{query, results[], more, searched, failed}`。每条结果是 `{chat:{type:'bot'|'group', id, name}, threadId, current, messageId, time, from:'owner'|'cat', catName?, snippet, match:[起,止]}`，按时间从新到旧，最多 30 条。
+
+- 范围是用户自己的会话：每只猫当前的对话和它的历史对话（`current:false`，需要先从历史对话里打开）、所有群聊；各取最新一页（200 条）原生消息，搜索时当场读取，不建索引、不留副本。
+- 可见口径与聊天一致：用户消息（应用代发的开场邀请除外）和可见的猫回复；草稿、处理中、`SILENT`、被显式发言取代的执行记录不算，匹配的是去掉署名后的显示文字，不区分大小写。
+- `more` 表示还有没返回的匹配，或有会话存在更早、这次没看的消息；`failed` 是没能读取的会话数，前端要如实说明，不当作「没有结果」。
+- 固定上游自带的消息检索（`/api/evidence/search?resultUnit=message`）依赖证据索引，2026-11-11 在隔离运行时和现有实例上实测都返回空（`passages_count: 0`，未配置嵌入模型），所以这里没有用它；索引可用后可以改为调用原生检索，接口形状不变。
 
 问候复用固定版本 `42017e0c` 的 `POST /api/messages`。原生身份上下文包含猫名、角色说明与性格（`assets/prompt-templates/s1-identity.md`）。适配层指定单个成员、`next_work` 与同一猫和会话的稳定幂等键。首次请求先检查原生历史和队列，已有对话返回 `exists`。检查与准入是两个操作，并发到达的用户消息由原生队列决定顺序。创建猫和读取历史各自独立，生成失败时猫仍可正常聊天。
 

@@ -2,9 +2,15 @@ import express from 'express';
 import { z } from 'zod';
 import { ApiError } from '../errors.js';
 import type { BotBridge } from '../native/bridge.js';
+import { searchMessages } from '../native/search.js';
 
 export function createActivityRouter(bridge: BotBridge) {
   const router = express.Router();
+  // Find a phrase in the owner's conversations (the newest page of each, read now).
+  router.get('/search', async (req, res) => {
+    const query = z.string().trim().min(1).max(100).parse(req.query.q);
+    res.json(await searchMessages(bridge, query));
+  });
   for (const kind of ['bots', 'groups'] as const) {
     const scope = `/${kind}/:chat`;
     const context = async (name: string) => {
