@@ -22,7 +22,9 @@
    when it stays legible on the bubble (--pz-paw, drawn at full strength, so
    the ratio chat-presence-rules.js checked is the one on screen), else the
    theme's. Only transform moves. Reduced motion: three still paws. The
-   markup is chat-live.js's own dots; only their look changes here. */
+   markup is chat-live.js's own dots; only their look changes here. After
+   the stream was lost and nothing has confirmed the reply since
+   (chat-live.js's lv-unsure), they rest as well: no claim it is writing. */
 @supports (mask-image: none) or (-webkit-mask-image: none) {
   .thread .msg .typing-dots { gap: 5px; }
   .thread .msg .typing-dots > i {
@@ -35,7 +37,8 @@
   }
   .thread .msg .typing-dots > i:nth-child(2) { animation-delay: 160ms; }
   .thread .msg .typing-dots > i:nth-child(3) { animation-delay: 320ms; }
-  .thread .msg[data-wait] .typing-dots > i { animation: none; background: var(--faint); opacity: .4; }
+  .thread .msg[data-wait] .typing-dots > i,
+  .thread .msg.lv-unsure .typing-dots > i { animation: none; background: var(--faint); opacity: .4; }
 }
 @keyframes pz-knead {
   0%, 60%, 100% { transform: none; }
@@ -47,7 +50,7 @@
    in the header moves but the name, which glides up to make room. A status
    or an error in the shell's own subtitle takes precedence. */
 .top-title > .pz-sub {
-  position: absolute; top: 50%; left: 40px; max-width: min(240px, 52vw);
+  position: absolute; top: 50%; left: 40px; max-width: 320px; /* chat-presence.js narrows it to the header's free width */
   margin-top: 1px; font-size: 12px; line-height: 16px; color: var(--muted);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
   opacity: 0; transform: translateY(3px);
@@ -72,8 +75,9 @@
 }
 
 /* ---- Seen: the paw by the owner's latest message the engine picked up ----
-   In the hover time's place, left of the bubble: hovering shows the time
-   instead. Stamped once, the first time it appears on this page. */
+   Left of the bubble; hovering the row shows the hover time further left,
+   so the paw stays put and can be hovered or focused for who saw it.
+   Stamped once, the first time it appears on this page. */
 .pz-seen { color: var(--faint); }
 .msg.user > .bubble-col > .pz-seen {
   position: absolute; right: calc(100% + 6px); bottom: 7px; width: 12px; height: 12px;
@@ -85,7 +89,8 @@
   from { opacity: 0; transform: translateY(-3px) rotate(-26deg) scale(1.4); }
   to { opacity: 1; transform: rotate(-12deg); }
 }
-@media (hover: hover) { .msg.user:hover > .bubble-col > .pz-seen { visibility: hidden; } }
+.msg.user > .bubble-col:has(> .pz-seen) > .ht { right: calc(100% + 24px); }
+.pz-seen:focus-visible { outline-offset: 1px; border-radius: 4px; }
 
 /* ---- Motion ---- */
 /* Sending: the owner's new bubble settles in from the composer with the

@@ -533,7 +533,8 @@ test('the shell reads the sidebar lines from the status poll only: no transcript
   assert.doesNotMatch(app, /个 Bot"\), el\("span", "g", " 在忙/);
   // Review fixes: a failed status read is said (and cleared by the next one); quotes carry
   // their conversation and are checked on each read; drafts by native ID; a deleted cat's draft goes.
-  assert.match(app, /try \{ data = await api\("\/xbot-api\/bots\/status"\); \} catch \(e\) \{ chatList\.stale\(true\); throw e; \}\n\s+chatList\.stale\(false\);/);
+  // (presence.rows() then drops the typing dots that read can no longer vouch for: chat-presence.js.)
+  assert.match(app, /try \{ data = await api\("\/xbot-api\/bots\/status"\); \} catch \(e\) \{ chatList\.stale\(true\); presence\.rows\(\); throw e; \}\n\s+chatList\.stale\(false\);/);
   assert.match(app, /state\.replyTo = \{ seq: n, text: String\(text \|\| ""\)\.trim\(\), thread: workspace\.threadId\(\) \|\| "" \};/);
   assert.match(app, /state\.chatRead = read;\n[^\n]*\n\s+chatList\.read\(selection, read\.threadId\);/);
   assert.match(app, /catId: \(name\) => botCatId\(name\),/);

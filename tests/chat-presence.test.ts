@@ -107,7 +107,12 @@ test('the header says what the cat is doing in a messenger\'s few words, from th
   assert.equal(say(one('start')), '正在输入…', 'started, words not yet: the typing bubble');
   assert.equal(say(one('text')), '正在输入…');
   assert.equal(say(one('thinking')), '在想…');
-  for (const tool of ['Read', 'Grep', 'WebSearch', 'WebFetch', 'mcp__memory__recall', 'mcp__search__query']) assert.equal(say(one('step', tool)), '在查资料…', tool);
+  // 在查资料… only for tools known to read or search (and Codex's web search).
+  for (const tool of ['Read', 'Grep', 'Glob', 'WebSearch', 'WebFetch', 'web_search', 'LS', 'NotebookRead']) assert.equal(say(one('step', tool)), '在查资料…', tool);
+  // A browser or a memory tool proves no lookup (review 2026-11-12, finding 4).
+  for (const tool of ['mcp__playwright__browser_click', 'mcp__chrome__navigate']) assert.equal(say(one('step', tool)), '在用浏览器…', tool);
+  for (const tool of ['mcp__memory__store', 'mcp__memory__recall', 'mcp__custom__do_thing']) assert.equal(say(one('step', tool)), '在处理…', tool);
+  assert.equal(say(one('step', 'mcp__search__query')), '在查找…');
   for (const tool of ['Write', 'Edit', 'file_change']) assert.equal(say(one('step', tool)), '在写文件…', tool);
   for (const tool of ['Bash', 'command_execution']) assert.equal(say(one('step', tool)), '在运行命令…', tool);
   assert.equal(say(one('step', 'Task')), '在分头处理…');
@@ -118,36 +123,76 @@ test('the header says what the cat is doing in a messenger\'s few words, from th
   assert.equal(say(one('thinking'), true), '团子在想…');
   assert.equal(say({ replies: [{ catId: 'a', phase: 'text' }, { catId: 'b', phase: 'step', tool: 'Read' }] }, true), '团子、栗子正在输入…');
   assert.equal(say({ replies: [{ catId: 'a', phase: 'text' }, { catId: 'b', phase: 'text' }, { catId: 'c', phase: 'text' }] }, true), '3 只猫猫正在输入…');
-  // A reply nobody named (no cat) says nothing.
+  // A reply nobody named (no cat) says nothing; nor does one whose stream was lost since (unsure).
   assert.equal(say({ replies: [{ catId: '', phase: 'text' }] }), '');
+  assert.equal(say({ replies: [{ catId: 'a', phase: 'step', tool: 'Read', unsure: true }] }), '', 'no claim after the stream was lost');
+  assert.equal(say({ replies: [{ catId: 'a', phase: 'step', tool: 'Read', unsure: true }, { catId: 'b', phase: 'thinking' }] }, true), '栗子在想…', 'only the confirmed one');
+  // What the polite region says: with the cat's name in a single chat, 排队中 for a send waiting in line.
+  const spoken = (now: Any, group = false) => R.spokenLine({ replies: [], waiting: [], ...now }, (id: string) => ({ a: '团子', b: '栗子' } as Any)[id] || '', group, L.verb);
+  assert.equal(spoken(one('thinking')), '团子在想…');
+  assert.equal(spoken(one('thinking'), true), '团子在想…');
+  assert.equal(spoken({ ...one('text'), stopping: true }), '正在停止…');
+  assert.equal(spoken({ waiting: [{ queued: true }] }), '排队中');
+  assert.equal(spoken({ waiting: [{ queued: false }] }), '');
+  assert.equal(spoken({ replies: [{ catId: 'a', phase: 'text', unsure: true }] }), '');
 });
 
-test('a sidebar row shows the live words for the open chat, the status\'s busy line elsewhere, and never covers what needs the owner', () => {
+test('a sidebar row: live words for the open chat; typing dots elsewhere only while that chat\'s own activity was read running and the poll did not fail; never over what needs the owner', () => {
   const R = rules();
-  assert.equal(R.rowShows('idle', '正在输入…'), 'live');
-  assert.equal(R.rowShows('running', '在想…'), 'live');
-  assert.equal(R.rowShows('queued', '正在输入…'), 'live');
-  assert.equal(R.rowShows('running', ''), 'status');
-  assert.equal(R.rowShows('queued', ''), '');
-  assert.equal(R.rowShows('idle', ''), '');
-  for (const kind of ['awaiting', 'failure', 'unknown']) assert.equal(R.rowShows(kind, '正在输入…'), '', kind);
+  assert.equal(R.rowShows('idle', '正在输入…', false), 'live');
+  assert.equal(R.rowShows('running', '在想…', false), 'live');
+  assert.equal(R.rowShows('running', '', true), 'status');
+  // The cat is busy (its overall state), but not in this chat: no dots (review finding 3).
+  assert.equal(R.rowShows('running', '', false), '');
+  assert.equal(R.rowShows('idle', '', false), '');
+  for (const kind of ['awaiting', 'failure', 'unknown']) assert.equal(R.rowShows(kind, '正在输入…', true), '', kind);
+  const busy = { readStatus: 'ready', active: [{ catId: 'a', invocationId: 'i' }] };
+  assert.equal(R.ownActive({ state: 'running', activity: busy }, false), true);
+  assert.equal(R.ownActive({ state: 'running', activity: busy }, true), false, 'the last poll failed: not vouched for');
+  assert.equal(R.ownActive({ state: 'running', activity: { ...busy, active: [] } }, false), false, 'busy in another chat only');
+  assert.equal(R.ownActive({ state: 'running', activity: { ...busy, readStatus: 'partial' } }, false), false, 'this chat could not be read whole');
+  assert.equal(R.ownActive({ state: 'running', activity: { readStatus: 'unavailable', active: [], items: [] } }, false), false);
+  assert.equal(R.ownActive({ state: 'running' }, false), false);
+  assert.equal(R.ownActive(null, false), false);
 });
 
-test('seen: only a reply that exists and names the owner\'s message (native.replyTo) marks it; the paw goes by the latest one picked up', () => {
+test('seen: only a cat\'s reply that began and names the owner\'s message (native.replyTo) marks it; system records, refusals and replies that failed before starting do not; the paw goes by the latest one picked up', () => {
   const R = rules();
   const user = (id: string) => ({ role: 'user', id, native_message_id: id, native: { id, type: 'user' } });
-  const reply = (id: string, to: string, cat = 'a', more: Any = {}) => ({ role: 'assistant', id, native_message_id: id, native_cat_id: cat, native: { id, type: 'assistant', catId: cat, replyTo: to }, ...more });
-  // u1 answered (settled), u2 being answered (in progress), u3 still waiting in the queue.
-  const rows = [user('u1'), reply('r1', 'u1'), user('u2'), reply('r2', 'u2', 'a', { in_progress: true }), user('u3')];
+  const reply = (id: string, to: string, native: Any = {}, more: Any = {}) => ({ role: 'assistant', id, native_message_id: id, native_cat_id: native.catId ?? 'a',
+    native: { id, type: 'assistant', catId: 'a', replyTo: to, content: '好的', lifecycle: { kind: 'response', status: 'completed' }, ...native }, ...more });
+  // u1 answered (settled), u2 being answered (in progress, no words yet), u3 still waiting in the queue.
+  const rows = [user('u1'), reply('r1', 'u1'), user('u2'), reply('r2', 'u2', { content: '', lifecycle: { status: 'processing' } }, { in_progress: true }), user('u3')];
   const seen = R.picked(rows);
   assert.deepEqual([...seen.keys()], ['u1', 'u2']);
   assert.deepEqual(JSON.parse(JSON.stringify(R.seenMark(['u1', 'u2', 'u3'], seen))), { id: 'u2', cats: ['a'] }, 'the latest picked up; the waiting one has none');
   assert.equal(R.seenMark(['u3'], seen), null);
-  // A refusal said by name, a reply to a message not on this page, and a quote by the owner are not answers.
-  const others = R.picked([user('u4'), reply('n1', 'u4', 'a', { notice: true }), reply('r9', 'gone'), { role: 'user', id: 'u5', native: { replyTo: 'u4' } }]);
-  assert.equal(others.size, 0);
+  // Not a cat picking it up (review 2026-11-12, finding 1): a system or delivery record with
+  // replyTo (projected as an assistant row), a refusal or reminder line (notice), a record
+  // without a cat, and replies that failed, stopped or were interrupted before producing anything.
+  const none = R.picked([user('u4'),
+    reply('d1', 'u4', { type: 'system', catId: null, content: '云端投递失败' }, { native_cat_id: '' }),
+    reply('d2', 'u4', { type: 'connector', catId: null, content: '提醒：该喝水了' }, { notice: true, reminder: true }),
+    reply('n1', 'u4', { content: '团子不在这个群里，没有回答。' }, { notice: true }),
+    reply('x1', 'u4', { catId: '' }, { native_cat_id: '' }),
+    reply('f1', 'u4', { content: '', lifecycle: { status: 'failed', reason: 'spawn failed' } }, { ended: { how: 'failed' } }),
+    reply('s1', 'u4', { content: '', lifecycle: { status: 'canceled' } }, { ended: { how: 'stopped' } }),
+    reply('i1', 'u4', { content: '  ', lifecycle: { status: 'interrupted' } }),
+    reply('q1', 'u4', { content: '', lifecycle: { status: 'queued' } }, { in_progress: true }),
+    reply('r9', 'gone'), { role: 'user', id: 'u5', native: { type: 'user', replyTo: 'u4' } }]);
+  assert.equal(none.size, 0, JSON.stringify([...none]));
+  // Evidence it began: words (even if it later failed), a draft, files, cards, tool steps of its own, or a normal finish.
+  for (const [native, more, why] of [
+    [{ content: '我先看一下…', lifecycle: { status: 'failed' } }, {}, 'failed after writing'],
+    [{ content: '', isDraft: true, lifecycle: undefined }, { in_progress: true }, 'a draft'],
+    [{ content: '' }, { attachments: [{ id: 'f' }] }, 'files'],
+    [{ content: '' }, { blocks: [{ kind: 'checklist' }] }, 'cards'],
+    [{ content: '', toolEvents: [{ type: 'tool_use' }], lifecycle: { status: 'canceled' } }, { presentation_kind: 'activity' }, 'tool steps, then stopped'],
+    [{ content: '' }, {}, 'finished normally (an empty reply)'],
+  ] as Array<[Any, Any, string]>) assert.equal(R.picked([user('u6'), reply('e1', 'u6', native, more)]).size, 1, why);
   // Group rows (kind person / bot, id is the native ID); two cats answering one message.
-  const group = R.picked([{ kind: 'person', id: 'g1' }, { kind: 'bot', id: 'x', native_cat_id: 'a', native: { replyTo: 'g1' } }, { kind: 'bot', id: 'y', native_cat_id: 'b', native: { replyTo: 'g1' } }, { kind: 'bot', id: 'z', native_cat_id: 'a', native: { replyTo: 'g1' } }]);
+  const said = (id: string, cat: string) => ({ kind: 'bot', id, native_cat_id: cat, native: { type: 'assistant', catId: cat, replyTo: 'g1', content: '好', lifecycle: { status: 'completed' } } });
+  const group = R.picked([{ kind: 'person', id: 'g1' }, said('x', 'a'), said('y', 'b'), said('z', 'a')]);
   assert.deepEqual([...group.get('g1')], ['a', 'b']);
   const name = (id: string) => ({ a: '团子', b: '栗子', c: '年糕' } as Any)[id] || '';
   assert.equal(R.seenWords(['a'], name), '团子看到了');
@@ -180,18 +225,48 @@ test('a reply that opens with its own cat\'s signature never shows it while writ
 });
 
 // ---------------------------------------------------------------- the page
-type Opts = { reduce?: boolean; dark?: boolean; group?: boolean };
+// What a browser has and the small DOM does not, for the paths that need it:
+// copying an element (the exit fades), animating it, placing it after
+// another, and layout boxes (only where a test sets them).
+const proto = El.prototype as Any;
+proto.cloneNode = function cloneNode(this: Any, deep: boolean) {
+  const c: Any = this.doc.createElement(this.tagName);
+  for (const [k, v] of this.attrs) c.attrs.set(k, v);
+  c.hidden = this.hidden;
+  if (deep) for (const k of this.kids) c.append(k instanceof El ? (k as Any).cloneNode(true) : this.doc.createTextNode(k.textContent));
+  return c;
+};
+proto.animate = function animate(this: Any) { this.animations = (this.animations || 0) + 1; return { finished: new Promise(() => {}) }; };
+proto.after = function after(this: Any, n: Any) { const p = this.parent; const at = p.kids.indexOf(this); n.remove(); n.parent = p; p.kids.splice(at + 1, 0, n); };
+proto.getBoundingClientRect = function rect(this: Any) { return this.box || { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 }; };
+const box = (left: number, width: number) => ({ left, right: left + width, width, top: 0, bottom: 20, height: 20 });
+
+// The café tokens a computed style would give, by theme.
+const TOKENS: Record<string, Record<string, string>> = {
+  light: { '--x-card': LIGHT.chat, '--x-bot-bubble': LIGHT.bubble, '--dur-pop-close': '120ms' },
+  dark: { '--x-card': DARK.chat, '--x-bot-bubble': DARK.bubble, '--dur-pop-close': '120ms' },
+};
+type Opts = { reduce?: boolean; dark?: boolean; group?: boolean; theme?: boolean };
 function page(opts: Opts = {}) {
   const doc = new Doc();
+  (doc as Any).documentElement = doc.root;
+  doc.root.setAttribute('data-theme', opts.dark ? 'dark' : 'light');
   const h = (tag: string, cls = '', id = '') => { const e = doc.createElement(tag); if (cls) e.className = cls; if (id) e.id = id; return e; };
+  const bar = h('div', 'top-inner');
   const chip = h('button', 'top-title', 'head-chip'), title = h('span', 'title', 'title'), subtitle = h('span', 'subtitle', 'subtitle');
   subtitle.hidden = true;
   chip.append(title, subtitle);
+  const more = h('button', 'icon-btn ch-more');
+  bar.append(chip, more);
   const chat = h('div', 'chat'), thread = h('div', 'thread', 'thread'), dock = h('div', 'dock'), roster = h('nav', 'list', 'roster');
   chat.append(thread, dock);
-  doc.body.append(chip, chat, roster);
+  // The search palette (a dialog card) and the drawer's scrim, for the exit fades.
+  const pal = h('div', 'pal'), card = h('div', 'pal-card'), input = h('input', 'pal-input');
+  card.setAttribute('role', 'dialog'); card.setAttribute('aria-modal', 'true'); card.append(input); pal.append(card); pal.hidden = true;
+  const scrim = h('div', 'panel-scrim', 'panel-scrim'); scrim.hidden = true;
+  doc.body.append(bar, chat, roster, pal, scrim);
   Object.assign(thread, { clientHeight: 600, scrollHeight: 600, scrollTop: 0 });
-  let now = 1_000_000, seq = 0;
+  let now = new Date(2026, 10, 11, 23, 58).getTime(), seq = 0;
   const timers = new Map<number, { fn: () => void; at: number; every?: number }>();
   let frames: Array<() => void> = [];
   const advance = (ms: number) => {
@@ -207,7 +282,17 @@ function page(opts: Opts = {}) {
     now = end;
   };
   const frame = () => { const list = frames; frames = []; list.forEach(fn => fn()); };
-  const window: Any = { matchMedia: () => ({ matches: !!opts.reduce }), requestAnimationFrame: (fn: () => void) => { frames.push(fn); return frames.length; } };
+  // MutationObserver: the test says when an attribute changed (fire).
+  const observers: Array<{ target: Any; cb: (r: Any[]) => void }> = [];
+  class FakeObserver { constructor(private cb: (r: Any[]) => void) {} observe(target: Any) { observers.push({ target, cb: this.cb }); } }
+  const fire = (target: Any, oldValue: string | null) => { for (const o of observers) if (o.target === target) o.cb([{ oldValue }]); };
+  const window: Any = {
+    matchMedia: () => ({ matches: !!opts.reduce }),
+    requestAnimationFrame: (fn: () => void) => { frames.push(fn); return frames.length; },
+    MutationObserver: FakeObserver,
+    getComputedStyle: (n: Any) => ({ getPropertyValue: (k: string) => (TOKENS[n.getAttribute('data-theme') || 'light'] || {})[k] || '' }),
+    addEventListener: (type: string, fn: () => void) => { if (type === 'resize') window.onResize = fn; },
+  };
   const RealDate = Date;
   class FakeDate extends RealDate {
     constructor(...args: Any[]) { super(...((args.length ? args : [now]) as [number])); }
@@ -224,7 +309,7 @@ function page(opts: Opts = {}) {
   const state: Any = {
     sel: opts.group ? { type: 'group', id: 'g' } : { type: 'bot', id: '团子' },
     bots: [{ name: '团子', native_id: 'a', accent: PAIRS['maine-coon'] }, { name: '栗子', native_id: 'b' }],
-    status: { bots: {}, groups: {} },
+    status: { bots: {}, groups: {} }, stale: false, redraws: 0,
   };
   const key = () => (state.sel ? (state.sel.type === 'group' ? 'group:' : 'bot:') + state.sel.id : '');
   const live = window.ClowderLive;
@@ -244,7 +329,9 @@ function page(opts: Opts = {}) {
   window.ClowderPresence.init({
     thread, live, chip, catName: (id: string) => names[id] || '',
     bots: () => state.bots, selected: () => state.sel, status: () => state.status,
-    surfaces: () => (opts.dark ? DARK : LIGHT),
+    stale: () => state.stale, redraw: () => { state.redraws++; },
+    // The real tokens through getComputedStyle when the test is about the theme.
+    ...(opts.theme ? {} : { surfaces: () => (opts.dark ? DARK : LIGHT) }),
   });
   const presence = window.ClowderPresence;
   live.select(key());
@@ -263,11 +350,15 @@ function page(opts: Opts = {}) {
     const body = h('span', 'item-body'); const nl = h('span', 'name-line'); nl.append(h('span', 'name'));
     body.append(nl, line); btn.append(h('span', 'avatar'), body); roster.append(btn); return btn;
   };
-  return { doc, h, chip, thread, roster, live, presence, state, draw, onScreen, userRow, catRow, settle, ev, sideRow, advance, frame, key };
+  // The polite region chat-presence.js says things in.
+  const region = () => doc.body.children.find((n: El) => n.getAttribute('role') === 'status' && n.getAttribute('aria-live') === 'polite') || null;
+  return { doc, h, bar, chip, more, thread, roster, pal, scrim, live, presence, state, draw, onScreen, userRow, catRow, settle, ev, sideRow, advance, frame, key, fire, window, region, clock: () => now };
 }
 const sub = (p: Any) => p.chip.find('pz-sub')[0];
 const own = (m: Any) => ({ role: 'user', id: m, native_message_id: m });
-const answer = (id: string, to: string, cat = 'a', more: Any = {}) => ({ role: 'assistant', id, native_message_id: id, native_cat_id: cat, native: { replyTo: to }, ...more });
+// A cat's reply row as the transcript gives it: the engine's assistant record under native.
+const answer = (id: string, to: string, cat = 'a', more: Any = {}, native: Any = {}) => ({ role: 'assistant', id, native_message_id: id, native_cat_id: cat,
+  native: { type: 'assistant', catId: cat, replyTo: to, content: more.in_progress ? '' : '好', lifecycle: { status: more.in_progress ? 'processing' : 'completed' }, ...native }, ...more });
 
 test('the header says 正在输入… / 在想… / 在查资料… under the name from chat-live.js\'s own replies, and nothing for a send no reply has started or another chat', async () => {
   const p = page();
@@ -283,7 +374,7 @@ test('the header says 正在输入… / 在想… / 在查资料… under the na
   await p.settle();
   assert.equal(p.chip.classList.contains('pz-on'), true);
   assert.equal(text(sub(p)), '正在输入…');
-  assert.equal(sub(p).getAttribute('aria-hidden'), 'true', 'the reply\'s own quiet line is the announced one');
+  assert.equal(sub(p).getAttribute('aria-hidden'), 'true', 'the visual line; the polite region says it');
   p.ev('thinking');
   await p.settle();
   assert.equal(text(sub(p)), '在想…');
@@ -311,6 +402,96 @@ test('the header says 正在输入… / 在想… / 在查资料… under the na
   assert.equal(q.chip.classList.contains('pz-on'), false);
 });
 
+test('accessibility follows the real states: the resting paws are named as waiting, the started ones as writing, and one polite region says each change once, never per streamed piece', async () => {
+  const p = page();
+  p.draw([p.userRow('u0', '你好')], [own('u0')]);
+  const reply = p.live.expect('a');
+  reply.accept('u1');
+  p.frame();
+  await p.settle();
+  const bubble = p.onScreen().children.at(-1)!;
+  const paws = () => bubble.find('typing-dots')[0];
+  assert.equal(paws().getAttribute('aria-label'), '等猫猫开始回复', 'before the engine starts: waiting, not typing');
+  assert.equal(text(p.region()), '', 'nothing said before the engine starts');
+  p.ev('start');
+  p.frame();
+  await p.settle();
+  assert.equal(paws().getAttribute('aria-label'), '正在输入');
+  assert.equal(text(p.region()), '团子正在输入…', 'the start is said, with the cat\'s name');
+  p.ev('step', { tool: 'Read', target: '说明.md' });
+  p.frame();
+  await p.settle();
+  assert.equal(text(p.region()), '团子在查资料…');
+  p.ev('text', { text: '好', end: 1 });
+  p.frame();
+  await p.settle();
+  const said = p.region()!.kids[0];
+  for (const [i, piece] of ['的', '，我', '看看'].entries()) { p.ev('text', { text: piece, end: [2, 4, 6][i] }); p.frame(); await p.settle(); }
+  assert.equal(text(p.region()), '团子正在输入…');
+  assert.equal(p.region()!.kids[0], said, 'streamed words say nothing new: the same announcement node');
+  // The reply's own quiet line is no second live region.
+  assert.equal(bubble.find('lv-step')[0].getAttribute('aria-live'), null);
+  assert.equal(p.doc.body.querySelectorAll('[aria-live="polite"]').length, 1);
+});
+
+test('after the stream is lost the header claims nothing until the reply is confirmed again; a read confirms only that it is in progress, and a recovered draft drops the old step', async () => {
+  const p = page();
+  p.draw([], []);
+  p.ev('start');
+  p.ev('step', { tool: 'Read', target: '说明.md' });
+  p.frame();
+  await p.settle();
+  assert.equal(text(sub(p)), '在查资料…');
+  const row = p.onScreen().children.at(-1)!;
+  // The connection drops (a reconnect, a resync): no claim about what it is doing.
+  p.live.lost();
+  p.frame();
+  await p.settle();
+  assert.equal(p.chip.classList.contains('pz-on'), false, 'not 在查资料… indefinitely');
+  assert.ok(row.classList.contains('lv-unsure'), 'the paws rest (chat-presence.css)');
+  p.advance(300); // the quiet line's cross-fade
+  assert.equal(text(row.find('lv-step')[0]), '', 'the quiet line drops 在看 说明.md too');
+  assert.equal(row.find('typing-dots')[0].getAttribute('aria-label'), '正在回复');
+  // Reads keep failing (none arrive): still nothing, however long.
+  p.advance(60_000);
+  await p.settle();
+  assert.equal(p.chip.classList.contains('pz-on'), false);
+  // A read shows it still in progress with the same draft: in progress is confirmed, the step is not.
+  p.live.read([{ id: 'm1', catId: 'a', inProgress: true, draft: '' }], p.clock());
+  p.live.attach(); // as loadThread does after each read
+  p.frame();
+  await p.settle();
+  assert.equal(text(sub(p)), '正在输入…', 'neutral: started, not 在查资料…');
+  assert.equal(row.classList.contains('lv-unsure'), false);
+  // The stream keeps failing (a retry, another loss) with no event in between: what the read
+  // showed stands, so the line does not come and go with each retry.
+  p.live.lost();
+  await p.settle();
+  assert.equal(text(sub(p)), '正在输入…');
+  assert.equal(p.chip.classList.contains('pz-on'), true);
+  // Its own next event is fresh evidence again.
+  p.ev('step', { tool: 'Grep' });
+  await p.settle();
+  assert.equal(text(sub(p)), '在查资料…');
+  // Lost again, then a read whose draft has words the stream never showed: writing words, the old step gone.
+  p.live.lost();
+  p.live.read([{ id: 'm1', catId: 'a', inProgress: true, draft: '我查到了' }], p.clock());
+  p.live.attach();
+  p.frame();
+  await p.settle();
+  assert.equal(text(sub(p)), '正在输入…');
+  assert.equal(p.live.presence().replies[0].phase, 'text');
+  // The rule itself: a draft that adds words always drops an older step.
+  const L = liveRules(), r = L.reply('m', 'c', true);
+  L.apply(r, { kind: 'step', tool: 'Read' });
+  assert.equal(L.draft(r, '新的字'), true);
+  assert.deepEqual([r.phase, r.step], ['text', null]);
+  assert.equal(L.recover(r), false, 'nothing to drop');
+  L.apply(r, { kind: 'thinking' });
+  assert.equal(L.recover(r), true);
+  assert.equal(r.phase, 'start');
+});
+
 test('a group\'s header says who is writing', async () => {
   const p = page({ group: true });
   p.draw([], []);
@@ -323,22 +504,62 @@ test('a group\'s header says who is writing', async () => {
   assert.equal(text(sub(p)), '团子、栗子正在输入…');
 });
 
-test('the sidebar: typing dots for a running row from the status poll, the live words on the open chat\'s row (given back after), never over what needs the owner', async () => {
+test('the header line runs only as far as the header\'s free width: up to the ⋯ button, not under it or off a narrow screen', async () => {
+  const p = page({ group: true });
+  // 390px: the bar from 16 to 374, a short group title centred, ⋯ at the right.
+  p.bar.box = box(16, 358);
+  p.chip.box = box(140, 110);
+  p.more.box = box(342, 32);
+  p.draw([], []);
+  // The line is placed 40px into the chip (after the face).
+  p.presence.refresh();
+  sub(p).box = box(180, 0);
+  p.live.event({ kind: 'start', messageId: 'm1', catId: 'a' });
+  p.live.event({ kind: 'start', messageId: 'm2', catId: 'b' });
+  await p.settle();
+  assert.equal(text(sub(p)), '团子、栗子正在输入…');
+  assert.equal(sub(p).style.maxWidth, (342 - 8 - 180) + 'px', 'stops 8px before ⋯');
+  // No ⋯ (no search panel): up to the bar's own edge; a resize measures again.
+  p.more.box = box(0, 0);
+  p.window.onResize();
+  assert.equal(sub(p).style.maxWidth, (374 - 8 - 180) + 'px');
+});
+
+test('the sidebar: typing dots only for a row whose own chat was read running in a poll that succeeded; the live words on the open chat\'s row (given back after); never over what needs the owner', async () => {
   const p = page();
   p.draw([], []);
   const spinLine = (words: string) => { const l = p.h('span', 'preview st run'); l.append(p.h('svg', 'st-spin'), (() => { const s = p.h('span'); s.textContent = words; return s; })()); return l; };
   const plainLine = (words: string) => { const l = p.h('span', 'preview'); l.textContent = words; return l; };
+  const busyHere = { threadId: 't', readStatus: 'ready', items: [], counts: { approval: 0, failure: 0, running: 1, queued: 0, task: 0 }, active: [{ catId: 'b', invocationId: 'i' }], queued: [], errors: [] };
+  const idleHere = { ...busyHere, counts: { ...busyHere.counts, running: 0 }, active: [] };
   const mine = p.sideRow('bot', '团子', plainLine('你：你好'));
   const other = p.sideRow('bot', '栗子', spinLine('在处理'));
+  const elsewhere = p.sideRow('bot', '年糕', spinLine('在处理'));
   const waiting = p.sideRow('group', 'g2', (() => { const l = p.h('span', 'preview st wait'); l.textContent = '等你确认'; return l; })());
-  p.state.status = { bots: { 栗子: { state: 'running' }, 团子: { state: 'idle' } }, groups: { g2: { state: 'awaiting' } } };
+  // 栗子 works in its own chat; 年糕 is "running" only because it works in a group (its single chat is idle).
+  p.state.status = { bots: { 栗子: { state: 'running', activity: busyHere }, 年糕: { state: 'running', activity: idleHere }, 团子: { state: 'idle' } }, groups: { g2: { state: 'awaiting' } } };
   p.presence.rows(p.roster);
-  // Another chat, running by the status: its spinner became the typing dots, its words stay.
   const line = other.find('preview')[0];
+  const spin = (row: El) => row.find('st-spin')[0];
   assert.equal(line.find('st-spin').length, 0);
   assert.equal(line.find('pz-dots').length, 1);
   assert.equal(line.find('pz-dots')[0].children.length, 3);
   assert.match(text(line), /在处理$/);
+  assert.ok(spin(elsewhere), 'busy only in another chat: no typing dots on this one (review finding 3)');
+  assert.equal(elsewhere.find('pz-dots').length, 0);
+  // Its own chat could not be read whole: no dots either.
+  p.state.status.bots.栗子 = { state: 'running', activity: { ...busyHere, readStatus: 'partial' } };
+  p.presence.rows(p.roster);
+  assert.equal(other.find('pz-dots').length, 0);
+  assert.ok(spin(other), 'the spinner it stood in for is back');
+  // Busy again, then the whole status read fails: the dots go, the list's own line stays.
+  p.state.status.bots.栗子 = { state: 'running', activity: busyHere };
+  p.presence.rows(p.roster);
+  assert.equal(other.find('pz-dots').length, 1);
+  p.state.stale = true;
+  p.presence.rows(p.roster);
+  assert.equal(other.find('pz-dots').length, 0, 'a failed poll vouches for nothing');
+  p.state.stale = false;
   assert.equal(text(mine.find('preview')[0]), '你：你好');
   // The open chat's cat starts writing: its row says so at once, before the next poll.
   const was = mine.find('preview')[0];
@@ -380,6 +601,7 @@ test('seen: the paw goes by the owner\'s latest message a reply answers, stamped
   assert.equal(pawOf('u2'), undefined, 'none while it waits');
   assert.equal(pawOf('u1').classList.contains('pz-stamp'), false, 'what was already seen when the chat opened is not stamped');
   assert.equal(pawOf('u1').getAttribute('aria-label'), '团子看到了');
+  assert.equal(pawOf('u1').tabIndex, 0, 'a stable focus target for who saw it (review finding 9)');
   assert.equal(pawOf('u1').dataset.cat, 'a', 'tinted by the cat that saw it (chat-presence-rules.js decides if it is legible)');
   const u1 = rowOf('u1');
   // The engine starts on u2: the paw moves there, stamped this once; u1 keeps its element.
@@ -399,10 +621,14 @@ test('seen: the paw goes by the owner\'s latest message a reply answers, stamped
   p.draw([p.userRow('u1', '一'), p.catRow('r1', 'a', '好'), p.userRow('u2', '二（改）'), p.catRow('r2', 'a', '')], next);
   assert.ok(rowOf('u2').classList.contains('lv-still'));
   assert.equal(pawOf('u2').classList.contains('pz-stamp'), false);
-  // A refusal said by name is not an answer.
-  const q = page();
-  q.draw([q.userRow('u9', '@年糕 在吗')], [own('u9'), answer('n9', 'u9', 'a', { notice: true })]);
-  assert.equal(q.onScreen().find('pz-seen').length, 0);
+  // A refusal said by name, a delivery failure (a system record), or a reply that failed before
+  // producing anything is no pickup: nothing says 看到了 (review finding 1).
+  for (const rows of [[answer('n9', 'u9', 'a', { notice: true })], [answer('s9', 'u9', '', { native_cat_id: '' }, { type: 'system', catId: null, content: '云端投递失败' })],
+    [answer('f9', 'u9', 'a', { ended: { how: 'failed' } }, { content: '', lifecycle: { status: 'failed' } })]]) {
+    const q = page();
+    q.draw([q.userRow('u9', '@年糕 在吗')], [own('u9'), ...rows]);
+    assert.equal(q.onScreen().find('pz-seen').length, 0, JSON.stringify(rows[0].native));
+  }
 });
 
 test('seen with reduced motion is never stamped; in a group the paw names every cat that picked the message up and takes no single colour', () => {
@@ -412,7 +638,7 @@ test('seen with reduced motion is never stamped; in a group the paw names every 
   assert.equal(p.onScreen().find('pz-seen')[0].classList.contains('pz-stamp'), false);
   const g = page({ group: true });
   const person = (id: string) => ({ kind: 'person', id });
-  const said = (id: string, cat: string) => ({ kind: 'bot', id, native_cat_id: cat, native: { replyTo: 'g1' } });
+  const said = (id: string, cat: string) => ({ kind: 'bot', id, native_cat_id: cat, native: { type: 'assistant', catId: cat, replyTo: 'g1', content: '好', lifecycle: { status: 'completed' } } });
   g.draw([g.userRow('g1', '大家好')], [person('g1'), said('x', 'a')]);
   assert.equal(g.onScreen().find('pz-seen')[0].dataset.cat, 'a');
   g.draw([g.userRow('g1', '大家好')], [person('g1'), said('x', 'a'), said('y', 'b')]);
@@ -432,6 +658,64 @@ test('the colours live in one style element that follows the cat list and the th
   p.presence.rows(p.roster);
   assert.equal(text(sheet), '', 'a pair taken away: the theme\'s colours again');
   assert.equal(p.doc.querySelectorAll('#pz-accents').length, 1);
+});
+
+test('the colours follow a theme switched at runtime: the theme\'s own tokens are read again and the rules re-decided', () => {
+  const p = page({ theme: true });
+  p.state.bots = [{ name: '团子', native_id: 'a', accent: PAIRS['golden-chinchilla'] }];
+  p.presence.rows(p.roster);
+  const sheet = p.doc.getElementById('pz-accents')!;
+  assert.equal(text(sheet), '', 'gold on cream: nothing legible, the theme\'s colours');
+  // The owner switches to dark (applyTheme sets data-theme): the observer re-reads the surfaces.
+  p.doc.root.setAttribute('data-theme', 'dark');
+  p.fire(p.doc.root, 'light');
+  assert.match(text(sheet), /\.who > span:first-child \{ color: #c8a951; \}/);
+  assert.match(text(sheet), /--pz-paw: #c8a951/);
+  p.doc.root.setAttribute('data-theme', 'light');
+  p.fire(p.doc.root, 'dark');
+  assert.equal(text(sheet), '');
+});
+
+test('the day separators are drawn again when the calendar day changes, through the status poll, once', () => {
+  const p = page();
+  p.draw([p.userRow('u1', '晚安')], [own('u1')]);
+  p.presence.rows(p.roster);
+  assert.equal(p.state.redraws, 0);
+  p.advance(60_000); // 23:58 → 23:59
+  p.presence.rows(p.roster);
+  assert.equal(p.state.redraws, 0, 'the same day');
+  p.advance(3 * 60_000); // past midnight
+  p.presence.rows(p.roster);
+  assert.equal(p.state.redraws, 1, '今天 and 昨天 are out of date: the history is drawn again');
+  p.presence.rows(p.roster);
+  assert.equal(p.state.redraws, 1, 'once per day change');
+});
+
+test('a closing palette or scrim leaves a fading copy that is no dialog (the palette can open again at once, which removes the copy); none with reduced motion', () => {
+  const p = page();
+  p.pal.hidden = false;
+  p.pal.find('pal-input')[0].value = '团';
+  p.pal.hidden = true;
+  p.fire(p.pal, null);
+  const copy = p.doc.body.children.find((n: El) => n.classList.contains('pz-ghost'))!;
+  assert.ok(copy, 'a copy fades where the palette was');
+  assert.equal(p.pal.hidden, true, 'the palette itself is hidden at once');
+  assert.equal(copy.getAttribute('aria-hidden'), 'true');
+  assert.equal(copy.inert, true);
+  assert.equal(copy.querySelectorAll('[aria-modal]').length + copy.querySelectorAll('[role="dialog"]').length, 0, 'no modal semantics: no guard takes it for an open dialog (review finding 8)');
+  assert.equal(copy.find('pal-input')[0].value, '团', 'the typed words fade with it');
+  assert.ok(copy.animations >= 1 && copy.find('pal-card')[0].animations >= 1);
+  // Open again during the fade: the copy goes at once.
+  p.pal.hidden = false;
+  p.fire(p.pal, '');
+  assert.equal(p.doc.body.children.some((n: El) => n.classList.contains('pz-ghost')), false);
+  // The scrim too; with reduced motion nothing is copied.
+  p.scrim.hidden = false; p.scrim.hidden = true; p.fire(p.scrim, null);
+  assert.equal(p.doc.body.children.filter((n: El) => n.classList.contains('pz-ghost')).length, 1);
+  const q = page({ reduce: true });
+  q.pal.hidden = true;
+  q.fire(q.pal, null);
+  assert.equal(q.doc.body.children.some((n: El) => n.classList.contains('pz-ghost')), false);
 });
 
 // ---------------------------------------------------------------- app.js

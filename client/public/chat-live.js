@@ -114,20 +114,26 @@
       for (const fn of [...watchers]) { try { fn(); } catch (err) { /* a watcher never breaks the live view */ } }
     });
   }
+  // unsure: the stream was lost since this reply was last confirmed (an
+  // event of its own, or a read showing it in progress), so what it was
+  // doing is not known now. waiting: sends no reply has claimed yet (queued:
+  // the status says they wait behind other work).
   function presence() {
     const replies = [];
     for (const e of S.replies.values()) {
       if (e.r.done || e.gone || !e.r.catId) continue;
-      replies.push({ id: e.id, catId: e.r.catId, phase: e.r.phase, tool: e.r.step ? e.r.step.tool : "" });
+      replies.push({ id: e.id, catId: e.r.catId, phase: e.r.phase, tool: e.r.step ? e.r.step.tool : "", unsure: !!e.unsure });
     }
-    return { key: S.key, stopping: !!S.stopping, replies };
+    return { key: S.key, stopping: !!S.stopping, replies, waiting: S.waiting.map((w) => ({ queued: !!w.wait.queued })) };
   }
 
   function entry(id, catId, fromStart) {
     // lifeAt: the last sign it was being written (an event, a read showing it
-    // in progress); missed: the stream may have dropped some of its events.
+    // in progress); missed: the stream may have dropped some of its events;
+    // unsure: lost since its last confirmation (see presence()); streamed:
+    // what it shows came from its own events (not only from a read).
     const e = { id, r: R.reply(id, catId, fromStart, Date.now()), row: null, own: false, bubble: null, step: null,
-      shown: null, phrase: null, next: 0, dirty: false, gone: false, wait: null, lifeAt: Date.now(), missed: false, replyTo: "" };
+      shown: null, phrase: null, next: 0, dirty: false, gone: false, wait: null, lifeAt: Date.now(), missed: false, unsure: false, streamed: false, replyTo: "" };
     S.replies.set(id, e);
     return e;
   }
@@ -157,8 +163,9 @@
     if (e.bubble) return;
     e.bubble = node("div", "prose bot-bubble lv-text lv-typing");
     e.bubble.append(dots());
+    // Not a live region: chat-presence.js announces what the cats are doing
+    // once per change, in one polite region for the whole chat.
     e.step = node("div", "lv-step");
-    e.step.setAttribute("aria-live", "polite");
     e.step.hidden = true;
   }
   // The reply's bubble and quiet line go into this row's body (before its hover time).
@@ -296,7 +303,14 @@
     e.bubble.classList.toggle("lv-writing", writing && !!shown);
     e.row.classList.toggle("lv-done", !writing);
     e.row.setAttribute("aria-busy", String(writing));
-    step(e, S.stopping && writing ? "正在停止…" : e.wait ? (e.wait.queued ? "排队中" : "") : R.phrase(e.r));
+    // Lost and not confirmed since: no claim about what it is doing (the
+    // quiet line empties, the typing paws rest).
+    e.row.classList.toggle("lv-unsure", writing && !!e.unsure);
+    step(e, S.stopping && writing ? "正在停止…" : e.wait ? (e.wait.queued ? "排队中" : "") : e.unsure ? "" : R.phrase(e.r));
+    // The typing paws are named for what they show: a send waiting for its
+    // cat to start, a reply being written, or one not confirmed since a loss.
+    const paws = kids(e.bubble).find((c) => c.classList.contains("typing-dots"));
+    if (paws) paws.setAttribute("aria-label", e.wait ? "等猫猫开始回复" : e.unsure ? "正在回复" : "正在输入");
     e.dirty = false;
     told();
     return true;
@@ -336,6 +350,12 @@
     }
     if (e.gone) return;
     e.lifeAt = Date.now();
+    // An event of its own confirms it again after a loss (and what it says
+    // now came from the stream, which a later loss puts in doubt).
+    const confirmed = e.unsure;
+    e.unsure = false;
+    e.streamed = true;
+    if (confirmed) e.dirty = true;
     const waiting = e.r.held.length;
     const changed = R.apply(e.r, ev, Date.now());
     // A piece is waiting for words this page missed: the transcript's draft
@@ -349,11 +369,23 @@
     }
     if (changed || e.dirty) dirty(e);
     if (ev.kind === "start" || ev.kind === "done") H.changed();
-    if (changed || ev.kind === "start" || ev.kind === "done") told();
+    if (changed || confirmed || ev.kind === "start" || ev.kind === "done") told();
   }
   // The stream may have missed events (a reconnect, a gap): words can follow
   // on only by native position now, and the next read fills what was missed.
-  function lost() { for (const e of S.replies.values()) { R.lost(e.r); e.missed = true; } }
+  // Until an event or a read confirms a reply again, nothing is said about
+  // what it is doing (unsure, presence()). Only what the stream said is put
+  // in doubt: a reply a read confirmed since (no event of its own after it)
+  // stays as that read showed it, so a stream that keeps failing does not
+  // make the header come and go with each retry.
+  function lost() {
+    for (const e of S.replies.values()) {
+      R.lost(e.r);
+      e.missed = true;
+      if (!e.r.done && !e.gone && !e.unsure && e.streamed) { e.unsure = true; dirty(e); }
+    }
+    told();
+  }
 
   // ------------------------------------------------------------------- reads
   // What a transcript or group read says about replies: [{id, catId,
@@ -397,6 +429,9 @@
         const w = answering(row);
         if (w && w.row !== x.row) dropWait(w);
       }
+      // A read shows it still being produced: confirmed again, though what it
+      // was doing when the stream was lost (a step, thinking) is not.
+      if (x.unsure) { x.unsure = false; x.streamed = false; R.recover(x.r); x.dirty = true; }
       x.replyTo = String(row.replyTo || "");
       x.lifeAt = now;
       if (R.draft(x.r, row.draft)) x.dirty = true;
