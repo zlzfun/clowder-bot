@@ -232,7 +232,7 @@
     // portrait, without words, until /start says otherwise.
     // custom: a cat of the owner's own (自定义). Switching keeps the name, the
     // face and both lines; only what is sent changes.
-    let s = null, agent = null, faceTouched = false, picked = null, suggested = "", busy = false, loads = 0, refused = "", kind = "";
+    let s = null, agent = null, faceTouched = false, picked = null, suggested = "", busy = false, loads = 0, refused = "", refusedFaces = false, kind = "";
     let offered = R.offer([], presets()), custom = false, painted = "", modeShown = null;
     // The keys of requests whose answer was lost, by request body: the same
     // body again — after switching to 自定义 and back, too — is the same
@@ -244,15 +244,19 @@
       root.setAttribute("novalidate", "");
       root.addEventListener("submit", (ev) => { ev.preventDefault(); submit(); });
     }
-    const faces = lineup({ compact: dialog, onPick: (id) => { faceTouched = true; picked = id; follow(id); paintAbout(); say(custom ? "" : spoken()); } });
+    const faces = lineup({ compact: dialog, onPick: (id) => { faceTouched = true; picked = id; follow(id); note(""); paintAbout(); say(custom ? "" : spoken()); } });
     const ids = () => offered.map((f) => f.id);
 
     // What the chosen cat is like — or, for a cat of the owner's own, that the
     // face is only its looks — and the quiet 自定义 switch between the two.
     const about = node("div", "qc-about"), trait = node("p", "qc-trait");
+    // A quiet line under the hint when the portrait changed since the screen
+    // read it (face_changed): the hint now shows the new words; have a look.
+    const fresh = node("p", "qc-fresh");
+    fresh.hidden = true;
     const mode = button("text-btn qc-mode", null, () => setMode(!custom));
     mode.setAttribute("aria-pressed", "false");
-    about.append(trait, mode);
+    about.append(trait, fresh, mode);
     // Said once, politely, for each choice the owner makes (a face, 自定义 on
     // or off); never for what the form fills in by itself, nor while typing.
     const voice = node("p", "qc-sr");
@@ -318,12 +322,13 @@
       laterBox.hidden = kind !== "later";
       go.hidden = kind !== "ready";
       faces.enable(kind === "ready");
-      if (kind !== "ready") { faces.set(null); say(""); }
+      if (kind !== "ready") { faces.set(null); say(""); note(""); }
       paintAbout();
       onState(kind);
     }
     function showError(text) { error.textContent = text || ""; error.hidden = !text; }
     function say(text) { if (voice.textContent !== (text || "")) voice.textContent = text || ""; }
+    function note(text) { fresh.textContent = text || ""; fresh.hidden = !text; }
     const chosenFace = () => offered.find((f) => f.id === faces.get()) || null;
     const spoken = () => { const f = chosenFace(); return f && f.hint ? f.hint.said : ""; };
     function setFace(id) { faces.set(id); follow(id); paintAbout(); }
@@ -369,6 +374,7 @@
         custom = next;
         own.hidden = !custom;
         faces.label(custom ? "选它的长相" : "选一只猫猫");
+        note("");
         paintAbout();
       });
       say(custom ? R.OWN_NOTE : spoken());
@@ -407,18 +413,23 @@
       const why = R.startError(err);
       if (how === "refresh" && !needBox.hidden) { paintNeed(s, "没能重新检测：" + why); return; }
       if (how === "refused" && !fields.hidden) { showError(refused + "也没能重新读取这台电脑的情况，稍后再试。"); return; }
+      if (how === "changed" && !fields.hidden) { showError("这只猫猫的介绍刚刚更新了，可没能读到新的介绍，稍后再试。"); return; }
       show("failed");
       wait.replaceChildren(node("span", "", why + "。"), button("text-btn qc-retry", "重试", () => load("first")));
     }
+    // how: "first", "refresh" (重新检测), "refused" (after a 422 or
+    // faces_unavailable: `refused` says what happened) or "changed" (after
+    // face_changed: the portrait the owner saw is out of date).
     function apply(next, how) {
       const before = s, wasReady = !fields.hidden && !!(before && before.ready);
       s = next;
       offerFaces(R.offer(next.faces, presets()));
-      if (!next.ready) {
-        let note = "";
-        if (how === "refresh") note = R.sameStart(before, next) ? R.need(next).unchanged : "检测结果有变化。";
-        else if (how === "refused") note = refused;
-        paintNeed(next, note);
+      // Blocked: no usable tool, or (just as final) no cat's details to make one from.
+      if (!next.ready || !R.usable(next.faces, presets())) {
+        let said = "";
+        if (how === "refresh") said = R.sameStart(before, next) ? needOf(next).unchanged : "检测结果有变化。";
+        else if (how === "refused") said = refused;
+        paintNeed(next, said);
         show("blocked");
         return;
       }
@@ -427,11 +438,19 @@
         agent = next.agent.id;
         if (!faceTouched) setFace(R.defaultFace(agent, ids()));
         if (lost) showError(lost + " 现在用不了，已经换成 " + next.agent.label + "。再点一次就好。");
-      } else if (how === "refused") showError(refused);
+      } else if (how === "refused") showError(refused + (refusedFaces ? "现在读到了，再点一次就好。" : ""));
       tool.render(next, agent);
       if (wasReady) {
         // The faces on offer changed under a choice that is no longer there.
         if (!faces.get()) setFace(faceTouched && picked ? picked : R.defaultFace(agent, ids()));
+        // The same face may come back with new words: show them (quietly; nobody chose anything).
+        paintAbout();
+        if (how === "changed") {
+          // The owner was looking at older words: say so beside the new ones, and once aloud. Nothing is sent again by itself.
+          note(R.FACE_CHANGED);
+          say(R.FACE_CHANGED + (custom ? "" : spoken()));
+          go.focus();
+        }
         return;
       }
       // Back from blocked (or first time ready): the owner's own face if they picked one.
@@ -440,14 +459,16 @@
       setFace(face);
       if (dialog || how === "refresh") focusName();
     }
-    function paintNeed(next, note) {
-      const copy = R.need(next), refocus = needBox.contains(document.activeElement);
+    // What blocks: the tools (item 28) first, else the cats' details.
+    const needOf = (next) => (next && next.ready ? R.facesNeed() : R.need(next));
+    function paintNeed(next, said) {
+      const copy = needOf(next), refocus = needBox.contains(document.activeElement);
       const cmds = node("div", "qc-cmds");
       for (const c of copy.commands) cmds.append(commandChip(c.command, copy.commands.length > 1 ? c.label : ""));
       cmds.hidden = !copy.commands.length;
       const label = node("span", "", "重新检测"), again = button("secondary qc-again");
       again.append(h.icon("refresh-cw"), label);
-      const status = node("p", "qc-note", note);
+      const status = node("p", "qc-note", said);
       status.setAttribute("role", "status");
       // Inert while checking, but not disabled: a disabled button would drop
       // focus, and the answer repaints this panel with focus kept on it.
@@ -481,8 +502,9 @@
     }
     async function submit() {
       if (busy || !s || !s.ready || fields.hidden) return;
-      // The face's own cat sends the face alone; 自定义 sends custom and what was written.
-      const body = R.catBody({ name: nameIn.value, face: faces.get(), agent, custom, about: aboutF.input.value, personality: temperF.input.value });
+      // The face's own cat sends the face and the rev of the portrait shown; 自定义 sends custom and what was written.
+      const face = chosenFace();
+      const body = R.catBody({ name: nameIn.value, face: faces.get(), rev: face && face.rev, agent, custom, about: aboutF.input.value, personality: temperF.input.value });
       const print = R.fingerprint(body);
       // The same request as one whose answer was lost goes back under its key
       // even when the refreshed list now knows the name: that cat may be this
@@ -498,18 +520,25 @@
       }
       const key = known || requestKey();
       showError("");
+      note("");
       setBusy(true);
       let result;
-      try { result = await h.api("/xbot-api/bots", { method: "POST", body: { ...body, idempotencyKey: key } }); }
+      // serverError: the shell's api() would otherwise turn a 5xx into a generic error and drop its `code`
+      // (faces_unavailable is a 503 that says nothing was made); a 5xx without a code is still unsure.
+      try { result = await h.api("/xbot-api/bots", { method: "POST", body: { ...body, idempotencyKey: key }, serverError: true }); }
       catch (err) {
         if (!alive()) return;
         setBusy(false);
         const what = R.catError(err, body.name, (R.choiceOf(s, agent) || {}).label);
         // An unsure request may have made the cat: the same body keeps its key.
-        // A refused one made none: the next is new, checked against the list again.
+        // A refused one made none (face_changed and faces_unavailable are
+        // refusals too): the next is new, checked against the list again.
         if (what.kind === "unsure") unsure.set(print, key); else unsure.delete(print);
         if (what.kind === "name") { nameF.mark(what.text); nameIn.focus(); quietly(h.refresh); }
-        else if (what.kind === "blocked") { refused = what.text; await load("refused"); }
+        // What blocks (the tool, or the cats' details) is read again and shown as item 28 does; nothing was made.
+        else if (what.kind === "blocked" || what.kind === "unavailable") { refused = what.text; refusedFaces = what.kind === "unavailable"; await load("refused"); }
+        // The portrait changed: read the faces again and let the owner look; not sent again by itself.
+        else if (what.kind === "changed") await load("changed");
         else { showError(what.text); go.focus(); if (what.kind === "unsure") quietly(h.refresh); }
         return;
       }
