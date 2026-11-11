@@ -9,7 +9,7 @@
 // data in ./data keeps using it until it is moved deliberately.
 import { existsSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 
 /**
  * BOT_DATA_DIR, else ./data when this checkout already holds data, else
@@ -30,9 +30,19 @@ export function nativeDataDir(root, env = process.env, home = homedir()) {
 export function productDataFile(root, env = process.env, home = homedir()) {
   return resolve(env.BOT_PRODUCT_DATA_FILE || join(dataRoot(root, env, home), 'bot', 'presentation.json'));
 }
-/** The nearest directory at or above `dir` that is a Git checkout, or null. */
+/**
+ * The nearest directory at or above `dir` that is a Git checkout, or null.
+ * Judged by where the directory really is: a link on the way (or `dir` itself
+ * being one) may lead into a checkout, and that is where a cat's CLI would
+ * find itself. `dir` need not exist yet; its nearest existing parent is
+ * resolved and the rest of the path is taken as written.
+ */
 export function enclosingRepository(dir) {
-  for (let current = resolve(dir); ; current = dirname(current)) {
+  let existing = resolve(dir);
+  const rest = [];
+  while (!existsSync(existing) && dirname(existing) !== existing) { rest.unshift(basename(existing)); existing = dirname(existing); }
+  try { existing = realpathSync(existing); } catch { /* unreadable: judge the path as written */ }
+  for (let current = join(existing, ...rest); ; current = dirname(current)) {
     if (existsSync(join(current, '.git'))) return current;
     if (dirname(current) === current) return null;
   }

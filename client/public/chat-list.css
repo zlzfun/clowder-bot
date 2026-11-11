@@ -1,0 +1,37 @@
+/* The sidebar as a messenger's contact list (chat-list.js): the time of a
+   conversation's latest line on the name line, its unread count under the
+   time, a draft's marker, and rows that glide to their new place. Builds on
+   the .item rows of app.css and the café layer; only existing tokens, no new
+   colours or fonts. The global prefers-reduced-motion rule of app.css stills
+   the glide (chat-list.js does not start one then either). */
+
+/* Name line over preview line; the count sits at the end of the preview line. */
+.item .item-body.cl-body {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center;
+  column-gap: var(--x-s3); row-gap: 2px;
+}
+.item-body.cl-body > .name-line { grid-column: 1 / -1; }
+.item-body.cl-body > .preview { grid-column: 1; min-width: 0; }
+.item-body.cl-body > .cl-count { grid-column: 2; }
+
+/* 刚刚 / 5 分钟前 / 14:05 / 昨天 / 11月3日, right-aligned and quiet. */
+.item .cl-time {
+  margin-left: auto; padding-left: var(--x-s2); flex: none;
+  font-size: var(--x-fs-cap); line-height: 1.35; color: var(--x-faint);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.cl-time[hidden], .cl-count[hidden] { display: none; }
+
+/* Two or more new replies: the count, beside the dot that stays on the face. */
+.cl-count {
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: var(--x-r-pill);
+  background: var(--x-primary); color: var(--x-on-primary);
+  font-size: 11px; font-weight: 600; line-height: 18px; text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 草稿：… while words are left in a chat the owner moved away from. */
+.item .preview.cl-draft .cl-draft-tag { color: var(--x-text-2); font-weight: 600; }
+
+/* A row gliding from where it was to its new place. */
+.item.cl-moving { transition: transform 180ms ease-out, background 160ms ease-out; }

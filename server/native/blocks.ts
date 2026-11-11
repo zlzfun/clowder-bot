@@ -10,8 +10,8 @@ import { clip } from './text.js';
  */
 export type ChatBlock =
   | { id: string; kind: 'card'; title: string; body?: string; tone?: 'info' | 'success' | 'warning' | 'danger'; fields?: Array<{ label: string; value: string }>;
-      /** Set when the card is a native request for the owner's confirmation (see approvals.ts). */
-      approval?: { id: string } }
+      /** Set when the card is a native request for the owner's confirmation (see approvals.ts); `state` once the engine's receipt on the same page says how it was answered. */
+      approval?: { id: string; state?: 'approved' | 'rejected' | 'closed' } }
   | { id: string; kind: 'checklist'; title?: string; items: Array<{ id: string; text: string; checked: boolean }> }
   | { id: string; kind: 'choices'; mode: 'single' | 'multiple' | 'confirm'; title?: string; description?: string;
       options: Array<{ id: string; label: string; emoji?: string; description?: string; custom?: true }>;
@@ -22,7 +22,15 @@ const record = (value: unknown): Record<string, unknown> => value && typeof valu
 const text = (value: unknown, max: number): string | undefined => typeof value === 'string' && value.trim() ? clip(value, max) : undefined;
 const tones = ['info', 'success', 'warning', 'danger'] as const;
 
-export function messageBlocks(message: NativeMessage): { blocks: ChatBlock[]; hidden: number } {
+/** How the engine's receipt says a request for confirmation was answered (see message-presentation.ts approvalReceipt). */
+export interface ApprovalDecision { proposalId: string; producerId: string; state: 'approved' | 'rejected' | 'closed'; cardMessageId?: string }
+
+/**
+ * `decided`: the receipts on the same page. A request card takes its state only
+ * from a receipt for the same request by the same producer and, when the
+ * receipt names the card's message, for this message.
+ */
+export function messageBlocks(message: NativeMessage, decided: ApprovalDecision[] = []): { blocks: ChatBlock[]; hidden: number } {
   const raw = record(message.extra?.rich).blocks, blocks: ChatBlock[] = [];
   let hidden = 0;
   for (const entry of Array.isArray(raw) ? raw.slice(0, 50) : []) {
@@ -31,25 +39,38 @@ export function messageBlocks(message: NativeMessage): { blocks: ChatBlock[]; hi
     if (block.kind === 'file') continue;
     if (block.kind === 'card' && text(block.title, 300)) {
       const approval = record(record(block.meta).approval), proposal = text(approval.canonicalProposalId, 200);
+      const state = proposal ? decided.find(receipt => receipt.proposalId === proposal && receipt.producerId === approval.producerId
+        && (receipt.cardMessageId === undefined || receipt.cardMessageId === message.id))?.state : undefined;
       const fields = (Array.isArray(block.fields) ? block.fields : []).map(record)
         .filter(field => typeof field.label === 'string' && typeof field.value === 'string').slice(0, 20)
         .map(field => ({ label: clip(field.label as string, 80), value: clip(field.value as string, 400) }));
       blocks.push({ id, kind: 'card', title: text(block.title, 300)!, ...(text(block.bodyMarkdown, 8000) ? { body: text(block.bodyMarkdown, 8000)! } : {}),
         ...(tones.includes(block.tone as never) ? { tone: block.tone as typeof tones[number] } : {}), ...(fields.length ? { fields } : {}),
-        ...(proposal ? { approval: { id: proposal } } : {}) });
+        ...(proposal ? { approval: { id: proposal, ...(state ? { state } : {}) } } : {}) });
     } else if (block.kind === 'checklist' && Array.isArray(block.items)) {
       const items = block.items.map(record).filter(item => typeof item.id === 'string' && typeof item.text === 'string').slice(0, 100)
         .map(item => ({ id: item.id as string, text: clip(item.text as string, 500), checked: item.checked === true }));
       if (!items.length) { hidden++; continue; }
       blocks.push({ id, kind: 'checklist', ...(text(block.title, 300) ? { title: text(block.title, 300)! } : {}), items });
     } else if (block.kind === 'interactive' && Array.isArray(block.options)) {
-      const options = block.options.map(record).filter(option => typeof option.id === 'string' && typeof option.label === 'string').slice(0, 40)
+      // An option with a direct action calls a native endpoint instead of sending a chat message
+      // (upstream F155: guides, feedback). Those operations are not adapted, so such a block is not
+      // offered as an ordinary choice that would disable it without doing what it asks.
+      if (block.options.some(option => record(option).action !== undefined)) { hidden++; continue; }
+      const mode = block.interactiveType === 'confirm' ? 'confirm' as const : block.interactiveType === 'multi-select' ? 'multiple' as const : 'single' as const;
+      let options = block.options.map(record).filter(option => typeof option.id === 'string' && typeof option.label === 'string').slice(0, 40)
         .map(option => ({ id: option.id as string, label: clip(option.label as string, 200),
           ...(text(option.emoji, 16) ? { emoji: text(option.emoji, 16)! } : {}), ...(text(option.description, 400) ? { description: text(option.description, 400)! } : {}),
           ...(option.customInput === true ? { custom: true as const } : {}) }));
+      if (mode === 'confirm') {
+        // Exactly two answers, chosen as the native web client does: the option called __confirm__ or
+        // else the first one confirms; the first other one cancels, or a plain 取消 when none is declared.
+        const yes = options.find(option => option.id === '__confirm__') ?? options[0] ?? { id: '__confirm__', label: '确认' };
+        options = [yes, options.find(option => option.id !== yes.id) ?? { id: '__cancel__', label: '取消' }];
+      }
       if (!options.length) { hidden++; continue; }
       const selected = Array.isArray(block.selectedIds) ? block.selectedIds.filter((value): value is string => typeof value === 'string') : [];
-      blocks.push({ id, kind: 'choices', mode: block.interactiveType === 'confirm' ? 'confirm' : block.interactiveType === 'multi-select' ? 'multiple' : 'single',
+      blocks.push({ id, kind: 'choices', mode,
         ...(text(block.title, 300) ? { title: text(block.title, 300)! } : {}), ...(text(block.description, 1000) ? { description: text(block.description, 1000)! } : {}),
         options, ...(typeof block.maxSelect === 'number' && block.maxSelect > 0 ? { max: block.maxSelect } : {}),
         ...(text(block.messageTemplate, 1000) ? { template: text(block.messageTemplate, 1000)! } : {}),

@@ -405,6 +405,12 @@ test('Agent binding restores native defaults; retired model APIs cannot mutate c
   const patch = r.native.calls.findLast(c => c.path === `/api/cats/${cat.id}` && c.method === 'PATCH')!.body;
   assert.equal(patch.configurationSource, 'native_tool'); assert.equal(patch.accountRef, null);
   assert.equal(patch.defaultModel, ''); assert.equal(patch.cli.effort, null); assert.equal(patch.cli.serviceTier, null);
-  assert.deepEqual(patch.cliConfigArgs, []); assert.equal(patch.expectedRevision, cat.configurationRevision);
+  assert.deepEqual(patch.cliConfigArgs, [], 'Codex gets no extra arguments'); assert.equal(patch.expectedRevision, cat.configurationRevision);
   assert.equal((await r.bridge.direct(cat)).id, thread.id);
+  // Bound to Claude Code, the member starts with the CLI's own schedulers switched off, so "remind me…" goes to the engine's.
+  r.native.runtimes.push({ id: 'claude', label: 'Claude Code', clientId: 'anthropic', installed: true, models: [], readiness: { status: 'configured', checkedAt: 1 } });
+  assert.equal((await r.call('/xbot-api/bots/Ada/agent', 'PUT', { runtimeId: 'claude' })).status, 200);
+  const claude = r.native.calls.findLast(c => c.path === `/api/cats/${cat.id}` && c.method === 'PATCH')!.body;
+  assert.deepEqual(claude.cliConfigArgs, ['--settings', '{"skillOverrides":{"schedule":"off","loop":"off"}}', '--disallowedTools', 'RemoteTrigger,CronCreate,CronDelete,CronList']);
+  assert.doesNotMatch(claude.cliConfigArgs[1], /\s/, 'the settings JSON has no spaces: the CLI carrier splits arguments on whitespace');
 });

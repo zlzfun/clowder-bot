@@ -2,11 +2,11 @@ import { createHash, randomUUID } from 'node:crypto';
 import { ApiError } from '../errors.js';
 import { ProductStore } from '../product-store.js';
 import type { NativeCat, NativeMessage, NativeThread, NativeTransport } from './types.js';
-import { defaultRuntime, runtimeUnavailable, supportsRuntime } from './agents.js';
-import { messageDisplayText, messagePresentation, replyEnding, replyInProgress } from './message-presentation.js';
+import { defaultRuntime, memberCliArgs, runtimeUnavailable, supportsRuntime } from './agents.js';
+import { approvalReceipt, approvalReceiptText, messageDisplayText, messagePresentation, replyEnding, replyInProgress, rosterRefusals } from './message-presentation.js';
 import { avatarBreed, type CatConfig, type SourceTemplate } from './cat-templates.js';
 import { clip } from './text.js';
-import { messageBlocks } from './blocks.js';
+import { messageBlocks, type ApprovalDecision } from './blocks.js';
 import { Workspaces } from '../workspaces.js';
 import { NativeFiles } from './files.js';
 import { Activity } from './activity.js';
@@ -158,11 +158,16 @@ export class BotBridge {
     // A reply names the message it answers. Right under that message the quote
     // only repeats it, so it is shown when something else came in between.
     let lastUser: string | undefined;
+    // A cat that was addressed but does not belong to this conversation: said once by name (see rosterRefusals).
+    const refusals = rosterRefusals(page.messages, id => cats.find(cat => cat.id === id)?.name, false);
+    const decided = this.decisions(page.messages);
     for (const { message, ...presentation } of this.presentMessages(page.messages, cats)) {
       if (message.type === 'user' && message.id === source) continue;
-      const seq = this.store.sequence(thread.id, message.id);
-      const text = messageDisplayText(message, thread.id), inProgress = replyInProgress(message);
-      const rich = message.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(message), ending = replyEnding(message);
+      if (refusals.get(message.id) === null) continue;
+      const seq = this.store.sequence(thread.id, message.id), receipt = approvalReceipt(message);
+      const refusal = refusals.get(message.id) ?? (receipt ? approvalReceiptText(receipt) : undefined);
+      const text = refusal ?? messageDisplayText(message, thread.id, presentation.speaker?.name), inProgress = replyInProgress(message);
+      const rich = message.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(message, decided), ending = replyEnding(message);
       // At the top of a page that continues further back, what came just before is not known; no quote is guessed there.
       const quoted = message.replyTo && message.replyTo !== source
         && !(message.type !== 'user' && (message.replyTo === lastUser || (lastUser === undefined && page.hasMore))) ? message.replyTo : undefined;
@@ -171,7 +176,7 @@ export class BotBridge {
         content: text, ...presentation, time: new Date(message.timestamp).toISOString(),
         reply_to: quoted ? this.store.state.messageRefs[thread.id]?.[quoted] ?? 0 : 0,
         status: message.lifecycle?.status ?? (message.isDraft ? 'processing' : 'complete'), ...(inProgress ? { in_progress: true } : {}),
-        ...(ending ? { ended: ending } : {}),
+        ...(ending ? { ended: ending } : {}), ...(refusal ? { notice: true } : {}),
         attachments: this.workspaces.messageFiles(thread.id, message),
         // Cards, checklists and choices the cat attached; `blocks_hidden` counts what the chat cannot draw yet.
         ...(rich.blocks.length ? { blocks: rich.blocks } : {}), ...(rich.hidden ? { blocks_hidden: rich.hidden } : {}), native: message };
@@ -240,6 +245,10 @@ export class BotBridge {
     this.greetingRequests.set(key, request);
     try { return await request; } finally { this.greetingRequests.delete(key); }
   }
+  /** How the requests for confirmation on this page were answered, from the engine's own receipts. */
+  decisions(messages: NativeMessage[]): ApprovalDecision[] {
+    return messages.map(approvalReceipt).filter((receipt): receipt is ApprovalDecision => !!receipt);
+  }
   presentMessages(messages: NativeMessage[], cats: NativeCat[]) {
     const kinds = messagePresentation(messages);
     return messages.map(message => {
@@ -295,7 +304,7 @@ export class BotBridge {
       Object.assign(this.store.bot(cat.id), { templateId: identity, avatarSeed: input.avatar_seed || `cat:${identity}`,
         timezone: input.timezone, ...(result.sourceTemplate ? { sourceTemplate: result.sourceTemplate } : {}) });
       this.store.save();
-      return cat;
+      return this.withStartingArguments(cat);
     }
     if (input.sourceTemplate) throw new ApiError(400, '缺少创建配置');
     if ((await this.cats()).some(c => c.name.toLowerCase() === input.name.toLowerCase())) throw new ApiError(409, '已经有一只叫这个名字的猫猫了');
@@ -320,7 +329,38 @@ export class BotBridge {
     } });
     Object.assign(this.store.bot(cat.id), { templateId: template.id, avatarSeed: input.avatar_seed, timezone: input.timezone });
     this.store.save();
+    return this.withStartingArguments(cat);
+  }
+  /**
+   * The CLI arguments a new cat starts with (memberCliArgs), written as their
+   * own native step after the member exists. The creation request itself never
+   * carries them: its shape stays what native recorded for its key, so a repeat
+   * of an older request still matches, whatever the defaults are by then. A
+   * member that already has arguments is left alone. A refused write is tried
+   * once more against the member's current revision; if it still fails the
+   * cat exists and works, and is returned without the arguments — the caller
+   * can tell from the record (startingArgumentsMissing) and says so.
+   */
+  private async withStartingArguments(created: NativeCat): Promise<NativeCat> {
+    const args = memberCliArgs(created.clientId), has = (cat: NativeCat) => Array.isArray(cat.cliConfigArgs) && cat.cliConfigArgs.length > 0;
+    let cat = created;
+    for (let attempt = 0; args.length && !has(cat) && attempt < 2; attempt++) {
+      try {
+        const updated = await this.native.request<{ cat: NativeCat }>(`/api/cats/${encode(cat.id)}`, { method: 'PATCH',
+          body: { expectedRevision: cat.configurationRevision, cliConfigArgs: args } });
+        if (updated.cat?.id) cat = updated.cat;
+      } catch {
+        // Someone edited the member in between, or the write did not go through: look at it as it is now.
+        const current = await this.cats().then(cats => cats.find(known => known.id === created.id)).catch(() => undefined);
+        if (!current) break;
+        cat = current;
+      }
+    }
     return cat;
+  }
+  /** True when a cat should have starting arguments (see withStartingArguments) and has none. */
+  startingArgumentsMissing(cat: NativeCat): boolean {
+    return memberCliArgs(cat.clientId).length > 0 && !(Array.isArray(cat.cliConfigArgs) && cat.cliConfigArgs.length > 0);
   }
   /**
    * A cat from a name alone, on the unpatched native member creation
@@ -358,7 +398,7 @@ export class BotBridge {
     if (!cat?.id) throw new ApiError(502, '没能确认猫猫是否建好，请刷新后查看');
     Object.assign(this.store.bot(cat.id), { templateId: face, avatarSeed: `cat:${face}`, ...(timezone ? { timezone } : {}) });
     this.store.save();
-    return cat;
+    return this.withStartingArguments(cat);
   }
   async send(thread: NativeThread, body: { text: string; reply_to?: number; idempotencyKey?: string; attachments?: string[]; expectedThreadId?: string }, directCat?: NativeCat) {
     if (body.expectedThreadId && body.expectedThreadId !== thread.id) throw new ApiError(409, '会话已变化，请核对后重试');

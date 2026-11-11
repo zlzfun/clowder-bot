@@ -1,5 +1,5 @@
 import express, { type Response } from 'express';
-import { messageDisplayText, replyEnding, replyInProgress } from '../native/message-presentation.js';
+import { approvalReceipt, approvalReceiptText, messageDisplayText, replyEnding, replyInProgress, rosterRefusals } from '../native/message-presentation.js';
 import { liveEvent } from '../native/live.js';
 import { clip } from '../native/text.js';
 import { messageBlocks } from '../native/blocks.js';
@@ -78,13 +78,16 @@ export function createXbotCoreRouter(bridge: BotBridge) {
     const thread = await bridge.group(req.params.id);
     const [cats, page] = await Promise.all([bridge.cats(), bridge.messages(thread.id, typeof req.query.before === 'string' ? req.query.before : undefined)]);
     const first = page.messages[0];
+    // A cat that was addressed but is not in this group: said once by name instead of the engine's raw refusal lines.
+    const refusals = rosterRefusals(page.messages, id => cats.find(cat => cat.id === id)?.name, true), decided = bridge.decisions(page.messages);
     res.json({ group: bridge.groupItem(thread, cats), hasMore: page.hasMore,
       // The cursor for the page before this one, as the single-chat transcript gives it.
       before: first ? `${first.timelineOrderAt ?? first.timestamp}:${first.id}` : null,
-      messages: bridge.presentMessages(page.messages, cats).map(({ message: m, name, ...presentation }) => {
-        const rich = m.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(m);
+      messages: bridge.presentMessages(page.messages.filter(m => refusals.get(m.id) !== null), cats).map(({ message: m, name, ...presentation }) => {
+        const rich = m.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(m, decided), receipt = approvalReceipt(m);
+        const refusal = refusals.get(m.id) ?? (receipt ? approvalReceiptText(receipt) : undefined);
         return { id: m.id, time: new Date(m.timestamp).toISOString(), sender: m.type === 'user' ? 'local' : name,
-          kind: m.type === 'user' ? 'person' : 'bot', text: messageDisplayText(m, thread.id),
+          kind: m.type === 'user' ? 'person' : 'bot', text: refusal ?? messageDisplayText(m, thread.id, presentation.speaker?.name), ...(refusal ? { notice: true } : {}),
           status: m.lifecycle?.status ?? (m.isDraft ? 'processing' : 'complete'), ...(replyInProgress(m) ? { in_progress: true } : {}),
           ...(replyEnding(m) ? { ended: replyEnding(m) } : {}),
           attachments: bridge.workspaces.messageFiles(thread.id, m),
@@ -97,7 +100,9 @@ export function createXbotCoreRouter(bridge: BotBridge) {
       if ((value.catConfig || value.simple) && !value.idempotencyKey) ctx.addIssue({ code: 'custom', path: ['idempotencyKey'], message: '创建猫猫需要请求标识' });
     }).parse(req.body);
     const cat = await bridge.createBot(input);
-    res.status(201).json({ name: cat.name, native_id: cat.id });
+    // The cat exists either way; a second native step (its starting CLI arguments) may not have gone through.
+    res.status(201).json({ name: cat.name, native_id: cat.id, ...(bridge.startingArgumentsMissing(cat)
+      ? { notice: '猫猫建好了，但有一项默认设置没写进去：在对话里让它设提醒可能不生效。到它的资料 → 高级里重新选一次「它用什么思考」就能补上。' } : {}) });
   });
   router.patch('/bots/:name', async (req, res) => {
     const cat = await bot(req.params.name);
@@ -144,7 +149,15 @@ export function createXbotCoreRouter(bridge: BotBridge) {
     // Unnamed, a group is called after its members; it can be renamed later.
     const joined = members.map(c => c.name).join('、');
     const title = input.name ?? clip(joined, 64);
-    const thread = await bridge.newThread(title, members.map(c => c.id), directoryKey, await bridge.workspaces.groupPath(directoryKey));
+    const directory = await bridge.workspaces.groupPath(directoryKey);
+    if (input.idempotencyKey) {
+      // Native answers a repeated key with the thread it made, but applies the request's members to it
+      // again (pinned upstream routes/threads.ts), which would undo a member change made since and skip
+      // the busy-member check. A group this key already made is answered as it is now, without replaying.
+      const made = (await Promise.all(store.state.groupThreadIds.map(id => bridge.thread(id)))).find(known => known.projectPath === directory);
+      if (made) return res.json(bridge.groupItem(made, await bridge.cats()));
+    }
+    const thread = await bridge.newThread(title, members.map(c => c.id), directoryKey, directory);
     if (!store.state.groupThreadIds.includes(thread.id)) { store.state.groupThreadIds.push(thread.id); store.save(); }
     res.status(201).json(bridge.groupItem(thread, members));
   });
@@ -257,7 +270,11 @@ export function createXbotCoreRouter(bridge: BotBridge) {
   });
   router.post('/groups/:id/stop', async (req, res) => res.json(await bridge.stop((await bridge.group(req.params.id)).id)));
   router.post('/bots/:name/new', async (req, res) => {
-    const cat = await bot(req.params.name), thread = await bridge.workspaces.newConversation(cat);
+    // Optional: the conversation the page is showing. A view that is no longer current must not start a new one.
+    const { expectedThreadId } = z.object({ expectedThreadId: z.string().min(1).max(200).optional() }).strict().parse(req.body ?? {});
+    const cat = await bot(req.params.name);
+    if (expectedThreadId && (await bridge.direct(cat)).id !== expectedThreadId) throw new ApiError(409, '会话已变化，请刷新后重试');
+    const thread = await bridge.workspaces.newConversation(cat);
     res.json({ status: 'ok', conversation_id: thread.id });
   });
   router.post('/bots/:name/compact', async (req, res) => {

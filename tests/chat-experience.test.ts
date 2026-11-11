@@ -127,8 +127,14 @@ test('a conversation says what was said last: the owner counts, the invitation, 
   // A cut inside an emoji would leave half a character.
   r.native.messages.get(r.thread.id)!.push(r.reply('emoji',2800,'a'.repeat(138)+'🐱b'));
   assert.equal((await last())!.text,'a'.repeat(138)+'…');
+  // A cat writes Markdown; the list shows its words, not the marks. What the owner typed stays as typed.
+  r.native.messages.get(r.thread.id)!.push(r.reply('marked',2900,'## 结论\n\n看过说明，要点写进了 `结果.md`。\n\n简单说：纸箱让猫觉得**安全又暖和**。'));
+  assert.equal((await last())!.text,'结论 看过说明，要点写进了 结果.md。 简单说：纸箱让猫觉得安全又暖和。');
+  r.native.messages.get(r.thread.id)!.push({id:'typed',type:'user',content:'**加粗**是这样写的吗',timestamp:2950,threadId:r.thread.id,userId:'clowder-bot-owner'} as never);
+  assert.equal((await last())!.text,'**加粗**是这样写的吗');
+  r.native.messages.get(r.thread.id)!.push(r.reply('emoji2',2990,'a'.repeat(138)+'🐱b'));
   // The status read carries it for each cat; a conversation that cannot be read has none.
-  const status=await(await r.call('/bots/status')).json();assert.equal(status.bots[0].activity.last.messageId,'emoji');
+  const status=await(await r.call('/bots/status')).json();assert.equal(status.bots[0].activity.last.messageId,'emoji2');
   assert.equal(r.bridge.activity.unavailable(r.thread.id).last,null);
 });
 test('an invitation whose receipt has not come back yet is still not something the owner said',async t=>{

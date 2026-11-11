@@ -34,6 +34,17 @@ test('the words around a match come back on one line with where the match sits',
   assert.equal(long.snippet.length, 1 + 24 + 6 + 72 + 1);
   assert.deepEqual(snippet('Read HELLO.txt', 'hello'), { snippet: 'Read HELLO.txt', match: [5, 10] });
   assert.equal(snippet('没有这个词', '纸箱'), null);
+  // A cat's reply is searched as the words it shows: no Markdown marks in the snippet, and the match still sits on the phrase.
+  const reply = '## 结论\n\n| 项 | 值 |\n| --- | --- |\n| 尺寸 | **安全又暖和** |\n\n- 要点写进了 `结果.md`，见[说明](https://example.com/a(b))。\n```js\nconst box = 1;\n```';
+  const plain = snippet(reply, '安全又暖和', true)!;
+  assert.equal(plain.snippet, '结论 项 值 尺寸 安全又暖和 要点写进了 结果.md，见说明。 const box = 1;');
+  assert.equal(plain.snippet.slice(...plain.match), '安全又暖和');
+  assert.equal(snippet(reply, '结果.md，见说明', true)!.snippet.includes('`'), false);
+  // A phrase that only matches with the marks is found in the text as written.
+  const marked = snippet('先运行 `npm ci` 再说', '`npm ci`', true)!;
+  assert.equal(marked.snippet.slice(...marked.match), '`npm ci`');
+  // What the owner typed is never rewritten.
+  assert.equal(snippet('**不要**动我的星号', '星号')!.snippet, '**不要**动我的星号');
 });
 
 test('search finds what was said across chats, newest first, the way the chat shows it', async t => {
@@ -63,6 +74,14 @@ test('search finds what was said across chats, newest first, the way the chat sh
   assert.equal(found.results[2].snippet, '因为纸箱让它觉得安全。');
   assert.deepEqual([found.more, found.searched, found.failed], [false, 3, 0], 'Ada now and earlier, and the group; Bob has no conversation yet');
   assert.equal(found.results[0].chat.id, group.id); assert.equal(found.results[2].chat.id, r.ada.id);
+  // Inside one chat: only the conversation open in it, so other chats cannot crowd its matches out.
+  const inAda = await (await r.call(`/bots/Ada/search?q=${encodeURIComponent('纸箱')}`)).json();
+  assert.deepEqual(inAda.results.map((hit: any) => [hit.messageId, hit.current]), [['answer', true], ['ask', true]], 'not the group, not the earlier conversation');
+  assert.deepEqual([inAda.searched, inAda.failed, inAda.results[0].chat.name], [1, 0, 'Ada']);
+  const inGroup = await (await r.call(`/groups/${group.id}/search?q=${encodeURIComponent('纸箱')}`)).json();
+  assert.deepEqual(inGroup.results.map((hit: any) => [hit.messageId, hit.chat.name]), [['g2', '读书会'], ['g1', '读书会']]);
+  assert.equal((await r.call('/bots/Ada/search?q=')).status, 400);
+  assert.equal((await r.call(`/bots/Nobody/search?q=x`)).status, 404);
   assert.deepEqual((await r.search('纸箱模型')).results, [], 'a signature is not something that was said');
   assert.deepEqual((await r.search('开场邀请')).results, []);
   // Reads only: nothing is written or indexed.

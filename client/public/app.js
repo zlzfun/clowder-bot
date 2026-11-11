@@ -60,8 +60,6 @@
     knownNotes: null,
     owner: "",
     ownerName: "",
-    preview: {},
-    previewAt: {},
     listSig: "",
     // The drawer tab last chosen; each kind of chat shows its own tabs
     // (profile-rules.js tabFor maps it, and the retired names, to one of them).
@@ -257,6 +255,9 @@
       line.append(el("span", "", "离线 · 最后状态 " + mins + " 分钟前"));
       sig += mins;
     } else {
+      // The draft left in this chat, else the latest line said here (chat-list.js).
+      const said = !(st && st.todo) && chatList.preview("bot", name);
+      if (said) return { sig: sig + said.sig, node: said.node, off: false };
       const bot = (state.bots || []).find((b) => b.name === name);
       const text = (st && st.todo) || realPreview(st && st.last_message) || (bot ? lineForBot(bot) : "") || "没有消息";
       line.className = "preview";
@@ -291,6 +292,9 @@
       line.append(spinIcon(11), el("span", "", text));
       return { sig: kind, node: line };
     }
+    // The draft left in this group, else the latest line said here (chat-list.js).
+    const said = chatList.preview("group", g.id);
+    if (said) return { sig: "idle" + said.sig, node: said.node };
     const text = lineForGroup(g);
     return { sig: "idle" + text, node: el("span", "preview", text) };
   }
@@ -403,22 +407,12 @@
     });
   }
 
-  // Running/awaiting first, stable otherwise. Only out-of-place rows are moved.
+  // Newest conversation first inside each folder and among groups, with the
+  // time of its latest line, its unread count and the page title's total
+  // (chat-list.js). A row moves only when something is said, never because
+  // work starts or stops; only out-of-place rows are moved.
   function sortStatusRows() {
-    const hot = (row) => {
-      const st = stStatus.map[row.dataset.bot];
-      return st && (st.state === "running" || st.state === "awaiting") ? 0 : 1;
-    };
-    document.querySelectorAll("#roster .folder-bots").forEach((body) => {
-      const rows = Array.from(body.children).filter((r) => r.dataset.bot);
-      if (rows.length < 2) return;
-      const sorted = rows.slice().sort((a, b) => hot(a) - hot(b));
-      let ref = body.firstChild;
-      for (const row of sorted) {
-        if (row !== ref) body.insertBefore(row, ref);
-        ref = row.nextSibling;
-      }
-    });
+    chatList.paint($("roster"));
   }
 
   async function refreshStatus() {
@@ -926,6 +920,12 @@
   // 开箱即用 (quick-create.js): the first-run stage, the no-chat line and the
   // quick 新建猫猫 / 新建群聊 dialogs; init() is near the end, after experience.init.
   const quick = window.ClowderQuickCreate;
+  // 找得到: the sidebar as a contact list and each chat's draft (chat-list.js);
+  // earlier messages, the header's ⋯ menu and the first-words suggestions
+  // (chat-history.js). init() is near the end, after quick.init.
+  const chatList = window.ClowderList;
+  const listRules = window.ClowderListRules;
+  const chatHistory = window.ClowderHistory;
   // 资料页与群 (profile.js): the drawer's 资料 and 成员 pages, its identity
   // head, a group's rename / members / delete and its sidebar menu; and the @
   // list in a group's composer (mention.js). init() is near the end.
@@ -3074,6 +3074,7 @@
       // made-up message. A chat with records but no rows stays blank.
       const keep = sendFeedback(inner, messages);
       if (read) placeGreeting(inner, read);
+      chatHistory.top(inner); // a page of records with no rows may still have earlier ones
       const shown = live.commit(inner, keep);
       state.firstRender = false;
       if (near) thread.scrollTop = thread.scrollHeight;
@@ -3199,6 +3200,9 @@
     const keep = sendFeedback(inner, messages);
     if (read) placeGreeting(inner, read);
     addTimeDividers(inner);
+    // 更早的消息 at the top; suggestions under the cat's greeting (chat-history.js).
+    chatHistory.top(inner);
+    chatHistory.starters(inner, read);
     // Rows that did not change keep their element: only new rows rise in.
     const shown = live.commit(inner, keep);
     state.firstRender = false;
@@ -3389,6 +3393,7 @@
       last = key;
       inner.append(row);
     }
+    chatHistory.top(inner); // 更早的消息 at the top (chat-history.js)
     // Rows that did not change keep their element: only new rows rise in.
     const shown = live.commit(inner, sendFeedback(inner, messages));
     state.firstRender = false;
@@ -3682,17 +3687,6 @@
     return row;
   }
 
-  function hiddenFromPreview(m) {
-    if (!m || m.role === "tool" || m.role === "system") return true;
-    const raw = String(m.content || "").trim();
-    if (m.role === "user" && (raw.startsWith("<environment") || raw.startsWith("<memory>") || raw.startsWith("<background_tasks>") || raw.startsWith("<untrusted") || raw.startsWith("<coding_card ") || raw.startsWith("<approval_card"))) return true;
-    return false;
-  }
-
-  function summaryLine(text) {
-    return /^summary written\b/i.test(String(text || "").trim());
-  }
-
   function plainText(md) {
     return displayText(md)
       .replace(/^\s*(```|~~~)[^\n]*$/gm, " ")
@@ -3706,56 +3700,20 @@
       .replace(/\s+/g, " ").trim();
   }
 
-  function previewFromMessages(messages) {
-    if (!messages) return "";
-    // A bot line counts only for what the chat draws from it.
-    const spoken = spokenLines(messages);
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i];
-      if (hiddenFromPreview(m)) continue;
-      // A reply still being written is not what the chat last said.
-      if (m.in_progress) continue;
-      if (m.role === "assistant" && !spoken.has(i)) continue;
-      const says = m.role === "assistant" && spoken.get(i);
-      const parsed = says ? { text: says.map((say) => say.text).join(" ") } : unwrap(m.content || "");
-      if (parsed.untrusted) continue;
-      const text = clip(plainText(pullImages(parsed.text).text), 72);
-      if (!text || text === "SILENT" || summaryLine(text)) continue;
-      return text;
-    }
-    return "";
-  }
-
-  function previewFromGroup(messages) {
-    if (!messages) return "";
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i];
-      const raw = String(m.text || "").trim();
-      // An execution record is not a reply, so it is never the preview; nor is a reply still being written.
-      if (!raw || m.in_progress || (m.kind !== "person" && isSilent(raw)) || /^\[action\]/i.test(raw) || presentation.isActivity(m)) continue;
-      const who = m.kind === "person" ? "你" : niceName(m.sender || "");
-      const text = clip(plainText(raw), 64);
-      return who ? who + "：" + text : text;
-    }
-    return "";
-  }
-
   function realPreview(text) {
     const raw = plainText(displayText(text));
     return raw && raw !== "SILENT" ? clip(raw, 72) : "";
   }
 
+  // What a row says when nothing was said in its conversation yet (or the
+  // status has not been read): the cat's own description, the group's members.
   function lineForBot(b) {
-    const p = state.preview["b:" + b.name];
-    if (p && realPreview(p)) return realPreview(p);
     if (b.description) return plainText(b.description);
     if (b.persona) return plainText(b.persona);
     return "没有消息";
   }
 
   function lineForGroup(g) {
-    const p = state.preview["g:" + g.id];
-    if (p) return plainText(p);
     return (g.members || []).map(niceName).join(" · ") || "没有消息";
   }
 
@@ -4140,7 +4098,8 @@
     titleEl.replaceChildren(...(titleAv ? [titleAv] : []), el("span", "title-name", shown));
     setTip(titleEl, slug && slug !== shown ? slug : "");
     $("head-chip").disabled = !state.sel;
-    document.title = shown + " · clowder-bot";
+    // With the unread total in front, from the status poll (chat-list.js).
+    chatList.title(shown + " · clowder-bot");
   }
 
   function leavePeer() {
@@ -4200,7 +4159,7 @@
     titleEl.append(row);
     setTip(titleEl, a + " ⇄ " + b);
     peerNote();
-    document.title = niceName(splitPeer(a).bot) + " ⇄ " + niceName(splitPeer(b).bot) + " · clowder-bot";
+    chatList.title(niceName(splitPeer(a).bot) + " ⇄ " + niceName(splitPeer(b).bot) + " · clowder-bot");
   }
 
   const PEER_LIMIT = 50;
@@ -4443,6 +4402,8 @@
     experience.select(state.sel);
     // So do the replies drawn while written, typing bubbles and a stop in flight.
     live.select(chatKey(state.sel));
+    // And its earlier pages, the header's ⋯ menu and the suggestions (chat-history.js).
+    chatHistory.select(state.sel);
     stopState = null;
     state.streaming = 0;
     state.pendingSends = [];
@@ -4501,11 +4462,14 @@
   }
 
   async function selectBot(name) {
+    // What was being written stays with the chat it was written in (chat-list.js).
+    chatList.leave(state.sel);
     leavePeer();
     clearQuote();
     state.sel = { type: "bot", id: name };
     try { sessionStorage.setItem("xbot-selected-bot", name); } catch (e) {}
     resetConversation();
+    chatList.enter(state.sel);
     try {
       const draft = sessionStorage.getItem("xbot-draft:" + name);
       if (draft) {
@@ -4533,10 +4497,12 @@
   }
 
   async function selectGroup(id) {
+    chatList.leave(state.sel);
     leavePeer();
     clearQuote();
     state.sel = { type: "group", id: id };
     resetConversation();
+    chatList.enter(state.sel);
     state.sig = "";
     state.editOpen = false;
     closeDrawer();
@@ -4625,7 +4591,8 @@
         // A missing or malformed list is a failed read, not an empty chat.
         if (!data || !Array.isArray(data.messages)) throw new Error("transcript without messages");
         watchNativeThread(data.thread_id);
-        const messages = data.messages;
+        // Earlier pages the owner scrolled back to stay above the newest one (chat-history.js).
+        const messages = chatHistory.merge(selection, data.thread_id, data);
         // The native page can hold records that project to no rows: a cursor
         // (before) or more pages mean the chat has history, so it is not new.
         const history = (data.before != null && data.before !== "") || !!data.hasMore;
@@ -4645,13 +4612,10 @@
         live.read(liveRows(messages, false), requestedAt);
         const sig = transcriptSig(read);
         state.messages = messages;
-        state.previewAt["b:" + selection.id] = Date.now();
         workspace.observe(selection, data.thread_id, sig !== state.sig);
         experience.observe(selection, data.thread_id, sig !== state.sig);
         if (sig === state.sig) { live.attach(); return; }
         state.sig = sig;
-        state.preview["b:" + selection.id] = previewFromMessages(messages);
-        renderLists();
         if (state.peer) return;
         renderMessages(messages, selection.id, read);
         if (panel.classList.contains("open")) await loadPanel();
@@ -4660,16 +4624,13 @@
       const data = await api("/xbot-api/groups/" + encodeURIComponent(selection.id));
       if (state.sel !== selection || request !== state.threadLoad || state.streaming || state.peer) return;
       watchNativeThread(data.group?.native_thread_id || data.group?.id);
-      const messages = data.messages || [];
+      const messages = chatHistory.merge(selection, data.group?.native_thread_id || data.group?.id, data);
       live.read(liveRows(messages, true), requestedAt);
       const sig = JSON.stringify(sigRows(messages));
-      state.previewAt["g:" + selection.id] = Date.now();
       workspace.observe(selection, data.group?.native_thread_id || data.group?.id, sig !== state.sig);
       experience.observe(selection, data.group?.native_thread_id || data.group?.id, sig !== state.sig);
       if (sig === state.sig) { live.attach(); return; }
       state.sig = sig;
-      state.preview["g:" + selection.id] = previewFromGroup(messages);
-      renderLists();
       renderGroup(messages, data.group || { id: selection.id });
     } catch (e) {
       if (state.sel === selection && request === state.threadLoad && !state.streaming && !state.pendingSends.length) threadUnavailable();
@@ -4982,9 +4943,10 @@
   }
 
   let toastTimer = 0;
-  function showToast(text) {
+  // A done thing shows a check; a note (the search palette's) passes "info".
+  function showToast(text, iconName = "check") {
     const box = $("toast");
-    box.replaceChildren(icon("check"), el("span", "", text));
+    box.replaceChildren(icon(iconName), el("span", "", text));
     box.hidden = false;
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { box.hidden = true; }, 3000);
@@ -5115,7 +5077,6 @@
         if (/last bot/i.test(msg)) throw new Error("最后一只猫猫不能删。");
         throw new Error(msg || "删除失败");
       }
-      delete state.preview["b:" + name];
       if (state.sel && state.sel.type === "bot" && state.sel.id === name) state.sel = null;
       await refreshLists();
       const home = state.bots.find((b) => b.primary) || state.bots[0];
@@ -5380,14 +5341,16 @@
     const sig = JSON.stringify([hello, state.ownerName, busy.map(s => s.bot)]);
     if (host.dataset.sig === sig) return;
     host.dataset.sig = sig;
-    host.replaceChildren(document.createTextNode(hello + (state.ownerName ? "，" + state.ownerName : "") + "。"));
-    // 状态只写「有 N 个 Bot 在忙」，有忙才出；不写已完成类状态。
+    // The owner by name only when the server knows one (its default owner_name is 你).
+    const who = listRules.greetName(state.ownerName);
+    host.replaceChildren(document.createTextNode(hello + (who ? "，" + who : "") + "。"));
+    // 状态只写「有 N 只猫猫在忙」，有忙才出；不写已完成类状态。
     if (busy.length) {
       host.append(el("br"), el("span", "g", "有 "));
       const stack = el("span", "greet-stack");
       for (const st of busy.slice(0, 3)) stack.append(avatar(st.bot, paintOf(st.bot), "xs"));
       if (busy.length > 3) stack.append(el("span", "greet-more", "+" + (busy.length - 3)));
-      host.append(stack, document.createTextNode(" " + busy.length + " 个 Bot"), el("span", "g", " 在忙。"));
+      host.append(stack, document.createTextNode(" " + busy.length + " 只猫猫"), el("span", "g", " 在忙。"));
     }
   }
 
@@ -6023,39 +5986,7 @@
     state.groups = groups.groups || [];
     renderLists();
     refreshBotFaces();
-    warmOne().catch(() => {});
-  }
-
-  let warming = false;
-  async function warmOne() {
-    if (warming || state.streaming) return;
-    const now = Date.now();
-    const jobs = [];
-    for (const b of state.bots) jobs.push({ key: "b:" + b.name, kind: "bot", id: b.name });
-    for (const g of state.groups) jobs.push({ key: "g:" + g.id, kind: "group", id: g.id });
-    const job = jobs.find((j) => state.preview[j.key] == null || now - (state.previewAt[j.key] || 0) > 20000);
-    if (!job) return;
-    if (state.sel && ((job.kind === "bot" && state.sel.type === "bot" && state.sel.id === job.id) || (job.kind === "group" && state.sel.type === "group" && state.sel.id === job.id))) {
-      state.previewAt[job.key] = now;
-      return;
-    }
-    warming = true;
-    try {
-      if (job.kind === "bot") {
-        const data = await api("/xbot-api/bots/" + encodeURIComponent(job.id) + "/transcript");
-        state.preview[job.key] = previewFromMessages(data.messages || []);
-      } else {
-        const data = await api("/xbot-api/groups/" + encodeURIComponent(job.id));
-        state.preview[job.key] = previewFromGroup(data.messages || []);
-      }
-      state.previewAt[job.key] = Date.now();
-      renderLists();
-    } catch (e) {
-      if (state.preview[job.key] == null) state.preview[job.key] = "";
-      state.previewAt[job.key] = Date.now();
-    } finally {
-      warming = false;
-    }
+    syncNoChat();
   }
 
   async function refreshNotes() {
@@ -6896,6 +6827,38 @@
     if (open) loadPanel().catch(() => {});
   });
 
+  // Search and jump (palette.js): ⌘K / Ctrl+K or 搜索 at the top of the
+  // sidebar opens it, Alt+↑ / Alt+↓ step through the chats in sidebar order.
+  // It sees the chats and opens them, switches a cat's conversation and runs
+  // its default actions only through these hooks.
+  window.ClowderPalette.init({
+    api, icon, visibleError, composer: input,
+    chats: () => [
+      ...state.bots.map((b) => ({ type: "bot", id: b.name, name: niceName(b.name), nativeId: b.native_id || b.id || "" })),
+      ...state.groups.map((g) => ({ type: "group", id: g.id, name: niceName(g.name || g.id), members: (g.members || []).map(niceName) })),
+    ],
+    // The sidebar's rows top to bottom (a collapsed folder's cats are not shown there).
+    order: () => [...document.querySelectorAll("#pin-row [data-bot], #roster [data-bot], #roster [data-group]")]
+      .filter((n) => !n.closest("[hidden]"))
+      .map((n) => (n.dataset.group ? { type: "group", id: n.dataset.group } : { type: "bot", id: n.dataset.bot })),
+    face: (chat, size) => (chat.type === "group"
+      ? avatar("", groupFace(state.groups.find((g) => g.id === chat.id) || { id: chat.id }), size)
+      : avatar(chat.id, paintOf(chat.id), size)),
+    selection: () => (state.peer ? null : state.sel),
+    open: (sel) => (sel.type === "group" ? pickGroup(sel.id) : pickBot(sel.id)),
+    // The open chat's history as drawn, for finding a message in it.
+    history: (sel) => [...thread.children].find((n) => n.classList.contains("thread-inner") && n.dataset.chat === chatKey(sel)) || null,
+    switchConversation: (threadId) => workspace.switchTo(threadId),
+    newCat: (opener) => openNewBot(opener),
+    newGroup: (opener) => openNewGroup(opener),
+    settings: () => openSettings("general", { home: settingsNarrow.matches }),
+    theme: () => (document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light"),
+    setTheme: (mode) => applyTheme(mode),
+    note: (text) => showToast(text, "info"),
+    focusComposer: () => { if (window.innerWidth >= 768) input.focus({ preventScroll: true }); },
+    blocked: () => shell.hidden,
+  });
+
   // The remote conversation is a full panel at z-index 12; this drawer sits at
   // 30, so it would cover its header and composer. Close it when one opens.
   window.addEventListener("xbot:remote-open", () => {
@@ -7324,7 +7287,6 @@
     const home = state.bots.find((b) => b.name === remembered) || state.bots.find((b) => b.primary) || state.bots[0];
     if (!state.sel && home) await selectBot(home.name);
     else if (!state.sel) showNoChat();
-    for (let i = 0; i < state.bots.length + state.groups.length; i++) await warmOne();
     syncPanelDefault();
   }
 
@@ -7335,6 +7297,17 @@
     const inner = el("div", "thread-inner no-chat");
     inner.append(state.bots.length ? quick.noChat() : quick.stage());
     thread.replaceChildren(inner);
+  }
+
+  // Every list read keeps the no-chat view in step with the cats: the first one
+  // arriving from elsewhere retires an untouched stage for the no-chat line
+  // (quick.release keeps one with a draft or a request on its way, and points
+  // at the cat); the last one leaving brings the stage back. Other views, and
+  // an open chat, are never touched.
+  function syncNoChat() {
+    if (state.sel) return;
+    const stage = thread.querySelector(".qc-stage"), none = thread.querySelector(".qc-none");
+    if ((stage && state.bots.length && quick.release(stage, state.bots.map((b) => b.name))) || (none && !state.bots.length)) showNoChat();
   }
 
   function syncPanelDefault() {
@@ -7438,6 +7411,46 @@
     more: (opener) => openTemplateCreate(opener),
     showList: () => $("menu").click(),
     error: (e) => setStatus(visibleError(e), true),
+    // The 新建 button as it is now (renderLists redraws the pin row): focus returns there after a dialog.
+    opener: () => [document.querySelector("#pin-row .pin.add"), $("rail-new")].find((b) => b && b.getClientRects().length) || null,
+  });
+  // 找得到 (chat-list.js): rows read the status poll's latest lines; drafts
+  // move between the composer and the chat they were written in.
+  chatList.init({
+    entries: () => ({ bots: stStatus.map, groups: stStatus.groups }),
+    selected: () => state.sel,
+    composer: {
+      text: () => composerText(input),
+      set: (text) => { composerSet(text); composerRefreshHeight(); syncComposer(); },
+      quote: () => state.replyTo,
+      setQuote: (q) => { state.replyTo = q; paintQuoteBar(); },
+    },
+  });
+  // 找得到 (chat-history.js): earlier messages, the header's ⋯ menu, suggestions.
+  chatHistory.init({
+    api, visibleError, thread,
+    selected: () => state.sel,
+    name: (sel) => niceName(sel.type === "group" ? ((state.groups.find((g) => g.id === sel.id) || {}).name || sel.id) : sel.id),
+    reload: () => { state.sig = ""; return loadThread().catch(() => {}); },
+    reopen: (sel) => (sel.type === "group" ? selectGroup(sel.id) : selectBot(sel.id)),
+    send: (text) => sendText(text, null, [], null),
+    sendBusy: () => state.pendingSends.length > 0 || state.replyErrors.length > 0,
+    working: () => !!state.streaming || chatWorking(),
+    pendingFiles: () => workspace.pendingCount(),
+    // The conversation on screen, so a stale view cannot start a new one.
+    threadId: () => workspace.threadId(),
+    conversations: () => workspace.openConversations(),
+    openDetails: async () => {
+      closePops();
+      state.tab = "profile";
+      rememberPanel(true);
+      panelOpen(true);
+      if (window.innerWidth < 768) { sidebar.classList.remove("open"); syncBackdrop(); }
+      await loadPanel();
+    },
+    place: (anchor, menu) => placeMenu(anchor, menu, "below"),
+    toast: showToast,
+    status: setStatus,
   });
   // 资料页与群 (profile.js) draws with these. The technical parts of 资料 ›
   // 高级 stay the shell's own: the Agent row, the configuration, task and run cards.
@@ -7456,9 +7469,8 @@
     syncExec: (root, data) => syncTaskView(root, data),
     conversations: (sel) => workspace.conversationsView(sel),
     runtimeHref: (data) => "/runtime.html" + (data.thread_id ? "?thread=" + encodeURIComponent(data.thread_id) : ""),
-    sending: () => state.pendingSends.some((row) => !row.keepFailed),
-    working: () => chatWorking(),
-    pendingFiles: () => attachReady() > 0 || attachBusy(),
+    // 新对话 is the header ⋯ menu's own dialog (chat-history.js), opened from 资料.
+    newConversation: (sel, opener) => chatHistory.newConversation(sel, opener),
     editProfile: (data) => openProfile(data && data.name ? data : state.panelData || {}),
     pin: async (name, on) => {
       await api("/xbot-api/bots/" + encodeURIComponent(name) + "/pin", { method: "POST", body: { pinned: on } });
@@ -7467,8 +7479,6 @@
     exportChat: (name) => openExport(name),
     copyId: (name) => copyBotID(name),
     deleteCat: (name) => confirmDelete(name),
-    // 新对话: the cat now talks in a new thread; its chat opens afresh there.
-    reopen: (sel) => (sel.type === "group" ? selectGroup(sel.id) : selectBot(sel.id)),
     // A group's name or members changed: the list, the header and the drawer follow.
     groupChanged: async (id) => {
       await refreshLists().catch(() => {});
@@ -7482,7 +7492,6 @@
     },
     // Gone from the list: an open group gives way to the home cat, as a deleted cat does.
     groupDeleted: async (id) => {
-      delete state.preview["g:" + id];
       const open = !!state.sel && state.sel.type === "group" && state.sel.id === id;
       if (open) state.sel = null;
       await refreshLists().catch(() => {});
@@ -7531,9 +7540,13 @@
   function startPoll() {
     if (startPoll.started) return;
     startPoll.started = true;
+    let hiddenTicks = 0;
     setInterval(() => {
       if (shell.hidden) return;
-      if (!document.hidden) refreshStatus().catch(() => {});
+      // In a background tab the status is read every 30 s instead of 3 s, so
+      // the page title's unread count (chat-list.js) still says when a reply lands.
+      hiddenTicks = document.hidden ? hiddenTicks + 1 : 0;
+      if (!document.hidden || hiddenTicks % 10 === 0) refreshStatus().catch(() => {});
       if (state.streaming) return;
       if (!document.hidden) refreshUpdate().catch(() => {});
       refreshNotes().catch(() => {});

@@ -11,23 +11,25 @@
 需要 **Node.js 24、npm、Git、redis-server**。pnpm 9.15.4 随项目开发依赖安装。成员接入本机已安装并配置的 Agent，沿用它的登录与默认配置。没有演示引擎，也不会在原生服务不可用时生成模拟回复。
 
 ```bash
-git submodule update --init --recursive
 npm ci
-npm run runtime:prepare
-cp .env.example .env
-npm run runtime:start
+npm run app
 ```
 
-另开终端启动 Bot：
+`npm run app` 一条命令做完后面的事：第一次会取回引擎源码并准备运行环境（约 5 分钟，只需一次），构建界面，启动运行环境和应用，然后打开浏览器 **http://127.0.0.1:3210**。按 Ctrl+C 停止，它会等数据写完再退出。之后每次启动只要几秒；更新代码后再运行会自动重新构建界面。应用已经在运行时，它只打开页面，不改动任何东西。缺 Node、redis-server 或端口被占用时，它会直接说缺什么。`--no-open` 不打开浏览器，`--no-build` 不构建界面。过程记录在 `.runtime/logs/`。
+
+它只是把下面这些步骤按需依次执行，分开运行也可以（例如开发时）：
 
 ```bash
-npm run build
-npm start
+git submodule update --init --recursive
+npm run runtime:prepare      # 准备运行环境
+cp .env.example .env         # 可选：改端口或数据位置
+npm run runtime:start        # 终端一：运行环境
+npm run build && npm start   # 终端二：应用
 ```
 
-打开 **http://127.0.0.1:3210**。开发时第二个终端改用 `npm run dev`，访问 **http://127.0.0.1:5173**。运行面板位于 `/runtime.html`。
+开发时终端二改用 `npm run dev`，访问 **http://127.0.0.1:5173**。运行面板位于 `/runtime.html`。
 
-首次启动原生成员名册为空。在界面新建 Bot，选择本机检测到的执行工具，再开始聊天。角色模板直接读取上游；在「本地 Agent」中查看检测与执行状态，为 Bot 选择执行者。待审批事项在运行面板管理。原生启动包含数据库初始化和可选插件检查，看到 API listening 后再打开界面。
+第一次打开时还没有猫猫，页面会请你领一只回家：填个名字就能开聊，默认使用本机已经登录的 Claude Code 或 Codex；一个都没有时，页面会告诉你怎么装。想细调的（模板、执行工具、模型）在「更多选项」和猫猫资料的高级设置里；等你确认的事会出现在对话里，也可以在运行面板查看。
 
 默认端口：Bot 3210、Clowder AI API 4331、专属 Redis 6392、原生指标 9492，均绑定本机。不要把本项目指向其他 Clowder 部署的数据或 Redis。启动器遇到端口占用会停止，不接管已有进程。
 
@@ -81,7 +83,7 @@ BOT_MODEL_SMOKE=1 npm run test:native
 BOT_BACKGROUND_SMOKE=1 npm run test:background-journey
 ```
 
-界面预览不需要引擎和模型：`npm run preview:fixture` 在 **http://127.0.0.1:3230** 用脚本化的协议替身运行真实的适配层，按固定上游的事件形态回放一轮回复（逐字输出、步骤、停止、失败；团子按 Claude Code 的事件形态回答，栗子按 Codex 的），也能摆出本机没有可用 Agent、需要登录等首屏状态（`POST /__preview {"agents":"ready|unknown|login|none"}`）。回复是固定文本并写明是预览；数据在临时目录，退出即删，不会成为运行时的后备路径。
+界面预览不需要引擎和模型：`npm run preview:fixture` 在 **http://127.0.0.1:3230** 用脚本化的协议替身运行真实的适配层，按固定上游的事件形态回放一轮回复（逐字输出、步骤、停止、失败；团子按 Claude Code 的事件形态回答，栗子按 Codex 的），也能摆出本机没有可用 Agent、需要登录等首屏状态（`POST /__preview {"agents":"ready|unknown|login|none"}`），或把每页消息数调小来看「更早的消息」怎么加载（`{"page":12}`）。回复是固定文本并写明是预览；数据在临时目录，退出即删，不会成为运行时的后备路径。
 
 原生集成测试使用专用临时成员和会话，结束时通过原生接口删除测试成员、软删除测试会话，不清空存储。更多验收与上游回归命令见 [维护说明](docs/upstream-maintenance.md)。
 

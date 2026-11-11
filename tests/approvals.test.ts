@@ -73,6 +73,11 @@ test('what waits for the owner in a chat is said in chat words; nothing is decid
   ];
   const { threadId, approvals } = await (await r.call('/bots/' + encodeURIComponent('快手') + '/approvals')).json();
   assert.equal(threadId, r.thread.id);
+  // The one-line status of the same conversation says them in everyday words too, not in the hub's own summaries.
+  const waiting = (await (await r.call('/bots/' + encodeURIComponent('快手') + '/activity')).json()).items.filter((item: any) => item.kind === 'approval');
+  assert.deepEqual(Object.fromEntries(waiting.map((item: any) => [item.proposalId, item.label])), {
+    taste: '等你确认：记住你的一个偏好', schedule: '等你确认：设一个定时「喝水提醒」', profile: '等你确认：更新关于你的资料', question: '等你确认：要用哪个账号？',
+    unroutable: '等你确认：别的事', unknown: '等你确认：没有登记去处的事', applying: '等你确认：取消一个定时「周报」' });
   assert.deepEqual(approvals.map((a: any) => [a.id, a.kind, a.title, a.body, a.approve?.label ?? null, a.reject?.label ?? null]), [
     ['taste', 'preference', '快手想记住你的一个偏好', '用户偏好简短、结论优先的表达方式', '记住', '不用记'],
     ['schedule', 'schedule', '快手想设一个定时', '喝水提醒 · 每天 09:00（Asia/Shanghai）', '设上', '不用'],

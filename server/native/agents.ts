@@ -15,6 +15,25 @@ export function runtimeUnavailable(runtime: NativeRuntime): string | null {
   if (runtime.readiness?.status === 'not_installed') return '本机尚未检测到这个 Agent';
   return null;
 }
+/**
+ * Extra CLI arguments a cat's member record starts with — upstream's supported
+ * per-member setting (cliConfigArgs, "额外 CLI 参数" in its member editor), not
+ * a change to how the engine launches a tool.
+ *
+ * Claude Code ships its own scheduling (the built-in `schedule` / `loop`
+ * skills and the Cron* / RemoteTrigger tools, which set up cloud routines).
+ * Asked in a chat to "remind me every day at 9", a cat picked that instead of
+ * the engine's scheduler, whose tools it only sees as deferred names — so
+ * nothing reached the owner's confirmation, the cat's schedule list or the
+ * chat. With them switched off for the member, the same sentence goes through
+ * the engine's reminder tools and its confirmation (measured on the isolated
+ * runtime, 2026-11-11). Codex has no scheduler of its own and needs nothing.
+ */
+export function memberCliArgs(clientId: string): string[] {
+  return clientId === 'anthropic'
+    ? ['--settings', '{"skillOverrides":{"schedule":"off","loop":"off"}}', '--disallowedTools', 'RemoteTrigger,CronCreate,CronDelete,CronList']
+    : [];
+}
 /** The local Agent a new cat uses when the owner did not pick one: one with a login record first, else any installed and adapted one. */
 export function defaultRuntime(runtimes: NativeRuntime[]): NativeRuntime | undefined {
   const usable = runtimes.filter(runtime => !runtimeUnavailable(runtime));
@@ -102,7 +121,7 @@ export async function bindAgent(bridge: BotBridge, cat: NativeCat, runtimeId: st
       expectedRevision: cat.configurationRevision,
       clientId: runtime.clientId, configurationSource: 'native_tool', accountRef: null,
       defaultModel: '', provider: null, agentProvider: null, carrier: 'cli', acp: null,
-      cliConfigArgs: [], cli: { ...(runtime.command ? { command: runtime.command } : {}), effort: null, serviceTier: null, defaultArgs: [] },
+      cliConfigArgs: memberCliArgs(runtime.clientId), cli: { ...(runtime.command ? { command: runtime.command } : {}), effort: null, serviceTier: null, defaultArgs: [] },
     },
   });
   return { name: updated.name, agent: agentBinding(updated, runtimes) };

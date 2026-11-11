@@ -50,17 +50,9 @@
     const id = config && config.breed && config.breed.mode === "explicit" ? config.breed.breedId : "";
     return !!id && !!bot && (id === bot.native_id || id === bot.id);
   }
-  // Under 新对话, what happens to the conversation on screen.
+  // Under 新对话 (whose dialog, refusals included, is chat-history.js's), what
+  // happens to the conversation on screen.
   const NEW_CHAT_NOTE = "现在的对话会收进「历史对话」，随时能回去接着聊；它记得的关于你的事都还在。";
-  function newChatError(err, name) {
-    const status = err && err.status, message = String((err && err.message) || "");
-    if (status === 409) return /切换/.test(message)
-      ? { kind: "busy", text: "正在换对话，稍等一下再试。" }
-      : { kind: "busy", text: (trim(name) || "它") + " 还在忙这个对话里的事。等它做完，或先停下来，再开新对话。" };
-    if (status === 404) return { kind: "gone", text: "找不到这只猫猫了，刷新列表看看。" };
-    if (!status || status >= 500) return { kind: "unsure", text: "没能确认新对话开好没有。先看看「历史对话」，再决定要不要重试。" };
-    return { kind: "form", text: plain(message) ? message : "没能开始新对话，请稍后再试。" };
-  }
 
   // ---- a group ----
   const MIN = 2, MAX = 10;
@@ -125,7 +117,7 @@
 
   root.ClowderProfileRules = Object.freeze({
     trim, plain, key, TABS, tabs, home, tabFor, opensAdvanced,
-    accent, ownBreed, NEW_CHAT_NOTE, newChatError,
+    accent, ownBreed, NEW_CHAT_NOTE,
     MIN, MAX, members, known, countText, addable, room, canRemove, membersBody, membersProblem,
     defaultName, nameProblem, renameBody, HOW_TO_TALK, groupError,
   });

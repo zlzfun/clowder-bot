@@ -18,6 +18,13 @@ export function createActivityRouter(bridge: BotBridge) {
       if (kind === 'groups') return {thread:await bridge.group(name),catId:undefined};
       const cat = await bridge.cat(name); return {thread:await bridge.direct(cat),catId:cat.id};
     };
+    // The same search inside one chat's current conversation.
+    router.get<{chat:string}>(`${scope}/search`, async (req, res) => {
+      const query = z.string().trim().min(1).max(100).parse(req.query.q);
+      if (kind === 'groups') { const thread = await bridge.group(String(req.params.chat)); return void res.json(await searchMessages(bridge, query, 30, { chat: { type: 'group', id: thread.id, name: '' }, threadId: thread.id })); }
+      const cat = await bridge.cat(String(req.params.chat)), thread = await bridge.direct(cat);
+      res.json(await searchMessages(bridge, query, 30, { chat: { type: 'bot', id: cat.id, name: cat.name }, threadId: thread.id }));
+    });
     router.get<{chat:string}>(`${scope}/activity`, async (req,res) => {
       const {thread}=await context(String(req.params.chat));
       res.json(await bridge.activity.read(thread.id));
@@ -44,6 +51,14 @@ export function createActivityRouter(bridge: BotBridge) {
       const block=message&&messageBlocks(message).blocks.find(item=>item.id===String(req.params.block));
       if(!block||block.kind!=='choices')throw new ApiError(404,'这条消息里没有这个选项');
       if(selectedIds.some(id=>!block.options.some(option=>option.id===id)))throw new ApiError(400,'选项不在这条消息里');
+      // Native's block-state write takes whatever it is given and closes the block for good, so what a
+      // choice allows is checked here: each option once, one answer for a single choice or a confirmation,
+      // one to `max` for a multiple choice, and only while the block is still asking.
+      if(block.answered)throw new ApiError(409,'这个选项已经回答过了');
+      if(new Set(selectedIds).size!==selectedIds.length)throw new ApiError(400,'同一个选项不能选两次');
+      if(!selectedIds.length)throw new ApiError(400,'至少选一项');
+      if(block.mode!=='multiple'&&selectedIds.length!==1)throw new ApiError(400,'这里只能选一项');
+      if(block.mode==='multiple'&&block.max&&selectedIds.length>block.max)throw new ApiError(400,`最多选 ${block.max} 项`);
       await bridge.native.request(`/api/messages/${encodeURIComponent(message!.id)}/block-state`,{method:'PATCH',body:{userId:'clowder-bot-owner',blockId:block.id,disabled:true,selectedIds}});
       res.json({messageId:message!.id,blockId:block.id,selected:selectedIds,answered:true});
     });

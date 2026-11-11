@@ -17,7 +17,13 @@ import type { NativeCat } from '../server/native/types.js';
 // same body returns the member made before; with another body it is refused.
 class StartNative extends NativeFixture {
   receipts = new Map<string, { payload: string; id: string }>();
+  /** How many member edits native refuses next (a revision that moved, a write that did not go through). */
+  refuseEdits = 0;
   override async request<T>(path: string, options: { method?: string; body?: any; headers?: Record<string, string> } = {}): Promise<T> {
+    if (options.method === 'PATCH' && path.startsWith('/api/cats/') && this.refuseEdits > 0) {
+      this.refuseEdits--; this.calls.push({ path, method: 'PATCH', body: options.body });
+      throw new ApiError(409, 'Member configuration changed', { code: 'revision_conflict' });
+    }
     // Without a creation identity native creates plainly, as the base fixture does.
     if (path !== '/api/cats' || options.method !== 'POST' || !options.headers) return super.request(path, options);
     this.calls.push({ path, method: 'POST', body: { ...options.body, headers: options.headers } });
@@ -35,6 +41,7 @@ class StartNative extends NativeFixture {
     return { cat: structuredClone(cat) } as T;
   }
 }
+const startingArgs = ['--settings', '{"skillOverrides":{"schedule":"off","loop":"off"}}', '--disallowedTools', 'RemoteTrigger,CronCreate,CronDelete,CronList'];
 const runtime = (id: string, clientId: string, status: string | undefined, more: Partial<NativeRuntime> = {}): NativeRuntime =>
   ({ id, label: id === 'claude' ? 'Claude Code' : id === 'codex' ? 'Codex' : id, clientId, installed: status !== 'not_installed', models: [],
     ...(status ? { readiness: { status: status as any, checkedAt: 1, ...(id === 'codex' ? { loginCommand: 'codex login' } : {}) } } : {}), ...more });
@@ -92,6 +99,13 @@ test('a cat needs only a name: one unpatched native creation with the Agent’s 
   assert.match(sent.roleDescription, /随叫随到/);
   assert.ok(sent.personality && sent.teamStrengths, 'a stock engineering portrait is not left to fill in');
   for (const field of ['breedId', 'cli', 'accountRef', 'carrier', 'provider']) assert.equal(field in sent, false, field);
+  // A Claude Code cat starts with the CLI's own schedulers off (memberCliArgs). The creation request never carries
+  // them — it must stay what native recorded for its key — they are written as a second native step.
+  assert.equal('cliConfigArgs' in sent, false);
+  const edits = () => r.native.calls.filter(c => c.method === 'PATCH' && c.path === '/api/cats/' + sent.catId);
+  assert.deepEqual(edits().map(c => c.body), [{ expectedRevision: 'r1', cliConfigArgs: startingArgs }]);
+  assert.deepEqual(r.native.cats[0]!.cliConfigArgs, startingArgs);
+  assert.equal('notice' in await made.json(), false);
   assert.equal(r.native.calls.some(c => c.path.startsWith('/api/bot-cat-templates')), false, 'not the locally patched template route');
   const item = (await (await r.call('/xbot-api/bots')).json()).bots[0];
   assert.deepEqual([item.name, item.avatar_seed, item.templateId, item.native_id], ['团子', 'cat:ragdoll', 'ragdoll', sent.catId]);
@@ -109,6 +123,7 @@ test('a cat needs only a name: one unpatched native creation with the Agent’s 
   assert.equal((await again.json()).native_id, sent.catId);
   assert.deepEqual({ ...creations()[1]!.body }, { ...sent }, 'byte-for-byte the first request, so native replays it');
   assert.equal(r.native.cats.length, 1);
+  assert.equal(edits().length, 1, 'the cat already has its arguments: nothing is written again');
   // Another request under the same key is native's to refuse; a second cat of the same name is refused before asking.
   const other = await r.call('/xbot-api/bots', 'POST', { name: '团子', simple: { about: '别的用途' }, idempotencyKey: key });
   assert.equal(other.status, 409); assert.match((await other.json()).native.code, /member_creation_conflict/);
@@ -120,7 +135,8 @@ test('a cat needs only a name: one unpatched native creation with the Agent’s 
   const about = '帮我管理每周的读书笔记，\n周五提醒我整理';
   assert.equal((await r.call('/xbot-api/bots', 'POST', { name: '栗子', simple: { face: 'golden-chinchilla', about, agent: 'codex' }, idempotencyKey: randomUUID() })).status, 201);
   const second = creations().at(-1)!.body;
-  assert.equal(second.clientId, 'openai');
+  assert.equal(second.clientId, 'openai'); assert.equal('cliConfigArgs' in second, false);
+  assert.equal(r.native.calls.some(c => c.method === 'PATCH' && c.path === '/api/cats/' + second.catId), false, 'a Codex cat has no arguments to add');
   assert.equal(second.roleDescription, about);
   assert.equal(second.teamStrengths, '帮我管理每周的读书笔记， 周五提醒我整理');
   const chestnut = (await (await r.call('/xbot-api/bots')).json()).bots.find((b: any) => b.name === '栗子');
@@ -128,6 +144,31 @@ test('a cat needs only a name: one unpatched native creation with the Agent’s 
   // Without a chosen face a Codex cat gets the face that goes with it.
   await r.call('/xbot-api/bots', 'POST', { name: '年糕', simple: { agent: 'codex' }, idempotencyKey: randomUUID() });
   assert.equal((await (await r.call('/xbot-api/bots')).json()).bots.find((b: any) => b.name === '年糕').avatar_seed, 'cat:maine-coon');
+});
+
+test('a new cat whose starting arguments could not be written exists, and the answer says what is missing', async t => {
+  const r = await setup(t);
+  r.native.runtimes = [runtime('claude', 'anthropic', 'configured')];
+  // The member was edited in between (its revision moved): the write is tried once more against the member as it is now.
+  r.native.refuseEdits = 1;
+  const moved = await r.call('/xbot-api/bots', 'POST', { name: '团子', simple: {}, idempotencyKey: randomUUID() });
+  assert.equal(moved.status, 201); assert.equal('notice' in await moved.json(), false);
+  assert.deepEqual(r.native.cats[0]!.cliConfigArgs, startingArgs);
+  // It keeps failing: the cat is there and works, without the arguments, and the answer says so instead of looking complete.
+  r.native.refuseEdits = 2;
+  const missing = await r.call('/xbot-api/bots', 'POST', { name: '栗子', simple: {}, idempotencyKey: randomUUID() });
+  assert.equal(missing.status, 201);
+  const answer = await missing.json();
+  assert.equal(answer.name, '栗子'); assert.match(answer.notice, /建好了.*提醒/);
+  assert.equal(r.native.cats.length, 2); assert.equal('cliConfigArgs' in r.native.cats[1]!, false);
+  // Arguments the owner gave the member since are never replaced, not even by a repeat of the creation.
+  const key = randomUUID();
+  assert.equal((await r.call('/xbot-api/bots', 'POST', { name: '年糕', simple: {}, idempotencyKey: key })).status, 201);
+  r.native.cats[2]!.cliConfigArgs = ['--own'];
+  const edits = r.native.calls.filter(c => c.method === 'PATCH').length;
+  assert.equal((await r.call('/xbot-api/bots', 'POST', { name: '年糕', simple: {}, idempotencyKey: key })).status, 201);
+  assert.deepEqual(r.native.cats[2]!.cliConfigArgs, ['--own']);
+  assert.equal(r.native.calls.filter(c => c.method === 'PATCH').length, edits);
 });
 
 test('quick creation refuses what it cannot do truthfully', async t => {
@@ -167,6 +208,13 @@ test('a group can be made from its members alone and is then called after them',
   const twice = await (await r.call('/xbot-api/groups', 'POST', { members: ['快手', '年糕'], idempotencyKey: key })).json();
   assert.equal(twice.id, once.id);
   assert.equal(r.store.state.groupThreadIds.filter(id => id === once.id).length, 1);
+  assert.equal(r.native.calls.filter(c => c.path === '/api/threads' && c.method === 'POST' && c.body.idempotencyKey === key).length, 1, 'the creation is not replayed to native');
+  // A late copy of that request must not undo a member change made since: native would apply its members again.
+  assert.equal((await r.call(`/xbot-api/groups/${once.id}`, 'PATCH', { members: ['快手', '年糕', '小团'] })).status, 200);
+  const late = await r.call('/xbot-api/groups', 'POST', { members: ['快手', '年糕'], idempotencyKey: key });
+  assert.equal(late.status, 200);
+  assert.deepEqual((await late.json()).members, ['快手', '年糕', '小团'], 'answered as the group is now');
+  assert.equal(r.native.threads.get(once.id)!.preferredCats!.length, 3);
   assert.equal((await r.call('/xbot-api/groups', 'POST', { members: ['快手', '年糕'], idempotencyKey: 'not-a-uuid' })).status, 400);
   for (const name of ['', '   ', '<b>群</b>', 'x'.repeat(65)]) assert.equal((await r.call('/xbot-api/groups', 'POST', { name, members: ['小团', '快手'] })).status, 400, JSON.stringify(name));
   // Without members the same route still makes a sidebar folder, which keeps the stricter name.

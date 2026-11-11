@@ -14,10 +14,11 @@
 //
 // Each page is the same element for the same chat across the drawer's
 // frequent repaints (an open fold, a confirm in progress and focus survive);
-// another chat builds its own. Requests: POST /xbot-api/bots/:name/new,
-// PATCH /xbot-api/groups/:id {name?, members?} and DELETE /xbot-api/groups/:id
-// (docs/xbot-api.md). A change is shown only once the server has answered;
-// nothing here stops work, routes messages or keeps a copy of the groups.
+// another chat builds its own. Requests: PATCH /xbot-api/groups/:id
+// {name?, members?} and DELETE /xbot-api/groups/:id (docs/xbot-api.md); 新对话
+// opens chat-history.js's own dialog, the same one as the header's ⋯ menu. A
+// change is shown only once the server has answered; nothing here stops work,
+// routes messages or keeps a copy of the groups.
 (() => {
   "use strict";
   const R = window.ClowderProfileRules;
@@ -122,23 +123,6 @@
     if (on && L.card.contains(document.activeElement) && document.activeElement.tagName === "BUTTON") L.card.focus();
     for (const b of buttons) b.disabled = on;
   }
-  // A yes/no question; resolves true for yes.
-  function confirm(title, text, yes, opener, danger) {
-    return new Promise((resolve) => {
-      const L = dialog(title, opener);
-      let answer = false;
-      const close = L.close;
-      L.close = (force) => { close(force); if (!L.alive) resolve(answer); };
-      L.body.append(node("p", "pf-lead", text));
-      const no = button("secondary", "取消", () => L.close());
-      const ok = node("button", danger ? "secondary pf-danger" : "primary", yes);
-      ok.type = "submit";
-      L.actions.append(no, ok);
-      L.card.addEventListener("submit", (ev) => { ev.preventDefault(); answer = true; L.close(true); });
-      no.focus();
-    });
-  }
-
   // ------------------------------------------------------------ the drawer head
   // A cat: its portrait on a soft wash of its own colour (bots[].accent), its
   // name. Drawn again only when the face or the name changes.
@@ -273,7 +257,7 @@
   }
 
   function buildCat(sel, key) {
-    const P = { sel, key, data: { name: sel.id }, pinBusy: false, starting: false, agentSig: null, configSig: null, exec: null };
+    const P = { sel, key, data: { name: sel.id }, pinBusy: false, agentSig: null, configSig: null, exec: null };
     const root = node("div", "pf-page pf-cat");
     root.dataset.key = key;
 
@@ -297,14 +281,15 @@
     const pinLine = node("p", "pf-line");
     pinLine.hidden = true;
 
-    // 对话: start a new one, or open a saved one (workspace.js's 历史对话).
+    // 对话: start a new one (chat-history.js's 新对话 dialog, which asks the
+    // server and says why it cannot while the cat is busy), or open a saved
+    // one (workspace.js's 历史对话).
     const convs = node("section", "psec pf-convs");
-    const fresh = labelled("secondary pf-new", "plus", "新对话", (ev) => newChat(P, ev.currentTarget));
+    const fresh = labelled("secondary pf-new", "plus", "新对话", (ev) => H.newConversation(P.sel, ev.currentTarget));
+    fresh.setAttribute("aria-haspopup", "dialog");
     const note = node("p", "pf-note", R.NEW_CHAT_NOTE);
-    const line = node("p", "pf-line");
-    line.hidden = true;
     const slot = node("div", "pf-convs-slot");
-    convs.append(node("h4", "", "对话"), fresh, note, line, slot);
+    convs.append(node("h4", "", "对话"), fresh, note, slot);
 
     // 高级: what is technical, as it was in 详情 and 任务.
     const fold = advanced(key, (body) => buildCatAdvanced(P, body));
@@ -313,7 +298,7 @@
     foot.append(remove);
 
     root.append(duty, pin, pinLine, convs, node("div", "pf-rule"), fold.box, foot);
-    Object.assign(P, { root, duty, dutyText, dutyNone, pinSwitch, pinLine, fresh, line, slot, fold, remove });
+    Object.assign(P, { root, duty, dutyText, dutyNone, pinSwitch, pinLine, fresh, slot, fold, remove });
     return P;
   }
 
@@ -350,7 +335,6 @@
     // 历史对话 is workspace.js's node (the same one while the conversation is the same).
     const convs = H.conversations(P.sel);
     if (convs ? P.slot.firstChild !== convs || P.slot.childNodes.length !== 1 : P.slot.firstChild) P.slot.replaceChildren(...(convs ? [convs] : []));
-    paintFresh(P);
     if (P.fold.built) paintCatAdvanced(P);
     P.remove.setAttribute("aria-label", "删除猫猫「" + name + "」");
   }
@@ -402,40 +386,6 @@
     }
     P.pinBusy = false;
     if (S.cat === P) paintPin(P);
-  }
-
-  function paintFresh(P) {
-    P.fresh.setAttribute("aria-disabled", String(!!P.starting));
-    P.fresh.label.textContent = P.starting ? "正在开始新对话…" : "新对话";
-  }
-  // 新对话: the conversation on screen goes to 历史对话 and an empty one opens
-  // (the server refuses while the cat is still at work in this one). Files
-  // waiting to be sent belong to this conversation, so the owner says yes first.
-  async function newChat(P, opener) {
-    if (P.starting) return;
-    const sel = P.sel, name = P.data.name || sel.id;
-    say(P.line, "");
-    if (H.sending()) { say(P.line, "这条消息还在发送，发出后再开新对话。", true); return; }
-    if (H.working()) { say(P.line, R.newChatError({ status: 409, message: "" }, name).text, true); return; }
-    if (H.pendingFiles() && !(await confirm("开始新对话", "待发送的附件只属于现在的对话，开始新对话后会被移除。", "开始新对话", opener))) return;
-    if (S.cat !== P || P.starting) return;
-    P.starting = true;
-    paintFresh(P);
-    try {
-      await H.api("/xbot-api/bots/" + enc(name) + "/new", { method: "POST" });
-    } catch (err) {
-      P.starting = false;
-      paintFresh(P);
-      say(P.line, R.newChatError(err, name).text, true);
-      return;
-    }
-    P.starting = false;
-    paintFresh(P);
-    H.toast("已开始新对话");
-    await H.reopen(sel);
-    // The chat opened afresh around the same page: focus comes back to the button.
-    const here = document.activeElement;
-    if (S.cat === P && P.root.isConnected && (!here || here === document.body)) P.fresh.focus({ preventScroll: true });
   }
 
   // ------------------------------------------------------------ 成员 (a group)

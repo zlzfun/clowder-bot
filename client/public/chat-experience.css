@@ -32,6 +32,12 @@
 
 /* A message found from the line flashes like a quoted one. */
 .msg.cx-hit .bubble, .msg.cx-hit > .body { border-radius: var(--x-r-card); animation: quote-flash 1.5s linear; }
+/* quote-flash (app.css) tints from the accent to --bubble-fill, which nothing
+   set: an owner's bubble went see-through, its light words vanishing for the
+   flash, and a cat's bubble did not flash at all. Give each bubble its own
+   fill; an owner's bubble, already the accent colour, tints toward the page. */
+.msg.cx-hit .bubble { --bubble-fill: var(--x-user-bubble); --accent: var(--x-card); }
+.msg.cx-hit .bot-bubble { --bubble-fill: var(--x-bot-bubble); animation: quote-flash 1.5s linear; }
 .msg.cx-hit:focus { outline: none; }
 
 /* ---- Sidebar second line: a failure and an unconfirmable state. */

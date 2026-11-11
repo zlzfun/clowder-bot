@@ -439,15 +439,20 @@
     const held = new Set(keep);
     const before = new Map(keyed(kids(live).filter((n) => !held.has(n))));
     const out = [];
+    const pairs = keyed(kids(next));
+    for (const [, n] of pairs) sig(n);
+    // New message rows above the first one that was already there are
+    // earlier history brought in on top (chat-history.js): not news, so they
+    // neither rise nor count as added (回到最新 is for what arrived below).
+    const top = pairs.findIndex(([k]) => { const old = before.get(k); return !!old && old.classList.contains("msg"); });
     let added = 0;
-    for (const [k, n] of keyed(kids(next))) {
-      sig(n);
+    pairs.forEach(([k, n], i) => {
       const old = before.get(k);
-      if (old && sig(old) === n._lvSig) { out.push(old); before.delete(k); continue; }
+      if (old && sig(old) === n._lvSig) { out.push(old); before.delete(k); return; }
       if (old) { before.delete(k); n.classList.add("lv-still"); }
-      else if (n.classList.contains("msg")) added++;
+      else if (n.classList.contains("msg")) { if (top >= 0 && i < top) n.classList.add("lv-still"); else added++; }
       out.push(n);
-    }
+    });
     out.push(...keep);
     const wanted = new Set(out);
     for (const n of kids(live)) if (!wanted.has(n)) n.remove();
@@ -676,6 +681,9 @@
   window.ClowderLive = Object.freeze({
     init, select, event, lost, read, frame, commit, reconcile, rendered, attach,
     expect, working, stopping, stopped, isStopping: () => !!S.stopping, sendButton, following, tick,
+    // A history row its owner changed in place (chat-history.js's top row):
+    // the next redraw reads its markup again instead of the one remembered.
+    touched: (n) => { if (n) delete n._lvSig; },
     // For tests and diagnostics only: what this page is drawing, never a record.
     peek: (id) => { const e = S.replies.get(id); return e ? { text: e.r.text, shown: e.shown, done: e.r.done, own: e.own, row: e.row } : null; },
   });

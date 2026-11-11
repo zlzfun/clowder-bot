@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { createApp } from '../server/app.js';
 import { NativeFixture } from './native-fixture.js';
 import { liveEvent } from '../server/native/live.js';
-import { messageDisplayText, replyInProgress } from '../server/native/message-presentation.js';
+import { messageDisplayText, replyInProgress, rosterRefusals } from '../server/native/message-presentation.js';
 import type { NativeEvent, NativeMessage } from '../server/native/types.js';
 
 // Shapes below are trimmed copies of events the pinned engine (42017e0) sent
@@ -245,4 +245,68 @@ test('a cat that signed by itself before the host tail loses both lines, in the 
     ...(message.extra!.outputLayout as object), contentRevision: { length: fencedContent.length, sha256: createHash('sha256').update(fencedContent).digest('hex') },
     hostTail: { kind: 'cat_signature', producer: 'codex_stream_finalizer', basis: 'runtime_canonical', start: fenced.length, end: fencedContent.length, gluePrefixLength: 2 },
   } } }, 'thread'), fenced);
+});
+
+test('cats addressed from outside a conversation are named once, not listed as raw engine refusals', async t => {
+  const r = await setup(t), ada = await r.bridge.createBot({ name: 'Ada' }), bob = await r.bridge.createBot({ name: 'Bob' });
+  const cy = await r.bridge.createBot({ name: 'Cy' }), dee = await r.bridge.createBot({ name: 'Dee' });
+  const group = await (await r.call('/xbot-api/groups', 'POST', { name: 'Team', members: ['Ada', 'Bob'] })).json();
+  // Shapes from a real run: the engine's @all reached every cat; the member check (patches/0001) refused the outsiders.
+  const refused = (id: string, catId: string, timestamp: number): NativeMessage =>
+    ({ id, type: 'system', catId: null, timestamp, content: `Error: Member ${catId} is not in the execution roster of thread ${group.id}` });
+  r.native.messages.set(group.id, [
+    { id: 'u1', type: 'user', catId: null, timestamp: 1000, content: '@all 各说一句' },
+    refused('x1', cy.id, 1100), refused('x2', dee.id, 1200),
+    { id: 'a1', type: 'assistant', catId: ada.id, timestamp: 1300, content: '我先说' },
+    refused('x3', 'bot-deleted', 1400), refused('x4', cy.id, 1450),
+    { id: 'u2', type: 'user', catId: null, timestamp: 2000, content: '@Cy 你呢' },
+    refused('x5', cy.id, 2100),
+    { id: 's1', type: 'system', catId: null, timestamp: 2200, content: 'Error: something else went wrong' },
+  ]);
+  const page = await (await r.call(`/xbot-api/groups/${group.id}`)).json();
+  assert.deepEqual(page.messages.map((m: any) => [m.id, m.text, m.notice ?? false]), [
+    ['u1', '@all 各说一句', false], ['x1', 'Cy、Dee、有只猫猫不在这个群里，没有回答。', true], ['a1', '我先说', false],
+    ['u2', '@Cy 你呢', false], ['x5', 'Cy不在这个群里，没有回答。', true], ['s1', 'Error: something else went wrong', false]]);
+  assert.match(page.messages[1].native.content, /execution roster/, 'the native record is untouched');
+  // The same in a single chat's transcript, worded for a conversation.
+  const thread = await r.bridge.direct(ada);
+  r.native.messages.set(thread.id, [{ id: 'u', type: 'user', catId: null, timestamp: 1, content: 'hi' }, { ...refused('y1', bob.id, 2), content: `Error: Member ${bob.id} is not in the execution roster of thread ${thread.id}` }]);
+  const rows = (await (await r.call('/xbot-api/bots/Ada/transcript')).json()).messages.filter((m: any) => m.id);
+  assert.deepEqual(rows.map((m: any) => [m.id, m.content, m.notice ?? false]), [['u', 'hi', false], ['y1', 'Bob不在这个对话里，没有回答。', true]]);
+  assert.equal(rosterRefusals([{ id: 'n', type: 'assistant', catId: 'c', timestamp: 1, content: 'Error: Member x is not in the execution roster of thread t' }], () => 'X', true).size, 0, 'only the engine’s own system line');
+  // The engine's line carries no link to the message that caused it, so the fold goes by position only and the
+  // sentence claims nothing about which message it answers: every cat that was turned away is still named.
+  const line = (id: string, member: string): any => ({ id, type: 'system', catId: null, timestamp: 1, content: `Error: Member ${member} is not in the execution roster of thread t` });
+  const said = (id: string): any => ({ id, type: 'user', catId: null, timestamp: 1, content: id });
+  const names = (id: string) => ({ a: 'Cy', b: 'Dee' } as Record<string, string>)[id];
+  assert.deepEqual([...rosterRefusals([said('u1'), said('u2'), line('x1', 'a'), line('x2', 'b')], names, true)],
+    [['x1', 'Cy、Dee不在这个群里，没有回答。'], ['x2', null]], 'two requests answered back to back read as one line with both names');
+  // A run cut by a page boundary is told on each page for the cats that page has.
+  assert.deepEqual([...rosterRefusals([said('u1'), line('x1', 'a')], names, true)], [['x1', 'Cy不在这个群里，没有回答。']]);
+  assert.deepEqual([...rosterRefusals([line('x2', 'b')], names, true)], [['x2', 'Dee不在这个群里，没有回答。']]);
+});
+
+test('a signature a cat wrote at the start of its own reply is hidden when words follow it', async t => {
+  const r = await setup(t), cat = await r.bridge.createBot({ name: '快手' }), thread = await r.bridge.direct(cat);
+  const shown = (content: string, name: string | undefined = '快手') => messageDisplayText({ id: 'm', type: 'assistant', catId: cat.id, timestamp: 1, content }, thread.id, name);
+  assert.equal(shown('[快手/Haiku🐾]  今天精力满满，准备好接棒！🚀'), '今天精力满满，准备好接棒！🚀');
+  assert.equal(shown('[快手🐾] 7'), '7');
+  assert.equal(shown('[快手/Haiku 🐾] 好的\n\n[快手/Haiku 🐾]'), '好的', 'and the closing one as before');
+  assert.equal(shown('[快手/Haiku🐾]\n\n7'), '7', 'the real shape: the signature on a line of its own, then the answer');
+  assert.equal(shown('[快手/Haiku🐾]  \n \n    const a = 1;\n    const b = 2;'), '    const a = 1;\n    const b = 2;', 'an indented first line keeps its indentation: it may be a code block');
+  // Not its own name, not at the start, or no paw: the text stays. A signature with nothing after it is the closing kind.
+  for (const text of ['[墨点/gpt🐾] 是墨点的署名', '[墨点/gpt🐾]\n\n7', '看这个 [快手/Haiku🐾] 格式', '[快手] 没有猫爪'])
+    assert.equal(shown(text), text, text);
+  assert.equal(shown('[快手/Haiku🐾]'), '');
+  assert.equal(shown('[快手/Haiku🐾]  今天'), '今天');
+  assert.equal(messageDisplayText({ id: 'm', type: 'assistant', catId: cat.id, timestamp: 1, content: '[快手/Haiku🐾]  今天' }, thread.id), '[快手/Haiku🐾]  今天');
+  // Through the routes: a group reply and the conversation's latest line.
+  const peer = await r.bridge.createBot({ name: '墨点' });
+  const group = await (await r.call('/xbot-api/groups', 'POST', { members: ['快手', '墨点'] })).json();
+  r.native.messages.set(group.id, [{ id: 'g', type: 'assistant', catId: cat.id, timestamp: 5, content: '[快手/Haiku🐾]  7' }, { id: 'h', type: 'assistant', catId: peer.id, timestamp: 6, content: '[快手/Haiku🐾] 是它的署名' }]);
+  const page = await (await r.call(`/xbot-api/groups/${group.id}`)).json();
+  assert.deepEqual(page.messages.map((m: any) => m.text), ['7', '[快手/Haiku🐾] 是它的署名']);
+  r.native.messages.set(thread.id, [{ id: 'd', type: 'assistant', catId: cat.id, timestamp: 5, content: '[快手/Haiku🐾]  到了' }]);
+  assert.equal((await r.bridge.activity.read(thread.id)).last!.text, '到了');
+  assert.equal((await (await r.call('/xbot-api/bots/' + encodeURIComponent('快手') + '/transcript')).json()).messages[0].content, '到了');
 });

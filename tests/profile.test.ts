@@ -180,18 +180,11 @@ test('a cat\'s own colour is used only as the server gives it, and a cat made fr
   assert.equal(R.ownBreed(null, bot), false);
 });
 
-test('新对话 is said in everyday words: busy names the cat, a switch in flight waits, an unsure answer says to look first', () => {
+test('the note under 新对话 says, in everyday words, where this conversation goes and that what the cat knows of you stays', () => {
   const R = load(RULES).window.ClowderProfileRules;
   assert.match(R.NEW_CHAT_NOTE, /历史对话/);
   assert.match(R.NEW_CHAT_NOTE, /记得/);
-  assert.equal(R.newChatError(fail(409, '请先完成或停止会话中的任务'), '团子').text, '团子 还在忙这个对话里的事。等它做完，或先停下来，再开新对话。');
-  assert.equal(R.newChatError(fail(409, '会话正在切换，请稍后重试'), '团子').text, '正在换对话，稍等一下再试。');
-  assert.equal(R.newChatError(fail(undefined, '连不上 clowder-bot'), '团子').kind, 'unsure');
-  assert.equal(R.newChatError(fail(502), '团子').kind, 'unsure');
-  assert.equal(R.newChatError(fail(404, '找不到这只猫猫'), '团子').kind, 'gone');
-  // An English or engine-worded refusal is not shown as it is.
-  assert.equal(R.newChatError(fail(400, 'invalid thread'), '团子').text, '没能开始新对话，请稍后再试。');
-  for (const kind of [409, 404, 500, 400]) assert.doesNotMatch(R.newChatError(fail(kind, 'x'), '团子').text, /会话|线程|Agent|thread|session/i);
+  assert.equal(R.newChatError, undefined, 'refusals are said by the shared dialog (chat-history.js)');
 });
 
 // ---------------------------------------------------------------- rules: groups
@@ -310,12 +303,11 @@ test('@ rules: picking writes @名字 and one space at the caret; 全体 writes 
 
 // ---------------------------------------------------------------- the drawer (profile.js)
 type Call = { path: string; method: string; body?: Any };
-function drawer(opts: { cats?: Any[]; groups?: Any[]; route?: (path: string, method: string, body: Any) => unknown; working?: boolean; sending?: boolean; files?: boolean } = {}) {
+function drawer(opts: { cats?: Any[]; groups?: Any[]; route?: (path: string, method: string, body: Any) => unknown } = {}) {
   const env = load([...RULES, 'client/public/profile.js']);
   const { doc, window } = env;
   const s: Any = {
     cats: plain(opts.cats ?? CATS), groups: plain(opts.groups ?? [{ id: 'g1', name: '读书会', members: ['快手', '墨点', '年糕'] }]),
-    working: !!opts.working, sending: !!opts.sending, files: !!opts.files,
   };
   const calls: Call[] = [], log: string[] = [];
   const api = async (path: string, opt: { method?: string; body?: unknown } = {}) => {
@@ -331,7 +323,6 @@ function drawer(opts: { cats?: Any[]; groups?: Any[]; route?: (path: string, met
       return group;
     }
     if (g && call.method === 'DELETE') { s.groups = s.groups.filter((x: Any) => x.id !== decodeURIComponent(g[1])); return { status: 'ok' }; }
-    if (/\/new$/.test(path)) return { status: 'ok', conversation_id: 'thread-new' };
     throw fail(404);
   };
   const made = (tag: string, cls: string, data: Record<string, string> = {}) => { const n = doc.createElement(tag); n.className = cls; for (const k of Object.keys(data)) n.dataset[k] = data[k]; return n; };
@@ -358,9 +349,7 @@ function drawer(opts: { cats?: Any[]; groups?: Any[]; route?: (path: string, met
     syncExec: (root: El) => log.push('sync:' + root.dataset.bot),
     conversations: () => convNode,
     runtimeHref: (data: Any) => data.thread_id ? '/runtime.html?thread=' + data.thread_id : '/runtime.html',
-    sending: () => s.sending,
-    working: () => s.working,
-    pendingFiles: () => s.files,
+    newConversation: (sel: Any, opener: El) => { log.push('new:' + sel.type + ':' + sel.id); s.opener = opener; },
     editProfile: (data: Any) => log.push('edit:' + data.name),
     pin: async (name: string, on: boolean) => {
       log.push('pin:' + name + ':' + on);
@@ -370,7 +359,6 @@ function drawer(opts: { cats?: Any[]; groups?: Any[]; route?: (path: string, met
     exportChat: (name: string) => log.push('export:' + name),
     copyId: (name: string) => log.push('copy:' + name),
     deleteCat: (name: string) => log.push('delete:' + name),
-    reopen: async (sel: Any) => { log.push('reopen:' + sel.type + ':' + sel.id); },
     groupChanged: async (id: string) => { log.push('changed:' + id); },
     groupDeleted: async (id: string) => { log.push('deleted:' + id); },
     closePops: () => log.push('closePops'),
@@ -504,57 +492,17 @@ test('置顶: the switch shows the list\'s word, the asked-for state while savin
   assert.equal(visibleText(one(page, 'pf-line')), '没能置顶：服务出了点问题，请稍后再试。');
 });
 
-test('新对话: one request, then the cat\'s chat opens afresh; refused while the cat works (in its words), files waiting are asked about, an unsure answer says to look first', async () => {
+test('新对话 on 资料 opens the shared dialog (the header ⋯ menu\'s own) for this cat, with focus to come back to the button; the page itself sends nothing', async () => {
   const d = drawer();
   const page = d.show(d.P.catPage(TUANZI, PROFILE));
   const fresh = one(page, 'pf-new');
-  fresh.click();
-  assert.equal(fresh.getAttribute('aria-disabled'), 'true');
-  assert.equal(visibleText(fresh), '正在开始新对话…');
-  fresh.click();
-  await settle();
-  assert.deepEqual(d.writes().map(c => c.method + ' ' + c.path), ['POST /xbot-api/bots/%E5%BF%AB%E6%89%8B/new']);
-  assert.deepEqual(d.log, ['toast:已开始新对话', 'reopen:bot:快手']);
   assert.equal(visibleText(fresh), '新对话');
-
-  // The cat still at work in this conversation: no request, the reason in place.
-  const busy = drawer({ working: true });
-  const p2 = busy.show(busy.P.catPage(TUANZI, PROFILE));
-  one(p2, 'pf-new').click();
+  assert.equal(fresh.getAttribute('aria-haspopup'), 'dialog');
+  fresh.click();
   await settle();
-  assert.equal(busy.writes().length, 0);
-  assert.equal(visibleText(one(one(p2, 'pf-convs'), 'pf-line')), '快手 还在忙这个对话里的事。等它做完，或先停下来，再开新对话。');
-  // The server says so too (it is the authority): the same words, nothing reopened.
-  const refused = drawer({ route: (path) => { if (path.endsWith('/new')) throw fail(409, '请先完成或停止会话中的任务'); return undefined; } });
-  const p3 = refused.show(refused.P.catPage(TUANZI, PROFILE));
-  one(p3, 'pf-new').click();
-  await settle();
-  assert.equal(visibleText(one(one(p3, 'pf-convs'), 'pf-line')), '快手 还在忙这个对话里的事。等它做完，或先停下来，再开新对话。');
-  assert.deepEqual(refused.log, []);
-  // A message still being sent waits.
-  const sending = drawer({ sending: true });
-  const p4 = sending.show(sending.P.catPage(TUANZI, PROFILE));
-  one(p4, 'pf-new').click();
-  assert.equal(visibleText(one(one(p4, 'pf-convs'), 'pf-line')), '这条消息还在发送，发出后再开新对话。');
-  // Files waiting: asked first; 取消 sends nothing, yes sends once.
-  const files = drawer({ files: true });
-  const p5 = files.show(files.P.catPage(TUANZI, PROFILE));
-  one(p5, 'pf-new').click();
-  const layer = files.layer()!;
-  assert.match(visibleText(layer), /待发送的附件只属于现在的对话，开始新对话后会被移除。/);
-  button(layer, '取消').click();
-  await settle();
-  assert.equal(files.writes().length, 0);
-  one(p5, 'pf-new').click();
-  one(files.layer()!, 'pf-card').dispatch('submit');
-  await settle();
-  assert.equal(files.writes().length, 1);
-  // No answer: it may have opened; say to look in 历史对话 rather than try blindly.
-  const unsure = drawer({ route: (path) => { if (path.endsWith('/new')) throw fail(undefined, '连不上 clowder-bot'); return undefined; } });
-  const p6 = unsure.show(unsure.P.catPage(TUANZI, PROFILE));
-  one(p6, 'pf-new').click();
-  await settle();
-  assert.equal(visibleText(one(one(p6, 'pf-convs'), 'pf-line')), '没能确认新对话开好没有。先看看「历史对话」，再决定要不要重试。');
+  assert.deepEqual(d.log, ['new:bot:快手']);
+  assert.equal(d.s.opener, fresh, 'the dialog returns focus here');
+  assert.equal(d.calls.length, 0, 'the request, its idle check and its refusals belong to chat-history.js');
 });
 
 const GROUP = { type: 'group', id: 'g1' };
@@ -840,6 +788,7 @@ test('the shell wires 资料页与群: scripts before app.js, styles before the 
   assert.ok(at('mention-rules.js') < at('mention.js') && at('mention.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
   assert.deepEqual(styles.slice(-3), ['profile.css', 'mention.css', 'chat-live.css']);
+  assert.ok(scripts.indexOf('chat-history.js') < scripts.indexOf('profile-rules.js'), 'after the earlier rounds\' scripts');
   // The drawer: tabs from the rules; 资料 / 成员 kept across repaints; 定时 its own page.
   assert.match(app, /for \(const pair of profileRules\.tabs\(panelKind\(\)\)\)/);
   assert.match(app, /else body\.append\(profile\.catPage\(state\.sel, data\)\);/);
@@ -866,7 +815,9 @@ test('the shell wires 资料页与群: scripts before app.js, styles before the 
   assert.match(app, /mention\.close\(\);/);
   // Requests: only the documented group and conversation routes.
   const profile = read('client/public/profile.js');
-  assert.deepEqual([...new Set([...profile.matchAll(/"(\/xbot-api\/[^"]*)"/g)].map(m => m[1]))].sort(), ['/xbot-api/bots/', '/xbot-api/groups/']);
+  assert.deepEqual([...new Set([...profile.matchAll(/"(\/xbot-api\/[^"]*)"/g)].map(m => m[1]))].sort(), ['/xbot-api/groups/']);
+  assert.match(app, /newConversation: \(sel, opener\) => chatHistory\.newConversation\(sel, opener\),/);
+  assert.match(read('client/public/chat-history.js'), /init, select, merge, top, starters, load, sync: syncMenu, openMenu, closeMenu, newConversation,/);
   assert.doesNotMatch(profile + read('client/public/mention.js'), /innerHTML\s*=(?!\s*body;)|localStorage|sessionStorage|\/stop"|\/cancel"/);
   // The words shown never name a Bot, an Agent, a session or a thread.
   for (const file of ['client/public/profile.js', 'client/public/profile-rules.js', 'client/public/mention.js', 'client/public/mention-rules.js']) {

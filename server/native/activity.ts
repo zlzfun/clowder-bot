@@ -2,8 +2,9 @@ import { ApiError } from '../errors.js';
 import type { BotBridge, QueueView } from './bridge.js';
 import { messageDisplayText, messagePresentation } from './message-presentation.js';
 import type { NativeCat, NativeMessage } from './types.js';
-import { clip } from './text.js';
+import { clip, plainLine } from './text.js';
 import { blockLine, messageBlocks } from './blocks.js';
+import { approvalLine } from './approvals.js';
 
 export interface ActivityItem {
   id: string; kind: 'approval'|'failure'|'running'|'queued'|'task'; label: string; threadId: string;
@@ -29,6 +30,7 @@ export class Activity {
   approvals(): Promise<{ items: unknown[] }> { return this.bridge.native.request('/api/approval-hub/pending'); }
   visibleReplies(threadId: string, messages: NativeMessage[]) {
     const presentation = messagePresentation(messages);
+    // Visibility never depends on a leading signature: it is only hidden when words follow it.
     return messages.filter(message => message.catId && message.type === 'assistant' && !message.isDraft
       && !['queued', 'processing', 'canceled', 'cancelled'].includes(message.lifecycle?.status ?? '')
       && presentation.get(message.id) !== 'activity'
@@ -96,7 +98,9 @@ export class Activity {
           if (said) {
             // A reply that is only a card or a list is named after it.
             const rich = said.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(said);
-            const text = (messageDisplayText(said, threadId) || blockLine(rich.blocks) || (rich.hidden ? '发来了暂时无法显示的内容' : '')).replace(/\s+/g, ' ').trim();
+            const words = messageDisplayText(said, threadId, names.find(cat => cat.id === said.catId)?.name);
+            // A cat writes Markdown; the list shows its words. What the owner typed stays as typed.
+            const text = ((said.type === 'user' ? words : plainLine(words) || words) || blockLine(rich.blocks) || (rich.hidden ? '发来了暂时无法显示的内容' : '')).replace(/\s+/g, ' ').trim();
             view.last = { messageId: said.id, time: new Date(said.timestamp).toISOString(), from: said.type === 'user' ? 'owner' : 'cat',
               ...(said.type === 'user' ? {} : annotate(said.catId)), text: clip(text, 140),
               files: this.bridge.workspaces.messageFiles(threadId, said).length };
@@ -114,7 +118,7 @@ export class Activity {
               || typeof card.messageId !== 'string' || typeof item.proposalId !== 'string') continue;
             view.items.push({id:`approval:${item.sourceFeatureId}:${item.proposalId}`,kind:'approval',threadId,
               messageId:card.messageId,proposalId:item.proposalId,...annotate(item.requesterCatId),
-              label:typeof item.summary === 'string' && item.summary.trim() ? `等你确认：${item.summary.slice(0,160)}` : '等你确认'});
+              label:approvalLine(item) ? `等你确认：${approvalLine(item)}` : '等你确认'});
           }
         }
         ready++;

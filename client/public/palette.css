@@ -1,0 +1,156 @@
+/* Search and jump: the ⌘K palette and its way in at the top of the sidebar
+   (palette.js). Builds on app.css's sidebar rows, .pop surfaces, .primary /
+   .secondary / .text-btn buttons, .visually-hidden and the rise/fade motion,
+   with the --x-* tokens of tokens.css and the café layer. No new colors,
+   fonts or motion; separation is surface and spacing, never a line. */
+
+/* ---- The way in: a quiet row under the greeting that stays at the top
+   while the list scrolls; the pinned row sticks just under it. */
+.pal-entry-wrap { position: sticky; top: 0; z-index: 2; background: var(--base); padding: 4px 8px 2px; }
+.side-scroll:has(> .pal-entry-wrap) > .pin-row { top: 42px; }
+.pal-entry {
+  width: 100%; height: 36px; display: flex; align-items: center; gap: 8px;
+  padding: 0 8px 0 10px; border: 0; border-radius: 10px; background: transparent;
+  color: var(--x-muted); font-size: var(--x-fs-ui); text-align: left;
+  transition: background 160ms ease-out, color 160ms ease-out;
+}
+.pal-entry:hover { background: var(--hover); color: var(--x-text); }
+.pal-entry:active { background: var(--selected); }
+.pal-entry:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+.pal-entry > .icon { width: 16px; height: 16px; }
+.pal-entry-label { flex: 1; min-width: 0; }
+.pal-key, .pal-esc, .pal-foot kbd {
+  flex: none; font: inherit; font-size: var(--x-fs-cap); line-height: 18px; color: var(--x-faint);
+  padding: 0 5px; border-radius: 5px; background: var(--x-fill-1); font-variant-numeric: tabular-nums;
+}
+.pal-esc, .pal-foot kbd { background: var(--x-fill-2); color: var(--x-muted); }
+.pal-entry:hover .pal-key { background: var(--x-fill-3); }
+/* The narrow rail: the lens alone, centred like the rail's other buttons. */
+.sidebar.rail .pal-entry-wrap { padding: 4px 10px 2px; }
+.sidebar.rail .pal-entry { width: 52px; height: 40px; margin: 0 auto; padding: 0; justify-content: center; }
+.sidebar.rail .pal-entry > .icon { width: 18px; height: 18px; }
+.sidebar.rail .pal-entry-label, .sidebar.rail .pal-key { display: none; }
+.sidebar.rail .side-scroll:has(> .pal-entry-wrap) > .pin-row { top: 46px; }
+
+/* ---- The palette: a card near the top of the window over the scrim. */
+.pal {
+  position: fixed; inset: 0; z-index: 50; display: flex; align-items: flex-start; justify-content: center;
+  padding: max(12vh, 24px) 16px 16px; background: var(--x-scrim); animation: fade 180ms ease-out;
+}
+.pal[hidden] { display: none; }
+.pal-card {
+  width: min(640px, 100%); max-height: min(560px, 100%); display: flex; flex-direction: column;
+  background: var(--x-popover); color: var(--x-text); border-radius: 16px; box-shadow: var(--x-shadow-pop);
+  overflow: hidden; animation: rise 180ms ease-out;
+}
+.pal-bar { flex: none; display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 0 14px 0 18px; }
+.pal-bar > .pal-lens { width: 18px; height: 18px; color: var(--x-muted); }
+.pal-input {
+  flex: 1; min-width: 0; height: 56px; padding: 0; border: 0; background: transparent;
+  font-size: var(--x-fs-body); color: var(--x-text); outline: none;
+}
+.pal-input::placeholder { color: var(--x-ph); }
+.pal-cancel { display: none; flex: none; border: 0; background: transparent; padding: 6px 2px; font-size: var(--x-fs-body); color: var(--x-text); }
+/* A scope (在对话里查找): the chat's name before the field, removable. */
+.pal-scope {
+  flex: none; display: inline-flex; align-items: center; gap: 2px; max-width: 40%; height: 26px;
+  padding: 0 2px 0 9px; border-radius: var(--x-r-pill); background: var(--x-fill-2); font-size: var(--x-fs-sm); color: var(--x-text-2);
+}
+.pal-scope[hidden] { display: none; }
+.pal-scope-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pal-scope-x {
+  flex: none; width: 22px; height: 22px; display: grid; place-items: center; padding: 0;
+  border: 0; border-radius: 50%; background: transparent; color: var(--x-muted);
+}
+.pal-scope-x:hover { background: var(--x-fill-3); color: var(--x-text); }
+.pal-scope-x:focus-visible, .pal-cancel:focus-visible, .pal-confirm button:focus-visible, .pal-retry:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pal-scope-x .icon { width: 13px; height: 13px; }
+
+.pal-body { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 0 8px 8px; }
+.pal-body[hidden] { display: none; }
+.pal-group + .pal-group { margin-top: 4px; }
+.pal-head { padding: 8px 10px 4px; font-size: var(--x-fs-cap); font-weight: 500; line-height: 18px; letter-spacing: .02em; color: var(--x-faint); }
+.pal-opt {
+  display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 6px 10px;
+  border-radius: 10px; color: var(--x-text); cursor: pointer; user-select: none;
+}
+.pal-opt.on { background: var(--hover); }
+.pal-opt > .avatar { width: 28px; height: 28px; }
+.pal-noface { background: var(--x-fill-2); }
+.pal-name { flex: none; max-width: 60%; font-size: 14px; font-weight: 500; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pal-sub { flex: 1; min-width: 0; font-size: var(--x-fs-sm); color: var(--x-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pal-sub.pal-end { text-align: right; color: var(--x-faint); }
+.pal-tag { flex: none; margin-left: auto; font-size: var(--x-fs-cap); color: var(--x-faint); }
+.pal-ico { flex: none; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; background: var(--x-fill-1); color: var(--x-muted); }
+.pal-opt.on .pal-ico { background: var(--x-popover); color: var(--x-text); }
+.pal-ico .icon { width: 16px; height: 16px; }
+/* On the dark popover the lightest fill all but disappears. */
+html[data-theme="dark"] .pal-ico, html[data-theme="dark"] .pal-quote { background: var(--x-fill-2); }
+/* The words that matched. */
+.pal-mark { background: var(--x-fill-3); color: var(--x-text); font-weight: 600; border-radius: 3px; padding: 0 1px; }
+/* A found message: the chat, who said it and the snippet, when on the right. */
+.pal-opt.pal-message { align-items: flex-start; padding: 8px 10px; }
+.pal-message > .avatar { margin-top: 1px; }
+.pal-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pal-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.pal-chat { min-width: 0; font-size: var(--x-fs-ui); font-weight: 560; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pal-line .pal-tag { margin-left: 0; }
+.pal-time { flex: none; margin-left: auto; font-size: var(--x-fs-cap); color: var(--x-faint); font-variant-numeric: tabular-nums; }
+.pal-snip {
+  font-size: 13px; line-height: 1.5; color: var(--x-text-2); overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+}
+.pal-who { color: var(--x-muted); }
+
+/* What the search says beyond its rows, in sight under the list: waiting,
+   nothing found, partly searched. */
+.pal-notes { flex: none; display: grid; gap: 2px; padding: 2px 18px 10px; }
+.pal-notes[hidden] { display: none; }
+.pal-note { margin: 0; font-size: var(--x-fs-sm); line-height: 1.6; color: var(--x-muted); }
+.pal-note.pal-warn { color: var(--warn); }
+.pal-note.pal-bad { color: var(--x-danger); }
+.pal-retry { vertical-align: baseline; }
+
+/* A message in a cat's earlier conversation: asked before switching. */
+.pal-confirm { padding: 4px 22px 20px 50px; }
+.pal-confirm[hidden] { display: none; }
+.pal-confirm h3 { margin: 0 0 6px; font-size: var(--x-fs-body); font-weight: 600; }
+.pal-confirm p { margin: 0; font-size: var(--x-fs-ui); line-height: 1.65; color: var(--x-muted); }
+.pal-quote {
+  display: block; margin-top: 10px; padding: 8px 12px; border-radius: 10px; background: var(--x-fill-1);
+  font-size: 13px; line-height: 1.5; color: var(--x-text-2); overflow-wrap: anywhere;
+}
+.pal-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
+.pal-foot[hidden] { display: none; }
+.pal-foot { flex: none; display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 10px 18px 12px; background: var(--x-fill-1); font-size: var(--x-fs-cap); color: var(--x-faint); }
+.pal-hint { display: inline-flex; align-items: center; gap: 3px; }
+.pal-foot kbd { min-width: 18px; text-align: center; }
+.pal-hint kbd:last-of-type { margin-right: 3px; }
+
+/* ---- A phone: a sheet over the whole screen, 取消 in place of esc, no key hints. */
+@media (max-width: 767px) {
+  .pal { padding: 0; align-items: stretch; }
+  .pal-card {
+    width: 100%; max-height: none; height: 100%; border-radius: 0; box-shadow: none; background: var(--bg);
+    padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom);
+  }
+  .pal-bar { padding: 0 14px 0 16px; }
+  .pal-input { font-size: 16px; }
+  .pal-esc, .pal-foot { display: none; }
+  .pal-cancel { display: inline-flex; }
+  .pal-opt { min-height: 48px; }
+  .pal-opt > .avatar { width: 32px; height: 32px; }
+  .pal-confirm { padding: 8px 18px 20px; }
+  .pal-entry-wrap { padding-top: 8px; }
+  .pal-key { display: none; }
+  .side-scroll:has(> .pal-entry-wrap) > .pin-row { top: 46px; }
+}
+
+/* A touch screen has no ⌘K to press. */
+@media (hover: none) { .pal-key { display: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .pal, .pal-card { animation: none; }
+  .pal-entry { transition: none; }
+}

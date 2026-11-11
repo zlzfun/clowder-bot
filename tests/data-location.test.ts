@@ -46,4 +46,12 @@ test('data inside a Git checkout is recognised, whatever the depth, including a 
   const worktree = join(dir, 'worktree'); mkdirSync(join(worktree, 'data'), { recursive: true });
   writeFileSync(join(worktree, '.git'), 'gitdir: elsewhere\n');
   assert.equal(enclosingRepository(join(worktree, 'data')), worktree);
+  // Judged by where the directory really is: a link outside that leads into a checkout is inside it,
+  // also for a directory that does not exist yet; a link inside a checkout that leads out is outside.
+  const outside = join(dir, 'outside'); mkdirSync(outside);
+  symlinkSync(join(repo, 'data'), join(outside, 'link'), 'dir');
+  assert.equal(enclosingRepository(join(outside, 'link')), repo);
+  assert.equal(enclosingRepository(join(outside, 'link', 'new-data', 'native')), repo);
+  mkdirSync(join(outside, 'real')); symlinkSync(join(outside, 'real'), join(repo, 'moved'), 'dir');
+  assert.equal(enclosingRepository(join(repo, 'moved', 'native')), enclosingRepository(dir));
 });
