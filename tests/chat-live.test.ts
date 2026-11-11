@@ -102,18 +102,77 @@ test('a transcript draft extends the words but never takes back longer words the
   // A newer, longer one that continues the words.
   assert.equal(L.draft(r, '今天天气不错，适合'), true);
   assert.equal(r.text, '今天天气不错，适合');
-  // Differing words: a replacement this page applied after the read was asked for wins …
+  // Differing words with no replacement seen here: the draft is the record (one this page missed).
+  const missed = L.reply('m', 'c', false);
+  L.draft(missed, '旧的开头');
+  assert.equal(L.draft(missed, '另一版全文'), true);
+  assert.equal(missed.text, '另一版全文');
+  // After a replacement this page saw, a draft can be older than it however late it was read: not taken.
   L.apply(r, piece('改过的', 3, { replace: true }), 5000);
-  assert.equal(L.draft(r, '今天天气不错，适合出门', 4000), false);
+  assert.equal(L.draft(r, '今天天气不错，适合出门'), false);
+  assert.equal(L.draft(r, '另一版全文'), false);
   assert.equal(r.text, '改过的');
-  // … a read asked for after it takes over (a replacement this page missed).
-  assert.equal(L.draft(r, '另一版全文', 6000), true);
-  assert.equal(r.text, '另一版全文');
   // Done: nothing changes it any more.
   L.apply(r, { kind: 'done', messageId: 'm' }, 7000);
   assert.equal(L.apply(r, piece('迟到', 7)), false);
   assert.equal(r.done, true);
   assert.equal('ok' in r, false, 'done says only that the reply stopped being produced');
+});
+
+// Review 2026-11-11 (frontend-r1), findings 1 and 2.
+test('a saved draft never undoes a replacement this page saw: an older, longer draft is not taken, so the next piece still lands (ABCD → AB → X at 3 is ABX)', () => {
+  const L = rules();
+  const r = L.reply('m', 'c', true);
+  L.apply(r, piece('ABCD', 4), 1);
+  L.apply(r, piece('AB', 2, { replace: true }), 2);
+  // A read that returns the draft saved before the replacement (whenever it was asked for).
+  assert.equal(L.draft(r, 'ABCD'), false);
+  assert.equal(r.text, 'AB');
+  assert.equal(L.apply(r, piece('X', 3), 3), true);
+  assert.equal(r.text, 'ABX');
+  // A shorter draft that differs (saved before the replacement, read after it) does not overwrite newer words either.
+  assert.equal(L.draft(r, 'AQ'), false);
+  assert.equal(L.draft(r, 'A'), false);
+  assert.equal(r.text, 'ABX');
+});
+
+test('after a replacement, a draft is taken only to fill a gap and only when the pieces received since vouch for it', () => {
+  const L = rules();
+  const r = L.reply('m', 'c', true);
+  L.apply(r, piece('旧的全文', 4), 1);
+  L.apply(r, piece('新的', 2, { replace: true }), 2);
+  // Pieces after a gap (「开头」 at 2..4 never arrived): held at their place.
+  L.apply(r, piece('之后', 6), 3);
+  assert.equal(r.text, '新的');
+  // A draft that disagrees with the held piece (saved before the replacement): not taken.
+  assert.equal(L.draft(r, '新的开头不对'), false);
+  // A draft too short to be checked against the held piece: not taken either.
+  assert.equal(L.draft(r, '新的开头'), false);
+  assert.equal(r.text, '新的');
+  // One that holds the very piece received since: it fills the gap.
+  assert.equal(L.draft(r, '新的开头之后'), true);
+  assert.equal(r.text, '新的开头之后');
+});
+
+test('a draft ahead of the stream stops pieces without a position from following on, so nothing is written twice (A, draft AB, then B is still AB)', () => {
+  const L = rules();
+  const r = L.reply('m', 'c', false);
+  L.apply(r, { kind: 'start', messageId: 'm' });
+  L.apply(r, piece('A'));
+  assert.equal(r.text, 'A');
+  assert.equal(L.draft(r, 'AB'), true);
+  L.apply(r, piece('B'));
+  assert.equal(r.text, 'AB', 'the late B is the one the draft already had');
+  // Positioned pieces still follow on.
+  L.apply(r, piece('C', 3));
+  assert.equal(r.text, 'ABC');
+  // A draft that only repeats what the stream showed changes nothing.
+  const same = L.reply('m', 'c', false);
+  L.apply(same, { kind: 'start', messageId: 'm' });
+  L.apply(same, piece('A'));
+  assert.equal(L.draft(same, 'A'), false);
+  L.apply(same, piece('B'));
+  assert.equal(same.text, 'AB');
 });
 
 // ---------------------------------------------------------------- real captures
@@ -379,7 +438,9 @@ function page(opts: Opts = {}) {
   });
   for (const file of ['client/public/chat-live-rules.js', 'client/public/chat-live.js']) vm.runInContext(read(file), context);
   const live = window.ClowderLive;
-  const state = { queued: !!opts.queued, busy: !!opts.busy, unread: opts.unread ?? '' };
+  const state: Any = { queued: !!opts.queued, busy: !!opts.busy, unread: opts.unread ?? '', activity: null };
+  // The status line's last successful activity read (chat-experience.js's activityRead()).
+  window.ClowderExperience = { activityRead: () => state.activity };
   // The hooks app.js passes (see live.init in client/public/app.js): a reply
   // frame like replyFrame (face + name when the cat is known), Markdown as
   // one paragraph per line.
@@ -639,13 +700,123 @@ test('stopping shows 正在停止… on what is being written until it ends; unc
   // one whose send is still on its way stays.
   const taken = p.live.expect('cat-a');
   taken.accept('u1');
+  p.live.stopping(true);
   p.live.stopped();
   p.advance(1600);
   assert.equal(p.onScreen().children.filter(r => r.dataset.wait !== undefined).length, 0);
+  p.live.stopping(false);
   p.live.expect('cat-a');
+  p.live.stopping(true);
   p.live.stopped();
   p.advance(1600);
   assert.equal(p.onScreen().children.filter(r => r.dataset.wait !== undefined).length, 1);
+});
+
+// Review 2026-11-11 (frontend-r1), findings 3–5.
+// GET <scope>/activity as chat-experience.js keeps it (already checked by its rules).
+const activityOf = (over: Record<string, unknown> = {}) => ({
+  threadId: 'thread-A', readStatus: 'ready', items: [], counts: { approval: 0, failure: 0, running: 0, queued: 0, task: 0 },
+  unread: 0, unreadHasMore: false, latestMessageId: null, errors: [], ...over,
+});
+
+test('a reply whose end the stream missed (it dropped, the reply ended silently) ends once an activity read asked for after its last sign of life shows nothing running or queued for that cat; older, failed or partial reads keep it open', () => {
+  const p = page();
+  p.live.select('bot:Ada');
+  p.live.commit(p.inner('bot:Ada'), []);
+  p.ev('start');
+  const since = p.clock();
+  p.live.lost();
+  const typing = p.onScreen().children[0];
+  const read = (askedAt: number, activity: Any, key = 'bot:Ada') => { p.state.activity = { key, threadId: 'thread-A', askedAt, activity }; p.advance(1000); };
+  read(since - 1, activityOf());
+  assert.equal(p.live.working(), true, 'a read asked for before the reply began says nothing about it');
+  read(p.clock(), activityOf({ readStatus: 'unavailable', errors: [{ source: 'queue', message: '暂时无法确认进度' }] }));
+  assert.equal(p.live.working(), true, 'a read that could not see the queue keeps it open');
+  read(p.clock(), activityOf({ items: [{ id: 'r', kind: 'running', catId: 'cat-a' }], counts: { approval: 0, failure: 0, running: 1, queued: 0, task: 0 } }));
+  assert.equal(p.live.working(), true, 'the cat still runs here');
+  read(p.clock(), activityOf({ counts: { approval: 0, failure: 0, running: 1, queued: 0, task: 0 } }));
+  assert.equal(p.live.working(), true, 'counted but not listed: whose it is cannot be told');
+  read(p.clock(), activityOf(), 'bot:Bob');
+  assert.equal(p.live.working(), true, 'another conversation\'s read says nothing about this one');
+  read(p.clock(), activityOf({ items: [{ id: 'r', kind: 'running', catId: 'cat-b' }], counts: { approval: 0, failure: 0, running: 1, queued: 0, task: 0 } }));
+  assert.equal(p.live.working(), false, 'nothing runs or waits for this cat any more: the reply is over');
+  // The transcript, read after that, has nothing for it (it ended silently): its row goes.
+  p.live.read([], p.clock() + 1);
+  p.live.attach();
+  assert.equal(typing.isConnected, false);
+  // The next send gets its typing bubble again.
+  p.live.expect('cat-a');
+  assert.equal(p.onScreen().children.filter(r => r.dataset.wait !== undefined).length, 1);
+});
+
+test('a reply the stream missed entirely, already finished in the first read, resolves the send\'s typing bubble it answers (by the message it replies to), without rising in again', () => {
+  const p = page();
+  p.live.select('bot:Ada');
+  p.live.commit(p.inner('bot:Ada'), []);
+  p.live.expect('cat-a').accept('u1');
+  const typing = p.onScreen().children[0];
+  // A finished reply to another message (the opening greeting) leaves it.
+  p.live.read([{ id: 'g1', catId: 'cat-a', inProgress: false, replyTo: 'g0', draft: '你好呀' }], p.clock());
+  p.live.attach();
+  assert.equal(typing.isConnected, true);
+  assert.equal(p.live.working(), true);
+  // The finished reply to this send: the bubble's place goes to it.
+  p.live.read([{ id: 'm1', catId: 'cat-a', inProgress: false, replyTo: 'u1', draft: '好的' }], p.clock());
+  assert.equal(p.live.working(), false, 'Stop is no longer offered');
+  const settled = p.msg('m1', '好的');
+  p.live.commit(p.inner('bot:Ada', p.msg('u1', '读一下', 'msg user'), settled), []);
+  assert.deepEqual(p.onScreen().children.map(r => r.dataset.mid), ['u1', 'm1'], 'no second typing bubble beside the finished reply');
+  assert.ok(settled.classList.contains('lv-still'), 'it takes the bubble\'s place without rising in');
+  // Without a commit (nothing else changed), the bubble still goes.
+  const q = page();
+  q.live.select('bot:Ada');
+  q.live.commit(q.inner('bot:Ada'), []);
+  q.live.expect('cat-a').accept('u1');
+  q.live.read([{ id: 'm1', catId: 'cat-a', inProgress: false, replyTo: 'u1', draft: '好的' }], q.clock());
+  q.live.attach();
+  assert.equal(q.onScreen().children.length, 0);
+});
+
+test('a reply in progress takes the send\'s typing bubble only if it answers that send: one answering another message (an opening greeting) gets its own row', () => {
+  const p = page();
+  p.live.select('bot:Ada');
+  p.live.commit(p.inner('bot:Ada'), []);
+  p.live.expect('cat-a').accept('u1');
+  const typing = p.onScreen().children[0];
+  p.live.read([{ id: 'g1', catId: 'cat-a', inProgress: true, replyTo: 'g0', draft: '你好' }], p.clock());
+  assert.equal(typing.dataset.mid, undefined, 'not taken by the greeting');
+  p.live.read([{ id: 'g1', catId: 'cat-a', inProgress: true, replyTo: 'g0', draft: '你好' }, { id: 'm1', catId: 'cat-a', inProgress: true, replyTo: 'u1', draft: '' }], p.clock());
+  assert.equal(typing.dataset.mid, 'm1', 'taken by the reply to this send');
+});
+
+test('a stop clears only the typing bubbles that were waiting when it was asked, in that conversation: a send right after it, here or in another chat, keeps its bubble', () => {
+  const p = page();
+  p.live.select('bot:Ada');
+  p.live.commit(p.inner('bot:Ada'), []);
+  p.live.expect('cat-a').accept('u1');
+  const before = p.onScreen().children[0];
+  p.live.stopping(true);
+  // A send after the stop was asked for (the stop cannot have withdrawn it).
+  p.live.expect('cat-a').accept('u2');
+  const after = p.onScreen().children[1];
+  p.live.stopped();
+  p.advance(1600);
+  assert.equal(before.isConnected, false, 'the withdrawn send\'s bubble goes');
+  assert.equal(after.isConnected, true, 'the later send keeps its bubble');
+  // Another chat within the moment the cleanup waits.
+  const q = page();
+  q.live.select('bot:Ada');
+  q.live.commit(q.inner('bot:Ada'), []);
+  q.live.expect('cat-a').accept('u1');
+  q.live.stopping(true);
+  q.live.stopped();
+  q.live.select('bot:Bob');
+  q.live.commit(q.inner('bot:Bob'), []);
+  q.live.expect('cat-b').accept('u9');
+  const other = q.onScreen().children[0];
+  q.advance(1600);
+  assert.equal(other.isConnected, true, 'a stop in one chat never touches another chat\'s bubble');
+  assert.equal(q.live.working(), true);
 });
 
 test('the send button morphs into stop in place and back; Enter never stops (in stop mode it is not a submit)', () => {
@@ -741,17 +912,27 @@ test('the shell hands chat-live.js the raw native draft of in-progress replies, 
     { id: 'd', role: 'assistant', content: '好了', status: 'completed' },
   ], false);
   assert.deepEqual(plain(rows), [
-    { id: 'm', catId: 'c', inProgress: true, draft: '写到一半\n\n[团' },
-    { id: 'r', catId: '', inProgress: false, draft: 'x' },
-    { id: 'd', catId: '', inProgress: false, draft: '好了' },
+    { id: 'm', catId: 'c', inProgress: true, draft: '写到一半\n\n[团', replyTo: '' },
+    { id: 'r', catId: '', inProgress: false, draft: 'x', replyTo: '' },
+    { id: 'd', catId: '', inProgress: false, draft: '好了', replyTo: '' },
   ], 'the raw draft (its length is the stream\'s position); an execution record is never a live reply');
-  assert.deepEqual(plain(out.liveRows([{ id: 'g', kind: 'bot', in_progress: true, text: '群', native_cat_id: 'c' }, { id: 'p', kind: 'person', text: '你' }], true)),
-    [{ id: 'g', catId: 'c', inProgress: true, draft: '群' }]);
+  assert.deepEqual(plain(out.liveRows([{ id: 'g', kind: 'bot', in_progress: true, text: '群', native_cat_id: 'c', native: { content: '群', replyTo: 'u7' } }, { id: 'p', kind: 'person', text: '你' }], true)),
+    [{ id: 'g', catId: 'c', inProgress: true, draft: '群', replyTo: 'u7' }], 'with the owner\'s message it answers (native replyTo)');
   // A growing draft does not change the redraw key; its place, a finish or a new row does.
-  const a = out.sigRows([{ id: 'm', in_progress: true, content: '写', native: { content: '写' }, tool_calls: [1] }]);
-  const b = out.sigRows([{ id: 'm', in_progress: true, content: '写到一半', native: { content: '写到一半' }, tool_calls: [2] }]);
+  const a = out.sigRows([{ id: 'm', role: 'assistant', in_progress: true, content: '写', native: { content: '写' }, tool_calls: [1] }]);
+  const b = out.sigRows([{ id: 'm', role: 'assistant', in_progress: true, content: '写到一半', native: { content: '写到一半' }, tool_calls: [2] }]);
+  const g1 = out.sigRows([{ id: 'g', kind: 'bot', in_progress: true, text: '群', native: { content: '群' } }]);
+  const g2 = out.sigRows([{ id: 'g', kind: 'bot', in_progress: true, text: '群聊里', native: { content: '群聊里' } }]);
+  assert.equal(JSON.stringify(g1), JSON.stringify(g2), 'the same in a group');
   assert.equal(JSON.stringify(a), JSON.stringify(b));
   assert.notEqual(JSON.stringify(a), JSON.stringify(out.sigRows([{ id: 'm', content: '写到一半', status: 'completed' }])));
+  // An execution record still running is not drawn live: every change of it redraws (review 2026-11-11, finding 6).
+  const record = (status: string, events: Any[]) => out.sigRows([{ id: 'x', role: 'assistant', presentation_kind: 'activity', in_progress: true, status, content: '', native: { toolEvents: events } }]);
+  const tool = { type: 'tool_use', toolName: 'Bash' };
+  assert.notEqual(JSON.stringify(record('processing', [tool])), JSON.stringify(record('processing', [tool, { type: 'tool_result', status: 'error' }])), 'a new tool result shows');
+  assert.notEqual(JSON.stringify(record('processing', [tool])), JSON.stringify(record('failed', [tool])), 'a changed status shows');
+  const groupRecord = (text: string) => out.sigRows([{ id: 'y', kind: 'bot', presentation_kind: 'activity', in_progress: true, text }]);
+  assert.notEqual(JSON.stringify(groupRecord('a')), JSON.stringify(groupRecord('ab')));
   // 已停止 / 这次没完成 under words a reply wrote before it ended that way; never twice.
   const body = { kids: [] as Any[], append(n: Any) { this.kids.push(n); } };
   out.endedNote(body, 'canceled', '写到一半');

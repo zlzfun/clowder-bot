@@ -3018,13 +3018,18 @@
       catId: String(m.native_cat_id || ""),
       inProgress: !!m.in_progress && !presentation.isActivity(m),
       draft: m.native && typeof m.native.content === "string" ? m.native.content : String((group ? m.text : sayText(m)) || ""),
+      // The owner's message it answers (native replyTo): a send's typing bubble goes to its own reply.
+      replyTo: m.native && typeof m.native.replyTo === "string" ? m.native.replyTo : "",
     }));
   }
 
   // A reply in progress changes with every draft the engine saves; its words
-  // are drawn live, so only its place in the history decides a redraw.
+  // are drawn live (live.frame), so only its place in the history decides a
+  // redraw. Every other row, including a running execution record (drawn
+  // from the history, not live), redraws on any change.
   function sigRows(messages) {
-    return (messages || []).map((m) => (m && m.in_progress ? {
+    const drawnLive = (m) => !!m && !!m.in_progress && !presentation.isActivity(m) && (m.role === "assistant" || m.kind === "bot");
+    return (messages || []).map((m) => (drawnLive(m) ? {
       id: m.id, seq: m.seq, role: m.role, kind: m.kind, time: m.time, in_progress: true, native_cat_id: m.native_cat_id,
       presentation_kind: m.presentation_kind, speaker: m.speaker, sender: m.sender, attachments: m.attachments,
     } : m));

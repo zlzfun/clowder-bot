@@ -114,16 +114,32 @@
     }
   }
 
-  // A transcript read's draft of this reply (the native content so far).
-  // requestedAt: when that read was asked for. A draft extends the words, or
-  // takes over when they differ and this page has no newer replacement; it
-  // never takes back longer words the stream already showed.
-  function draft(r, value, requestedAt = 0) {
+  // A transcript read's draft of this reply: the native content as the
+  // engine last saved it (about every two seconds). How old a saved draft
+  // is cannot be told from when it was read, so:
+  // - Before any replacement this page saw, the native words only grow: a
+  //   draft that continues the words extends them (and fills a gap); one that
+  //   differs means a replacement this page missed, and it is the record.
+  // - After a replacement this page saw, a draft may be older than it however
+  //   late it was read. It is taken only to fill a gap, and only when a piece
+  //   received since the replacement (waiting at its place) is in it.
+  // Never does a draft take back longer words the stream showed. A draft
+  // that adds words the stream has not delivered yet ends following on
+  // without a position: the stream's next unpositioned piece may be one of them.
+  function vouched(r, d) {
+    return r.held.some((p) => p.end <= d.length && d.slice(p.start, p.end) === p.text);
+  }
+  function draft(r, value) {
     const d = str(value);
     if (!r || d === r.text) return false;
-    if (d.length > r.text.length && d.startsWith(r.text)) { r.text = d; drain(r); return true; }
+    if (r.replacedAt && !vouched(r, d)) return false;
+    if (d.length > r.text.length && d.startsWith(r.text)) {
+      r.text = d;
+      r.broken = true;
+      drain(r);
+      return true;
+    }
     if (r.text.startsWith(d)) return false;
-    if (r.replacedAt && r.replacedAt >= requestedAt) return false;
     r.text = d;
     r.held = r.held.filter((p) => p.end > d.length);
     r.broken = true;

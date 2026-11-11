@@ -500,6 +500,32 @@ test('more than six items: the list starts short, 查看其余 N 项 opens every
   assert.deepEqual(p.posts(), [], 'nothing was sent: no approval, no read');
 });
 
+test('the last successful activity read is handed on with when it was asked for, for this conversation only; after a failed read there is none (chat-live.js ends a missed reply only on a fresh read)', async () => {
+  let mode = 'ok';
+  const p = page(path => {
+    if (!path.endsWith('/activity')) return {};
+    if (mode === 'down') throw failure(0, '连不上 clowder-bot');
+    return activity();
+  });
+  assert.equal(p.cx.activityRead(), null);
+  p.cx.select(ada);
+  const before = Date.now();
+  p.cx.observe(ada, 'thread-A', true);
+  await settle();
+  const seen = p.cx.activityRead();
+  assert.equal(seen.key, 'bot:Ada');
+  assert.equal(seen.threadId, 'thread-A');
+  assert.equal(seen.activity.threadId, 'thread-A');
+  assert.ok(seen.askedAt >= before && seen.askedAt <= Date.now(), 'when the read was asked for');
+  mode = 'down';
+  p.cx.touch();
+  p.cx.observe(ada, 'thread-A', false);
+  await settle();
+  assert.equal(p.cx.activityRead(), null, 'a failed read hands on nothing: what runs is not known');
+  p.cx.select(bob);
+  assert.equal(p.cx.activityRead(), null);
+});
+
 test('a lost connection keeps what was last read and says it may have changed; a first read that fails cannot tell; a partial read lists its errors; a server without the projection keeps the old lines', async () => {
   let mode = 'ok';
   const p = page(path => {

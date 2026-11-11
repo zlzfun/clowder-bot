@@ -87,7 +87,7 @@
   // -------------------------------------------------------------------- state
   const S = {
     sel: null, key: "", gen: 0, threadId: "",
-    act: null, state: "idle", error: "", req: 0, at: 0, loading: null,
+    act: null, state: "idle", error: "", req: 0, at: 0, askedAt: 0, loading: null,
     open: false, more: false, said: null, strip: null, sig: "",
   };
   // Replies confirmed, or refused for themselves, by conversation, thread and
@@ -103,7 +103,7 @@
     Object.assign(R, { pending: "", timer: 0, inflight: false, until: 0 });
     Object.assign(S, {
       sel: sel && sel.id ? { type: sel.type === "group" ? "group" : "bot", id: String(sel.id) } : null,
-      threadId: "", act: null, state: "idle", error: "", at: 0, loading: null, open: false, more: false, said: null, sig: "",
+      threadId: "", act: null, state: "idle", error: "", at: 0, askedAt: 0, loading: null, open: false, more: false, said: null, sig: "",
     });
     S.key = keyOf(S.sel);
     if (mem && mem.key !== S.key) mem = null;
@@ -144,6 +144,8 @@
     const gen = S.gen, req = ++S.req, scope = scopeOf(S.sel);
     if (!S.act && S.state !== "unavailable") S.state = "loading";
     const job = (async () => {
+      // When it was asked for: what it says is at least that recent.
+      const askedAt = Date.now();
       try {
         const data = await H.api(scope + "/activity");
         if (gen !== S.gen || req !== S.req) return;
@@ -152,7 +154,7 @@
         // Another thread's state never shows here; the transcript names the
         // thread and the next read asks again.
         if (S.threadId && a.threadId && a.threadId !== S.threadId) { S.at = 0; return; }
-        Object.assign(S, { act: a, state: "ready", error: "", at: Date.now() });
+        Object.assign(S, { act: a, state: "ready", error: "", at: Date.now(), askedAt });
       } catch (e) {
         if (gen !== S.gen || req !== S.req) return;
         S.at = Date.now();
@@ -675,6 +677,10 @@
     // earlier execution and Task lines step aside).
     active: () => !!S.sel && S.state !== "unavailable" && S.state !== "idle",
     activity: () => S.act,
+    // The last read that succeeded, for this conversation, with when it was
+    // asked for (chat-live.js ends a reply whose end it missed only on a read
+    // asked for after that reply's last sign of life). null after a failure.
+    activityRead: () => (S.sel && S.act && S.state === "ready" ? { key: S.key, threadId: S.threadId, askedAt: S.askedAt, activity: S.act } : null),
     load: () => loadActivity(),
   });
 })();

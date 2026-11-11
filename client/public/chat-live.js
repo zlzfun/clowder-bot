@@ -68,6 +68,8 @@
     // Replies the history drawing in progress has a row for.
     built: new Set(),
     stopping: 0, frame: 0, seq: 0, fresh: false, pill: null, pillText: null, scroll: false,
+    // Conversation generation, and the stop's withdrawn sends and cleanup timer.
+    gen: 0, stopWaits: [], stopTimer: 0,
     // The owner was reading the latest at the last look (scroll or our own move to the end).
     follow: true,
   };
@@ -80,6 +82,9 @@
   };
 
   function select(key) {
+    S.gen++;
+    clearTimeout(S.stopTimer);
+    S.stopWaits = [];
     S.key = key ? String(key) : "";
     S.replies.clear();
     S.waiting = [];
@@ -92,8 +97,10 @@
   }
 
   function entry(id, catId, fromStart) {
+    // lifeAt: the last sign it was being written (an event, a read showing it
+    // in progress); missed: the stream may have dropped some of its events.
     const e = { id, r: R.reply(id, catId, fromStart, Date.now()), row: null, own: false, bubble: null, step: null,
-      shown: null, phrase: null, next: 0, dirty: false, gone: false, wait: null };
+      shown: null, phrase: null, next: 0, dirty: false, gone: false, wait: null, lifeAt: Date.now(), missed: false, replyTo: "" };
     S.replies.set(id, e);
     return e;
   }
@@ -287,6 +294,7 @@
       e = entry(id, typeof ev.catId === "string" ? ev.catId : "", ev.kind === "start");
     }
     if (e.gone) return;
+    e.lifeAt = Date.now();
     const waiting = e.r.held.length;
     const changed = R.apply(e.r, ev, Date.now());
     // A piece is waiting for words this page missed: the transcript's draft
@@ -303,14 +311,22 @@
   }
   // The stream may have missed events (a reconnect, a gap): words can follow
   // on only by native position now, and the next read fills what was missed.
-  function lost() { for (const e of S.replies.values()) R.lost(e.r); }
+  function lost() { for (const e of S.replies.values()) { R.lost(e.r); e.missed = true; } }
 
   // ------------------------------------------------------------------- reads
   // What a transcript or group read says about replies: [{id, catId,
-  // inProgress, draft}] (draft: the native content so far). requestedAt: when
-  // that read was asked for.
+  // inProgress, draft, replyTo}] (draft: the native content so far; replyTo:
+  // the owner's message it answers). requestedAt: when that read was asked for.
+  // The send a reply answers, by the message it replies to; a send whose
+  // receipt named no message can only be matched by its cat.
+  function answered(row) {
+    const open = S.waiting.filter((v) => v.wait.accepted && (!v.r.catId || v.r.catId === String(row.catId || "")));
+    if (!row.replyTo) return open[0] || null;
+    return open.find((v) => v.wait.user === row.replyTo) || open.find((v) => !v.wait.user) || null;
+  }
+  const answering = (row) => (row.replyTo ? S.waiting.find((v) => v.wait.accepted && v.wait.user === row.replyTo) || null : null);
   function read(rows, requestedAt = 0) {
-    const seen = new Set();
+    const seen = new Set(), now = Date.now();
     for (const row of rows || []) {
       if (!row || !row.id) continue;
       const id = String(row.id);
@@ -319,6 +335,12 @@
       if (!row.inProgress) {
         S.settled.add(id);
         if (e) e.gone = true;
+        else {
+          // Finished before this page saw any of it: the typing bubble of the
+          // send it answers gives its place to it (the redraw swaps them in place).
+          const w = answering(row);
+          if (w) { const x = entry(id, String(row.catId || ""), false); take(x, w); x.gone = true; }
+        }
         continue;
       }
       if (S.settled.has(id)) continue;
@@ -326,24 +348,59 @@
       if (!x) {
         x = entry(id, String(row.catId || ""), false);
         // The reply a send was waiting for, named by the transcript first.
-        const w = S.waiting.find((v) => v.wait.accepted && (!v.r.catId || v.r.catId === x.r.catId));
+        const w = answered(row);
         if (w) take(x, w);
+      } else {
+        // Already on screen as its own row: the send it answers needs no bubble.
+        const w = answering(row);
+        if (w && w.row !== x.row) dropWait(w);
       }
-      if (R.draft(x.r, row.draft, requestedAt)) x.dirty = true;
+      x.replyTo = String(row.replyTo || "");
+      x.lifeAt = now;
+      if (R.draft(x.r, row.draft)) x.dirty = true;
     }
     // Finished, and this read was asked for after it finished, without it:
     // the record has nothing to show for it (an empty or SILENT reply).
     for (const e of S.replies.values()) if (!seen.has(e.id) && e.r.done && requestedAt > e.r.doneAt) e.gone = true;
-    // A send's typing bubble next to a reply of the same cat this page first
-    // saw only after the send was taken, mid-way (its start was missed): that
-    // reply is the answer, already on screen; the bubble goes.
+    // Without that link (a record that does not name the message it answers):
+    // a typing bubble next to a reply of the same cat this page first saw only
+    // after the send was taken, mid-way (its start was missed), goes.
     for (const w of [...S.waiting]) {
       if (!w.wait.accepted) continue;
-      const shown = [...S.replies.values()].some((e) => !e.gone && !e.r.done && !e.r.fromStart && e.row && e.row !== w.row
+      const shown = [...S.replies.values()].some((e) => !e.gone && !e.r.done && !e.r.fromStart && !e.replyTo && e.row && e.row !== w.row
         && (!w.r.catId || e.r.catId === w.r.catId) && e.r.seenAt >= w.wait.accepted);
       if (shown) dropWait(w);
     }
     H.changed();
+  }
+
+  // A reply whose end this page may have missed (the stream dropped or it
+  // was first met mid-way) is over once an activity read asked for after its
+  // last sign of life shows nothing running or queued for its cat in this
+  // conversation's thread. A read that failed, could not see the queue, or
+  // counts work it does not list changes nothing: absence from a transcript
+  // page alone is never taken as an end.
+  function busyFor(a, catId) {
+    for (const kind of ["running", "queued"]) {
+      const items = (a.items || []).filter((i) => i.kind === kind);
+      if ((a.counts && a.counts[kind]) > items.length) return true;
+      if (items.some((i) => !i.catId || i.catId === catId)) return true;
+    }
+    return false;
+  }
+  function settleMissed() {
+    const X = window.ClowderExperience;
+    const seen = X && typeof X.activityRead === "function" ? X.activityRead() : null;
+    const a = seen && seen.key === S.key ? seen.activity : null;
+    if (!a || !(a.readStatus === "ready" || a.readStatus === "partial" && !(a.errors || []).some((x) => /queue|thread/.test(String(x.source))))) return;
+    let ended = false;
+    for (const e of S.replies.values()) {
+      if (e.r.done || e.gone || (e.r.fromStart && !e.missed) || !(seen.askedAt > e.lifeAt) || busyFor(a, e.r.catId)) continue;
+      R.apply(e.r, { kind: "done" }, seen.askedAt);
+      dirty(e);
+      ended = true;
+    }
+    if (ended) H.changed();
   }
 
   // The renderers draw an in-progress reply's row through here.
@@ -497,19 +554,30 @@
       if (queued !== w.wait.queued) { w.wait.queued = queued; dirty(w); }
       if (age > 60000 || (age > 8000 && !queued && !H.busy())) dropWait(w);
     }
+    settleMissed();
     if (S.pill && S.pill.classList.contains("on")) pill();
   }
 
   // ------------------------------------------------------------------ stopping
   const working = () => active() || S.waiting.length > 0;
+  // The sends the server had taken when the stop was asked for: the only
+  // ones the stop can have withdrawn.
   function stopping(on) {
     S.stopping = on ? Date.now() : 0;
+    if (on) S.stopWaits = S.waiting.filter((w) => w.wait.accepted);
     for (const e of all()) dirty(e);
   }
-  // The native stop answered: queued sends were withdrawn, so a typing
-  // bubble no reply has claimed by now will not get one.
+  // The native stop answered: those queued sends were withdrawn, so a typing
+  // bubble of theirs no reply has claimed a moment later will not get one.
+  // A send made after the stop was asked for, or another conversation, is
+  // never touched.
   function stopped() {
-    setTimeout(() => { for (const w of [...S.waiting]) if (w.wait.accepted) dropWait(w); }, 1500);
+    const targets = S.stopWaits.slice(), gen = S.gen;
+    clearTimeout(S.stopTimer);
+    S.stopTimer = setTimeout(() => {
+      if (gen !== S.gen) return;
+      for (const w of targets) if (S.waiting.includes(w)) dropWait(w);
+    }, 1500);
   }
   // The send button: the arrow, or (while this chat's cat works and nothing is
   // typed) a stop square, morphing in place. mode: "send" | "stop" | "stopping".
