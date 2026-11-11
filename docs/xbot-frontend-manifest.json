@@ -27,7 +27,7 @@
       "file": "app.js",
       "target": "client/public/app.js",
       "sourceSha256": "1248f793493826bf044359c71e7d8772ccc3472d6021d6abb979dff9b6cb29bc",
-      "sha256": "1c50fb24a1540bb90973a27282f4024623a264d20c0f91d50243cb3ee6338ba5",
+      "sha256": "f46618cbf0fdd087d6ff1562d05b8611a8ff4a7d45c6dc24a4032dbd40627666",
       "unchanged": false
     },
     {
@@ -153,7 +153,7 @@
       "file": "index.html",
       "target": "client/index.html",
       "sourceSha256": "a4160c18e23489fbc6a9e21fe494e1ac52840a67b2e138997400a0b42835b556",
-      "sha256": "920f284b0e14e1f0d501cceefc86f2a8efcabf526f012173f81e5204ac1524a3",
+      "sha256": "233cbc36bbad082733be084f2e4d092a41807d91551bbfb6df3c8c79111d2ce7",
       "unchanged": false
     },
     {
@@ -722,6 +722,24 @@
       "description": "Live-reply styles after every other style: replaced rows do not rise, calmer typing dots that rest once the reply ends, a breathing caret, the quiet step line with crossfade, the 已停止/这次没完成 note, the send/stop icon morph, and the 回到最新 pill; existing --x-* and motion tokens only, original CSS unchanged",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for the live reply round (docs/chat-live-api.md)",
       "sha256": "f247fb129acd413585c780ff8196a4bedce6eda3aaedbd0b7e49ee18140f1333"
+    },
+    {
+      "target": "client/public/quick-create-rules.js",
+      "description": "Quick creation rules without DOM or network: cat names checked as the adapter's zod label (1–64 characters, letters, digits, space, _ . -; taken names ignoring case) and group names as its groupTitle, the unnamed group's name joined by 、 and clipped like the server's clip(), the face that goes with a tool and the preset nickname made free of taken names, the name following the face until typed, GET /xbot-api/start read as it is (usable tools are the logged-in and the unconfirmed ones, an unchecked login never called ready), what blocks in everyday words with the native login commands, unchanged re-detection, request bodies that always carry the tool shown with a fingerprint for key reuse, and failed requests told apart (409 the name, 422 blocked, no answer or 5xx unsure; adapter words naming a Bot, an Agent or a model not shown)",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 开箱即用 (docs/xbot-api.md「开箱即用」)",
+      "sha256": "f587b3d2d824cade9e348f100af88eb88bee7b0782d6e1ea91cf7ef612288939"
+    },
+    {
+      "target": "client/public/quick-create.js",
+      "description": "The first-run 「领一只猫猫回家」 stage (eight clay faces as one radio group, the chosen one stepping forward, the nickname as the name, 带它回家, the quiet tool line with a select when more than one is usable and the unconfirmed-login note with its copyable command), the blocked states with 重新检测 (?refresh=1, says plainly when nothing changed, focus kept), inline creation errors and the same-key retry of an unsure request, the portrait gliding to the header face on success (skipped under reduced motion), the made-but-not-opened state, the no-chat line with 打开列表, the quick 新建猫猫 dialog (optional 它主要帮你做什么 as simple.about, 更多设置 handing over to the unchanged template creator) and the 新建群聊 dialog (face chips in pick order, 2–10 members, optional name whose placeholder is the generated name, unsure answers told to look before retrying); one dialog at a time, Escape, Tab and focus kept inside and returned to the opener",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 开箱即用 (docs/xbot-api.md「开箱即用」)",
+      "sha256": "a046e3ad8782afe6912974e01006ed2643070045c48273bf0c7693e69eabd66f"
+    },
+    {
+      "target": "client/public/quick-create.css",
+      "description": "Stage, faces with the cushion and caption, name box, action, tool line and select chip, copyable command chips, blocked panel, dialogs on the original modal card, group face chips, the gliding portrait, the hidden composer while no chat is open, phone 4 × 2 faces and reduced motion; only existing tokens and keyframes, original CSS unchanged",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 开箱即用 (docs/xbot-api.md「开箱即用」)",
+      "sha256": "b4c29142e08291a832c456d1240447add1139488971507ba50586a626d87ce5e"
     }
   ]
 }
