@@ -1,0 +1,58 @@
+/* One voice and a clean finish (docs/xbot-frontend.md item 33): the found
+   message's ring and flash, 设置 → 关于's link as a settings row, and the
+   consistency fixes from the audit at 1440×900 and 390×844, light and dark.
+   Only existing --x-* tokens, the app.css aliases built on them, the existing
+   quote-flash keyframe and 180 ms motion; loaded after mention.css, before
+   chat-cards.css and chat-live.css (selectors are specific enough not to
+   depend on that order). Upstream CSS stays byte-identical. */
+
+/* ---- A message with focus: found from search, a quote or the status line
+   (chat-locate.js, chat-experience.js), or reached with the keyboard. The
+   app's square ring round the whole row (as wide as the history) becomes a
+   quiet one that follows the bubble's own shape. */
+#thread .msg:focus-visible { outline: none; }
+#thread .msg:focus-visible :is(.bubble, .bot-bubble) {
+  outline: 2px solid color-mix(in srgb, var(--x-primary) 45%, transparent); outline-offset: 2px;
+}
+/* A row without a bubble (a request card, a notice): the ring goes round the row, rounded. */
+#thread .msg:focus-visible:not(:has(.bubble, .bot-bubble)) {
+  outline: 2px solid color-mix(in srgb, var(--x-primary) 45%, transparent); outline-offset: 2px; border-radius: var(--x-r-card);
+}
+/* The flash is the bubble's alone (not a block round the name line and the
+   bubble); the owner's bubble tints toward the page in light and dark alike,
+   a cat's toward the accent. A row with no bubble keeps the body's flash. */
+.msg.cx-hit > .body:has(.bot-bubble) { animation: none; }
+html[data-theme="dark"] .msg.cx-hit .bot-bubble { --bubble-fill: var(--x-bot-bubble); --accent: var(--x-user-bubble); }
+
+/* ---- 设置 → 关于: the runtime panel is a settings row like every other one,
+   not a raw link. */
+a.setrow.about-link { color: var(--x-text); text-decoration: none; border-radius: inherit; transition: background-color 180ms ease-out; }
+a.setrow.about-link:hover { background: var(--x-fill-2); }
+a.setrow.about-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+a.setrow.about-link > .ic { flex: none; color: var(--x-muted); }
+.setsec.about-tech { margin-top: var(--x-s7); }
+
+/* ---- The toast with a longer note (a creation's notice, finding a message):
+   centred with left: 50%, it could only use half the column, so on a phone
+   two sentences ran down seven narrow lines. Short toasts look the same. */
+.toast { width: max-content; max-width: min(560px, calc(100% - 32px)); }
+
+/* ---- Audit: siblings that differed. */
+/* The drawer's pages share one left edge: 文件 sat 4px further left (16px)
+   than 资料, 记忆 and 定时 (20px). */
+.tab-body:has(> .ws-files) { padding-left: var(--x-s7); padding-right: var(--x-s7); }
+/* An empty or idle state in the drawer is one quiet line, alike on every
+   page: 文件 and 定时 already were (12.5px, muted); 高级's 任务 and 执行 and
+   记忆's 便笺 read as body text (13.5px, darker). */
+#panel-body .psec p.ws-note, #panel-body .cx-notes p.hint, #panel-body .task-idle, #panel-body .pnone {
+  font-size: var(--x-fs-sm); line-height: 1.6; color: var(--x-muted);
+}
+/* A dialog's explanation (删除猫猫, 删除分组, 复刻…: #modal's p.note) also
+   matched app.css's notes-list row (.note): 14px in from the title and a
+   hover fill, so a plain sentence looked like a button. */
+.modal-card p.note { display: block; padding: 0; transition: none; }
+.modal-card p.note:hover, .modal-card p.note:active { background: transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  a.setrow.about-link { transition: none; }
+}

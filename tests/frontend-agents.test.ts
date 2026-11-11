@@ -101,7 +101,13 @@ test('only installed, supported Agents without a login gap can be chosen; unknow
   assert.equal(model.selectable({ ...kimi, selectable: true }), false, 'login_required is refused even if the server says otherwise');
   assert.equal(model.selectable(agent({ installed: false, readiness: { status: 'not_installed', checkedAt: null } })), false);
   assert.equal(model.selectable(agent({ supported: false, selectable: false })), false);
-  assert.equal(model.unavailable(kimi), '请先在本机 Agent 中完成登录');
+  // Said from the facts: the server's reason names engine objects (「请先在本机 Agent 中完成登录」).
+  assert.equal(model.unavailable(kimi), '需要先在这台电脑上登录');
+  assert.equal(model.unavailable(agent({ installed: false, readiness: { status: 'not_installed', checkedAt: null }, unavailableReason: '本机尚未检测到这个 Agent' })), '这台电脑上还没检测到它');
+  assert.equal(model.unavailable(agent({ supported: false, selectable: false, unavailableReason: '此 Agent 的接入方式尚未适配' })), '这个工具还没有接上');
+  // Not explained by the facts: the server's reason when it speaks everyday words, else a plain one.
+  assert.equal(model.unavailable(agent({ selectable: false, unavailableReason: '额度用完了，明天再试' })), '额度用完了，明天再试');
+  assert.equal(model.unavailable(agent({ selectable: false, unavailableReason: '这个 Agent 被管理员停用' })), '暂时不能选用');
   assert.equal(model.unavailable(codex), '');
 });
 
@@ -122,9 +128,9 @@ test('a managed account binding stays read-only and is never shown as a local Ag
   assert.match(legacy.detail, /只读保留/);
   assert.equal(legacy.legacy, true);
   assert.deepEqual(plain(model.binding(local())), { local: true, legacy: false, id: 'codex', title: 'Codex', detail: '沿用本机默认 · gpt-5.5', override: '', effort: '' });
-  assert.match(model.binding(local({ modelOverride: 'gpt-4o' })).detail, /Bot 单独指定 gpt-4o/);
+  assert.match(model.binding(local({ modelOverride: 'gpt-4o' })).detail, /^单独指定 gpt-4o$/);
   // The cat's own effort comes from the cat_config copied at creation.
-  assert.equal(model.binding(local({ modelOverride: 'gpt-4o' }), ownEffort).detail, 'Bot 单独指定 gpt-4o · 推理强度 high');
+  assert.equal(model.binding(local({ modelOverride: 'gpt-4o' }), ownEffort).detail, '单独指定 gpt-4o · 推理强度 high');
   assert.equal(model.binding(local(), { ...ownEffort, effort: { mode: 'inherit' } }).detail, '沿用本机默认 · gpt-5.5');
   assert.equal(model.binding(undefined).local, false);
   assert.equal(model.binding(undefined).legacy, false, 'an unread binding is not called an older carrier');
@@ -153,7 +159,7 @@ test('a 409 keeps the server\'s reason and is never guessed to be work in flight
   assert.match(unknown, /「ada」的配置刚有变化/);
   assert.doesNotMatch(unknown, /任务|执行|排队/);
   assert.equal(model.bindError({ status: 422, message: '请先在本机 Agent 中完成登录' }, 'ada'), '请先在本机 Agent 中完成登录');
-  assert.equal(model.bindError(new Error('request failed'), 'ada'), '没能更换 Agent，请稍后再试。');
+  assert.equal(model.bindError(new Error('request failed'), 'ada'), '没能更换工具，请稍后再试。');
   const { api, calls } = fakeApi(inventory);
   await model.inventory(api, true);
   await model.inventory(api);
@@ -167,11 +173,11 @@ test('changing a Bot\'s Agent waits for an explicit confirmation and sends only 
   await agents.open({ api, data: { name: 'ada', agent: local() }, manage() {}, onBound: (next: unknown) => { bound.push(plain(next)); } });
   const dialog = all(body).find(n => n.tag === 'dialog')!;
   assert.ok(dialog.open);
-  const options = radios(dialog), use = byText(dialog, '改用此 Agent')!;
+  const options = radios(dialog), use = byText(dialog, '改用这个工具')!;
   assert.deepEqual(options.map(n => all(n).find(c => c.tag === 'strong')!.textContent), ['Claude Code', 'Codex', 'Kimi']);
   assert.equal(options[1].getAttribute('aria-checked'), 'true');
   assert.ok(options[2].disabled, 'an Agent that needs a login cannot be picked');
-  assert.match(options[2].textContent, /请先在本机 Agent 中完成登录.*需要先登录/);
+  assert.match(options[2].textContent, /需要先在这台电脑上登录.*需要先登录/);
   assert.ok(use.disabled, 'keeping the current Agent is not a change');
   options[0].onclick!();
   assert.equal(options[0].getAttribute('aria-checked'), 'true');
@@ -193,7 +199,7 @@ test('a switch refused while work is in flight keeps the dialog open and says wh
   assert.equal(radios(dialog).filter(r => r.getAttribute('aria-checked') === 'true').length, 0, 'a managed account is not preselected as a local Agent');
   radios(dialog)[1].onclick!();
   assert.equal(named(dialog, 'binding-note')[0].textContent, '确认后会清除原有接入、单独指定的模型 gpt-4o。有任务在执行或排队，完成或停止后才能更换。');
-  const use = byText(dialog, '改用此 Agent')!;
+  const use = byText(dialog, '改用这个工具')!;
   await use.onclick!();
   assert.equal(dialog.isConnected, true);
   assert.equal(named(dialog, 'bad')[0].textContent, '请先完成或停止这个 Bot 的任务，再更换 Agent');
@@ -208,7 +214,7 @@ test('while a switch is saving, the staged choice cannot change and the saved on
   const { api, calls } = fakeApi(inventory, () => new Promise(resolve => { finish = resolve; }));
   await agents.open({ api, data: { name: 'ada', agent: managed }, manage() {}, onBound: (next: unknown, picked: { id: string }) => { bound.push([plain(next), picked.id]); } });
   const dialog = all(body).find(n => n.tag === 'dialog')!;
-  const [claudeRow, codexRow] = radios(dialog), use = byText(dialog, '改用此 Agent')!;
+  const [claudeRow, codexRow] = radios(dialog), use = byText(dialog, '改用这个工具')!;
   claudeRow.onclick!();
   const saving = use.onclick!();
   await settle();
@@ -229,12 +235,12 @@ test('a cat with its own effort can re-choose its Agent to clear it, and the tri
   const data: any = { name: 'ada', agent: local(), cat_config: ownEffort };
   const trigger = agents.trigger({ api, data, manage() {}, onBound: (next: unknown) => { bound.push(plain(next)); } });
   body.append(trigger);
-  assert.match(trigger.textContent, /Bot 单独指定 推理强度 high/);
+  assert.match(trigger.textContent, /单独指定 推理强度 high/);
   await trigger.onclick!();
   const dialog = all(body).find(n => n.tag === 'dialog')!;
   const current = radios(dialog).find(r => r.getAttribute('aria-checked') === 'true')!;
   assert.equal(all(current).find(c => c.tag === 'strong')!.textContent, 'Codex');
-  const use = byText(dialog, '改用此 Agent')!;
+  const use = byText(dialog, '改用这个工具')!;
   assert.ok(!use.disabled, 'the cat\'s own effort makes re-choosing a real change');
   assert.equal(named(dialog, 'binding-note')[0].textContent, '确认后会清除单独指定的推理强度 high。');
   await use.onclick!();
@@ -312,8 +318,8 @@ test('settings lists local Agents by installation, one real status line each and
   const rows = rowsOf(host);
   assert.deepEqual(rows.map(nameOf), ['Codex', 'Claude Code', 'Kimi', 'Gemini', 'Pi']);
   assert.deepEqual(rows.map(hintOf), [
-    '已有配置记录 · 1 个 Bot · 1 个执行中 · 2 个排队',
-    '未确认登录 · 1 个 Bot · 会话状态未知',
+    '已有配置记录 · 1 只猫猫 · 1 个执行中 · 2 个排队',
+    '未确认登录 · 1 只猫猫 · 状态未知',
     '需要先登录',
     '暂未适配',
     '未检测到',
@@ -325,7 +331,7 @@ test('settings lists local Agents by installation, one real status line each and
   // The user removed the first-screen lead and footnotes.
   assert.equal(named(host, 'setlead').length + named(host, 'setfoot').length, 0);
   assert.doesNotMatch(host.textContent, /Bot 交给这台电脑|沿用 Agent 自己的配置|不代表|只统计/);
-  assert.equal(all(host).find(n => n.tag === 'h2')!.textContent, '本地 Agent');
+  assert.equal(all(host).find(n => n.tag === 'h2')!.textContent, '本机工具');
   assert.deepEqual(levels, [null]);
   assert.deepEqual(calls, [{ path: '/xbot-api/agents', method: 'GET' }], 'opening the pane only reads');
 });
@@ -334,7 +340,7 @@ test('searching narrows the Agent list and can be cleared, without another read'
   const { host, calls, mounted } = await settingsPane();
   await mounted;
   const search = all(host).find(n => n.tag === 'input')!;
-  assert.equal(search.getAttribute('aria-label'), '搜索 Agent');
+  assert.equal(search.getAttribute('aria-label'), '搜索工具');
   search.value = 'KIM'; search.oninput!();
   assert.deepEqual(rowsOf(host).map(nameOf), ['Kimi']);
   assert.deepEqual(named(host, 'setsec').map(s => s.children[0].textContent), ['已安装']);
@@ -344,7 +350,7 @@ test('searching narrows the Agent list and can be cleared, without another read'
   search.value = 'nothing'; search.oninput!();
   assert.equal(rowsOf(host).length, 0);
   const none = named(host, 'sknone').find(visible)!;
-  assert.match(none.textContent, /没有匹配的 Agent/);
+  assert.match(none.textContent, /没有匹配的工具/);
   byText(host, '清除搜索')!.onclick!();
   assert.equal(search.value, '');
   assert.equal(rowsOf(host).length, 5);
@@ -358,23 +364,23 @@ test('an Agent opens on its own page with defaults and evidence, and back return
   rowsOf(host)[0].onclick!();
   const level = levels.at(-1)!;
   assert.equal(level.title, 'Codex');
-  assert.equal(level.backLabel, '本地 Agent');
+  assert.equal(level.backLabel, '本机工具');
   assert.equal(rowsOf(host).length, 0, 'the list is replaced by the detail page');
   assert.ok(root.focused!.className.includes('agent-dname'), 'focus moves to the Agent name');
   const facts = named(host, 'agent-fact').map(r => r.textContent);
-  assert.deepEqual(facts.slice(0, 4), ['本机已安装', '登录已有登录或配置记录', '选用可以选用', 'Bot 会话1 个执行中 · 2 个排队']);
+  assert.deepEqual(facts.slice(0, 4), ['本机已安装', '登录已有登录或配置记录', '选用可以选用', '猫猫的对话1 个执行中 · 2 个排队']);
   assert.ok(facts.includes('模型gpt-5.5') && facts.includes('推理强度high'));
   assert.deepEqual(named(host, 'agent-bots')[0].children.map(c => c.textContent), ['ada']);
-  assert.match(named(host, 'setsec')[1].children[0].textContent, /接入的 Bot · 1/);
+  assert.match(named(host, 'setsec')[1].children[0].textContent, /用它的猫猫 · 1/);
   // Paths and detection evidence sit in a folded block.
   const more = all(host).find(n => n.tag === 'details')!;
   assert.equal(more.open, false);
   assert.equal(all(more).find(n => n.tag === 'summary')!.textContent, '检测详情');
-  assert.match(more.textContent, /命令codex.*接入方式cli.*检测于.*Agent IDcodex/);
+  assert.match(more.textContent, /命令codex.*接入方式cli.*检测于.*工具 IDcodex/);
   assert.equal(all(more).find(n => n.tag === 'a')!.href, '/runtime.html');
   // The in-page back link and the settings bar back both return to the list.
   const back = named(host, 'setback')[0];
-  assert.equal(back.textContent, '本地 Agent');
+  assert.equal(back.textContent, '本机工具');
   back.onclick!();
   assert.equal(levels.at(-1), null);
   assert.equal(rowsOf(host).length, 5);
@@ -391,11 +397,11 @@ test('detail pages keep login evidence, choosability and activity as separate, u
   await mounted;
   const open = (name: string) => { levels.at(-1)?.back(); rowsOf(host).find(r => nameOf(r) === name)!.onclick!(); return named(host, 'agent-fact').map(r => r.textContent); };
   const claudeFacts = open('Claude Code');
-  assert.deepEqual(claudeFacts.slice(0, 4), ['本机已安装', '登录未确认登录状态', '选用可以选用，未登录时执行会失败', 'Bot 会话状态未知']);
+  assert.deepEqual(claudeFacts.slice(0, 4), ['本机已安装', '登录未确认登录状态', '选用可以选用，未登录时执行会失败', '猫猫的对话状态未知']);
   assert.ok(claudeFacts.includes('模型未读取到'));
   assert.doesNotMatch(host.textContent, /空闲/);
   const kimiFacts = open('Kimi');
-  assert.deepEqual(kimiFacts.slice(0, 3), ['本机已安装', '登录需要先登录', '选用请先在本机 Agent 中完成登录']);
+  assert.deepEqual(kimiFacts.slice(0, 3), ['本机已安装', '登录需要先登录', '选用需要先在这台电脑上登录']);
   const hint = named(host, 'agent-hint')[0];
   assert.match(hint.textContent, /在终端运行 kimi login 后重新检测/);
   assert.equal(all(hint).find(n => n.tag === 'code')!.textContent, 'kimi login');
@@ -405,7 +411,7 @@ test('detail pages keep login evidence, choosability and activity as separate, u
   open('Pi');
   const piStatus = named(named(host, 'setsec')[0], 'agent-fact').map(r => r.textContent);
   assert.deepEqual(piStatus, ['本机未检测到', '接入暂未适配'], 'an Agent that is not installed claims no login, activity or defaults');
-  assert.doesNotMatch(host.textContent, /空闲|本机默认|接入的 Bot/);
+  assert.doesNotMatch(host.textContent, /空闲|本机默认|用它的猫猫/);
 });
 
 test('重新检测 is the only refresh and an open detail follows the new inventory', async () => {
@@ -424,7 +430,7 @@ test('重新检测 is the only refresh and an open detail follows the new invent
   assert.match(named(host, 'agent-stamp')[0].textContent, /^检测于 /);
   assert.ok(!again.disabled);
   levels.at(-1)!.back();
-  assert.deepEqual(rowsOf(host).map(hintOf), ['需要先登录 · 1 个 Bot · 1 个执行中 · 2 个排队', '未检测到']);
+  assert.deepEqual(rowsOf(host).map(hintOf), ['需要先登录 · 1 只猫猫 · 1 个执行中 · 2 个排队', '未检测到']);
 });
 
 test('loading, empty and failed reads stay short', async () => {
@@ -434,14 +440,14 @@ test('loading, empty and failed reads stay short', async () => {
   assert.ok(byText(pending.host, '重新检测')!.disabled);
   answer({ checkedAt: 1, agents: [] });
   await pending.mounted;
-  assert.equal(named(pending.host, 'sknone').filter(visible).map(n => n.textContent).join(), '没有检测到 Agent');
+  assert.equal(named(pending.host, 'sknone').filter(visible).map(n => n.textContent).join(), '没有检测到工具');
   assert.equal(named(pending.host, 'agent-stamp')[0].textContent, '');
 
   const failed = await settingsPane(listed, async () => { throw new Error('offline'); });
   await failed.mounted;
   const alert = all(failed.host).find(n => n.getAttribute('role') === 'alert')!;
   assert.ok(!alert.hidden);
-  assert.equal(alert.textContent, '没能读取本地 Agent');
+  assert.equal(alert.textContent, '没能读取本机工具');
   assert.ok(!byText(failed.host, '重新检测')!.disabled, 're-checking stays available after a failure');
 });
 
@@ -457,7 +463,7 @@ test('the page no longer reaches the retired model store, key or binding routes'
   for (const file of checked) assert.doesNotMatch(read(file), retired, file);
   const html = read('client/index.html');
   assert.doesNotMatch(html, /模型与供应商|id="setup"|API key/);
-  assert.match(html, /data-set="agents"[^>]*>.*本地 Agent<\/span>/);
+  assert.match(html, /data-set="agents"[^>]*>.*本机工具<\/span>/);
   assert.match(html, /data-spane="agents"/);
   const scripts = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]);
   assert.ok(scripts.includes('/agents.js') && scripts.indexOf('/agents.js') < scripts.indexOf('/app.js'));

@@ -132,6 +132,18 @@
     return e;
   }
   const active = () => [...S.replies.values()].some((e) => !e.r.done && !e.gone);
+  // Cats shown writing in the open history right now (a reply in progress, or
+  // a send's typing bubble that is not waiting in line); "" stands for a group
+  // bubble whose cat is not named yet. The status line leaves out what this
+  // row already shows (chat-experience.js).
+  function writing() {
+    const cats = new Set();
+    for (const e of all()) {
+      if (e.gone || e.r.done || !e.row || !e.row.isConnected || (e.wait && e.wait.queued)) continue;
+      cats.add(String(e.r.catId || ""));
+    }
+    return cats;
+  }
 
   // ------------------------------------------------------------- the live rows
   function dots() {
@@ -719,6 +731,8 @@
     // The replies being written now (chat-presence.js), and a callback for
     // when that may have changed (called after the change, coalesced).
     presence, watch: (fn) => { watchers.add(fn); return () => watchers.delete(fn); },
+    // Cats drawn writing in the open history, typing bubbles included (chat-experience.js's status line).
+    writing,
     // A history row its owner changed in place (chat-history.js's top row):
     // the next redraw reads its markup again instead of the one remembered.
     touched: (n) => { if (n) delete n._lvSig; },

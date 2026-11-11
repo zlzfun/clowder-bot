@@ -84,7 +84,21 @@
   // replies show only while the newest one is out of sight (showUnread). A
   // partial read, or a read that failed (failed), says so instead of falling
   // back to "nothing going on". null: nothing to say.
+  // What the history already shows: a cat drawn writing there (its live reply
+  // or typing bubble, opts.writing: a Set of native cat IDs; "" is a group's
+  // bubble whose cat is not named yet and stands for any) is not said again
+  // here as 「…正在处理」. Only running items go: waiting in line, a request
+  // and a failure always stay, and work the server counts but does not list
+  // keeps its count.
+  function withoutShown(a, writing) {
+    if (!a || !writing || !writing.size) return a;
+    const drop = a.items.filter((i) => i.kind === "running" && (writing.has("") || writing.has(i.catId)));
+    if (!drop.length) return a;
+    return { ...a, items: a.items.filter((i) => !drop.includes(i)), counts: { ...a.counts, running: Math.max(0, a.counts.running - drop.length) } };
+  }
+
   function line(a, opts = {}) {
+    a = withoutShown(a, opts.writing);
     if (!a) return opts.failed ? { kind: "unknown", lead: "暂时无法确认状态", label: "", rest: [], partial: false, catId: "", catName: "" } : null;
     const top = KINDS.find((k) => a.counts[k] > 0) || "";
     const fresh = opts.showUnread ? unreadText(a) : "";
@@ -190,6 +204,6 @@
   }
 
   window.ClowderExperienceRules = Object.freeze({
-    KINDS, TAG, SHORT, MEMORY, activity, line, lead, itemText, side, readTarget, memory, sources, memoryError, oneLine, unreadText,
+    KINDS, TAG, SHORT, MEMORY, activity, line, withoutShown, lead, itemText, side, readTarget, memory, sources, memoryError, oneLine, unreadText,
   });
 })();

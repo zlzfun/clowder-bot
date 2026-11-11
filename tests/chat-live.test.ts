@@ -571,6 +571,25 @@ test('a send shows the cat\'s typing bubble at once; the reply\'s start takes th
   assert.equal(p.onScreen().children.length, 3);
 });
 
+test('writing() names the cats drawn writing in the open history: the typing bubble and the reply in progress, not a queued send or a finished reply', () => {
+  const p = page();
+  p.live.select('bot:Ada');
+  p.live.commit(p.inner('bot:Ada', p.msg('u0', '你好', 'msg user')), []);
+  assert.deepEqual([...p.live.writing()], [], 'nothing written yet');
+  const reply = p.live.expect('cat-a');
+  assert.deepEqual([...p.live.writing()], ['cat-a'], 'the typing bubble shows the cat at work');
+  reply.accept('u1');
+  p.ev('start');
+  p.ev('text', { text: '好的', end: 2 });
+  p.frame();
+  assert.deepEqual([...p.live.writing()], ['cat-a'], 'its words being written');
+  p.ev('done');
+  p.frame();
+  assert.deepEqual([...p.live.writing()], [], 'done: no longer writing, the status line may speak again');
+  p.live.select('bot:Bea');
+  assert.deepEqual([...p.live.writing()], [], 'another chat starts over');
+});
+
 test('a reply already under way (one this page met mid-way, like an opening greeting) does not take a send\'s typing bubble; a reply whose start was missed after the send was taken replaces it', () => {
   const p = page();
   p.live.select('bot:Ada');

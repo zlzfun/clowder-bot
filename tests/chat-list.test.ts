@@ -78,6 +78,10 @@ test('unread: the count shows from two up (99+ at most, + when there are more th
   assert.equal(L.badge(L.unread({})), '');
   const total = L.total([u(1), u(2), u(0), {}, { activity: { unread: null } }]);
   assert.deepEqual(plain(total), { n: 3, more: false });
+  // The conversation in view is left out (its reply is being read), even with more unread than a page.
+  const open = u(4, true);
+  assert.deepEqual(plain(L.total([u(1), open, u(2)], open)), { n: 3, more: false });
+  assert.deepEqual(plain(L.total([u(1), open, u(2)], null)), { n: 7, more: true });
   assert.equal(L.title('团子 · clowder-bot', total), '(3) 团子 · clowder-bot');
   assert.equal(L.title('团子 · clowder-bot', { n: 0, more: false }), '团子 · clowder-bot');
   assert.equal(L.title('', { n: 120, more: false }), '(99+) clowder-bot');
@@ -259,7 +263,15 @@ test('painting puts the time on the name line and the count beside the preview (
   assert.equal(count('栗子'), null, 'one new reply in the open chat: no count');
   assert.equal(text(count('g1')), '2+');
   assert.ok(rowOf('团子').querySelector('.item-body')!.classList.contains('cl-body'));
-  assert.equal(p.doc.title, '(6+) 栗子 · clowder-bot', 'every conversation\'s new replies, the open one too, until it is read');
+  assert.equal(p.doc.title, '(5+) 栗子 · clowder-bot', 'every other conversation\'s new replies: the open chat, in view, is being read');
+  // A hidden tab counts the open chat too (that reply is waiting); back in view it stops, at once.
+  const doc = p.doc as Any;
+  doc.visibilityState = 'hidden';
+  p.list.paint(p.roster);
+  assert.equal(p.doc.title, '(6+) 栗子 · clowder-bot', 'the tab is hidden: the open chat\'s reply is waiting too');
+  doc.visibilityState = 'visible';
+  for (const fn of doc.listeners.get('visibilitychange') ?? []) fn({ type: 'visibilitychange' });
+  assert.equal(p.doc.title, '(5+) 栗子 · clowder-bot', 'back in view: the open chat is not counted, without waiting for a poll');
   // Read: the count and the title clear; minutes pass and the time follows without a poll.
   p.entries.bots['团子'] = status(line('cat', '好', t - 5 * 60_000), { unread: 0 });
   p.entries.bots['栗子'] = status(line('owner', '在吗', t - 10_000), { unread: 0 });

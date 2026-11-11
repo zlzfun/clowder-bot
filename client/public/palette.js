@@ -535,11 +535,13 @@
     close({ restore: false });
     if (!after && !(await openChat({ type: chat.type, id: chat.id }))) return;
     if (op !== S.op) return;
+    // true: found; null: not found and the locate said why itself (the app's
+    // replacement reads earlier pages, chat-locate.js); false: not found.
     let ok = false;
-    try { ok = !!(await api.locate({ ...chatArgs(chat), messageId: hit.messageId, threadId: hit.threadId })); }
+    try { const r = await api.locate({ ...chatArgs(chat), messageId: hit.messageId, threadId: hit.threadId }); ok = r === null ? null : !!r; }
     catch (e) { ok = false; }
     if (op !== S.op) return;
-    if (!ok) note(after + "这条消息不在已显示的消息里，可能在更早的记录里。");
+    if (ok === false) note(after + "这条消息不在已显示的消息里，可能在更早的记录里。");
   }
 
   // A message of a cat's earlier conversation: say so, and switch only when asked.
@@ -726,8 +728,9 @@
     isOpen: () => S.open,
     actions,
     // Replaceable: async ({type, id, nativeId?, messageId, threadId}) =>
-    // boolean. Called after the palette opened that chat; true once the
-    // message is on screen and highlighted. type/id name the chat as the app
+    // boolean | null. Called after the palette opened that chat; true once the
+    // message is on screen and highlighted; null when it was not found and the
+    // locate already told the owner why (the palette then says nothing more). type/id name the chat as the app
     // does (a cat by name, a group by ID); nativeId is the cat's native ID.
     locate: locateOnScreen,
   };

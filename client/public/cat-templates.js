@@ -133,7 +133,7 @@
     const bind = (f, control) => { if (!control.id) control.id = uid(f.key); f.lab.htmlFor = control.id; f.control = control; };
     const text = (tag, max) => { const n = node(tag, ""); if (tag === "input") n.type = "text"; n.maxLength = max; n.autocomplete = "off"; return n; };
 
-    const agentF = field("agent", "Agent"), agentSel = node("select", "");
+    const agentF = field("agent", "工具"), agentSel = node("select", "");
     bind(agentF, agentSel);
     agentF.box.append(agentSel, agentF.note, agentF.err);
     agentSel.addEventListener("change", () => {
@@ -214,7 +214,7 @@
     }
     function paintAgent() {
       const options = [];
-      if (!cfg.runtimeId) options.push(option("", list ? "选择 Agent" : agentsFailed ? "—" : "正在读取…", true));
+      if (!cfg.runtimeId) options.push(option("", list ? "选一个工具" : agentsFailed ? "—" : "正在读取…", true));
       for (const a of list || []) {
         const tag = R.agentTag(a);
         options.push(option(a.id, (a.label || a.id) + (tag ? " · " + tag : ""), !R.usable(a, purpose)));
@@ -223,10 +223,10 @@
       fill(agentSel, options, cfg.runtimeId || "");
       agentSel.disabled = !list;
       agentF.note.replaceChildren();
-      if (agentsFailed) agentF.note.append("没能读取本地 Agent ", link("重试", retryAgents));
+      if (agentsFailed) agentF.note.append("没能读取本机工具 ", link("重试", retryAgents));
       else if (list && purpose === "create" && !list.some(R.selectable)) {
-        agentF.note.append("没有可用的 Agent");
-        if (manageAgents) agentF.note.append(" · ", link("本地 Agent", manageAgents));
+        agentF.note.append("没有能用的工具");
+        if (manageAgents) agentF.note.append(" · ", link("本机工具", manageAgents));
       }
     }
     function paintModel() {
@@ -761,7 +761,9 @@
       }
       saving = false;
       close(true);
-      const created = { name: (result && result.name) || body.name, native_id: (result && result.native_id) || null };
+      // `notice`: the cat exists but one default setting could not be written; the shell says it once its chat opens.
+      const notice = result && typeof result.notice === "string" ? result.notice.trim() : "";
+      const created = { name: (result && result.name) || body.name, native_id: (result && result.native_id) || null, ...(notice ? { notice } : {}) };
       try { await onCreated(created); } catch (err) { if (onError) onError(err); }
     }
     // The template moved on: take its current revision; keep the user's own edits.

@@ -116,7 +116,7 @@
   function zhError(msg) {
     msg = String(msg || "").trim();
     const timeout = msg.match(/request timeout after (\d+)m/i);
-    if (timeout) return "模型超时（" + timeout[1] + " 分钟）";
+    if (timeout) return "超时（" + timeout[1] + " 分钟没有回应）";
     for (const [pattern, text] of [
       [/responses: empty response/i, EMPTY_REPLY],
       [/text is empty/i, "内容是空的"], [/unanswered tool calls/i, "有一张确认卡片还没处理"],
@@ -148,6 +148,8 @@
 
   function visibleError(e, fallback) {
     if (e instanceof TypeError) return "连不上 clowder-bot";
+    // A route not adapted here: say so plainly instead of the server's engine words.
+    if (e && e.code === "not_adapted") return "这项功能在这里还用不了";
     const raw = String((e && e.message) || "");
     const msg = zhError(raw);
     if (e && e.status >= 400 && e.status < 500 && e.status !== 401 && raw && raw !== "request failed") return "没能完成：" + msg;
@@ -189,6 +191,9 @@
     if (!res.ok) {
       const err = new Error(data.error || "request failed");
       err.status = res.status;
+      // The server's machine-readable reason (e.g. not_adapted: a route this
+      // product has not adapted), so callers never match its wording.
+      if (typeof data.code === "string") err.code = data.code;
       throw err;
     }
     return data;
@@ -935,6 +940,9 @@
   const chatList = window.ClowderList;
   const listRules = window.ClowderListRules;
   const chatHistory = window.ClowderHistory;
+  // Finding a message further back than the loaded history (chat-locate.js):
+  // search hits and quote jumps; init() after chatHistory.init.
+  const locate = window.ClowderLocate;
   // 资料页与群 (profile.js): the drawer's 资料 and 成员 pages, its identity
   // head, a group's rename / members / delete and its sidebar menu; and the @
   // list in a group's composer (mention.js). init() is near the end.
@@ -1076,7 +1084,7 @@
     const task = plainText(displayText(attrs.task_title || attrs.task || attrs.title || attrs.name));
     const failed = /fail|error/i.test(parsed.type + " " + (attrs.status || ""));
     const timeout = failed && /request timeout after (\d+)m/i.exec(parsed.text);
-    const reason = timeout ? "模型超时（" + timeout[1] + " 分钟）" : "出错了";
+    const reason = timeout ? "超时（" + timeout[1] + " 分钟没有回应）" : "出错了";
     const label = parsed.source === "subagent"
       ? (failed ? "子任务失败：" + reason : (task ? "子任务「" + task + "」：" : "子任务：") + first)
       : ({ shell: "后台命令", webhook: "Webhook", watch: "监视" }[parsed.source] || "来自 " + (displayText(parsed.source) || "外部事件")) + "：" + first;
@@ -1366,6 +1374,8 @@
       if (!para.length) return;
       const p = document.createElement("p");
       appendInline(p, para.join("\n"));
+      // A line break written inside a paragraph stays a break (chat-presentation.js).
+      presentation.lineBreaks(p);
       parent.append(p);
       para = [];
     };
@@ -2227,19 +2237,19 @@
 
   function peerPhrase(name, args, who) {
     const text = clip(args.text || args.prompt || "", 72);
-    const from = niceName(who) || "Bot";
+    const from = niceName(who) || "猫猫";
     if (name === "message_bot") {
       const to = args.bot || args.to || "";
       // The other bot's name, never the text: the exchange view has it.
       if (to) return { text: "", peer: to, sent: true };
-      return { text: from + " 发给了另一个 Bot", peer: "" };
+      return { text: from + " 发给了另一只猫猫", peer: "" };
     }
     if (name === "post_group") {
       const g = args.name || args.id || "群";
       return { text: from + " 发到 " + niceName(g) + (text ? " · " + text : ""), peer: "" };
     }
     if (name === "create_group") return { text: from + " 建了群" + (args.name ? " · " + niceName(args.name) : ""), peer: "" };
-    if (name === "fork_bot") return { text: from + " 复刻出 " + niceName(args.name || "新 Bot"), peer: "" };
+    if (name === "fork_bot") return { text: from + " 复刻出 " + niceName(args.name || "新猫猫"), peer: "" };
     return null;
   }
 
@@ -2728,7 +2738,9 @@
     if (Number.isFinite(prev.getTime()) && prev.toDateString() === current.toDateString() && current - prev < 30 * 60000) return "";
     const yesterday = new Date(now);
     yesterday.setDate(yesterday.getDate() - 1);
-    const day = current.toDateString() === now.toDateString() ? "今天" : current.toDateString() === yesterday.toDateString() ? "昨天" : current.getFullYear() + "/" + (current.getMonth() + 1) + "/" + current.getDate();
+    // Older days read like the sidebar's times: 11月3日, with the year only when it is not this year.
+    const date = (current.getFullYear() === now.getFullYear() ? "" : current.getFullYear() + "年") + (current.getMonth() + 1) + "月" + current.getDate() + "日";
+    const day = current.toDateString() === now.toDateString() ? "今天" : current.toDateString() === yesterday.toDateString() ? "昨天" : date;
     return day + " " + clockTime(time);
   }
 
@@ -2817,14 +2829,15 @@
     return btn;
   }
 
+  // A quote's jump finds its message like a search hit does (chat-locate.js):
+  // on screen it is centred, flashed and focused; further back, earlier pages
+  // are read until it is drawn, or the jump says why it stopped.
   function jumpToSeq(seq) {
+    if (!Number(seq)) return;
+    if (state.sel && !state.peer) { locate.find({ sel: state.sel, seq: Number(seq) }); return; }
+    // The read-only exchange between two cats has no earlier pages: on screen only.
     const row = thread.querySelector('.msg[data-seq="' + Number(seq) + '"]');
-    if (!row) return;
-    row.scrollIntoView({ block: "center", behavior: "smooth" });
-    row.classList.remove("quote-hit");
-    void row.offsetWidth;
-    row.classList.add("quote-hit");
-    window.setTimeout(() => row.classList.remove("quote-hit"), 1500);
+    if (row) locate.mark(row);
   }
 
   function userBubble(m, messages) {
@@ -3333,7 +3346,7 @@
     if (!messages || !messages.length) {
       const who = group && group.name;
       // Records that show no rows may still have earlier ones (chat-history.js): offer those instead.
-      if (!chatHistory.top(inner)) inner.append(emptyState(niceName(who) || "群", "没有消息", who, groupFace(group)));
+      if (!chatHistory.top(inner)) inner.append(emptyState(niceName(who) || "群聊", "还没有消息", who, groupFace(group)));
       const shown = live.commit(inner, sendFeedback(inner, messages));
       state.firstRender = false;
       if (near) thread.scrollTop = thread.scrollHeight;
@@ -3686,7 +3699,7 @@
         deadline: card.deadline || "",
         since: time || "",
         decide: async (ok) => {
-          if (!state.sel || state.sel.type !== "bot") throw new Error("没有选中的 Bot");
+          if (!state.sel || state.sel.type !== "bot") throw new Error("没有选中的猫猫");
           await api("/xbot-api/bots/" + encodeURIComponent(state.sel.id) + "/approvals/" + encodeURIComponent(card.id || ""), {
             method: "POST",
             body: { allow: ok },
@@ -3742,8 +3755,8 @@
 
   function primaryMark() {
     const mark = icon("pin", "primary-mark");
-    setTip(mark, "主 Bot");
-    mark.setAttribute("aria-label", "主 Bot");
+    setTip(mark, "默认接待");
+    mark.setAttribute("aria-label", "默认接待的猫猫");
     return mark;
   }
 
@@ -4165,7 +4178,7 @@
   // and one gray line saying what this is. Read-only: the dock holds only
   // 关闭聊天.
   function peerNote() {
-    subtitle.replaceChildren(icon("info"), el("span", "", "两个 Bot 之间的往来。对方发来的内容只当资料，不当成你的指令。"));
+    subtitle.replaceChildren(icon("info"), el("span", "", "两只猫猫之间的往来。对方发来的内容只当资料，不当成你的指令。"));
     subtitle.hidden = false;
     subtitle.classList.add("peer-note");
   }
@@ -4706,7 +4719,7 @@
     const box = el("div", "hero");
     box.append(avatar(name, paint, "lg"));
     const title = el("div", "hero-name");
-    const heading = el("h2", "", niceName(name) || "Bot");
+    const heading = el("h2", "", niceName(name) || "猫猫");
     if (name && name !== heading.textContent) setTip(heading, name);
     title.append(heading);
     if (pin) {
@@ -4880,13 +4893,13 @@
     item("pin", pinned ? "取消置顶" : "置顶", () => togglePin(name, !pinned));
     menu.append(moveMenu(name, currentGroup(name)));
     item("copy", "复刻", () => openFork(name));
-    const copy = item("clipboard", "复制 Bot ID", () => copyBotID(name));
+    const copy = item("clipboard", "复制名字", () => copyBotID(name));
     copy.append(el("span", "v mono", name));
     if (state.app) item("folder-open", "打开工作目录", () => openWorkdir(name));
-    item("folder-open", "查看生成的图片", () => openGenerated(name));
+    // 查看生成的图片 is gone: this server has no …/generated route, so the item only ever failed.
     item("download", "导出对话", () => openExport(name));
     menu.append(el("div", "mgap"));
-    item("trash", "删除 Bot", () => confirmDelete(name), { danger: true });
+    item("trash", "删除猫猫", () => confirmDelete(name), { danger: true });
     anchor.classList.add("on");
     anchor.setAttribute("aria-expanded", "true");
     placeMenu(anchor, menu);
@@ -4947,33 +4960,6 @@
     }
   }
 
-  async function openGenerated(name) {
-    const route = "/xbot-api/bots/" + encodeURIComponent(name);
-    try {
-      const data = await api(route + "/generated");
-      openModal("生成的图片", [
-        { type: "note", label: "图片保存在运行 clowder-bot 的电脑上。" },
-        { name: "path", label: "工作区 generated/", value: data.path },
-      ], async () => {
-        if (!await copyText(data.path)) throw new Error("复制失败，请手动选择路径。");
-        showToast("已复制路径");
-      }, "复制路径", inputs => {
-        inputs.path.readOnly = true;
-        $("modal-cancel").textContent = "关闭";
-        if (data.can_open) {
-          const open = el("button", "secondary", "打开目录"); open.type = "button";
-          open.onclick = async () => {
-            open.disabled = true;
-            try { await api(route + "/open-workdir?folder=generated", {method:"POST"}); }
-            catch (e) { modalError.hidden = false; modalError.textContent = visibleError(e); }
-            finally { open.disabled = false; }
-          };
-          modalFields.append(open);
-        }
-      });
-    } catch (e) { setStatus(visibleError(e), true); }
-  }
-
   let toastTimer = 0;
   // A done thing shows a check; a note (the search palette's) passes "info".
   function showToast(text, iconName = "check") {
@@ -4982,6 +4968,20 @@
     box.hidden = false;
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { box.hidden = true; }, 3000);
+  }
+
+  // The same toast for a longer quiet note: a creation's `notice` (POST
+  // /xbot-api/bots: the cat exists, one default could not be written), said
+  // once after the new cat's chat opens, and the progress and outcome of
+  // finding a message on an earlier page (chat-locate.js). Up long enough to
+  // read; `busy` keeps it up with a spinner until the next note; "" hides it.
+  function quietNote(text, busy = false) {
+    const box = $("toast");
+    clearTimeout(toastTimer);
+    if (!text) { box.hidden = true; return; }
+    box.replaceChildren(busy ? spinIcon(16) : icon("info"), el("span", "", text));
+    box.hidden = false;
+    if (!busy) toastTimer = setTimeout(() => { box.hidden = true; }, Math.min(12000, 4000 + String(text).length * 80));
   }
 
   // 移到分组 is a full menu row: icon, label, the current group on the right,
@@ -5083,7 +5083,7 @@
 
   function confirmDeleteFolder(name) {
     openModal("删除分组", [
-      { name: "warn", type: "note", label: "「" + name + "」里的 Bot 不会被删除，会回到未分组。" },
+      { name: "warn", type: "note", label: "「" + name + "」里的猫猫不会被删除，会回到未分组。" },
     ], async () => {
       try {
         await api("/xbot-api/groups/" + encodeURIComponent(name), { method: "DELETE" });
@@ -5207,6 +5207,8 @@
     return (n / 1000).toFixed(1).replace(/\.0$/, "") + "K";
   }
 
+  // vocabulary: technical — 资料 › 高级's 它用什么思考 and 模型与画像 may name
+  // models and reasoning effort (tests/vocabulary.test.ts), up to the end marker.
   // The Bot's local Agent, shared by 资料 › 高级 and the profile drawer.
   // Busy is a hint only: the server refuses a switch while work is in flight.
   function agentTrigger(data, aside) {
@@ -5214,7 +5216,7 @@
       busy: () => ["running", "queued"].includes(stStatus.map[data.name]?.state),
       manage: () => { if (!modal.hidden) closeModal(); openSettings("agents"); },
       onBound: async (agent, picked) => {
-        showToast("已改由 " + ((agent && agent.label) || picked.label) + " 执行");
+        showToast("已改用 " + ((agent && agent.label) || picked.label));
         await refreshLists();
         await loadPanel();
       }});
@@ -5267,7 +5269,7 @@
       return list;
     };
     const sec = el("div", "psec cat-config");
-    sec.append(el("h4", "", "模型与画像"), facts(templates.describe(config, ctx).filter(([label]) => label !== "Agent")));
+    sec.append(el("h4", "", "模型与画像"), facts(templates.describe(config, ctx).filter(([label]) => label !== "工具")));
     const portrait = config.portrait || {};
     const more = [["性格", portrait.personality], ["擅长", portrait.teamStrengths], ["提醒", portrait.caution]]
       .filter(([, value]) => typeof value === "string" && value.trim())
@@ -5281,6 +5283,7 @@
     }
     return sec;
   }
+  // vocabulary: end
 
   // 记忆 is chat-experience.js's memoryView: 关于你 and 你的偏好 read only on
   // demand, then 这个对话的便笺 (the conversation's native notes).
@@ -5390,8 +5393,11 @@
   function paintWorkStatus() {
     const host = $("work-status");
     const selected = state.sel?.type === "bot" && !state.peer;
-    const agents = selected && state.panelData?.name === state.sel.id ? (state.panelData.agents || []).filter(a => ["running", "awaiting"].includes(a.status)) : [];
-    const signature = JSON.stringify(agents.map(a => [a.id, a.type, a.task, a.steps, a.current_step, a.started_at]));
+    // A run whose reply is drawn writing in the history is not said again here (chat-live.js).
+    const writing = live.writing(), cat = selected ? botCatId(state.sel.id) : "";
+    const shown = (a) => a.status === "running" && (writing.has("") || writing.has(String(a.native?.catId || cat)));
+    const agents = selected && state.panelData?.name === state.sel.id ? (state.panelData.agents || []).filter(a => ["running", "awaiting"].includes(a.status) && !shown(a)) : [];
+    const signature = JSON.stringify(agents.map(a => [a.id, a.type, a.task, a.current_step, a.started_at]));
     if (host.dataset.sig === signature) return;
     host.dataset.sig = signature;
     host.replaceChildren();
@@ -5407,7 +5413,8 @@
     if (agents.length === 1) {
       const ag = agents[0];
       const name = el("b"), step = el("span", "work-step"); taskText(name, taskTitle(ag)); taskText(step, taskProgress(ag)); step.hidden = !taskProgress(ag);
-      row.append(name, step, el("span", "sep", "·"), el("span", "", "第 " + Math.max(1, ag.steps || 0) + " 步"));
+      // No 「第 N 步」: the engine's step count is not something the owner reads.
+      row.append(name, step);
     } else { const many = el("span", "work-many"); many.append(el("b", "", agents.length + " 项"), el("span", "", "在处理")); row.append(many); }
     if (started) { const duration = el("span", "el"); duration.dataset.workSince = started; duration.dataset.longest = agents.length > 1 ? "true" : ""; row.append(el("span", "sep", "·"), duration); }
     row.append(icon("chevron")); host.append(row); updateWorkTimes();
@@ -5474,7 +5481,7 @@
       const group = el("div", "notable-detail"); group.append(el("div", "", labels[item.kind]));
       const list = el("ul");
       for (const object of item.objects || []) list.append(el("li", "", object));
-      if (item.incomplete) list.append(el("li", "", "部分调用未提供对象，或对象明细超过记录上限"));
+      if (item.incomplete) list.append(el("li", "", "有些步骤没有记下对象，或明细超过了记录上限"));
       group.append(list); details.append(group);
     }
   }
@@ -5863,7 +5870,7 @@
     wrap.append(
       section("基本", head, labeled("名字", name), labeled("简介", description)),
       section("职责", dutyBox),
-      section("执行 Agent", agentTrigger(data)),
+      section("它用什么思考", agentTrigger(data)),
       err,
     );
     const showErr = (e, fallback) => { err.hidden = false; err.textContent = visibleError(e, fallback); };
@@ -5957,15 +5964,16 @@
   }
 
   function openFork(src) {
-    openModal("复刻 Bot", [
-      { name: "name", label: "标识", placeholder: "reviewer" },
-      { name: "role", label: "角色", multiline: true },
-      { name: "group", label: "群" },
+    openModal("复刻猫猫", [
+      // Everyday labels: the new cat's name, what it does (its role) and the sidebar folder (分组, not a 群聊).
+      { name: "name", label: "名字", placeholder: "比如：审稿员" },
+      { name: "role", label: "它负责什么", multiline: true },
+      { name: "group", label: "分组（可不填）" },
     ], async (v) => {
       const name = (v.name || "").trim();
       const role = (v.role || "").trim();
       if (!name) throw new Error("需要一个名字");
-      if (!role) throw new Error("需要一个角色");
+      if (!role) throw new Error("写一句它负责什么");
       const body = { name: name, role: role };
       const group = (v.group || "").trim();
       if (group) body.group = group;
@@ -6461,7 +6469,8 @@
     $("modal-title").textContent = title;
     $("modal-ok").hidden = false;
     $("modal-ok").textContent = okLabel || "创建";
-    $("modal-ok").className = okLabel === "删除" ? (title === "删除猫猫" ? "text-btn danger" : "secondary") : "primary";
+    // 删除猫猫 confirms with the same button as 删除群聊 (profile.js): a secondary in the danger colour.
+    $("modal-ok").className = okLabel === "删除" ? (title === "删除猫猫" ? "secondary pf-danger" : "secondary") : "primary";
     $("modal-ok").disabled = false;
     $("modal-cancel").textContent = "取消";
     modalFields.replaceChildren();
@@ -6644,6 +6653,8 @@
       onCreated: async (created) => {
         await refreshLists();
         await selectBot(created.name);
+        // A default the server could not write is said once, after the chat opens.
+        if (created.notice) quietNote(created.notice);
       },
       onError: (e) => setStatus(visibleError(e), true),
     });
@@ -7079,6 +7090,10 @@
   document.addEventListener("focusin", (ev) => {
     const host = ev.target.closest && ev.target.closest("[data-tip]");
     if (!host) return;
+    // Focus from the keyboard shows the tip at once; a tap or click focuses too,
+    // and on a touch screen that tip lingered over the list after it moved
+    // (pointer hover still shows it after the usual pause).
+    try { if (!ev.target.matches(":focus-visible")) return; } catch (e) { /* older engines: as before */ }
     window.clearTimeout(tipTimer);
     tipHost = host;
     placeTip(host);
@@ -7417,6 +7432,8 @@
     obscured: () => !$("setpage").hidden || !lightbox.hidden
       || (window.innerWidth < 768 && (panel.classList.contains("open") || sidebar.classList.contains("open"))),
     focusTask: (id) => workspace.focusTask(id),
+    // Cats drawn writing in the history (chat-live.js): the line does not repeat 「…正在处理」 for them.
+    writing: () => live.writing(),
     // 去确认 finds the request's card in the history (chat-cards.js).
     confirm: (item) => cards.find(item),
     // A confirmed read clears that conversation's dot at once; the next status poll agrees.
@@ -7447,7 +7464,9 @@
       const a = experience.activity();
       return a && nativeThreadId && a.threadId === nativeThreadId ? experienceRules.unreadText(a) : "";
     },
-    changed: () => syncComposer(),
+    // A reply started or ended: the stop control, and the status lines that
+    // leave out a cat already drawn writing (paintWorkStatus, chat-experience.js).
+    changed: () => { syncComposer(); paintWorkStatus(); experience.rendered(); },
     // Words of a reply were missed (a reload or reconnect mid-reply): read the
     // draft a little sooner than the next poll, at most every 1.5 s.
     gap: () => {
@@ -7500,6 +7519,8 @@
     copy: (text) => copyText(text),
     refresh: () => refreshLists(),
     openCat: async (name) => { await refreshLists(); await selectBot(name); },
+    // A created cat's notice, once its chat is open.
+    notice: (text) => quietNote(text),
     openGroup: async (id) => { await refreshLists(); await selectGroup(id); },
     // Where the chat shows the new cat's face: its portrait glides there.
     landing: (name) => [...document.querySelectorAll("#title .avatar[data-avatar-bot]")].find((a) => a.dataset.avatarBot === name) || null,
@@ -7548,6 +7569,24 @@
     toast: showToast,
     status: setStatus,
   });
+  // Finding a message further back than the loaded history (chat-locate.js):
+  // earlier pages through chat-history.js's loader, a bounded number, with one
+  // quiet note. The search palette's locate and a quote's jump go through it.
+  locate.init({
+    thread,
+    selected: () => (state.peer ? null : state.sel),
+    history: chatHistory,
+    note: (text, busy) => quietNote(text, busy),
+    rest: () => { if (window.innerWidth >= 768) input.focus({ preventScroll: true }); },
+  });
+  if (window.ClowderPalette) {
+    // Called once the palette opened the chat: type/id name it as the app does, nativeId is a cat's native ID.
+    window.ClowderPalette.locate = async ({ type, id, nativeId, messageId }) => {
+      const sel = state.peer ? null : state.sel;
+      if (!sel || sel.type !== type || !(sel.id === id || (type === "bot" && nativeId && botCatId(sel.id) === nativeId))) return false;
+      return locate.find({ sel, messageId });
+    };
+  }
   // 资料页与群 (profile.js) draws with these. The technical parts of 资料 ›
   // 高级 stay the shell's own: the Agent row, the configuration, task and run cards.
   profile.init({

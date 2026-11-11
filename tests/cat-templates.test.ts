@@ -275,7 +275,7 @@ test('设置 → 模板 lists every template flat with a portrait and one summar
   const s = await mounted();
   const rows = named(s.host, 'ct-row');
   assert.deepEqual(rows.map(r => r.children.find((c): c is El => c instanceof El && has(c, 'tx'))!.children[0].textContent), ['布偶猫', '缅因猫', '梵花猫', '狸花猫']);
-  assert.deepEqual(rows.map(r => named(r, 'hint')[0].textContent), ['Claude Code · claude-opus-4-6', 'Codex · 默认模型 · high', 'Kimi · 默认模型', '未选 Agent · zhipu/glm-5.2']);
+  assert.deepEqual(rows.map(r => named(r, 'hint')[0].textContent), ['Claude Code · claude-opus-4-6', 'Codex · 默认模型 · high', 'Kimi · 默认模型', '未选工具 · zhipu/glm-5.2']);
   assert.deepEqual(rows.map(r => all(r).find(n => n.tag === 'svg')?.getAttribute('data-cat-id') ?? 'none'), ['ragdoll', 'maine-coon', 'none', 'dragon-li'], 'Kimi without a known default model is not guessed from the Agent');
   assert.equal(all(s.host).some(n => n.tag === 'select'), false, 'no breed filter');
   assert.equal(named(s.host, 'tl-group-head').length + all(s.host).filter(n => n.tag === 'h3').length, 0, 'no breed headings');
@@ -310,7 +310,7 @@ test('editing saves the template with its revision; changing the Agent resets th
   const model = control(s.host, '模型');
   assert.equal(model.value, 'claude-opus-4-6');
   assert.deepEqual(options(model).map(o => o.text), ['默认（Opus 4.6）', 'Opus 4.6', 'Sonnet 4.6', '其他…']);
-  const agent = control(s.host, 'Agent');
+  const agent = control(s.host, '工具');
   assert.deepEqual(options(agent).map(o => [o.text, o.disabled]), [['Codex', false], ['Claude Code · 未确认登录', false], ['Kimi · 需要登录', false], ['OpenCode', false]]);
   type(control(s.host, '性格'), '更温柔');
   choose(agent, 'codex');
@@ -394,7 +394,7 @@ test('新建猫猫 lists templates flat with 从零开始 last; a template fills
   const c = creating();
   await settle();
   const rows = named(c.modal(), 'skrow');
-  assert.deepEqual(rows.map(r => r.textContent), ['布偶猫Claude Code · claude-opus-4-6', '缅因猫Codex · 默认模型 · high', '梵花猫Kimi · 默认模型', '狸花猫未选 Agent · zhipu/glm-5.2', '从零开始']);
+  assert.deepEqual(rows.map(r => r.textContent), ['布偶猫Claude Code · claude-opus-4-6', '缅因猫Codex · 默认模型 · high', '梵花猫Kimi · 默认模型', '狸花猫未选工具 · zhipu/glm-5.2', '从零开始']);
   assert.equal(c.doc.focused, rows[0]);
   rows[1].click();
   await settle();
@@ -428,9 +428,9 @@ test('从零开始 opens the configuration, needs a breed it cannot infer, and s
   await settle();
   assert.equal(named(c.modal(), 'ct-more').length, 0);
   assert.equal(named(c.modal(), 'ct-custom')[0].hidden, false);
-  assert.equal(control(c.modal(), 'Agent').value, 'codex', 'the Agent with a configuration record');
-  assert.deepEqual(options(control(c.modal(), 'Agent')).filter(o => o.disabled).map(o => o.value), ['kimi'], 'an Agent awaiting login cannot create');
-  choose(control(c.modal(), 'Agent'), 'opencode');
+  assert.equal(control(c.modal(), '工具').value, 'codex', 'the Agent with a configuration record');
+  assert.deepEqual(options(control(c.modal(), '工具')).filter(o => o.disabled).map(o => o.value), ['kimi'], 'an Agent awaiting login cannot create');
+  choose(control(c.modal(), '工具'), 'opencode');
   await settle();
   assert.match(c.modal().textContent, /无法读取模型列表/);
   type(control(c.modal(), '名字'), '新猫');
@@ -503,13 +503,25 @@ test('a conflicting template revision is re-read before the next try', async () 
   assert.deepEqual(c.created, [{ name: '宪宪 2', native_id: 'cat_2' }]);
 });
 
+test('a creation\'s notice goes to the shell with the new cat, which says it once the chat is open', async () => {
+  const c = creating({ create: () => ({ name: '宪宪 2', native_id: 'cat_2', notice: ' 有一项默认设置没写进去。 ' }) });
+  await settle();
+  named(c.modal(), 'ct-row')[0].click();
+  await settle();
+  c.submit();
+  await settle();
+  assert.deepEqual(c.created, [{ name: '宪宪 2', native_id: 'cat_2', notice: '有一项默认设置没写进去。' }]);
+  // The shell opens the chat first, then says it (app.js openTemplateCreate).
+  assert.match(read('client/public/app.js'), /onCreated: async \(created\) => \{\s*await refreshLists\(\);\s*await selectBot\(created\.name\);\s*\/\/[^\n]*\n\s*if \(created\.notice\) quietNote\(created\.notice\);/);
+});
+
 test('a late model answer for a previous Agent never paints over the current one', async () => {
   const slow = defer<unknown>();
   const c = creating({ models: (_body, id) => id === 'codex' ? slow.promise : models[id] });
   await settle();
   named(c.modal(), 'ct-scratch')[0].click();
   await settle();
-  choose(control(c.modal(), 'Agent'), 'claude');
+  choose(control(c.modal(), '工具'), 'claude');
   await settle();
   slow.resolve(models.codex);
   await settle();
@@ -550,7 +562,7 @@ test('the detail summary shows the copied configuration without provenance', () 
   const { T, doc } = browser();
   const list = T.renderSummary(tpl({ breed: { mode: 'explicit', breedId: 'moonshot' }, runtimeId: 'kimi', model: { mode: 'inherit' } }), { agents, breeds });
   doc.body.append(list);
-  assert.equal(list.textContent, 'AgentKimi模型默认推理强度默认猫种梵花猫');
+  assert.equal(list.textContent, '工具Kimi模型默认推理强度默认猫种梵花猫');
 });
 
 test('the detail summary names a breed only from the catalog and never shows a breed ID', () => {
@@ -564,7 +576,7 @@ test('the detail summary names a breed only from the catalog and never shows a b
   // An older native cat's synthetic ID is not a name; the row is left out and the config is untouched.
   const legacy = tpl(explicit('bot-f4eb9bcb-844'));
   const rows = plain(R.describe(legacy, { agents, breeds }));
-  assert.deepEqual(rows.map(([label]: [string]) => label), ['Agent', '模型', '推理强度']);
+  assert.deepEqual(rows.map(([label]: [string]) => label), ['工具', '模型', '推理强度']);
   assert.doesNotMatch(JSON.stringify(rows), /bot-f4eb9bcb-844/);
   assert.deepEqual(plain(legacy.breed), { mode: 'explicit', breedId: 'bot-f4eb9bcb-844' });
   // No catalog, or a catalog entry without a name: nothing to name it by.

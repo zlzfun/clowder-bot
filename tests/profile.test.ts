@@ -468,7 +468,7 @@ test('高级 holds what is technical: drawn the first time it opens, kept open a
   assert.match(visibleText(body), /^它用什么思考/);
   assert.ok(all(body).includes(d.tasksNode), 'the task cards (workspace.js)');
   assert.ok(named(body, 'task-view').length === 1, 'the run cards');
-  assert.deepEqual(named(body, 'pf-act').map(n => visibleText(n)), ['导出对话', '复制 ID', '在运行面板查看']);
+  assert.deepEqual(named(body, 'pf-act').map(n => visibleText(n)), ['导出对话', '复制名字', '在运行面板查看']);
   assert.equal(one(body, 'pf-act').tagName, 'BUTTON');
   const runtime = named(body, 'pf-act')[2];
   assert.equal(runtime.getAttribute('href'), '/runtime.html?thread=thread-1');
@@ -1054,7 +1054,7 @@ test('the shell wires 资料页与群: scripts before app.js, styles before the 
   assert.ok(at('quick-create-rules.js') < at('profile-rules.js') && at('profile-rules.js') < at('profile.js') && at('profile.js') < at('app.js'));
   assert.ok(at('mention-rules.js') < at('mention.js') && at('mention.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
-  assert.deepEqual(styles.slice(-5), ['profile.css', 'mention.css', 'chat-cards.css', 'chat-presence.css', 'chat-live.css']);
+  assert.deepEqual(styles.slice(-6), ['profile.css', 'mention.css', 'polish.css', 'chat-cards.css', 'chat-presence.css', 'chat-live.css']);
   assert.ok(scripts.indexOf('chat-history.js') < scripts.indexOf('profile-rules.js'), 'after the earlier rounds\' scripts');
   // The drawer: tabs from the rules; 资料 / 成员 kept across repaints; 定时 its own page.
   assert.match(app, /for \(const pair of profileRules\.tabs\(panelKind\(\)\)\)/);

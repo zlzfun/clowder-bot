@@ -149,8 +149,14 @@
 
   // The page before the oldest one shown. The redraw that follows (the
   // shell's own read of the newest page) puts it above, keeping the row the
-  // owner is looking at where it was.
-  async function load() {
+  // owner is looking at where it was. A call while a page is on its way gets
+  // that same page's promise (finding a message, chat-locate.js, waits on it).
+  let job = null;
+  function load() {
+    if (P.state === "loading" && job) return job;
+    return (job = loadPage());
+  }
+  async function loadPage() {
     const sel = H && H.selected();
     const cursor = nextCursor();
     if (!sel || keyOf(sel) !== P.key || P.state === "loading" || !cursor) return;
@@ -513,6 +519,9 @@
 
   window.ClowderHistory = Object.freeze({
     init, select, merge, top, starters, load, sync: syncMenu, openMenu, closeMenu, newConversation,
+    // Where the earlier pages stand for the open chat: whether one more can be
+    // read, one is on its way, or the last read failed (and why).
+    older: () => ({ key: P.key, state: P.state, more: !!nextCursor(), loaded: P.loaded, error: P.error }),
     // For tests and diagnostics only: what this page holds, never a record.
     peek: () => ({ key: P.key, thread: P.thread, held: P.held.length, state: P.state, loaded: P.loaded, cursor: nextCursor() }),
   });

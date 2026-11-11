@@ -292,7 +292,9 @@
     const on = !!S.sel && !H.peer() && S.state !== "unavailable" && S.state !== "idle";
     if (dock && dock.classList) dock.classList.toggle("cx-on", on);
     const fresh = !!S.act && S.act.unread > 0 && !latestInSight();
-    const view = on ? X.line(S.act, { failed: S.state === "error", showUnread: fresh }) : null;
+    // A cat already drawn writing in the history is not said again here (H.writing: chat-live.js).
+    const writing = H.writing ? H.writing() : null;
+    const view = on ? X.line(S.act, { failed: S.state === "error", showUnread: fresh, writing }) : null;
     if (!view) S.open = false;
     box.hidden = !view;
     const sig = JSON.stringify([view, S.open, S.open && S.act, S.open && S.more, S.state, S.error, S.said, fresh]);
