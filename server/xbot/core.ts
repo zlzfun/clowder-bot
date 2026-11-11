@@ -128,7 +128,8 @@ export function createXbotCoreRouter(bridge: BotBridge) {
     delete store.state.bots[cat.id]; store.save(); res.json({ status: 'ok', history: 'preserved_by_clowder_ai' });
   });
   router.post('/groups', async (req, res) => {
-    const input = z.object({ name: groupTitle.optional(), members: z.array(z.string()).min(2).max(10).optional(), projectId: z.string().optional() }).strict().parse(req.body);
+    const input = z.object({ name: groupTitle.optional(), members: z.array(z.string()).min(2).max(10).optional(), projectId: z.string().optional(),
+      idempotencyKey: z.uuid().optional() }).strict().parse(req.body);
     if (input.projectId) throw new ApiError(410, '新群聊会自动分配文件目录，无需关联项目');
     if (!input.members) {
       const folder = label.parse(input.name);
@@ -137,12 +138,15 @@ export function createXbotCoreRouter(bridge: BotBridge) {
     }
     const members = await Promise.all(input.members.map(name => bot(name)));
     if (new Set(members.map(c => c.id)).size !== members.length) throw new ApiError(400, '成员不能重复');
-    const directoryKey = randomUUID();
+    // The key names both the group's directory and the native thread creation, so sending the same
+    // request again (an answer that got lost) arrives at the same group instead of making a second one.
+    const directoryKey = input.idempotencyKey ?? randomUUID();
     // Unnamed, a group is called after its members; it can be renamed later.
     const joined = members.map(c => c.name).join('、');
     const title = input.name ?? clip(joined, 64);
     const thread = await bridge.newThread(title, members.map(c => c.id), directoryKey, await bridge.workspaces.groupPath(directoryKey));
-    store.state.groupThreadIds.push(thread.id); store.save(); res.status(201).json(bridge.groupItem(thread, members));
+    if (!store.state.groupThreadIds.includes(thread.id)) { store.state.groupThreadIds.push(thread.id); store.save(); }
+    res.status(201).json(bridge.groupItem(thread, members));
   });
   router.patch('/groups/:name', async (req, res) => {
     const input = z.object({ name: groupTitle.optional(), members: z.array(z.string()).min(2).max(10).optional() }).strict()

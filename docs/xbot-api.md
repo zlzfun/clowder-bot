@@ -39,7 +39,7 @@ UI 保留 Bot 名称和文件夹概念，实际成员、执行和历史以 Clowd
 - 幂等用上游成员创建自带的请求身份：请求头 `x-cat-cafe-onboarding-journey: clowder-bot-simple` 与 `idempotency-key: onboarding:clowder-bot-simple:cat:<idempotencyKey>`（`config/member-create-receipt.ts`）。`catId` 由 `idempotencyKey` 推导，所以同一个键、同样的内容重发得到同一只猫；同一个键换了内容由原生拒绝（409）。重发时如果那只猫已经在，就不再按当前的 Agent 检测结果拦截。这一路径 2026-11-11 在隔离运行时上实测过创建、重放和冲突。
 - 必须带 `idempotencyKey`；不能与 `catConfig`、`runtimeId`、`templateId`、`persona`、`description` 混用。没有可用 Agent 时 422，说明要先装好并登录；同名 409。
 
-`POST /xbot-api/groups` 带 `members` 时 `name` 可省略，群名取成员名用「、」连接（超过 64 字截断），之后可改名。群名是原生 Thread 标题，按自由文本校验；不带 `members` 时同一路由仍是建侧栏分组，分组名沿用原来的字符限制。
+`POST /xbot-api/groups` 带 `members` 时 `name` 可省略，群名取成员名用「、」连接（超过 64 字截断），之后可改名。可带 `idempotencyKey`（UUID）：它同时是群目录的名字和原生 Thread 创建的幂等键，应答丢失后用同一个键重发得到同一个群，不会建出第二个。群名是原生 Thread 标题，按自由文本校验；不带 `members` 时同一路由仍是建侧栏分组，分组名沿用原来的字符限制。
 
 ## 搜索
 

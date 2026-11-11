@@ -161,6 +161,13 @@ test('a group can be made from its members alone and is then called after them',
   assert.equal(named.name, '周五读书会（试行）');
   assert.equal((await r.call(`/xbot-api/groups/${named.id}`, 'PATCH', { name: '读书会 · 第 2 期' })).status, 200);
   assert.equal(r.native.threads.get(named.id)!.title, '读书会 · 第 2 期');
+  // The same request sent again (its answer got lost) is the same group, listed once.
+  const key = randomUUID();
+  const once = await (await r.call('/xbot-api/groups', 'POST', { members: ['快手', '年糕'], idempotencyKey: key })).json();
+  const twice = await (await r.call('/xbot-api/groups', 'POST', { members: ['快手', '年糕'], idempotencyKey: key })).json();
+  assert.equal(twice.id, once.id);
+  assert.equal(r.store.state.groupThreadIds.filter(id => id === once.id).length, 1);
+  assert.equal((await r.call('/xbot-api/groups', 'POST', { members: ['快手', '年糕'], idempotencyKey: 'not-a-uuid' })).status, 400);
   for (const name of ['', '   ', '<b>群</b>', 'x'.repeat(65)]) assert.equal((await r.call('/xbot-api/groups', 'POST', { name, members: ['小团', '快手'] })).status, 400, JSON.stringify(name));
   // Without members the same route still makes a sidebar folder, which keeps the stricter name.
   assert.equal((await r.call('/xbot-api/groups', 'POST', { name: '工作' })).status, 200);

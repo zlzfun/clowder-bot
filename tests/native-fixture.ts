@@ -38,7 +38,9 @@ export class NativeFixture implements NativeTransport {
     } else if (parts[2] === 'cats' && parts[3] && method === 'PATCH') {
       const cat = this.cats.find(c => c.id === parts[3]); if (!cat) throw new ApiError(404, 'Missing cat'); Object.assign(cat, body); result = { cat };
     } else if (path === '/api/threads' && method === 'POST') {
-      const thread = { ...body, id: randomUUID(), createdAt: Date.now() }; this.threads.set(thread.id, thread); result = thread;
+      // Native answers a repeated creation key with the thread it made the first time.
+      const made = body.idempotencyKey ? [...this.threads.values()].find(known => known.idempotencyKey === body.idempotencyKey) : undefined;
+      const thread = made ?? { ...body, id: randomUUID(), createdAt: Date.now() }; this.threads.set(thread.id, thread); result = thread;
     } else if (parts[2] === 'threads' && parts[3] && parts.length === 4) {
       const thread = this.threads.get(parts[3]); if (!thread) throw new ApiError(404, 'Missing thread');
       if (method === 'PATCH') Object.assign(thread, body); result = thread;
