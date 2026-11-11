@@ -161,12 +161,16 @@ export function createXbotCoreRouter(bridge: BotBridge) {
     if (!store.state.groupThreadIds.includes(thread.id)) { store.state.groupThreadIds.push(thread.id); store.save(); }
     res.status(201).json(bridge.groupItem(thread, members));
   });
+  // One member edit of a group at a time: each works from the roster native has at that moment.
+  const groupEdits = new Map<string, Promise<unknown>>();
   router.patch('/groups/:name', async (req, res) => {
-    const input = z.object({ name: groupTitle.optional(), members: z.array(z.string()).min(2).max(10).optional() }).strict()
-      .refine(value => value.name !== undefined || value.members !== undefined, { message: '没有要修改的内容' }).parse(req.body);
+    const names = z.array(z.string()).min(1).max(10);
+    const input = z.object({ name: groupTitle.optional(), members: z.array(z.string()).min(2).max(10).optional(), add: names.optional(), remove: names.optional() }).strict()
+      .refine(value => value.name !== undefined || value.members !== undefined || value.add !== undefined || value.remove !== undefined, { message: '没有要修改的内容' })
+      .refine(value => !(value.members && (value.add || value.remove)), { message: '成员只能用一种方式修改' }).parse(req.body);
     const index = store.state.folders.indexOf(req.params.name);
     if (index >= 0) {
-      if (input.members) throw new ApiError(400, '分组没有成员设置');
+      if (input.members || input.add || input.remove) throw new ApiError(400, '分组没有成员设置');
       const name = label.parse(input.name);
       if (store.state.folders.includes(name) && name !== req.params.name) throw new ApiError(409, '分组已存在');
       store.state.folders[index] = name;
@@ -174,23 +178,42 @@ export function createXbotCoreRouter(bridge: BotBridge) {
       store.save(); return res.json({ name });
     }
     // A group chat: its name is the native thread title, its members the native preferredCats.
-    const thread = await bridge.group(req.params.name), update: Record<string, unknown> = {};
-    if (input.name !== undefined) update.title = input.name;
-    if (input.members) {
-      const members = await Promise.all(input.members.map(name => bot(name)));
-      if (new Set(members.map(c => c.id)).size !== members.length) throw new ApiError(400, '成员不能重复');
-      const kept = new Set(members.map(c => c.id)), leaving = (thread.preferredCats ?? []).filter(id => !kept.has(id));
-      if (leaving.length) {
-        // Leaving the group does not stop what a cat is doing there; say so instead of pretending it did.
-        const work = await bridge.queue(thread.id);
-        const busy = leaving.find(id => work.activeInvocations.some(i => i.catId === id)
-          || work.queue.some(entry => entry.targetCatId === id || entry.targetCats?.includes(id)));
-        if (busy) throw new ApiError(409, '有猫猫还在这个群里处理事情，等它做完或先停止，再把它移出');
+    const id = (await bridge.group(req.params.name)).id;
+    const edit = async () => {
+      const thread = await bridge.group(id), update: Record<string, unknown> = {}, current = thread.preferredCats ?? [];
+      if (input.name !== undefined) update.title = input.name;
+      let next: string[] | undefined;
+      if (input.members) {
+        const members = await Promise.all(input.members.map(name => bot(name)));
+        if (new Set(members.map(c => c.id)).size !== members.length) throw new ApiError(400, '成员不能重复');
+        next = members.map(c => c.id);
+      } else if (input.add || input.remove) {
+        // What the owner meant — "add this cat", "take that one out" — applied to the roster as it is now,
+        // so a page that has not caught up with another change cannot undo it by sending its old list.
+        const adding = (await Promise.all((input.add ?? []).map(name => bot(name)))).map(c => c.id);
+        const removing = new Set((await Promise.all((input.remove ?? []).map(name => bot(name)))).map(c => c.id));
+        if (adding.some(cat => removing.has(cat))) throw new ApiError(400, '不能同时加入和移出同一只猫猫');
+        next = [...current.filter(cat => !removing.has(cat)), ...[...new Set(adding)].filter(cat => !current.includes(cat))];
+        if (next.length < 2) throw new ApiError(400, '群聊里至少要有两只猫猫');
+        if (next.length > 10) throw new ApiError(400, '一个群聊最多 10 只猫猫');
       }
-      update.preferredCats = members.map(c => c.id);
-    }
-    await native.request(`/api/threads/${encode(thread.id)}`, { method: 'PATCH', body: update });
-    res.json({ ...bridge.groupItem(await bridge.thread(thread.id), await bridge.cats()), name: input.name ?? thread.title ?? '群聊' });
+      if (next) {
+        const kept = new Set(next), leaving = current.filter(cat => !kept.has(cat));
+        if (leaving.length) {
+          // Leaving the group does not stop what a cat is doing there; say so instead of pretending it did.
+          const work = await bridge.queue(thread.id);
+          const busy = leaving.find(cat => work.activeInvocations.some(i => i.catId === cat)
+            || work.queue.some(entry => entry.targetCatId === cat || entry.targetCats?.includes(cat)));
+          if (busy) throw new ApiError(409, '有猫猫还在这个群里处理事情，等它做完或先停止，再把它移出');
+        }
+        update.preferredCats = next;
+      }
+      await native.request(`/api/threads/${encode(thread.id)}`, { method: 'PATCH', body: update });
+      return { ...bridge.groupItem(await bridge.thread(thread.id), await bridge.cats()), name: input.name ?? thread.title ?? '群聊' };
+    };
+    const turn = (groupEdits.get(id) ?? Promise.resolve()).catch(() => {}).then(edit);
+    groupEdits.set(id, turn);
+    try { res.json(await turn); } finally { if (groupEdits.get(id) === turn) groupEdits.delete(id); }
   });
   router.delete('/groups/:name', async (req, res) => {
     if (store.state.folders.includes(req.params.name)) {

@@ -290,10 +290,10 @@ class El {
   removeAttribute(k: string) { this.attrs.delete(k); }
   hasAttribute(k: string) { return this.attrs.has(k); }
   get children(): El[] { return this.kids.filter((k): k is El => k instanceof El); }
-  get childNodes() { return this.kids; }
-  get lastChild() { return this.kids.at(-1) ?? null; }
-  get firstChild() { return this.kids[0] ?? null; }
-  get parentElement() { return this.parent; }
+  get childNodes(): Array<El | Text> { return this.kids; }
+  get lastChild(): El | Text | null { return this.kids.at(-1) ?? null; }
+  get firstChild(): El | Text | null { return this.kids[0] ?? null; }
+  get parentElement(): El | null { return this.parent; }
   get isConnected(): boolean { for (let n: El | null = this; n; n = n.parent) if (n === this.doc.body) return true; return false; }
   get offsetWidth() { return 0; }
   get textContent(): string { return this.kids.map(k => k.textContent).join(''); }
