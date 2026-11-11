@@ -4,7 +4,9 @@
 // and POST /xbot-api/groups {members, name?} (docs/xbot-api.md「开箱即用」).
 // The name rules mirror the server's own (server/xbot/core.ts `label` and
 // `groupTitle`, server/native/text.ts `clip`), so what the form accepts is
-// what the adapter accepts. Words shown here never name Agents or models.
+// what the adapter accepts. Words shown here never name Agents or models;
+// what a face's cat is like is the engine's own template words, shown as
+// they are (they may say Review or provider: that is the template, not us).
 (function (root) {
   "use strict";
 
@@ -39,6 +41,9 @@
   // characters (server `simpleCat.about`), so its box admits twice that.
   const ABOUT_INPUT_MAX = 4000;
   const aboutProblem = (text) => (length(trim(text)) > 2000 ? "这一行最多 2000 个字" : "");
+  // A custom cat's personality: at most 500 characters (server `simpleCat.personality`).
+  const PERSONALITY_INPUT_MAX = 1000;
+  const personalityProblem = (text) => (length(trim(text)) > 500 ? "性格最多 500 个字" : "");
   // A group's name is a native thread title: free text, 1–64 after trimming,
   // no < > or control characters (server `groupTitle`). Empty is allowed: the
   // server then names the group after its members.
@@ -87,6 +92,57 @@
   // own; emptied again, it follows once more.
   const followsFace = (value, suggested) => !trim(value) || value === suggested;
 
+  // ---- what each face's cat is like ----
+  // Picking a face picks a cat: by default it starts with the engine's template
+  // of the same id, which /start lists as faces[] (role, personality, strengths,
+  // one clipped line each). The faces offered are those, in that order, that
+  // have a portrait here; the label next to a portrait stays the client's own
+  // (upstream calls dsh 小鲸鱼). With no faces (the templates could not be
+  // read) every portrait is offered without words, and a cat of the owner's own
+  // can still be made.
+  function offer(faces, presets) {
+    const own = new Map((presets || []).filter((p) => p && p.id).map((p) => [p.id, p]));
+    const out = [], seen = new Set();
+    for (const face of faces || []) {
+      const p = face && own.get(face.id);
+      if (!p || seen.has(p.id)) continue;
+      seen.add(p.id);
+      out.push({ id: p.id, label: p.label, hint: trait(face) });
+    }
+    return out.length ? out : [...own.values()].map((p) => ({ id: p.id, label: p.label, hint: null }));
+  }
+  // One calm line, cut at a pause (、，；space) near the end when it is too
+  // long, never mid-way through a word when a pause is close by.
+  const TRAIT_MAX = 40;
+  function clipLine(value, max) {
+    const text = trim(String(value == null ? "" : value).replace(/\s+/g, " "));
+    const chars = [...text];
+    if (chars.length <= max) return text;
+    let cut = chars.slice(0, max - 1).join("");
+    const pause = Math.max(...["、", "，", ",", "；", ";", "。", " ", "/"].map((p) => cut.lastIndexOf(p)));
+    if (pause >= cut.length * 0.6) cut = cut.slice(0, pause);
+    return cut.replace(/[\s、，,；;。/:：-]+$/u, "") + "…";
+  }
+  // What a cat is like, in at most two short lines: its personality, then
+  // what it is good at (its strengths, else its role), in the template's own
+  // words. `said` is the same, as one sentence for a screen reader. null when
+  // the template says neither.
+  function trait(face) {
+    if (!face || typeof face !== "object") return null;
+    const temper = clipLine(face.personality, TRAIT_MAX);
+    const strengths = clipLine(face.strengths, TRAIT_MAX - 3);
+    const good = strengths
+      ? (strengths.startsWith("擅长") ? strengths : "擅长" + (/^[\x21-\x7e]/.test(strengths) ? " " : "") + strengths)
+      : clipLine(face.role, TRAIT_MAX);
+    const lines = [temper, good].filter(Boolean);
+    if (!lines.length) return null;
+    const said = lines.length > 1 ? lines[0] + (/[。！？.!?…]$/u.test(lines[0]) ? "" : "。") + lines[1] : lines[0];
+    return { lines, said };
+  }
+  // A cat of the owner's own: the face only gives its looks (the two lines
+  // below say 可不填 themselves). One line on a phone, too.
+  const OWN_NOTE = "这里只挑它的长相，它做什么、什么性格写在下面。";
+
   // ---- GET /xbot-api/start ----
   const STATES = ["ready", "unknown", "login", "missing"];
   function start(raw) {
@@ -97,11 +153,19 @@
     const chosen = raw.agent && typeof raw.agent.id === "string" && raw.agent.id
       ? { id: raw.agent.id, label: trim(raw.agent.label) || raw.agent.id, confirmed: raw.agent.confirmed === true } : null;
     const ready = raw.ready === true && !!chosen;
+    // faces[]: {id, name?, role?, personality?, strengths?}; [] when the templates could not be read.
+    const faces = (Array.isArray(raw.faces) ? raw.faces : [])
+      .filter((f) => f && typeof f.id === "string" && f.id)
+      .map((f) => {
+        const face = { id: f.id };
+        for (const k of ["name", "role", "personality", "strengths"]) if (typeof f[k] === "string" && trim(f[k])) face[k] = trim(f[k]);
+        return face;
+      });
     return {
       cats: Number.isFinite(raw.cats) ? raw.cats : 0, ready,
       agent: ready ? chosen : null,
       blocked: ready ? null : raw.blocked === "login_required" ? "login_required" : "no_agent",
-      agents,
+      agents, faces,
     };
   }
   // The tools a new cat may think with: the server's choice first, then every
@@ -155,12 +219,19 @@
   }
 
   // ---- request bodies ----
-  // The tool shown is always sent, so a retry is the same request.
-  function catBody({ name, face, agent, about }) {
+  // The tool shown is always sent, so a retry is the same request. A face's
+  // own cat sends only the face: words of the owner's own would silently make
+  // it custom on the server, so they go only with `custom: true`, and then
+  // only what was written (empty is a plain helper).
+  function catBody({ name, face, agent, custom, about, personality }) {
     const simple = {};
     if (face) simple.face = face;
-    const text = trim(about);
-    if (text) simple.about = text;
+    if (custom) {
+      simple.custom = true;
+      const what = trim(about), temper = trim(personality);
+      if (what) simple.about = what;
+      if (temper) simple.personality = temper;
+    }
     if (agent) simple.agent = agent;
     return { name: trim(name), simple };
   }
@@ -207,6 +278,7 @@
 
   root.ClowderQuickCreateRules = Object.freeze({
     trim, nameProblem, groupNameProblem, groupName, freeName, defaultFace, suggestName, followsFace, NAME_INPUT_MAX, ABOUT_INPUT_MAX, aboutProblem,
+    PERSONALITY_INPUT_MAX, personalityProblem, offer, trait, clipLine, TRAIT_MAX, OWN_NOTE,
     start, choices, choiceOf, loginCommand, sameStart, need, TOOL_LINE, unconfirmed,
     catBody, groupBody, fingerprint, MAX_MEMBERS, catError, groupError, startError, createdNotice,
   });
