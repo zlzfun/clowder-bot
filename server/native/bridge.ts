@@ -137,9 +137,9 @@ export class BotBridge {
       pages.push(page.messages);
       if (!page.hasMore) break;
       const first = page.messages[0];
-      if (!first) throw new ApiError(502, '原生消息分页返回了空游标');
+      if (!first) throw new ApiError(502, '引擎的消息分页返回了空游标');
       before = `${first.timelineOrderAt ?? first.timestamp}:${first.id}`;
-      if (seen.has(before)) throw new ApiError(502, '原生消息分页没有前进');
+      if (seen.has(before)) throw new ApiError(502, '引擎的消息分页没有前进');
       seen.add(before);
     }
     return [...new Map(pages.reverse().flat().map(m => [m.id, m])).values()];
@@ -303,7 +303,7 @@ export class BotBridge {
           ...(input.sourceTemplate ? { sourceTemplate: input.sourceTemplate } : {}), idempotencyKey: input.idempotencyKey ?? randomUUID() },
       });
       const cat = result.cat;
-      if (!cat?.id || !cat.breedId) throw new ApiError(502, '原生创建结果缺少猫猫身份');
+      if (!cat?.id || !cat.breedId) throw new ApiError(502, '引擎的创建结果缺少猫猫身份');
       const identity = avatarBreed(cat.breedId);
       Object.assign(this.store.bot(cat.id), { templateId: identity, avatarSeed: input.avatar_seed || `cat:${identity}`,
         timezone: input.timezone, ...(result.sourceTemplate ? { sourceTemplate: result.sourceTemplate } : {}) });
@@ -319,7 +319,7 @@ export class BotBridge {
     const runtimes = await this.runtimes();
     const installed = runtimes.filter(r => r.installed && supportsRuntime(r) && !runtimeUnavailable(r));
     const runtime = input.runtimeId ? runtimes.find(r => r.id === input.runtimeId) : source ? installed.find(r => r.clientId === source.clientId) : defaultRuntime(runtimes);
-    if (!runtime) throw new ApiError(422, '请先安装并配置本地 Agent，再选择接入。');
+    if (!runtime) throw new ApiError(422, '请先装好并登录一个本机工具（Claude Code 或 Codex），再来选择。');
     const unavailable = runtimeUnavailable(runtime);
     if (unavailable) throw new ApiError(422, unavailable);
     const catId = `bot-${randomUUID().slice(0, 12)}`;
@@ -405,11 +405,11 @@ export class BotBridge {
     return this.withStartingArguments(cat);
   }
   async send(thread: NativeThread, body: { text: string; reply_to?: number; idempotencyKey?: string; attachments?: string[]; expectedThreadId?: string }, directCat?: NativeCat) {
-    if (body.expectedThreadId && body.expectedThreadId !== thread.id) throw new ApiError(409, '会话已变化，请核对后重试');
-    if (body.attachments?.length && !body.expectedThreadId) throw new ApiError(400, '发送附件需要当前会话标识');
+    if (body.expectedThreadId && body.expectedThreadId !== thread.id) throw new ApiError(409, '对话已变化，请核对后重试');
+    if (body.attachments?.length && !body.expectedThreadId) throw new ApiError(400, '发送附件需要当前对话的标识');
     const attachments = body.attachments?.length ? await this.workspaces.attachments(thread.id, body.attachments) : [];
     const replyTo = body.reply_to ? this.store.messageId(thread.id, body.reply_to) : undefined;
-    if (body.reply_to && !replyTo) throw new ApiError(400, '引用的消息不存在，请刷新会话');
+    if (body.reply_to && !replyTo) throw new ApiError(400, '引用的消息不存在，请刷新对话');
     return this.native.request('/api/messages', { method: 'POST', body: {
       threadId: thread.id, content: body.text, idempotencyKey: body.idempotencyKey ?? randomUUID(),
       // Native admission binds the exact active parent and appends without interrupting.

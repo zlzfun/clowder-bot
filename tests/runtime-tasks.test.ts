@@ -380,7 +380,7 @@ test('a stale answer (409) re-reads the list and never falls back to a thread or
 
 for (const [status, message, expected, reread] of [
   [404, 'task_not_found', /当前后端没有开放这个任务操作，或任务已不存在。已重新读取原生 Task。/, true],
-  [404, '此原生接口未开放到 Bot 适配层', /当前后端没有开放这个任务操作，或任务已不存在（此原生接口未开放到 Bot 适配层）。/, true],
+  [404, '这个接口没有开放', /当前后端没有开放这个任务操作，或任务已不存在（这个接口没有开放）。/, true],
   [409, '后台执行已由其他页面停止。', /后台执行已由其他页面停止。已重新读取原生 Task/, true],
   [409, 'background_control_unavailable', /当前状态不支持这个操作。已重新读取原生 Task/, true],
   [409, 'some_future_code', /任务已有变化，或当前状态不支持这个操作。已重新读取原生 Task，请核对后再操作。/, true],
@@ -463,7 +463,7 @@ test('a re-read that fails after a control keeps what the control already showed
 });
 
 test('a backend without native Tasks (404) leaves only this block unavailable; other failures say so', async () => {
-  const old = await mount([], { route: call => { if (call.path.startsWith('/api/tasks')) throw failure(404, '此原生接口未开放到 Bot 适配层'); return undefined; } });
+  const old = await mount([], { route: call => { if (call.path.startsWith('/api/tasks')) throw failure(404, '这个接口没有开放'); return undefined; } });
   assert.equal(old.host.textContent, '当前后端还没有开放原生 Task，任务列表暂不可用；会话、队列和其他面板照常显示。');
   const broken = await mount([], { route: call => { if (call.path.startsWith('/api/tasks')) throw failure(500, '服务出现异常，请查看日志。'); return undefined; } });
   assert.match(broken.host.textContent, /^没能读取原生 Task：服务出现异常，请查看日志。其他面板不受影响/);
@@ -637,7 +637,7 @@ function panel(replies: Record<string, unknown>, search = '') {
 }
 
 test('on a backend without native Tasks, the rest of the runtime panel still loads', async () => {
-  const { page, requests } = panel({ ...nativePanel, '/native-api/api/tasks?threadId=thread-1': http(404, { error: '此原生接口未开放到 Bot 适配层' }) });
+  const { page, requests } = panel({ ...nativePanel, '/native-api/api/tasks?threadId=thread-1': http(404, { error: '这个接口没有开放' }) });
   await settle();
   assert.match(page.tasks.textContent, /任务列表暂不可用/);
   assert.match(page.thread.textContent, /^0 个执行中 · 0 个队列项/);

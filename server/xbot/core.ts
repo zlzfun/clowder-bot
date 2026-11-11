@@ -41,7 +41,7 @@ export function createXbotCoreRouter(bridge: BotBridge) {
       agent: agentBinding(cat, runtimes), persona_card: null, memory, routines: [],
       cat_config: catConfiguration(cat, runtimes), source_template: store.bot(cat.id).sourceTemplate ?? null,
       agents: queue.activeInvocations.map(i => ({ id: i.invocationId ?? i.catId, type: 'agent', status: i.status ?? 'running', task: '正在处理', mode: 'chat', steps: 0, started_at: i.startedAt ? new Date(i.startedAt).toISOString() : '', native: i })),
-      native: { cat, thread, queue }, memory_description: '会话共享笔记。长期记忆由 Clowder AI 原生记忆系统管理。' };
+      native: { cat, thread, queue }, memory_description: '这段对话的共享笔记。长期记忆由 Clowder AI 管理。' };
   };
   router.get('/session', async (_req, res) => {
     await native.request('/api/health');
@@ -71,7 +71,7 @@ export function createXbotCoreRouter(bridge: BotBridge) {
   router.get('/bots/:name/todos', async (req, res) => {
     const thread = await direct(req.params.name);
     const progress = await native.request(`/api/threads/${encode(thread.id)}/task-progress`);
-    res.json({ items: [], native: progress, supported: false, reason: '任务进展请在原生运行面板查看' });
+    res.json({ items: [], native: progress, supported: false, reason: '任务进展请在运行面板查看' });
   });
   router.get('/bots/:name', async (req, res) => res.json(await panel(await bot(req.params.name))));
   router.get('/groups/:id', async (req, res) => {
@@ -271,7 +271,7 @@ export function createXbotCoreRouter(bridge: BotBridge) {
   });
   router.post('/bots/import', async (req, res) => {
     const input = z.object({ ...botBody, avatar: z.string().max(3_000_000).optional(), avatar_mime: z.string().max(80).optional(), routines: z.array(z.unknown()).max(100).optional() }).strict().parse(req.body);
-    if (input.routines?.length) throw new ApiError(422, '定时任务需要通过 Clowder AI 原生调度配置导入');
+    if (input.routines?.length) throw new ApiError(422, '定时不能随导入一起带过来，请在猫猫的「定时」里重新设置');
     if (input.avatar) validateAvatar(Buffer.from(input.avatar, 'base64'), input.avatar_mime ?? '');
     const cat = await bridge.createBot(input);
     if (input.avatar) Object.assign(store.bot(cat.id), { avatarData: input.avatar, avatarMime: input.avatar_mime, avatarUpdated: Date.now() });
@@ -298,7 +298,7 @@ export function createXbotCoreRouter(bridge: BotBridge) {
     // Optional: the conversation the page is showing. A view that is no longer current must not start a new one.
     const { expectedThreadId } = z.object({ expectedThreadId: z.string().min(1).max(200).optional() }).strict().parse(req.body ?? {});
     const cat = await bot(req.params.name);
-    if (expectedThreadId && (await bridge.direct(cat)).id !== expectedThreadId) throw new ApiError(409, '会话已变化，请刷新后重试');
+    if (expectedThreadId && (await bridge.direct(cat)).id !== expectedThreadId) throw new ApiError(409, '对话已变化，请刷新后重试');
     const thread = await bridge.workspaces.newConversation(cat);
     res.json({ status: 'ok', conversation_id: thread.id });
   });
@@ -321,7 +321,7 @@ export function createXbotCoreRouter(bridge: BotBridge) {
   router.get('/bots/:name/context', async (req, res) => {
     const cat = await bot(req.params.name), thread = await bridge.direct(cat);
     res.json({ ceiling: cat.resolvedContext?.windowTokens ?? 0, target: cat.resolvedContext?.inputCeilingTokens ?? 0, requests: [], detail: null,
-      native: await native.request(`/api/threads/${encode(thread.id)}/sessions?catId=${encode(cat.id)}`), reason: '原生会话与用量请在运行面板查看；未估算或伪造 Token 消耗。' });
+      native: await native.request(`/api/threads/${encode(thread.id)}/sessions?catId=${encode(cat.id)}`), reason: '对话记录与用量请在运行面板查看；这里不估算 Token 消耗。' });
   });
   router.get('/bots/:name/peers/:peer/messages', async (req, res) => {
     const [left, right, cats] = await Promise.all([bot(req.params.name), bot(req.params.peer), bridge.cats()]);

@@ -21,20 +21,20 @@ export function createWorkspaceRouter(bridge: BotBridge) {
       if (kind === 'groups') return {thread:await bridge.group(id)};
       const cat = await bridge.cat(id); return {cat,thread:await bridge.direct(cat)};
     };
-    const checkThread = (thread:NativeThread,id:string) => { if (id !== thread.id) throw new ApiError(409,'会话已变化，请刷新后重试'); };
+    const checkThread = (thread:NativeThread,id:string) => { if (id !== thread.id) throw new ApiError(409,'对话已变化，请刷新后重试'); };
     const readTask = async (thread:NativeThread,id:string) => {
       const task = await bridge.native.request<Task>(`/api/tasks/${encode(id)}`);
-      if (task.threadId !== thread.id) throw new ApiError(404,'这个任务不属于当前会话');
-      if (task.kind !== 'work' || task.subjectKey !== null || task.entrustedWork) throw new ApiError(409,'此类任务请在原生运行面板处理');
+      if (task.threadId !== thread.id) throw new ApiError(404,'这个任务不属于当前对话');
+      if (task.kind !== 'work' || task.subjectKey !== null || task.entrustedWork) throw new ApiError(409,'这类任务请在运行面板处理');
       return task;
     };
     const member = async (thread:NativeThread,id:string|null) => {
       if (id === null) return;
-      if (!thread.preferredCats?.includes(id) || !(await bridge.cats()).some(c=>c.id===id)) throw new ApiError(400,'负责人必须是当前会话的猫猫');
+      if (!thread.preferredCats?.includes(id) || !(await bridge.cats()).some(c=>c.id===id)) throw new ApiError(400,'负责人必须是当前对话里的猫猫');
     };
     router.get(`${base}/workspace`,async(req,res)=>{const {thread,cat}=await context(req); res.json(await ws.view(thread,cat));});
     if (kind === 'bots') {
-      router.put(`${base}/workspace`, () => { throw new ApiError(410, '项目切换已收起，旧会话可从历史对话打开'); });
+      router.put(`${base}/workspace`, () => { throw new ApiError(410, '项目切换已收起，之前的对话可以从历史对话打开'); });
       router.get(`${base}/conversations`,async(req,res)=>{ const {cat}=await context(req); res.json(await ws.conversations(cat!)); });
       router.put(`${base}/conversation`,async(req,res)=>{
         const body=z.object({threadId:expected,expectedThreadId:expected}).strict().parse(req.body);

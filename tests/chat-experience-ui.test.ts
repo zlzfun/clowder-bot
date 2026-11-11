@@ -767,7 +767,7 @@ test('a 404 refuses that one reply, not reading in the conversation: after A is 
   assert.deepEqual(asked, ['m-A', 'm-B'], 'a refusal never turns reading off for the conversation');
   assert.deepEqual(p.reads, [{ sel: ada, threadId: 'thread-A', messageId: 'm-B' }]);
   // A 409 for C, then D: also one reply at a time.
-  refuse = (id: string) => { if (id === 'm-C') throw failure(409, '会话已变化，请刷新后重试'); return null; };
+  refuse = (id: string) => { if (id === 'm-C') throw failure(409, '对话已变化，请刷新后重试'); return null; };
   latest = 'm-C';
   p.row('m-C', 540);
   p.cx.touch();
@@ -834,7 +834,7 @@ test('a late read answer for the thread or conversation the chat has left change
   q.cx.observe(bob, 'thread-B', true);
   await settle();
   const before = q.calls.filter(c => c.path.endsWith('/activity')).length;
-  late.reject(failure(409, '会话已变化，请刷新后重试'));
+  late.reject(failure(409, '对话已变化，请刷新后重试'));
   await settle();
   assert.equal(q.calls.filter(c => c.path.endsWith('/activity')).length, before, 'Ada\'s 409 does not reload Bob\'s state');
   await q.advance(900);

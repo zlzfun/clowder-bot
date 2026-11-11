@@ -58,7 +58,7 @@ export class BotSchedules {
     const data = await this.bridge.native.request<{ tasks: NativeSchedule[]; botScheduleVersion?: number; botSchedulerReady?: boolean }>('/api/schedule/tasks');
     if (data.botScheduleVersion !== 1) throw new ApiError(503, '定时任务需要更新 Clowder AI 运行时，请运行 npm run runtime:prepare 后重新启动运行时');
     if (requireReady && data.botSchedulerReady !== true) throw new ApiError(503, '定时功能还在启动，请稍后再试');
-    if (!Array.isArray(data.tasks)) throw new ApiError(502, '原生定时任务列表格式无效');
+    if (!Array.isArray(data.tasks)) throw new ApiError(502, '引擎返回的定时列表读不懂');
     return data.tasks;
   }
   private belongs(task: NativeSchedule, cat: NativeCat): boolean {
@@ -80,7 +80,7 @@ export class BotSchedules {
     const thread = await this.bridge.thread(threadId);
     if (thread.deletedAt || !thread.preferredCats?.includes(cat.id)) throw new ApiError(409, '投递聊天已不可用或不再包含这只猫，请新建定时任务');
     const runtime = runtimeForCat(cat, await this.bridge.runtimes());
-    if (!runtime) throw new ApiError(422, '请先为这只猫接入可用的本地 Agent');
+    if (!runtime) throw new ApiError(422, '请先给这只猫猫选一个能用的本机工具');
     const reason = runtimeUnavailable(runtime);
     if (reason) throw new ApiError(422, reason);
   }
@@ -100,7 +100,7 @@ export class BotSchedules {
         display: { label: input.name, category: 'system', description: input.prompt }, deliveryThreadId: thread.id,
         botIdempotencyKey: input.idempotencyKey },
     });
-    if (!result.success || result.proposed || !result.task?.id) throw new ApiError(502, '原生运行时未确认定时任务已创建，请刷新列表核对');
+    if (!result.success || result.proposed || !result.task?.id) throw new ApiError(502, '引擎没有确认定时已经建好，请刷新列表核对');
     // Do not turn a successful create into a failure by performing another fallible read.
     return { id: result.task.id, name: input.name, prompt: input.prompt, trigger, threadId: thread.id };
   }

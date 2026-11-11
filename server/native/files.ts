@@ -55,7 +55,7 @@ export class NativeFiles {
   async list(threadId: string): Promise<{ files: NativeFileView[]; nativeReadStatus: 'ready'|'unavailable'; nativeError?: string }> {
     try {
       const catalog = await this.bridge.native.request<{ artifacts: Array<Record<string, any>>; complete?: boolean; workLineage?: string }>(`/api/threads/${encodeURIComponent(threadId)}/artifacts`);
-      if (!Array.isArray(catalog.artifacts)) throw new ApiError(502, '原生成果目录暂时不可读');
+      if (!Array.isArray(catalog.artifacts)) throw new ApiError(502, '文件目录暂时读不到');
       const messages = new Map((await this.bridge.allMessages(threadId)).map(message => [message.id, message]));
       const files = new Map<string, NativeFileView>();
       for (const artifact of catalog.artifacts) {
@@ -66,16 +66,16 @@ export class NativeFiles {
         else {
           // Ledger-only and otherwise unresolved records are not downloadable file authority.
           const id = 'nfu.' + hash([threadId, artifact.sourceMessageId, artifact.publicationItem, artifact.ref, artifact.name]);
-          files.set(id, { id, threadId, name: typeof artifact.name === 'string' ? artifact.name : '原生成果',
+          files.set(id, { id, threadId, name: typeof artifact.name === 'string' ? artifact.name : '文件',
             kind: 'deliverable', mime: 'application/octet-stream', size: null, createdAt: Number(artifact.createdAt) || 0,
             sourceMessageId: message?.id ?? null, nativeSource: true, availability: 'unavailable', unavailableReason: '这份成果暂时不能下载' });
         }
       }
       const partial = catalog.complete === false;
       return { files: [...files.values()], nativeReadStatus: partial ? 'unavailable' : 'ready',
-        ...(partial ? { nativeError: '部分原生成果暂时不可读，请重试' } : {}) };
+        ...(partial ? { nativeError: '有些文件暂时读不到，请重试' } : {}) };
     } catch {
-      return { files: [], nativeReadStatus: 'unavailable', nativeError: '原生成果暂时读不到，已保留现有文件，请重试' };
+      return { files: [], nativeReadStatus: 'unavailable', nativeError: '引擎里的文件暂时读不到，已保留现有文件，请重试' };
     }
   }
   async read(id: string) {

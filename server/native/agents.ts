@@ -47,7 +47,7 @@ export function agentBinding(cat: NativeCat, runtimes: NativeRuntime[]) {
   const runtime = runtimeForCat(cat, runtimes);
   return {
     id: runtime?.id ?? null,
-    label: runtime?.label ?? (cat.configurationSource === 'managed_account' || cat.accountRef ? 'Clowder AI 托管接入' : '其他原生接入'),
+    label: runtime?.label ?? (cat.configurationSource === 'managed_account' || cat.accountRef ? 'Clowder AI 托管' : '其他接入方式'),
     configurationSource: cat.configurationSource ?? 'unknown',
     modelOverride: cat.defaultModel || null,
     configuredModel: runtime?.configuredModel ?? null,
@@ -110,12 +110,12 @@ export async function startSummary(bridge: BotBridge, refresh = false) {
 export async function bindAgent(bridge: BotBridge, cat: NativeCat, runtimeId: string) {
   const runtimes = await bridge.runtimes(true);
   const runtime = runtimes.find(r => r.id === runtimeId);
-  if (!runtime) throw new ApiError(404, '找不到这个本地 Agent');
+  if (!runtime) throw new ApiError(404, '找不到这个本机工具');
   const unavailable = runtimeUnavailable(runtime);
   if (unavailable) throw new ApiError(422, unavailable);
   const status = (await bridge.statuses()).bots.find(b => b.native_id === cat.id);
-  if (status?.executionReadStatus !== 'ready') throw new ApiError(503, '暂时无法确认执行状态，请稍后再更换 Agent');
-  if (status?.active.length || status?.queued.length) throw new ApiError(409, '请先完成或停止这个 Bot 的任务，再更换 Agent');
+  if (status?.executionReadStatus !== 'ready') throw new ApiError(503, '暂时无法确认它是不是还在忙，请稍后再换工具');
+  if (status?.active.length || status?.queued.length) throw new ApiError(409, '这只猫猫还在忙，等它做完或先停止，再换工具');
   const { cat: updated } = await bridge.native.request<{ cat: NativeCat }>(`/api/cats/${encodeURIComponent(cat.id)}`, {
     method: 'PATCH', body: {
       expectedRevision: cat.configurationRevision,

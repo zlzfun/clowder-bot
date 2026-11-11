@@ -37,7 +37,7 @@ export function createActivityRouter(bridge: BotBridge) {
     router.post<{chat:string;id:string}>(`${scope}/approvals/:id`, async (req,res) => {
       const {decision,expectedThreadId}=z.object({decision:z.enum(['approve','reject']),expectedThreadId:z.string().min(1).max(200)}).strict().parse(req.body);
       const {thread}=await context(String(req.params.chat));
-      if(thread.id!==expectedThreadId)throw new ApiError(409,'会话已变化，请刷新后重试');
+      if(thread.id!==expectedThreadId)throw new ApiError(409,'对话已变化，请刷新后重试');
       res.json(await bridge.approvals.decide(thread.id,String(req.params.id),decision));
     });
     // Record that the owner answered a cat's choice block. The answer itself is an ordinary chat message
@@ -45,7 +45,7 @@ export function createActivityRouter(bridge: BotBridge) {
     router.post<{chat:string;message:string;block:string}>(`${scope}/messages/:message/blocks/:block/answer`, async (req,res) => {
       const {selectedIds,expectedThreadId}=z.object({selectedIds:z.array(z.string().min(1).max(200)).max(40),expectedThreadId:z.string().min(1).max(200)}).strict().parse(req.body);
       const {thread}=await context(String(req.params.chat));
-      if(thread.id!==expectedThreadId)throw new ApiError(409,'会话已变化，请刷新后重试');
+      if(thread.id!==expectedThreadId)throw new ApiError(409,'对话已变化，请刷新后重试');
       // The message has to be one of this conversation's and carry that choice.
       const message=(await bridge.allMessages(thread.id)).find(item=>item.id===String(req.params.message));
       const block=message&&messageBlocks(message).blocks.find(item=>item.id===String(req.params.block));
@@ -65,7 +65,7 @@ export function createActivityRouter(bridge: BotBridge) {
     router.post<{chat:string}>(`${scope}/read`, async (req,res) => {
       const {expectedThreadId,messageId}=z.object({expectedThreadId:z.string().min(1).max(200),messageId:z.string().min(1).max(200)}).strict().parse(req.body);
       const {thread,catId}=await context(String(req.params.chat));
-      if(thread.id!==expectedThreadId)throw new ApiError(409,'会话已变化，请刷新后重试');
+      if(thread.id!==expectedThreadId)throw new ApiError(409,'对话已变化，请刷新后重试');
       res.json(await bridge.activity.acknowledge(thread.id,messageId,()=>catId
         ? bridge.store.bot(catId).activeThreadId===thread.id : bridge.store.state.groupThreadIds.includes(thread.id)));
     });

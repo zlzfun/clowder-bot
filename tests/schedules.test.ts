@@ -459,19 +459,19 @@ test('a form keeps the input on errors, blocks duplicate saves, reuses its key o
   type(control(form, '间隔（分钟）'), '30');
   assert.equal(described().length, 1, 'a fixed field keeps only its note');
 
-  replies.push(() => { throw fail(422, '请先为这只猫接入可用的本地 Agent'); });
+  replies.push(() => { throw fail(422, '请先给这只猫猫选一个能用的本机工具'); });
   ok.click();
   await settle();
-  assert.equal(one(form, 'error').textContent, '没能创建：请先为这只猫接入可用的本地 Agent。');
+  assert.equal(one(form, 'error').textContent, '没能创建：请先给这只猫猫选一个能用的本机工具。');
   assert.equal(control(form, '名称').value, '晨会', 'input survives a refusal');
   assert.equal(formOf(t.section), form);
   const firstKey = t.calls.filter(c => c.method === 'POST')[0].body.idempotencyKey;
 
   // The outcome is unknown (the runtime may have made it): say so, keep the key for a retry.
-  replies.push(() => { throw fail(502, '原生运行时未确认定时任务已创建，请刷新列表核对'); });
+  replies.push(() => { throw fail(502, '引擎没有确认定时已经建好，请刷新列表核对'); });
   ok.click();
   await settle();
-  assert.equal(one(form, 'error').textContent, '没能确认是否已创建：原生运行时未确认定时任务已创建，请刷新列表核对。请先点「刷新」核对列表，没有再重试。');
+  assert.equal(one(form, 'error').textContent, '没能确认是否已创建：引擎没有确认定时已经建好，请刷新列表核对。请先点「刷新」核对列表，没有再重试。');
   assert.equal(t.calls.filter(c => c.method === 'POST')[1].body.idempotencyKey, firstKey, 'the same content is the same request');
 
   // A changed form is a new request with a new key.

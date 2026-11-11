@@ -369,11 +369,11 @@ test('新对话 refused or unsure: busy in the server\'s eyes is said plainly, a
   const d = p.doc.querySelector('.ch-modal')!;
   const submit = () => d.querySelector('button[type="submit"]')!.click();
   submit();
-  p.fail(Object.assign(new Error('请先完成或停止会话中的任务'), { status: 409 }));
+  p.fail(Object.assign(new Error('这段对话里还有事在做，等它做完或先停止再试'), { status: 409 }));
   await p.settle();
   assert.equal(text(d.querySelector('.error')), '团子还在忙这段对话。等它做完，或者先点停止，再开始新对话。');
   submit();
-  p.fail(Object.assign(new Error('会话正在切换，请稍后重试'), { status: 409 }));
+  p.fail(Object.assign(new Error('对话正在切换，请稍后重试'), { status: 409 }));
   await p.settle();
   assert.equal(text(d.querySelector('.error')), '正在切换对话，稍等一下再试。');
   submit();
@@ -423,7 +423,7 @@ test('新对话 from another entry (the drawer\'s 资料) is the same dialog: it
   d = p.doc.querySelector('.ch-modal')!;
   submit();
   assert.deepEqual(plain(p.calls[1].opt), { method: 'POST', body: { expectedThreadId: 'T2' } });
-  p.fail(Object.assign(new Error('会话已变化，请刷新后重试'), { status: 409 }));
+  p.fail(Object.assign(new Error('对话已变化，请刷新后重试'), { status: 409 }));
   await p.settle();
   assert.equal(text(d.querySelector('.error')), '这段对话刚换过了，没有再开新对话。先看一眼对话；还要开新对话的话，关掉这里再点一次「新对话」。');
   assert.equal(p.app.reloads, 2);
@@ -470,7 +470,7 @@ test('while 新对话 is asked, focus stays in the dialog and everything behind 
   const tab = root.querySelector('.modal-card')!.key('Tab');
   assert.equal(tab.defaultPrevented, true, 'Tab has nowhere to go but the dialog');
   assert.ok(p.doc.activeElement === card);
-  p.fail(Object.assign(new Error('请先完成或停止会话中的任务'), { status: 409 }));
+  p.fail(Object.assign(new Error('这段对话里还有事在做，等它做完或先停止再试'), { status: 409 }));
   await p.settle();
   assert.ok(p.doc.activeElement === ok, 'back on its button once it can be pressed again');
   card.key('Escape');

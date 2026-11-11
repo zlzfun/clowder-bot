@@ -31,12 +31,12 @@ export class NativeClient implements NativeTransport {
           headers: this.cookie ? { Cookie: this.cookie } : {}, redirect: 'error', signal: AbortSignal.timeout(10_000),
         });
       } catch { throw new ApiError(503, 'Clowder AI 运行时未连接，请运行 npm run runtime:start。'); }
-      if (!response.ok) throw new ApiError(502, '无法建立 Clowder AI 会话');
+      if (!response.ok) throw new ApiError(502, '连不上 Clowder AI');
       const session = await response.json() as { userId?: string; csrfToken?: string };
       if (!session.csrfToken || session.userId !== 'clowder-bot-owner') throw new ApiError(502, 'Clowder AI 实例身份不匹配，拒绝连接其他部署');
       const cookie = response.headers.getSetCookie().find(c => c.startsWith('clowder_bot_native_session='));
       if (cookie) this.cookie = cookie.split(';')[0]!;
-      if (!this.cookie) throw new ApiError(502, 'Clowder AI 未签发会话 Cookie');
+      if (!this.cookie) throw new ApiError(502, 'Clowder AI 没有给出登录凭据');
       this.csrf = session.csrfToken;
     })();
     try { await this.session; } finally { this.session = undefined; }
@@ -146,7 +146,7 @@ export class NativeClient implements NativeTransport {
   }
   private async join(threadId: string): Promise<void> {
     const ack = await this.socket!.timeout(5000).emitWithAck('join_room', `thread:${threadId}`);
-    if (!ack?.ok) throw new ApiError(502, 'Clowder AI 拒绝订阅该会话');
+    if (!ack?.ok) throw new ApiError(502, 'Clowder AI 拒绝了这段对话的实时更新');
   }
   async subscribe(threadId: string, listener: (event: NativeEvent) => void): Promise<() => void> {
     const existing = this.rooms.has(threadId);

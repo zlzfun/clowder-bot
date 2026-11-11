@@ -134,7 +134,7 @@ export class Activity {
     await this.bridge.thread(threadId);
     const message = this.visibleReplies(threadId, await this.bridge.allMessages(threadId)).find(item => item.id === messageId);
     if (!message) throw new ApiError(404, '这条可见回复不属于当前对话');
-    if (!stillCurrent()) throw new ApiError(409, '会话已变化，请刷新后重试');
+    if (!stillCurrent()) throw new ApiError(409, '对话已变化，请刷新后重试');
     if (!Number.isFinite(orderTime(message))) throw new ApiError(502, '消息顺序暂时不可确认');
     const current = this.bridge.store.state.readCursors[threadId];
     if (after(message, current)) {

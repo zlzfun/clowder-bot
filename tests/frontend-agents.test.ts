@@ -80,7 +80,7 @@ const claude = agent({ id: 'claude', label: 'Claude Code', clientId: 'anthropic'
 const kimi = agent({ id: 'kimi', label: 'Kimi', clientId: 'kimi', command: 'kimi', selectable: false, unavailableReason: '请先在本机 Agent 中完成登录', readiness: { status: 'login_required', checkedAt: 1761900000000, loginCommand: 'kimi login' } });
 const inventory = { checkedAt: 1761900000000, agents: [claude, codex, kimi] };
 const local = (over: Record<string, unknown> = {}) => ({ id: 'codex', label: 'Codex', configurationSource: 'native_tool', modelOverride: null, configuredModel: 'gpt-5.5', ...over });
-const managed = { id: null, label: 'Clowder AI 托管接入', configurationSource: 'managed_account', modelOverride: 'gpt-4o', configuredModel: null };
+const managed = { id: null, label: 'Clowder AI 托管', configurationSource: 'managed_account', modelOverride: 'gpt-4o', configuredModel: null };
 // GET /xbot-api/bots/:name cat_config with the cat's own effort.
 const ownEffort = { runtimeId: 'codex', breed: { mode: 'explicit', breedId: 'maine-coon' }, model: { mode: 'inherit' }, effort: { mode: 'explicit', value: 'high' }, portrait: { roleDescription: '审阅' } };
 
@@ -124,7 +124,7 @@ test('a managed account binding stays read-only and is never shown as a local Ag
   const { model } = browser().agents;
   const legacy = model.binding(managed);
   assert.equal(legacy.local, false);
-  assert.equal(legacy.title, 'Clowder AI 托管接入');
+  assert.equal(legacy.title, 'Clowder AI 托管');
   assert.match(legacy.detail, /只读保留/);
   assert.equal(legacy.legacy, true);
   assert.deepEqual(plain(model.binding(local())), { local: true, legacy: false, id: 'codex', title: 'Codex', detail: '沿用本机默认 · gpt-5.5', override: '', effort: '' });
@@ -151,7 +151,7 @@ test('switching names only what it really clears; the current Agent is a change 
 
 test('a 409 keeps the server\'s reason and is never guessed to be work in flight', async () => {
   const { model } = browser().agents;
-  const busy = '请先完成或停止这个 Bot 的任务，再更换 Agent';
+  const busy = '这只猫猫还在忙，等它做完或先停止，再换工具';
   const revision = '成员已在其他页面修改。草稿已保留，请重新读取后核对再保存。';
   assert.equal(model.bindError({ status: 409, message: busy }, 'ada'), busy);
   assert.equal(model.bindError({ status: 409, message: revision }, 'ada'), revision);
@@ -192,17 +192,17 @@ test('changing a Bot\'s Agent waits for an explicit confirmation and sends only 
 
 test('a switch refused while work is in flight keeps the dialog open and says why', async () => {
   const { agents, body } = browser();
-  const { api, calls } = fakeApi(inventory, () => { throw Object.assign(new Error('请先完成或停止这个 Bot 的任务，再更换 Agent'), { status: 409 }); });
+  const { api, calls } = fakeApi(inventory, () => { throw Object.assign(new Error('这只猫猫还在忙，等它做完或先停止，再换工具'), { status: 409 }); });
   await agents.open({ api, data: { name: 'ada', agent: managed }, manage() {}, busy: () => true });
   const dialog = all(body).find(n => n.tag === 'dialog')!;
-  assert.match(named(dialog, 'binding-sub')[0].textContent, /当前 Clowder AI 托管接入（只读保留）/);
+  assert.match(named(dialog, 'binding-sub')[0].textContent, /当前 Clowder AI 托管（只读保留）/);
   assert.equal(radios(dialog).filter(r => r.getAttribute('aria-checked') === 'true').length, 0, 'a managed account is not preselected as a local Agent');
   radios(dialog)[1].onclick!();
   assert.equal(named(dialog, 'binding-note')[0].textContent, '确认后会清除原有接入、单独指定的模型 gpt-4o。有任务在执行或排队，完成或停止后才能更换。');
   const use = byText(dialog, '改用这个工具')!;
   await use.onclick!();
   assert.equal(dialog.isConnected, true);
-  assert.equal(named(dialog, 'bad')[0].textContent, '请先完成或停止这个 Bot 的任务，再更换 Agent');
+  assert.equal(named(dialog, 'bad')[0].textContent, '这只猫猫还在忙，等它做完或先停止，再换工具');
   assert.ok(!use.disabled, 'the user can retry once the work is done');
   assert.equal(calls.filter(c => c.method === 'PUT').length, 1);
 });

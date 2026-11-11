@@ -669,7 +669,7 @@ test('a pick that did not go out, or went out but was not recorded, stays answer
   moved.draw([choiceMessage(weekend)]);
   moved.row('m-pick').querySelectorAll('button.ask-opt')[0].click();
   moved.sends[0].sent();
-  moved.posts[0].answer({ status: 409, body: { error: '会话已变化，请刷新后重试' } });
+  moved.posts[0].answer({ status: 409, body: { error: '对话已变化，请刷新后重试' } });
   await settle();
   assert.ok(moved.row('m-pick').querySelectorAll('button.ask-opt').every(b => b.getAttribute('aria-disabled') !== 'true'));
   // The typed option: its own words, Enter sends them.

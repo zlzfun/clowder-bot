@@ -433,14 +433,14 @@ test('a send that does not go out hands its files back; after a switch they wait
 test('an upload refused by the server keeps its row with the reason and a retry; removing it returns focus to the input', async () => {
   let attempt = 0;
   const p = page(path => (path.endsWith('/workspace') ? view() : { tasks: [], cats: [] }),
-    () => (++attempt === 1 ? json(409, { error: '会话已变化，请刷新后重试' }) : json(201, { file: served() })));
+    () => (++attempt === 1 ? json(409, { error: '对话已变化，请刷新后重试' }) : json(201, { file: served() })));
   p.ws.select(ada);
   p.ws.observe(ada, 'thread-A', true);
   p.ws.addFiles([file('report.md', 2048)]);
   await settle();
   const row = p.chips()[0];
   assert.equal(row.dataset.status, 'failed');
-  assert.match(textOf(row), /没传上去：会话已变化，请刷新后重试/);
+  assert.match(textOf(row), /没传上去：对话已变化，请刷新后重试/);
   all(row).find(e => e.getAttribute('aria-label') === '重新上传 report.md')!.click();
   await settle();
   assert.equal(p.chips()[0].dataset.status, 'ready');
@@ -590,7 +590,7 @@ test('a directory route the server has not adapted is known by its code (not_ada
   for (const [error, expected] of [
     [Object.assign(failure(404, '此接口还没有适配'), { code: 'not_adapted' }), /当前后端还没有开放目录浏览。/],
     // The old wording without the code is just a failure now: nothing reads the server's sentence.
-    [failure(404, '此 XBot 接口尚无原生适配；请使用运行面板'), /没能/],
+    [failure(404, '这项功能在这里还用不了'), /没能/],
   ] as const) {
     const p = page((path) => {
       const bare = path.split('?')[0];
@@ -1024,8 +1024,8 @@ function historyCat(opts: { list?: Any[]; hooks?: Record<string, unknown> } = {}
     }
     if (path === '/xbot-api/bots/Ada/conversation' && method === 'PUT') {
       const made = (() => {
-        if (body.expectedThreadId !== server.thread) return { error: failure(409, '当前会话已变化，请刷新后再切换') };
-        if (server.busy.has(server.thread) || server.busy.has(body.threadId)) return { error: failure(409, '请先完成或停止会话中的任务') };
+        if (body.expectedThreadId !== server.thread) return { error: failure(409, '当前对话已变化，请刷新后再切换') };
+        if (server.busy.has(server.thread) || server.busy.has(body.threadId)) return { error: failure(409, '这段对话里还有事在做，等它做完或先停止再试') };
         server.thread = body.threadId;
         return { view: view({ threadId: body.threadId }) };
       })();
@@ -1118,7 +1118,7 @@ test('opening a saved conversation names the thread it saw; a busy refusal stays
   const put = p.calls.find(c => c.method === 'PUT')!;
   assert.equal(put.path, '/xbot-api/bots/Ada/conversation');
   assert.deepEqual(put.body, { threadId: 'thread-P', expectedThreadId: 'thread-A' });
-  assert.equal(textOf(convLine(node)), '请先完成或停止会话中的任务');
+  assert.equal(textOf(convLine(node)), '这段对话里还有事在做，等它做完或先停止再试');
   assert.equal(convLine(node).getAttribute('role'), 'alert');
   assert.deepEqual(p.reselected, [], 'a refused switch leaves the chat where it was');
   assert.equal(p.ws.threadId(), 'thread-A');
@@ -1182,7 +1182,7 @@ test('the same switch asked from elsewhere (the search palette, by thread) keeps
   assert.equal(p.count('PUT', '/xbot-api/bots/Ada/conversation'), 0);
   // Busy: refused by the server, in its words; the chat stays.
   p.server.busy.add('thread-P');
-  assert.deepEqual(plain(await p.ws.switchTo('thread-P')), { ok: false, text: '请先完成或停止会话中的任务' });
+  assert.deepEqual(plain(await p.ws.switchTo('thread-P')), { ok: false, text: '这段对话里还有事在做，等它做完或先停止再试' });
   assert.deepEqual(p.calls.filter(c => c.method === 'PUT').at(-1)!.body, { threadId: 'thread-P', expectedThreadId: 'thread-A' });
   assert.deepEqual(p.reselected, []);
   p.server.busy.clear();
@@ -1380,7 +1380,7 @@ function movingCat() {
     if (path === '/xbot-api/bots/Ada/files') return { threadId: at, files: [served({ id: `f-${at}-${n}`, threadId: at, name: `${at}-${n}.md` })] };
     if (path === '/xbot-api/bots/Ada/workspace-tree') return { entries: [{ name: `${at}-notes.md`, path: 'notes.md', type: 'file', size: 10 }] };
     if (path === '/xbot-api/bots/Ada/tasks' && method === 'GET') return { threadId: at, tasks: [task({ id: `t-${at}`, threadId: at, title: `${at} 的任务 ${n}` })], cats, historyAvailable: true };
-    if (method === 'POST' && body.expectedThreadId !== at) throw failure(409, '会话已变化，请刷新后重试');
+    if (method === 'POST' && body.expectedThreadId !== at) throw failure(409, '对话已变化，请刷新后重试');
     if (path === '/xbot-api/bots/Ada/deliverables') return { file: served({ id: `d-${at}`, threadId: at, kind: 'deliverable', name: `${at}-delivered.md` }) };
     throw failure(404, 'unexpected ' + method + ' ' + path);
   };
@@ -1396,7 +1396,7 @@ function movingCat() {
   };
   const upload = (path: string) => {
     const q = new URLSearchParams(path.split('?')[1]), at = server.thread;
-    const answer = (as = at) => (q.get('expectedThreadId') === as ? json(201, { file: served({ id: 'up-' + q.get('name'), threadId: as, name: q.get('name') }) }) : json(409, { error: '会话已变化，请刷新后重试' }));
+    const answer = (as = at) => (q.get('expectedThreadId') === as ? json(201, { file: served({ id: 'up-' + q.get('name'), threadId: as, name: q.get('name') }) }) : json(409, { error: '对话已变化，请刷新后重试' }));
     return holding.delete('UPLOAD') ? later('UPLOAD', answer) : answer();
   };
   let repaint = () => {};

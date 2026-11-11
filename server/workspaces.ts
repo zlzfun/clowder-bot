@@ -44,7 +44,7 @@ export class Workspaces {
     if (!safeSegment(name) || !contained(root, resolve(parent, name))) throw new ApiError(400, '工作区目录无效');
     try {
       const result = await this.bridge.native.request<{ createdPath: string }>('/api/projects/mkdir', { method: 'POST', body: { parentPath: parent, name } });
-      if (resolve(result.createdPath) !== resolve(parent, name)) throw new ApiError(502, '原生工作区目录不匹配');
+      if (resolve(result.createdPath) !== resolve(parent, name)) throw new ApiError(502, '引擎返回的工作目录对不上');
     } catch (e) {
       if (!(e instanceof ApiError && e.status === 409)) throw e;
       // The native browse endpoint canonicalizes and authorizes existing directories.
@@ -90,21 +90,21 @@ export class Workspaces {
     return { conversations: conversations.filter((c): c is NonNullable<typeof c> => c !== null) };
   }
   private async changingConversation<T>(cat: NativeCat, work: () => Promise<T>): Promise<T> {
-    if (this.switches.has(cat.id)) throw new ApiError(409, '会话正在切换，请稍后重试');
+    if (this.switches.has(cat.id)) throw new ApiError(409, '对话正在切换，请稍后重试');
     const job = work(); this.switches.set(cat.id,job);
     try { return await job; } finally { this.switches.delete(cat.id); }
   }
   private async requireIdle(id: string) {
     const queue = await this.bridge.queue(id);
-    if (queue.queue.length || queue.activeInvocations.length) throw new ApiError(409, '请先完成或停止会话中的任务');
+    if (queue.queue.length || queue.activeInvocations.length) throw new ApiError(409, '这段对话里还有事在做，等它做完或先停止再试');
   }
   async switchConversation(cat: NativeCat, threadId: string, expectedThreadId: string) {
     return this.changingConversation(cat, async () => {
       const old = await this.bridge.direct(cat);
-      if (old.id !== expectedThreadId) throw new ApiError(409, '当前会话已变化，请刷新后再切换');
+      if (old.id !== expectedThreadId) throw new ApiError(409, '当前对话已变化，请刷新后再切换');
       if (!this.knownConversations(cat).includes(threadId)) throw new ApiError(404, '找不到这只猫的历史对话');
       const thread = await this.bridge.thread(threadId);
-      if (thread.preferredCats?.length !== 1 || thread.preferredCats[0] !== cat.id) throw new ApiError(403, '此会话不属于这只猫');
+      if (thread.preferredCats?.length !== 1 || thread.preferredCats[0] !== cat.id) throw new ApiError(403, '这段对话不属于这只猫猫');
       if (threadId !== old.id) { await this.requireIdle(old.id); await this.requireIdle(threadId); }
       const meta = this.bridge.store.bot(cat.id);
       meta.conversationIds = this.knownConversations(cat);
@@ -131,7 +131,7 @@ export class Workspaces {
       path = project?.sharedPath ?? path;
     }
     const root = await realpath(this.bridge.workspace), actual = await realpath(path);
-    if (!contained(root, actual)) throw new ApiError(403, '工作目录不在此 Bot 管理范围内');
+    if (!contained(root, actual)) throw new ApiError(403, '这个文件夹不在这只猫猫能用的范围内');
     return actual;
   }
   async sourcePath(thread: NativeThread, path: string, area: 'workspace' | 'shared') {
@@ -201,7 +201,7 @@ export class Workspaces {
   }
   async attachments(threadId: string, ids: string[]) {
     if (ids.length > 8 || new Set(ids).size !== ids.length) throw new ApiError(400, '一次最多发送 8 个不同附件');
-    return Promise.all(ids.map(async id => { const file = this.file(id); if (file.threadId !== threadId) throw new ApiError(409, '附件属于其他会话，请重新选择'); await this.bytes(file);
+    return Promise.all(ids.map(async id => { const file = this.file(id); if (file.threadId !== threadId) throw new ApiError(409, '附件属于另一段对话，请重新选择'); await this.bytes(file);
       return { v:1 as const, id:file.id, kind:'workspace_file' as const, path:file.path, revision:`sha256:${file.sha256}` }; }));
   }
 }
