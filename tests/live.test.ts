@@ -224,6 +224,30 @@ test('a reply quotes what it answers only when something else came in between', 
   assert.equal(cut.find((m: any) => m.id === 'a2').reply_to, seq.q2, 'further down the same page the rule is unchanged');
 });
 
+test('a reminder that came due is a quiet line in the chat’s words, and the reply under it does not quote it', async t => {
+  const r = await setup(t), cat = await r.bridge.createBot({ name: 'Ada' }), thread = await r.bridge.direct(cat);
+  // As the engine records it: the scheduler's connector line, then the cat it woke answering that line.
+  const due: NativeMessage = { id: 'due', type: 'connector', catId: null, timestamp: 2000, content: '[定时任务] 该站起来活动一下了！',
+    source: { connector: 'scheduler', label: '定时任务', icon: 'scheduler' }, extra: { scheduler: { hiddenTrigger: true } } };
+  const other: NativeMessage = { id: 'feishu', type: 'connector', catId: null, timestamp: 4000, content: '[定时任务] 不是定时器发的', source: { connector: 'feishu' } };
+  r.native.messages.set(thread.id, [{ id: 'q', type: 'user', catId: null, timestamp: 1000, content: '3 分钟后提醒我' }, due,
+    { id: 'woke', type: 'assistant', catId: cat.id, timestamp: 2100, content: '该活动啦', replyTo: 'due' },
+    { id: 'later', type: 'assistant', catId: cat.id, timestamp: 3000, content: '补充一句', replyTo: 'due' }, other]);
+  const rows = (await (await r.call('/xbot-api/bots/Ada/transcript')).json()).messages.filter((m: any) => m.id);
+  const of = (id: string) => rows.find((m: any) => m.id === id);
+  assert.deepEqual([of('due').content, of('due').notice, of('due').reminder], ['提醒：该站起来活动一下了！', true, true]);
+  assert.match(of('due').native.content, /^\[定时任务\]/, 'the native record keeps the engine’s line');
+  assert.equal(of('woke').reply_to, 0, 'right under the reminder it answers: no quote');
+  assert.equal(of('later').reply_to, of('due').seq, 'further down it is quoted, as any reply is');
+  assert.deepEqual([of('feishu').content, 'reminder' in of('feishu')], ['[定时任务] 不是定时器发的', false], 'only the scheduler’s own line');
+  // The same in a group.
+  await r.bridge.createBot({ name: 'Bob' });
+  const group = await (await r.call('/xbot-api/groups', 'POST', { members: ['Ada', 'Bob'] })).json();
+  r.native.messages.set(group.id, [due]);
+  const line = (await (await r.call(`/xbot-api/groups/${group.id}`)).json()).messages[0];
+  assert.deepEqual([line.text, line.notice, line.reminder], ['提醒：该站起来活动一下了！', true, true]);
+});
+
 test('a cat that signed by itself before the host tail loses both lines, in the chat only', () => {
   const body = '你好，我是砚砚，很高兴认识你。', own = '\n\n[砚砚/GPT-6🐾]', host = '\n\n[砚砚/🐾]', content = body + own + host;
   const message: NativeMessage = {

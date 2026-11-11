@@ -3,7 +3,7 @@ import { ApiError } from '../errors.js';
 import { ProductStore } from '../product-store.js';
 import type { NativeCat, NativeMessage, NativeThread, NativeTransport } from './types.js';
 import { defaultRuntime, memberCliArgs, runtimeUnavailable, supportsRuntime } from './agents.js';
-import { approvalReceipt, approvalReceiptText, messageDisplayText, messagePresentation, replyEnding, replyInProgress, rosterRefusals } from './message-presentation.js';
+import { approvalReceipt, approvalReceiptText, messageDisplayText, messagePresentation, replyEnding, replyInProgress, rosterRefusals, scheduledReminder } from './message-presentation.js';
 import { avatarBreed, type CatConfig, type SourceTemplate } from './cat-templates.js';
 import { clip } from './text.js';
 import { messageBlocks, type ApprovalDecision } from './blocks.js';
@@ -157,7 +157,7 @@ export class BotBridge {
     for (const message of page.messages) this.store.sequence(thread.id, message.id);
     // A reply names the message it answers. Right under that message the quote
     // only repeats it, so it is shown when something else came in between.
-    let lastUser: string | undefined;
+    let lastUser: string | undefined, previous: string | undefined;
     // A cat that was addressed but does not belong to this conversation: said once by name (see rosterRefusals).
     const refusals = rosterRefusals(page.messages, id => cats.find(cat => cat.id === id)?.name, false);
     const decided = this.decisions(page.messages);
@@ -165,18 +165,22 @@ export class BotBridge {
       if (message.type === 'user' && message.id === source) continue;
       if (refusals.get(message.id) === null) continue;
       const seq = this.store.sequence(thread.id, message.id), receipt = approvalReceipt(message);
-      const refusal = refusals.get(message.id) ?? (receipt ? approvalReceiptText(receipt) : undefined);
+      // A reminder that came due is a quiet line in the chat's words; the cat's own reply follows it.
+      const reminder = scheduledReminder(message);
+      const refusal = refusals.get(message.id) ?? (receipt ? approvalReceiptText(receipt) : reminder ? `提醒：${reminder}` : undefined);
       const text = refusal ?? messageDisplayText(message, thread.id, presentation.speaker?.name), inProgress = replyInProgress(message);
       const rich = message.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(message, decided), ending = replyEnding(message);
       // At the top of a page that continues further back, what came just before is not known; no quote is guessed there.
       const quoted = message.replyTo && message.replyTo !== source
-        && !(message.type !== 'user' && (message.replyTo === lastUser || (lastUser === undefined && page.hasMore))) ? message.replyTo : undefined;
+        && !(message.type !== 'user' && (message.replyTo === lastUser || message.replyTo === previous || (lastUser === undefined && page.hasMore))) ? message.replyTo : undefined;
       if (message.type === 'user') lastUser = message.id;
+      // …and the same for a reply right under any other line it answers (a reminder that came due).
+      previous = message.id;
       const base = { seq, id: message.id, native_message_id: message.id, role: message.type === 'user' ? 'user' : 'assistant',
         content: text, ...presentation, time: new Date(message.timestamp).toISOString(),
         reply_to: quoted ? this.store.state.messageRefs[thread.id]?.[quoted] ?? 0 : 0,
         status: message.lifecycle?.status ?? (message.isDraft ? 'processing' : 'complete'), ...(inProgress ? { in_progress: true } : {}),
-        ...(ending ? { ended: ending } : {}), ...(refusal ? { notice: true } : {}),
+        ...(ending ? { ended: ending } : {}), ...(refusal ? { notice: true } : {}), ...(reminder ? { reminder: true } : {}),
         attachments: this.workspaces.messageFiles(thread.id, message),
         // Cards, checklists and choices the cat attached; `blocks_hidden` counts what the chat cannot draw yet.
         ...(rich.blocks.length ? { blocks: rich.blocks } : {}), ...(rich.hidden ? { blocks_hidden: rich.hidden } : {}), native: message };
