@@ -6,6 +6,7 @@ import { defaultRuntime, runtimeUnavailable, supportsRuntime } from './agents.js
 import { messageDisplayText, messagePresentation, replyInProgress } from './message-presentation.js';
 import { avatarBreed, type CatConfig, type SourceTemplate } from './cat-templates.js';
 import { clip } from './text.js';
+import { messageBlocks } from './blocks.js';
 import { Workspaces } from '../workspaces.js';
 import { NativeFiles } from './files.js';
 import { Activity } from './activity.js';
@@ -155,6 +156,7 @@ export class BotBridge {
       if (message.type === 'user' && message.id === source) continue;
       const seq = this.store.sequence(thread.id, message.id);
       const text = messageDisplayText(message, thread.id), inProgress = replyInProgress(message);
+      const rich = message.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(message);
       // At the top of a page that continues further back, what came just before is not known; no quote is guessed there.
       const quoted = message.replyTo && message.replyTo !== source
         && !(message.type !== 'user' && (message.replyTo === lastUser || (lastUser === undefined && page.hasMore))) ? message.replyTo : undefined;
@@ -163,10 +165,12 @@ export class BotBridge {
         content: text, ...presentation, time: new Date(message.timestamp).toISOString(),
         reply_to: quoted ? this.store.state.messageRefs[thread.id]?.[quoted] ?? 0 : 0,
         status: message.lifecycle?.status ?? (message.isDraft ? 'processing' : 'complete'), ...(inProgress ? { in_progress: true } : {}),
-        attachments: this.workspaces.messageFiles(thread.id, message), native: message };
+        attachments: this.workspaces.messageFiles(thread.id, message),
+        // Cards, checklists and choices the cat attached; `blocks_hidden` counts what the chat cannot draw yet.
+        ...(rich.blocks.length ? { blocks: rich.blocks } : {}), ...(rich.hidden ? { blocks_hidden: rich.hidden } : {}), native: message };
       if (message.type === 'user' || presentation.presentation_kind === 'activity') rows.push(base);
       // A reply that has started but has no words yet stays as a row: the chat shows it as typing.
-      else if (text || base.attachments.length || inProgress) {
+      else if (text || base.attachments.length || inProgress || rich.blocks.length || rich.hidden) {
         // XBot's delivery view. These receipts describe rendering, never model tool execution.
         const callId = `delivery_${message.id}`;
         rows.push({ ...base, presentation_receipt: true, tool_calls: [{ id: callId, type: 'function', function: { name: 'send_message_to_user', arguments: JSON.stringify({ text }) } }] });

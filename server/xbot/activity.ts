@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ApiError } from '../errors.js';
 import type { BotBridge } from '../native/bridge.js';
 import { searchMessages } from '../native/search.js';
+import { messageBlocks } from '../native/blocks.js';
 
 export function createActivityRouter(bridge: BotBridge) {
   const router = express.Router();
@@ -31,6 +32,20 @@ export function createActivityRouter(bridge: BotBridge) {
       const {thread}=await context(String(req.params.chat));
       if(thread.id!==expectedThreadId)throw new ApiError(409,'会话已变化，请刷新后重试');
       res.json(await bridge.approvals.decide(thread.id,String(req.params.id),decision));
+    });
+    // Record that the owner answered a cat's choice block. The answer itself is an ordinary chat message
+    // sent through the normal route; this only tells native which options were picked, so the block stops asking.
+    router.post<{chat:string;message:string;block:string}>(`${scope}/messages/:message/blocks/:block/answer`, async (req,res) => {
+      const {selectedIds,expectedThreadId}=z.object({selectedIds:z.array(z.string().min(1).max(200)).max(40),expectedThreadId:z.string().min(1).max(200)}).strict().parse(req.body);
+      const {thread}=await context(String(req.params.chat));
+      if(thread.id!==expectedThreadId)throw new ApiError(409,'会话已变化，请刷新后重试');
+      // The message has to be one of this conversation's and carry that choice.
+      const message=(await bridge.allMessages(thread.id)).find(item=>item.id===String(req.params.message));
+      const block=message&&messageBlocks(message).blocks.find(item=>item.id===String(req.params.block));
+      if(!block||block.kind!=='choices')throw new ApiError(404,'这条消息里没有这个选项');
+      if(selectedIds.some(id=>!block.options.some(option=>option.id===id)))throw new ApiError(400,'选项不在这条消息里');
+      await bridge.native.request(`/api/messages/${encodeURIComponent(message!.id)}/block-state`,{method:'PATCH',body:{userId:'clowder-bot-owner',blockId:block.id,disabled:true,selectedIds}});
+      res.json({messageId:message!.id,blockId:block.id,selected:selectedIds,answered:true});
     });
     router.post<{chat:string}>(`${scope}/read`, async (req,res) => {
       const {expectedThreadId,messageId}=z.object({expectedThreadId:z.string().min(1).max(200),messageId:z.string().min(1).max(200)}).strict().parse(req.body);

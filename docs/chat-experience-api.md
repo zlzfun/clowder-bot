@@ -43,6 +43,26 @@
 - 源码中的 legacy bot.lastReadMessageId 保留，不迁移成可信已读事实；新读位置按 thread 保存。只存展示游标，不持久化第二份任务或消息内容。
 - 首批为应用内状态与未读，无系统推送。任务控制继续使用既有能力，不添加／依赖新运行时补丁。
 
+## 卡片、清单与选项
+
+猫用引擎的 `create-rich-block` 工具发出的内容存在原生消息的 `extra.rich.blocks` 里（结构见固定上游 `packages/shared/src/types/rich.ts`）。此前适配层只投影其中的文件，其他种类在聊天里直接消失；只有卡片、没有文字的回复连一行都不剩。
+
+单聊与群聊的消息行现在带 `blocks`（有可画的块时）和 `blocks_hidden`（有画不了的块时的个数）：
+
+```ts
+type ChatBlock =
+  | {id; kind:'card'; title; body?; tone?:'info'|'success'|'warning'|'danger'; fields?:{label,value}[]; approval?:{id}}
+  | {id; kind:'checklist'; title?; items:{id,text,checked}[]}
+  | {id; kind:'choices'; mode:'single'|'multiple'|'confirm'; title?; description?; options:{id,label,emoji?,description?,custom?}[];
+     max?; template?; answered:boolean; selected:string[]}
+  | {id; kind:'diff'; file; diff};
+```
+
+- `card.approval.id` 是原生提议的 ID：这张卡是一条「等你确认的事」，与下一节 `approvals[].id` 对应，前端在这里画确认卡而不是原生卡片的原文。
+- `choices` 对应原生的 interactive 块。作答沿用原生网页的做法：把选择写成一句普通的聊天消息发出去（措辞规则见上游 `InteractiveBlock.tsx` 的 `buildSelectionMessage`：有 `template` 时把 `{selection}` 换成所选项，否则「我选了：…」，confirm 是「确认／取消」），再用 `POST <scope>/messages/:messageId/blocks/:blockId/answer {selectedIds, expectedThreadId}` 记到原生块上（转发 `PATCH /api/messages/:id/block-state`，`disabled: true`）。两步各自成败：消息已发出但记录失败时，选项仍可再点，不把它显示成已作答。
+- `diff` 只给文件名和差异正文。音频、图集、HTML 小组件暂时不画，只计入 `blocks_hidden`，前端要说明「还有 N 项暂时无法显示」，不能当作没有。文件块仍走原有的文件投影。
+- 只有块、没有文字的回复现在也是一行，计入未读和 `last`（`last.text` 取第一块的标题）。
+
 ## 等你确认的事
 
 猫提出需要用户点头的事（记住一个偏好、设一个定时……）时，原生会在会话里发一条带确认卡片的消息，并把它登记在 Approval Hub。此前聊天里只有「等你确认」一行，「去确认」要打开运行面板。适配层现在把它读成聊天里能直接回答的卡片；请求本身、它的生命周期和生效过程仍然全在原生。

@@ -2,6 +2,7 @@ import express, { type Response } from 'express';
 import { messageDisplayText, replyInProgress } from '../native/message-presentation.js';
 import { liveEvent } from '../native/live.js';
 import { clip } from '../native/text.js';
+import { messageBlocks } from '../native/blocks.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { ApiError } from '../errors.js';
@@ -74,12 +75,15 @@ export function createXbotCoreRouter(bridge: BotBridge) {
     const thread = await bridge.group(req.params.id);
     const [cats, page] = await Promise.all([bridge.cats(), bridge.messages(thread.id, typeof req.query.before === 'string' ? req.query.before : undefined)]);
     res.json({ group: bridge.groupItem(thread, cats), hasMore: page.hasMore,
-      messages: bridge.presentMessages(page.messages, cats).map(({ message: m, name, ...presentation }) => ({
-        id: m.id, time: new Date(m.timestamp).toISOString(), sender: m.type === 'user' ? 'local' : name,
-        kind: m.type === 'user' ? 'person' : 'bot', text: messageDisplayText(m, thread.id),
-        status: m.lifecycle?.status ?? (m.isDraft ? 'processing' : 'complete'), ...(replyInProgress(m) ? { in_progress: true } : {}),
-        attachments: bridge.workspaces.messageFiles(thread.id, m), ...presentation, native: m,
-      })).filter(m => m.native.type !== 'assistant' || !!m.text.trim() || m.attachments.length > 0 || m.presentation_kind === 'activity' || 'in_progress' in m) });
+      messages: bridge.presentMessages(page.messages, cats).map(({ message: m, name, ...presentation }) => {
+        const rich = m.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(m);
+        return { id: m.id, time: new Date(m.timestamp).toISOString(), sender: m.type === 'user' ? 'local' : name,
+          kind: m.type === 'user' ? 'person' : 'bot', text: messageDisplayText(m, thread.id),
+          status: m.lifecycle?.status ?? (m.isDraft ? 'processing' : 'complete'), ...(replyInProgress(m) ? { in_progress: true } : {}),
+          attachments: bridge.workspaces.messageFiles(thread.id, m),
+          ...(rich.blocks.length ? { blocks: rich.blocks } : {}), ...(rich.hidden ? { blocks_hidden: rich.hidden } : {}), ...presentation, native: m };
+      }).filter(m => m.native.type !== 'assistant' || !!m.text.trim() || m.attachments.length > 0 || m.presentation_kind === 'activity'
+        || 'in_progress' in m || 'blocks' in m || 'blocks_hidden' in m) });
   });
   router.post('/bots', async (req, res) => {
     const input = z.object({ ...botBody, simple: simpleCat.optional() }).strict().superRefine((value, ctx) => {

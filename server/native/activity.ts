@@ -3,6 +3,7 @@ import type { BotBridge, QueueView } from './bridge.js';
 import { messageDisplayText, messagePresentation } from './message-presentation.js';
 import type { NativeCat, NativeMessage } from './types.js';
 import { clip } from './text.js';
+import { blockLine, messageBlocks } from './blocks.js';
 
 export interface ActivityItem {
   id: string; kind: 'approval'|'failure'|'running'|'queued'|'task'; label: string; threadId: string;
@@ -32,7 +33,8 @@ export class Activity {
       && !['queued', 'processing', 'canceled', 'cancelled'].includes(message.lifecycle?.status ?? '')
       && presentation.get(message.id) !== 'activity'
       // By what the chat shows: a signed SILENT or a signature alone is no reply; a failure says so in words.
-      && (!!messageDisplayText(message, threadId).trim() || this.bridge.workspaces.messageFiles(threadId, message).length > 0))
+      && (!!messageDisplayText(message, threadId).trim() || this.bridge.workspaces.messageFiles(threadId, message).length > 0
+        || (rich => rich.blocks.length > 0 || rich.hidden > 0)(messageBlocks(message))))
       .sort((a, b) => orderTime(a) - orderTime(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   }
   unavailable(threadId: string): ActivityView {
@@ -92,7 +94,9 @@ export class Activity {
           const said = [...replies, ...(data.messages as NativeMessage[]).filter(message => message.type === 'user' && !this.bridge.isInvitation(threadId, message))]
             .sort((a, b) => orderTime(a) - orderTime(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).at(-1);
           if (said) {
-            const text = messageDisplayText(said, threadId).replace(/\s+/g, ' ').trim();
+            // A reply that is only a card or a list is named after it.
+            const rich = said.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(said);
+            const text = (messageDisplayText(said, threadId) || blockLine(rich.blocks) || (rich.hidden ? '发来了暂时无法显示的内容' : '')).replace(/\s+/g, ' ').trim();
             view.last = { messageId: said.id, time: new Date(said.timestamp).toISOString(), from: said.type === 'user' ? 'owner' : 'cat',
               ...(said.type === 'user' ? {} : annotate(said.catId)), text: clip(text, 140),
               files: this.bridge.workspaces.messageFiles(threadId, said).length };
