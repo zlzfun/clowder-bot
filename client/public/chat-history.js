@@ -55,12 +55,36 @@
   // the newest page they are joined to; cursor/more: the page before the
   // oldest one held; latest: the newest page's own cursor; loaded: pages
   // fetched; state: idle | loading | failed | end.
+  // drawn: how many of the loaded pages the last drawing of this history
+  // included (chat-locate.js waits for a page to be on screen, not just read).
   const P = { key: "", thread: "", held: [], was: [], cursor: "", more: false, latest: { before: "", more: false },
-    loaded: 0, empty: 0, state: "idle", error: "", gen: 0 };
+    loaded: 0, drawn: 0, empty: 0, state: "idle", error: "", gen: 0 };
+  // Earlier-page requests sent and failed, for the page's life (never reset):
+  // a lookup counts what happened while it ran, whoever asked.
+  let asked = 0, failures = 0;
   function reset(key) {
     Object.assign(P, { key, thread: "", held: [], was: [], cursor: "", more: false, latest: { before: "", more: false },
-      loaded: 0, empty: 0, state: "idle", error: "" });
+      loaded: 0, drawn: 0, empty: 0, state: "idle", error: "" });
     P.gen++;
+    settleDrawn();
+  }
+  // Waiting for a drawing that includes `need` loaded pages of generation
+  // `gen`: true once drawn, false when the history starts over or time runs out.
+  let drawWaiters = [];
+  function settleDrawn() {
+    drawWaiters = drawWaiters.filter((w) => {
+      if (w.gen !== P.gen) { w.done(false); return false; }
+      if (P.drawn >= w.need) { w.done(true); return false; }
+      return true;
+    });
+  }
+  function whenDrawn(need, ms = 20000) {
+    if (P.drawn >= need) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const w = { need, gen: P.gen, done: (ok) => { clearTimeout(w.timer); resolve(ok); } };
+      w.timer = setTimeout(() => { drawWaiters = drawWaiters.filter((x) => x !== w); resolve(false); }, ms);
+      drawWaiters.push(w);
+    });
   }
   const holding = () => P.held.length > 0 || P.loaded > 0;
   const nextCursor = () => (holding() ? (P.more ? P.cursor : "") : (P.latest.more ? P.latest.before : ""));
@@ -120,6 +144,9 @@
   }
   // true when a row was drawn: an empty view then has earlier records to offer.
   function top(inner) {
+    // Called while the history is drawn: every page loaded so far is in this
+    // drawing, which goes on screen right after (ClowderLive.commit).
+    if (inner) { P.drawn = P.loaded; Promise.resolve().then(settleDrawn); }
     const v = view();
     if (!v || !inner) return false;
     const row = node("div", "ch-older");
@@ -151,15 +178,20 @@
   // shell's own read of the newest page) puts it above, keeping the row the
   // owner is looking at where it was. A call while a page is on its way gets
   // that same page's promise (finding a message, chat-locate.js, waits on it).
-  let job = null;
-  function load() {
-    if (P.state === "loading" && job) return job;
+  // opts.cap: no request is sent once this many earlier-page requests have
+  // been sent in all (asked), the automatic reading through empty pages
+  // included; a lookup gives its budget this way. Without it there is no cap.
+  let job = null, cap = Infinity;
+  function load(opts) {
+    const limit = opts && Number.isFinite(opts.cap) ? opts.cap : Infinity;
+    if (P.state === "loading" && job) { cap = Math.min(cap, limit); return job; }
+    cap = limit;
     return (job = loadPage());
   }
   async function loadPage() {
     const sel = H && H.selected();
     const cursor = nextCursor();
-    if (!sel || keyOf(sel) !== P.key || P.state === "loading" || !cursor) return;
+    if (!sel || keyOf(sel) !== P.key || P.state === "loading" || !cursor || asked >= cap) return;
     const gen = P.gen;
     // The first earlier page belongs to the newest page as it was when asked
     // for (its cursor is that page's first message). Polls may move the newest
@@ -168,6 +200,7 @@
     const base = holding() ? null : { rows: P.was.slice(), before: cursor };
     P.state = "loading";
     paintTop();
+    asked++;
     try {
       const data = await H.api(R.pagePath(sel, cursor));
       if (gen !== P.gen) return;
@@ -192,8 +225,10 @@
       await H.reload();
       if (gen !== P.gen) return;
       paintTop();
-      if (!page.rows.length && P.more && P.empty < 4) load();
+      // Under the same cap as the request that led here.
+      if (!page.rows.length && P.more && P.empty < 4 && P.state === "idle") job = loadPage();
     } catch (e) {
+      failures++;
       if (gen !== P.gen) return;
       P.state = "failed";
       P.error = H.visibleError(e, "稍后再试").replace(/^没能完成：/, "").replace(/[。.]+$/, "");
@@ -521,7 +556,11 @@
     init, select, merge, top, starters, load, sync: syncMenu, openMenu, closeMenu, newConversation,
     // Where the earlier pages stand for the open chat: whether one more can be
     // read, one is on its way, or the last read failed (and why).
-    older: () => ({ key: P.key, state: P.state, more: !!nextCursor(), loaded: P.loaded, error: P.error }),
+    // gen changes whenever the history starts over (another chat or conversation);
+    // asked / failures count earlier-page requests for the page's life.
+    older: () => ({ key: P.key, thread: P.thread, gen: P.gen, state: P.state, more: !!nextCursor(), loaded: P.loaded, drawn: P.drawn,
+      error: P.error, asked, failures }),
+    whenDrawn,
     // For tests and diagnostics only: what this page holds, never a record.
     peek: () => ({ key: P.key, thread: P.thread, held: P.held.length, state: P.state, loaded: P.loaded, cursor: nextCursor() }),
   });

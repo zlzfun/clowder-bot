@@ -4533,6 +4533,8 @@
       if (state.sel === selection) setStatus("通知未能标为已读，请重试。", true);
     });
     await loadThread();
+    // A notice held for this cat since it was created (holdNotice): its chat is open now.
+    if (state.sel === selection) sayHeldNotice(name);
     if (state.sel === selection && panel.classList.contains("open") && !state.panelData) await loadPanel();
   }
 
@@ -4961,9 +4963,11 @@
   }
 
   let toastTimer = 0;
+  let toastOwner = null; // whose quiet note the toast shows (quietNote), null for any other toast
   // A done thing shows a check; a note (the search palette's) passes "info".
   function showToast(text, iconName = "check") {
     const box = $("toast");
+    toastOwner = null;
     box.replaceChildren(icon(iconName), el("span", "", text));
     box.hidden = false;
     clearTimeout(toastTimer);
@@ -4975,10 +4979,35 @@
   // once after the new cat's chat opens, and the progress and outcome of
   // finding a message on an earlier page (chat-locate.js). Up long enough to
   // read; `busy` keeps it up with a spinner until the next note; "" hides it.
-  function quietNote(text, busy = false) {
+  // `owner` (chat-locate.js passes its lookup's token): "" then hides the toast
+  // only while that owner's note is still the one up, never another toast.
+  // A creation's notice waits, by the created cat's identity (native ID, else
+  // its name), until that cat's chat is actually open: opening it may fail or
+  // come later (打开聊天, the list). Said once, then forgotten. Page memory only.
+  const heldNotices = new Map();
+  function holdNotice(held) {
+    if (!held || !held.text) return;
+    heldNotices.set(held.nativeId ? "id:" + held.nativeId : "name:" + held.name, String(held.text));
+  }
+  function sayHeldNotice(name) {
+    for (const key of ["id:" + (botCatId(name) || ""), "name:" + name]) {
+      if (!heldNotices.has(key)) continue;
+      const text = heldNotices.get(key);
+      heldNotices.delete(key);
+      quietNote(text);
+      return;
+    }
+  }
+
+  function quietNote(text, busy = false, owner = null) {
     const box = $("toast");
+    if (!text) {
+      if (owner && toastOwner !== owner) return;
+      clearTimeout(toastTimer);
+      box.hidden = true; toastOwner = null; return;
+    }
     clearTimeout(toastTimer);
-    if (!text) { box.hidden = true; return; }
+    toastOwner = owner;
     box.replaceChildren(busy ? spinIcon(16) : icon("info"), el("span", "", text));
     box.hidden = false;
     if (!busy) toastTimer = setTimeout(() => { box.hidden = true; }, Math.min(12000, 4000 + String(text).length * 80));
@@ -5207,8 +5236,9 @@
     return (n / 1000).toFixed(1).replace(/\.0$/, "") + "K";
   }
 
-  // vocabulary: technical — 资料 › 高级's 它用什么思考 and 模型与画像 may name
-  // models and reasoning effort (tests/vocabulary.test.ts), up to the end marker.
+  // agentTrigger, agentPart, configPart and catConfigSection are 资料 › 高级's
+  // 它用什么思考 and 模型与画像: they may name models and reasoning effort
+  // (tests/vocabulary.test.ts lists them by name).
   // The Bot's local Agent, shared by 资料 › 高级 and the profile drawer.
   // Busy is a hint only: the server refuses a switch while work is in flight.
   function agentTrigger(data, aside) {
@@ -5283,7 +5313,6 @@
     }
     return sec;
   }
-  // vocabulary: end
 
   // 记忆 is chat-experience.js's memoryView: 关于你 and 你的偏好 read only on
   // demand, then 这个对话的便笺 (the conversation's native notes).
@@ -5371,7 +5400,8 @@
     const host = $("greeting");
     if (!host) return;
     const statuses = Object.values(stStatus.map);
-    const busy = statuses.filter(st => st.state === "running" || st.state === "awaiting");
+    // Busy is working or waiting in line; a cat that waits for the owner (等你确认) is not busy (its row says so).
+    const busy = statuses.filter(st => st.state === "running" || st.state === "queued");
     const hour = new Date().getHours();
     const hello = hour < 6 ? "夜深了" : hour < 12 ? "上午好" : hour < 18 ? "下午好" : "晚上好";
     const sig = JSON.stringify([hello, state.ownerName, busy.map(s => s.bot)]);
@@ -6651,10 +6681,10 @@
       names: () => state.bots.map((b) => b.name),
       manageAgents: () => openSettings("agents"),
       onCreated: async (created) => {
+        // A default the server could not write is said once, when this cat's chat is open (held by identity).
+        if (created.notice) holdNotice({ name: created.name, nativeId: created.native_id || "", text: created.notice });
         await refreshLists();
         await selectBot(created.name);
-        // A default the server could not write is said once, after the chat opens.
-        if (created.notice) quietNote(created.notice);
       },
       onError: (e) => setStatus(visibleError(e), true),
     });
@@ -7519,8 +7549,8 @@
     copy: (text) => copyText(text),
     refresh: () => refreshLists(),
     openCat: async (name) => { await refreshLists(); await selectBot(name); },
-    // A created cat's notice, once its chat is open.
-    notice: (text) => quietNote(text),
+    // A created cat's notice: held by its identity, said once its chat is open.
+    notice: (held) => holdNotice(held),
     openGroup: async (id) => { await refreshLists(); await selectGroup(id); },
     // Where the chat shows the new cat's face: its portrait glides there.
     landing: (name) => [...document.querySelectorAll("#title .avatar[data-avatar-bot]")].find((a) => a.dataset.avatarBot === name) || null,
@@ -7576,15 +7606,16 @@
     thread,
     selected: () => (state.peer ? null : state.sel),
     history: chatHistory,
-    note: (text, busy) => quietNote(text, busy),
+    note: (text, busy, owner) => quietNote(text, busy, owner),
     rest: () => { if (window.innerWidth >= 768) input.focus({ preventScroll: true }); },
   });
   if (window.ClowderPalette) {
     // Called once the palette opened the chat: type/id name it as the app does, nativeId is a cat's native ID.
-    window.ClowderPalette.locate = async ({ type, id, nativeId, messageId }) => {
+    // `still`: the palette's own operation (a reopened palette or another choice ends this lookup).
+    window.ClowderPalette.locate = async ({ type, id, nativeId, messageId, still }) => {
       const sel = state.peer ? null : state.sel;
       if (!sel || sel.type !== type || !(sel.id === id || (type === "bot" && nativeId && botCatId(sel.id) === nativeId))) return false;
-      return locate.find({ sel, messageId });
+      return locate.find({ sel, messageId, still });
     };
   }
   // 资料页与群 (profile.js) draws with these. The technical parts of 资料 ›

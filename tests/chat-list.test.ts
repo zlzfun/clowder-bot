@@ -620,3 +620,29 @@ test('a quoted send takes its quote along at once: switching chats before the an
   h.send('好的', null, [], null);
   assert.equal('reply_to' in h.calls[0].body, false);
 });
+
+test('the greeting counts a cat as busy only while it works or waits in line, never while it waits for the owner', () => {
+  const app = read('client/public/app.js');
+  const m = /\n {2}function paintGreeting\(\) \{\n[\s\S]*?\n {2}\}\n/.exec(app);
+  assert.ok(m, 'paintGreeting is where the shell keeps it');
+  const doc = new Doc();
+  const host = doc.createElement('div');
+  host.id = 'greeting';
+  doc.body.append(host);
+  const el = (tag: string, cls?: string, t?: string) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (t != null) e.textContent = t; return e; };
+  const window: Any = {};
+  vm.runInNewContext(read('client/public/chat-list-rules.js'), { window });
+  const stStatus: Any = { map: {} };
+  const out: Any = {};
+  vm.runInNewContext(m[0] + 'out.paint = paintGreeting;', {
+    out, stStatus, state: { ownerName: '你' }, document: doc, Date, JSON,
+    $: (id: string) => doc.getElementById(id), el, listRules: window.ClowderListRules,
+    avatar: () => el('span', 'avatar'), paintOf: () => null,
+  });
+  stStatus.map = { 团子: { bot: '团子', state: 'awaiting' }, 栗子: { bot: '栗子', state: 'idle' } };
+  out.paint();
+  assert.doesNotMatch(text(host), /在忙/, 'waiting for the owner\'s confirmation is not busy');
+  stStatus.map = { 团子: { bot: '团子', state: 'awaiting' }, 栗子: { bot: '栗子', state: 'running' }, 年糕: { bot: '年糕', state: 'queued' } };
+  out.paint();
+  assert.match(text(host), /有\s+2 只猫猫 在忙。$/, 'working and queued count; the waiting one does not');
+});

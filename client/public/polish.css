@@ -9,14 +9,20 @@
 /* ---- A message with focus: found from search, a quote or the status line
    (chat-locate.js, chat-experience.js), or reached with the keyboard. The
    app's square ring round the whole row (as wide as the history) becomes a
-   quiet one that follows the bubble's own shape. */
+   one that follows the bubble's own shape. The primary colour at 70% over the
+   chat's background is 3.7:1 in light and 4.7:1 in dark (at least 3:1 for a
+   focus indicator; tests/reply-text.test.ts computes it from the tokens). */
 #thread .msg:focus-visible { outline: none; }
 #thread .msg:focus-visible :is(.bubble, .bot-bubble) {
-  outline: 2px solid color-mix(in srgb, var(--x-primary) 45%, transparent); outline-offset: 2px;
+  outline: 2px solid color-mix(in srgb, var(--x-primary) 70%, transparent); outline-offset: 2px;
 }
 /* A row without a bubble (a request card, a notice): the ring goes round the row, rounded. */
 #thread .msg:focus-visible:not(:has(.bubble, .bot-bubble)) {
-  outline: 2px solid color-mix(in srgb, var(--x-primary) 45%, transparent); outline-offset: 2px; border-radius: var(--x-r-card);
+  outline: 2px solid color-mix(in srgb, var(--x-primary) 70%, transparent); outline-offset: 2px; border-radius: var(--x-r-card);
+}
+/* Forced colours: the system's own highlight, whatever the theme. */
+@media (forced-colors: active) {
+  #thread .msg:focus-visible :is(.bubble, .bot-bubble), #thread .msg:focus-visible:not(:has(.bubble, .bot-bubble)) { outline-color: Highlight; }
 }
 /* The flash is the bubble's alone (not a block round the name line and the
    bubble); the owner's bubble tints toward the page in light and dark alike,

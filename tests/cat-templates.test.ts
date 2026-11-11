@@ -511,8 +511,9 @@ test('a creation\'s notice goes to the shell with the new cat, which says it onc
   c.submit();
   await settle();
   assert.deepEqual(c.created, [{ name: '宪宪 2', native_id: 'cat_2', notice: '有一项默认设置没写进去。' }]);
-  // The shell opens the chat first, then says it (app.js openTemplateCreate).
-  assert.match(read('client/public/app.js'), /onCreated: async \(created\) => \{\s*await refreshLists\(\);\s*await selectBot\(created\.name\);\s*\/\/[^\n]*\n\s*if \(created\.notice\) quietNote\(created\.notice\);/);
+  // The shell holds it by the cat's identity before opening, and says it once that chat is open (app.js openTemplateCreate,
+  // selectBot → sayHeldNotice), so a failed refresh or open does not lose it.
+  assert.match(read('client/public/app.js'), /onCreated: async \(created\) => \{\s*\/\/[^\n]*\n\s*if \(created\.notice\) holdNotice\(\{ name: created\.name, nativeId: created\.native_id \|\| "", text: created\.notice \}\);\s*await refreshLists\(\);\s*await selectBot\(created\.name\);/);
 });
 
 test('a late model answer for a previous Agent never paints over the current one', async () => {

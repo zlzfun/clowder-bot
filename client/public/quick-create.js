@@ -396,7 +396,12 @@
       if (!alive()) return;
       attempt = null;
       const name = (result && typeof result.name === "string" && result.name) || body.name;
-      done({ name, face: body.simple.face, picture: faces.picture(body.simple.face), notice: R.createdNotice(result) });
+      // A notice about the new cat (one default not written) is handed to the
+      // shell now, by the cat's identity; the shell says it once that cat's
+      // chat is actually open, however and whenever it opens (h.notice).
+      const notice = R.createdNotice(result);
+      if (notice && h.notice) h.notice({ name, nativeId: result && typeof result.native_id === "string" ? result.native_id : "", text: notice });
+      done({ name, face: body.simple.face, picture: faces.picture(body.simple.face) });
     }
     // Made, but its chat did not open: say it is there and offer to open it.
     function later(name, reopen) {
@@ -463,20 +468,12 @@
   }
   // Open the new cat's chat, gliding its portrait there on the way. Rejects
   // only when the chat could not be opened; the cat exists either way.
-  function arrive(name, face, picture, notice) {
+  function arrive(name, face, picture) {
     const h = hooks(), flight = handOff(picture, face);
     arriving++;
-    const opened = Promise.resolve().then(() => openThen(name, notice));
+    const opened = Promise.resolve().then(() => h.openCat(name));
     if (flight) flight.land(() => h.landing(name));
     return opened.finally(() => { arriving--; }).catch((err) => { if (flight) flight.cancel(); throw err; });
-  }
-  // The chat opens, then the creation's notice (if any) is said once, quietly
-  // (h.notice: the app's toast). A chat that did not open says nothing yet: the
-  // notice comes when 打开聊天 succeeds.
-  async function openThen(name, notice) {
-    const h = hooks();
-    await h.openCat(name);
-    if (notice && h.notice) h.notice(notice);
   }
   // A cat made here is on its way into its chat: the list may already show it.
   let arriving = 0;
@@ -493,12 +490,12 @@
       dialog: false,
       alive: () => root.isConnected,
       onState: (kind) => { sub.hidden = kind !== "ready" && kind !== "loading"; },
-      done: ({ name, face, picture, notice }) => {
+      done: ({ name, face, picture }) => {
         root.classList.add("leaving");
-        arrive(name, face, picture, notice).catch((err) => {
+        arrive(name, face, picture).catch((err) => {
           if (!root.isConnected) { h.error(err); return; }
           root.classList.remove("leaving");
-          flow.later(name, () => openThen(name, notice));
+          flow.later(name, () => h.openCat(name));
         });
       },
     });
@@ -613,8 +610,8 @@
       alive: () => L.alive,
       hold: L.card,
       onBusy: (on) => { L.busy = on; more.disabled = on; cancel.disabled = on; },
-      done: ({ name, face, picture, notice }) => {
-        const going = arrive(name, face, picture, notice); // takes the portrait's place before the dialog goes
+      done: ({ name, face, picture }) => {
+        const going = arrive(name, face, picture); // takes the portrait's place before the dialog goes
         L.close(true);
         going.catch((err) => h.error(err));
       },
