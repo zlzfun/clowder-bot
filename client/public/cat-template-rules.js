@@ -198,8 +198,8 @@
     ctx = ctx || {};
     const out = [], create = ctx.purpose === "create";
     if (create) {
-      if (!cfg.runtimeId) out.push({ field: "agent", text: "选择 Agent" });
-      else if (Array.isArray(ctx.agents) && !selectable(agentOf(ctx.agents, cfg.runtimeId))) out.push({ field: "agent", text: "这个 Agent 暂不可用" });
+      if (!cfg.runtimeId) out.push({ field: "agent", text: "选一个工具" });
+      else if (Array.isArray(ctx.agents) && !selectable(agentOf(ctx.agents, cfg.runtimeId))) out.push({ field: "agent", text: "这个工具暂时用不了" });
     }
     if (cfg.model.mode === "explicit") {
       const value = trim(cfg.model.value);
@@ -245,7 +245,7 @@
   // ---- text ----
   function summary(cfg, ctx) {
     ctx = ctx || {};
-    const parts = [cfg.runtimeId ? agentLabel(ctx.agents, cfg.runtimeId) : "未选 Agent"];
+    const parts = [cfg.runtimeId ? agentLabel(ctx.agents, cfg.runtimeId) : "未选工具"];
     parts.push(cfg.model.mode === "explicit" && trim(cfg.model.value) ? trim(cfg.model.value) : "默认模型");
     if (cfg.effort.mode === "explicit" && trim(cfg.effort.value)) parts.push(trim(cfg.effort.value));
     return parts.join(" · ");
@@ -262,7 +262,7 @@
     ctx = ctx || {};
     const c = config(cfg), breed = resolveBreed(c, ctx);
     const rows = [
-      ["Agent", c.runtimeId ? agentLabel(ctx.agents, c.runtimeId) : "未选"],
+      ["工具", c.runtimeId ? agentLabel(ctx.agents, c.runtimeId) : "未选"],
       ["模型", c.model.mode === "explicit" && trim(c.model.value) ? trim(c.model.value) : "默认"],
       ["推理强度", c.effort.mode === "explicit" && trim(c.effort.value) ? trim(c.effort.value) : "默认"],
     ];

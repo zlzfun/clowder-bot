@@ -121,10 +121,12 @@
     if (!u || u.n < 2) return "";
     return u.n > 99 ? "99+" : u.n + (u.more ? "+" : "");
   }
-  // All conversations' new replies together.
-  function total(entries) {
+  // All conversations' new replies together. `inView`: the conversation the
+  // owner is looking at (open, with the tab visible), left out: a reply that
+  // arrives there is being read, not waiting, even before its read is confirmed.
+  function total(entries, inView) {
     let n = 0, more = false;
-    for (const e of entries || []) { const u = unread(e); n += u.n; more = more || u.more; }
+    for (const e of entries || []) { if (inView && e === inView) continue; const u = unread(e); n += u.n; more = more || u.more; }
     return { n, more };
   }
   // The page title with the total in front: 「(3) 团子 · clowder-bot」.

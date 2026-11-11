@@ -13,7 +13,7 @@
       "file": "account.js",
       "target": "client/public/account.js",
       "sourceSha256": "1ad312ac1b74f6fcd8894910918cb798153912d83c0b50d5ff9b6ea7cd1b8461",
-      "sha256": "c4ac6836eae7233b65c5970a9910a6cb7d4f439af6008bba6709724c91863591",
+      "sha256": "a27751de6f60cdc87da6a845ff3c1c45b081754464ccde6cf4807a6e2fa2b236",
       "unchanged": false
     },
     {
@@ -27,7 +27,7 @@
       "file": "app.js",
       "target": "client/public/app.js",
       "sourceSha256": "1248f793493826bf044359c71e7d8772ccc3472d6021d6abb979dff9b6cb29bc",
-      "sha256": "99f38e9e541a510d50e357e209bb9e24402bf9b63013ef684b1d9f2d7d27a519",
+      "sha256": "9c2fe89bf6d5b19e6fba70be3e93ccdcee71659ae4e5109d943b99b0ce3eb4a1",
       "unchanged": false
     },
     {
@@ -153,7 +153,7 @@
       "file": "index.html",
       "target": "client/index.html",
       "sourceSha256": "a4160c18e23489fbc6a9e21fe494e1ac52840a67b2e138997400a0b42835b556",
-      "sha256": "5c27969e615a47eca20dbfc269b240c93b64702302da63813f2a47db1467e898",
+      "sha256": "4a7792cebf560cda946a6d02b23509ed05269146e7e8fbc1ea6c72ee6ae6ad30",
       "unchanged": false
     },
     {
@@ -590,7 +590,7 @@
     {
       "target": "client/public/agents.js",
       "description": "Local Agent access: settings list grouped by installation with search and one status line per Agent, per-Agent detail level (status, Bots, defaults, folded detection evidence) wired to the settings bar via onLevel; Bot Agent trigger and switch dialog that names only the carrier, model or effort a switch really clears (new-cat Agent choice moved to cat-templates.js)",
-      "sha256": "b4859c61a8825865997f2d8ed1b5faa5c6f261160908511da07324e75790ca5a"
+      "sha256": "9d5c481c2cc815cd87f93970d615aabdb1c58a85c0a31c88cd248e82c4af70fd"
     },
     {
       "target": "client/public/agents.css",
@@ -601,7 +601,7 @@
       "target": "client/public/chat-presentation.js",
       "description": "Message presentation: speaker identity by native cat ID and folded execution records (presentation_kind activity) that open onto their prose and their native toolEvents as literal text, one entry per event in stored order with each result's own status; a record with neither is a plain, non-expandable status line; the empty single chat's greeting invitation (greetings): page-only request bookkeeping per cat and native thread for POST /xbot-api/bots/:name/greeting {expectedThreadId}, at most one automatic request per thread for the page's life on the first visible read of a truly empty, unregistered chat, never retried by itself, owner retry for that thread only, the transcript greeting field (accepted/unconfirmed) preferred over the page's receipt, exists showing nothing; and its one status line (greetingLine: sysline with the cat's xs face, textContent only, no message ID, time, bubble or spinner, 重试 only for failed/unconfirmed); the cat's words are never made here",
       "attribution": "2026-11-06 greeting invitation bookkeeping and status line authored by local Claude Code (claude-opus-5-5), replacing that day's name-keyword opening line",
-      "sha256": "91e4317ef2545acc576ffdd32f42357b8a81ae2cd3e8f090257954b48839d64f"
+      "sha256": "89e4d8d553b44e698eff1a78fcb6c553215095492fc5a4aa2e01f358736d6270"
     },
     {
       "target": "client/public/chat-presentation.css",
@@ -643,13 +643,13 @@
       "target": "client/public/cat-template-rules.js",
       "description": "Cat template rules without DOM or network: CatConfig/CatTemplate normalisation, Agent usability, runtime-models effort capability, model-family breed, validation, request bodies and short summaries; shared by cat-templates.js and tests",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-03",
-      "sha256": "dcf60374fe04be5d7547f847ae0e4ce96f6a307a2864ec78b8d2c2f3bcd34c03"
+      "sha256": "1a2677bfb8d4898897370864fb2000447b28b64dc656d76184f521f7906eeca6"
     },
     {
       "target": "client/public/cat-templates.js",
       "description": "Cat templates: settings 模板 pane (flat list, search, editor, delete) mounted in the persona slot, the single 新建猫猫 layer opened from the shell's 新建 menu, and the copied-configuration rows for a cat's drawer; reads /xbot-api/cat-templates, /xbot-api/agents and /xbot-api/agents/:id/models, no sample data",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-03",
-      "sha256": "3fe08c5c20460dac5726c60b67f59a42c53f10933c1ceabd74cce40405eb02af"
+      "sha256": "db98ebd00526834efa389579c17a466b064f44d3111ced4d43e5ffb83bf81046"
     },
     {
       "target": "client/public/cat-templates.css",
@@ -673,13 +673,13 @@
       "target": "client/public/workspace-rules.js",
       "description": "File, saved-conversation and chat-task rules without DOM or network: conversation scope, sizes and badges, per-message attachment limits and refusal text, restoring files of a send that did not go out, Task order and dock summary, 请求传球 targets and gate, native ownership history (流转记录: newest first, handoff/human_update/claim named apart, nothing invented), saved-conversation list normalisation and refusal wording; shared by workspace.js and tests; native file views: a size not given is left out (never 0 B), availability gates download and preview (anything but an explicit available is not fetchable, with the server's reason), 成果 for a native result kept apart from the 交付物 snapshot name",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-04; interaction organization informed by OpenBot at acccbce543a59e8806ed3b60a74b11123b0ce5d2 (file cards with an in-place missing state, per-task resume/reassign/stop), no OpenBot code, text or assets copied; simplified by local Claude Code (claude-opus-5-5) on 2026-11-05 after user review: project/workspace management and manual Task creation/assignment removed, the working directory folded under 更多文件, 历史对话 added; chat experience 1/3/5 by local Claude Code (claude-opus-5-5) on 2026-11-05: native file availability, size null and 成果 naming",
-      "sha256": "3e81a4737411326729a047b7f4cfd9f5e07aa4748e6464c773220629dd0bf580"
+      "sha256": "f4b0e1e76df2fb822111adc8f464a5aa1bc269e582f593b5f6d865d5facad452"
     },
     {
       "target": "client/public/workspace.js",
       "description": "Files, saved conversations and chat Tasks for the chat shell: composer attachments uploaded to the exact native thread (picker, paste, drop; abort on switch; files handed back after a send that did not go out), file cards with download, server-offered preview and an honest missing state, the drawer 文件 page (deliverables and attachments; working-directory path, read-only browsing and mark-as-deliverable folded under 更多文件 and read only once opened; no file-policy claims), the cat 资料 page's folded 历史对话, there once the list is read even with one conversation (switches only between server-known threads with expectedThreadId, pending-attachment confirmation, late answers dropped), 任务 cards in the drawer's 高级 (负责人 from the read Task, progress, background run, 请求传球 as an asynchronous request, stop/cancel/resume via runtime-tasks.js rules, 流转记录) and the dock Task line; no project or workspace management and no Task creation or assignment; reads follow the chat poll and native events, stale answers dropped; owner feedback and pass receipts hold only at the owner revision they were said at, and a late control/pass answer never replaces or repaints a newer read (ownerRevision, then updatedAt); native file cards (成果, unavailable reason in place, no download, preview or picture request while unavailable; URLs built from the encoded ID only), a 成果 section on the 文件 page once the server reads the native record, whose failed read (nativeReadStatus unavailable) keeps the saved snapshots and attachments and offers 重试; focusTask(id) opens 任务 at one Task's card for the status line; switchTo(threadId) runs the same 历史对话 switch from elsewhere (the search palette) under the same rules and reports how it ended ({ok} or {ok:false, text} in the fold's words); switchTo needs its own successful, validated list read (a failed or malformed read switches nothing and says so, apart from a read that lacks the thread)",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-04; interaction organization informed by OpenBot at acccbce543a59e8806ed3b60a74b11123b0ce5d2 (file cards with an in-place missing state, per-task resume/reassign/stop), no OpenBot code, text or assets copied; simplified by local Claude Code (claude-opus-5-5) on 2026-11-05 after user review: project/workspace management and manual Task creation/assignment removed, the working directory folded under 更多文件, 历史对话 added; chat experience 1/3/5 by local Claude Code (claude-opus-5-5) on 2026-11-05: native file views on the existing cards, partial native reads, focusTask; switchTo and switch outcomes by local Claude Code (claude-opus-5-5) on 2026-11-11 for search and jump (round 3b); 历史对话 always reachable on the 资料 page by local Claude Code (claude-opus-5-5) on 2026-11-11 (资料页与群); switchTo fresh-read rule review fixes by local Claude Code (claude-opus-5-5) on 2026-11-11",
-      "sha256": "4520ab633a6f5a3511940286929fd875dd8f3a58b63791e56f627d8381f141be"
+      "sha256": "727e4abb8718df47f1fe940d9534ebbd412dd637f6423228f60f8365e248cd50"
     },
     {
       "target": "client/public/workspace.css",
@@ -691,13 +691,13 @@
       "target": "client/public/chat-experience-rules.js",
       "description": "Status-line, read-position and read-only memory rules without DOM or network: GET <scope>/activity checked (native order approval > failure > running > queued > task, counts never below the items, unknown kinds dropped, a missing read status is not ready), the one status line (the most urgent kind leads, every other kind keeps its count, partial or failed reads say they cannot tell, new replies only from the server's unread count), sidebar state for bots and groups (awaiting from approvals, unknown never idle, failure, unread), the read target gate (newest visible reply, something unread, same thread, visible uncovered page, in sight, once), Profile/Taste entries with pendingCount kept apart from saved content, sources and memory read failures by kind",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-05 for chat experience 1/3/5 (docs/chat-experience-api.md)",
-      "sha256": "81589415e320cdc3599a92f8d6dd0fe0b29713bc13e55cd819224e01f11d9d8d"
+      "sha256": "8724c724f60d2e7a13d8898a7653565d105b041917892b81c93c22525453cbc2"
     },
     {
       "target": "client/public/chat-experience.js",
       "description": "The chat's one status line (in place of the separate execution and Task lines while GET <scope>/activity answers; the earlier lines stay on a server without it), opening in place onto a short list whose rows find the real message by native message ID or the Task by ID; past six rows 查看其余 N 项 / 收起 shows every listed approval and concurrent item in place, kept open across refreshes of the same conversation; approvals pointing to the existing runtime-panel controls and never approved here; read confirmation by POST <scope>/read only for the newest visible cat reply after it stays in sight on a visible, uncovered page, once, one request at a time; a 404 or 409 refuses that one reply (conversation + thread + message) only, so a newer reply is still confirmed, and 409 reads the activity again; a late answer for a conversation or thread the chat has left leaves no refusal, wait or reload; the cat's 记忆, read only throughout: 关于你 and 你的偏好 folded and read only when opened (GET /xbot-api/memory/profile|taste), loading, failure, no permission, partial, empty and an absent route told apart, each entry's source on demand with its revision (409 asks to read the list again), no editing, confirming or forgetting; 这个对话的便笺 read only as before (no add or delete; a failed read says so with 重试, never as no notes); a group's 记忆 shows no owner records and no promise; activityRead() hands on the last successful activity read for the open conversation with the time it was asked for (chat-live.js ends a reply whose end it missed only on such a read)",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-05 for chat experience 1/3/5 (docs/chat-experience-api.md); review fixes by local Claude Code (claude-opus-5-5) on 2026-11-05: note add/delete removed (memory read only), the status list made fully reachable, read refusals scoped to one reply; 2026-11-06 unused sidebar attend() removed by local Claude Code (claude-opus-5-5); activityRead added by local Claude Code (claude-opus-5-5) on 2026-11-11 for the live reply review",
-      "sha256": "662cb63c1783b3ea43517d5747e3d5345f9fc07074377d664d3fc30f57c90840"
+      "sha256": "69eb9fc05924238820c99a711a2eeb78cfcd2748c971bc3c18d05aeecfb76312"
     },
     {
       "target": "client/public/chat-experience.css",
@@ -715,7 +715,7 @@
       "target": "client/public/chat-live.js",
       "description": "A reply drawn while it is written (typing bubble in the cat's reply position, one quiet crossfading step line, words through the existing Markdown path throttled to animation frames with a soft caret, the finished transcript row taking its place without rising), the send's typing bubble before the server names the reply (single chats and groups; 排队中 only when the status says the send waits after a grace period), the history's keyed redraw (unchanged rows keep their element, only new rows rise, changed rows replaced in place), the send/stop button morph, and 回到最新 above the composer with the server's unread count; nothing stored as a record; typing bubbles matched to the reply that answers them by native replyTo (a reply finished before any of it was seen takes the bubble's place), replies whose end was missed closed only on a fresh activity read showing nothing running or queued for their cat, and the stop cleanup limited to the sends taken when the stop was asked, in that conversation",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for the live reply round (docs/chat-live-api.md)",
-      "sha256": "c943a90f00c3239981e5266f5f257aef5ab0942f7cbb0b0784a9fe64fe73cd65"
+      "sha256": "322ad3fcbcf294662c73ebbb5de2be8f8c5344205d23416d603e7de040f42822"
     },
     {
       "target": "client/public/chat-live.css",
@@ -727,13 +727,13 @@
       "target": "client/public/quick-create-rules.js",
       "description": "Quick creation rules without DOM or network: cat names checked as the adapter's zod label (1–64 characters, letters, digits, space, _ . -; taken names ignoring case) and group names as its groupTitle, the unnamed group's name joined by 、 and clipped like the server's clip(), the face that goes with a tool and the preset nickname made free of taken names, the name following the face until typed, GET /xbot-api/start read as it is (usable tools are the logged-in and the unconfirmed ones, an unchecked login never called ready), what blocks in everyday words with the native login commands, unchanged re-detection, request bodies that always carry the tool shown with a fingerprint for key reuse, and failed requests told apart (409 the name, 422 blocked, no answer or 5xx unsure; adapter words naming a Bot, an Agent or a model not shown)",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 开箱即用 (docs/xbot-api.md「开箱即用」); review fixes by local Claude Code (claude-opus-5-5) on 2026-11-11: lost-answer retry under the original key, keyed group creation, tool switch keeps focus, picked face kept across blocked, input caps by code points, live opener for focus return, stage reconciled when the first cat arrives elsewhere",
-      "sha256": "23f9ce39e12caec6358fa6ac1d135c4143c92f5356980f1f48af245e61f2c8e8"
+      "sha256": "1816d1ba6f6b205b18f68d10d17ecb47293539c224e25807b75a896255ea6134"
     },
     {
       "target": "client/public/quick-create.js",
       "description": "The first-run 「领一只猫猫回家」 stage (eight clay faces as one radio group, the chosen one stepping forward, the nickname as the name, 带它回家, the quiet tool line with a select when more than one is usable and the unconfirmed-login note with its copyable command), the blocked states with 重新检测 (?refresh=1, says plainly when nothing changed, focus kept), inline creation errors and the same-key retry of an unsure request, the portrait gliding to the header face on success (skipped under reduced motion), the made-but-not-opened state, the no-chat line with 打开列表, the quick 新建猫猫 dialog (optional 它主要帮你做什么 as simple.about, 更多设置 handing over to the unchanged template creator) and the 新建群聊 dialog (face chips in pick order, 2–10 members, optional name whose placeholder is the generated name, unsure answers told to look before retrying); one dialog at a time, Escape, Tab and focus kept inside and returned to the opener",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 开箱即用 (docs/xbot-api.md「开箱即用」); review fixes by local Claude Code (claude-opus-5-5) on 2026-11-11: lost-answer retry under the original key, keyed group creation, tool switch keeps focus, picked face kept across blocked, input caps by code points, live opener for focus return, stage reconciled when the first cat arrives elsewhere",
-      "sha256": "ae20588679c20d77acd7ca5aea45fe94ae85d67654436ca75c17b1dd01d38cff"
+      "sha256": "591ab6c95c4e733350fa6c37321e86be3a8b50859408b70dc98b7f74364de38e"
     },
     {
       "target": "client/public/quick-create.css",
@@ -751,7 +751,7 @@
       "target": "client/public/palette.js",
       "description": "The ⌘K / Ctrl+K palette and 搜索 at the top of the sidebar (a full-height sheet on phones): instant name filtering, a debounced search of what was said with stale requests cancelled and late answers dropped, hits with chat, speaker, marked snippet and time, plain notes for unread conversations and unsearched or unlisted messages, retry; an empty query lists recent chats and the actions registry (ClowderPalette.actions: 新建猫猫, 新建群聊, 设置, 切换深浅色 by default, each the app's own function; others may add or replace entries); Enter opens a chat, or opens a hit's chat and finds the message through the replaceable ClowderPalette.locate (by default chat-experience.js's locate among the rows on screen; a message not shown is said to be further back), a hit in a cat's earlier conversation asks first and switches through workspace.switchTo (refusals shown); open({scope, query}) searches one chat; ↑/↓, Enter, Esc, Tab kept inside, focus returned, the shell inert while open; Alt+↑/↓ open the previous / next chat in sidebar order; no records kept; one chat searched through GET /xbot-api/bots/:name/search or /groups/:id/search with a scope-aware request key; every chosen row resolved again against the current chat list by lasting identity and refused in place when gone (also after the earlier-conversation question); continuations bound to an operation generation so a late chat opening or switch never closes, focuses or speaks over a newer palette; composition cancels pending searches and shows nothing for the text before it; a hidden shell (sign-in), another dialog or a 401 closes the palette without moving focus, its search cancelled and inert lifted",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for search and jump (round 3b) (docs/xbot-api.md「搜索」); review fixes by local Claude Code (claude-opus-5-5) on 2026-11-11 (sign-in transitions, stale rows, IME, operation generation, per-chat route)",
-      "sha256": "ec6e76ab1f6f12b808a5ad419b8e4a0de83ba4efa5e65b9705e5dce17fe59e10"
+      "sha256": "6f6847adb170648cdeb6a5ae2c6f6b4a2818ab24f32137944df9cf61ce4e081a"
     },
     {
       "target": "client/public/palette.css",
@@ -763,13 +763,13 @@
       "target": "client/public/chat-list-rules.js",
       "description": "Contact-list rules without DOM or network: the status poll's activity.last checked (owner or cat, time, one plain line, files), the preview line (你：… for the owner, 名字：… for a cat in a group, the single chat's cat bare, [文件] / [文件] N 个 for a file-only line), short relative times in one style (刚刚, N 分钟前, today's clock, 昨天, weekday, M月D日, Y/M/D) with a full stamp, recency order (newest first, rows with nothing said keep their order, ties never swap), unread count from two up and the page title's total, the greeting's owner name (none for the default 你), and per-chat drafts (words plus a single chat's quote)",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 找得到, part one (docs/xbot-frontend.md item 30)",
-      "sha256": "215d39f958d42dec7ffda6e09ed8d5c298dfc5bde0678c7a5a37a8cf54782790"
+      "sha256": "23c1ce46dd3f82989c399304a77d363a6719afd3d0a6fea7271931ac2c5bf191"
     },
     {
       "target": "client/public/chat-list.js",
       "description": "The sidebar as a messenger's contact list from the status poll only: a row's second line (the draft left in a chat other than the open one as 草稿：…, else the latest line, kept across a failed read of the same conversation), the time on the name line refreshed every 30 s, the unread count beside the preview (two up, never on the open chat), rows reordered by recency with only out-of-place rows moved, the focused row never moved, a 180 ms glide from where each row was last seen (none under reduced motion), the (N) total in the page title, and drafts moved between the composer and their chat on leaving and opening it (the quote dropped when the same chat reopens in place; a sessionStorage copy for reloads in the tab)",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 找得到, part one (docs/xbot-frontend.md item 30)",
-      "sha256": "fbab8e0f42b4e674f40f65967cc819c57d8854d9fd90ae7523a15f7fec14777d"
+      "sha256": "683da69824d963f569db902a24db5bf71d05416f14b845f2dc1fc533b8caee1d"
     },
     {
       "target": "client/public/chat-list.css",
@@ -787,7 +787,7 @@
       "target": "client/public/chat-history.js",
       "description": "Earlier messages (newest-page reads merged with the pages the owner scrolled back to; a quiet top row: 查看更早的消息 / 正在加载… / 没有更早的消息了 / failure with 重试, changed in place and re-read by the keyed redraw; scrolling near the top loads; answers for a chat or conversation left behind discarded), the chat header's ⋯ menu (新对话 and 历史对话 for a cat, 在对话里查找 only when window.ClowderPalette exists; arrows, Escape back to ⋯), the 新对话 dialog over the existing POST /xbot-api/bots/:name/new (says the old conversation stays under 历史对话 and what the cat remembers is kept; busy, switching and unsure answers said plainly), 历史对话 opening the existing list in 详情, and the suggestions under a cat's greeting that send on a tap",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 找得到, part one (docs/xbot-frontend.md item 30)",
-      "sha256": "8b0ddb2c1f324812779867c66aeffa873b429ff38d940c3e8d1c28a03da4f8f7"
+      "sha256": "12e235a17529be1af8fbe49e0ecc809459360ba75be4bd5694bfcfa1bb66789f"
     },
     {
       "target": "client/public/chat-history.css",
@@ -805,7 +805,7 @@
       "target": "client/public/profile.js",
       "description": "The drawer's identity head (a cat's portrait on a quiet wash of its own native colour; a group's face, its name edited in place with Enter/Esc and 「N 只猫猫」), the cat 资料 page (职责 or the way to write one, 置顶 as a switch, 新对话 via POST /xbot-api/bots/:name/new with what happens to the conversation and an attachment confirmation, workspace.js's 历史对话, one folded 高级 drawn on first open with the shell's Agent row, 模型与画像, task and run cards, 导出对话 / 复制 ID / 运行面板, 删除猫猫 last), the group 成员 page (faces and names, 添加猫猫 as face chips, 移出 with a second click within three seconds while two stay, PATCH /xbot-api/groups/:id {add}/{remove} with the answered roster shown and the freshest record read before an edit, a 409 shown as the server says and nothing stopped, the how-to-talk line, 高级 with task cards, 删除群聊 with DELETE after a confirmation that the history is kept) and a group row's menu (改名, 删除群聊; arrows, Home/End, Esc, focus back to the row by the group's id); pages kept per chat across repaints and acting for the current selection, the pin switch showing only the confirmed state (busy while saving), one dialog at a time with Escape and Tab kept inside even while busy and the page behind inert",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 资料页与群 (docs/xbot-frontend.md item 31; docs/xbot-api.md group PATCH/DELETE)",
-      "sha256": "22cf9d0f57cda945a55298c5a7f4ac5730811e1f3580870d6bc9ec726ef4bf33"
+      "sha256": "d8aa71761b3aa27f4650d98fda8a38b4bb57ccc03fe980e63c2d8dc2ec0719d6"
     },
     {
       "target": "client/public/profile.css",
@@ -866,6 +866,24 @@
       "description": "window.ClowderNotify: one switch in 设置 → 通用 that asks for the browser's permission and says when it refused or is unsupported (remembered in localStorage), and silent notifications from the polled status that focus the tab and open the chat; never touches the document title",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 确认与提醒 (docs/xbot-frontend.md item 32; docs/chat-experience-api.md 「等你确认的事」「卡片、清单与选项」, docs/chat-live-api.md)",
       "sha256": "255e60e18620cc5b573d05ab0edc3c0d608d0d33cf7a2cada9861528af276119"
+    },
+    {
+      "target": "client/public/chat-locate-rules.js",
+      "description": "Pure rules for finding one message of the open chat further back than the loaded history: match by native message ID or seq, whether to read one more earlier page or stop (a bounded number of pages), and the quiet progress and truthful stop wording",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 打磨 6a · one voice and a clean finish (docs/xbot-frontend.md item 33)",
+      "sha256": "0420ea46a00a0d840ee5c78fbbab987990edd76dc8bba4c94ef8e7025a7e7773"
+    },
+    {
+      "target": "client/public/chat-locate.js",
+      "description": "window.ClowderLocate: centres, flashes and focuses a message of the open chat; when it is not drawn yet, reads earlier pages through chat-history.js's own loader until it is, with one quiet note, and stops quietly when the chat changes or a newer search starts. Used by the search palette's locate and a quote's jump",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 打磨 6a · one voice and a clean finish (docs/xbot-frontend.md item 33)",
+      "sha256": "1175323a2b44bf66491dcb162f243c333bf8b37e744765f4ecbc85ffcaa89e19"
+    },
+    {
+      "target": "client/public/polish.css",
+      "description": "Styles for 6a: the found message's quiet ring that follows its bubble and a flash that reads in dark mode, 设置 → 关于's runtime link as a settings row, and the consistency fixes from the audit; existing tokens and keyframes only",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 打磨 6a · one voice and a clean finish (docs/xbot-frontend.md item 33)",
+      "sha256": "cc7c5f40adc46e3582d9f35c8e7b38b615cde56284405e7c776645fc6bb0250d"
     }
   ]
 }

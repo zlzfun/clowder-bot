@@ -16,6 +16,8 @@
     unknown: { dot: "idle", text: "未确认登录状态", short: "未确认登录" },
     not_installed: { dot: "off", text: "未检测到", short: "未检测到" },
   };
+  // Engine words a server reason may carry; such a reason is not shown as is.
+  const RETIRED = /\bagent\b|(?<![\w-])bot\b|模型|原生|会话/i;
   function readiness(agent) {
     const status = agent && agent.readiness && agent.readiness.status;
     const key = Object.hasOwn(READY, status) ? status : "unknown";
@@ -29,10 +31,14 @@
   }
   function unavailable(agent) {
     if (selectable(agent)) return "";
-    if (agent && agent.unavailableReason) return agent.unavailableReason;
-    if (!agent || !agent.installed) return "本机尚未检测到这个 Agent";
-    if (!agent.supported) return "这个 Agent 的接入方式还没适配";
-    return "需要先在本机完成登录";
+    // Said from the facts first: the server's own reason may name engine
+    // objects (「请先在本机 Agent 中完成登录」), so it is shown only when the
+    // facts do not explain the refusal and it speaks everyday words.
+    if (!agent || !agent.installed || readiness(agent).status === "not_installed") return "这台电脑上还没检测到它";
+    if (!agent.supported) return "这个工具还没有接上";
+    if (readiness(agent).status === "login_required") return "需要先在这台电脑上登录";
+    const said = String(agent.unavailableReason || "").trim();
+    return said && !RETIRED.test(said) ? said : "暂时不能选用";
   }
   // The short tag for a row that cannot be chosen.
   function blocked(agent) {
@@ -63,10 +69,10 @@
     const override = agent.modelOverride || "";
     const own = config && config.effort && config.effort.mode === "explicit" && typeof config.effort.value === "string" ? config.effort.value.trim() : "";
     if (!agent.id || agent.configurationSource !== "native_tool") {
-      return { local: false, legacy: true, id: null, title: agent.label || "其他原生接入", detail: "原有接入，只读保留" + (override ? " · " + override : ""), override, effort: own };
+      return { local: false, legacy: true, id: null, title: agent.label || "其他接入方式", detail: "原有接入，只读保留" + (override ? " · " + override : ""), override, effort: own };
     }
     const set = [override, own ? "推理强度 " + own : ""].filter(Boolean).join(" · ");
-    const detail = set ? "Bot 单独指定 " + set : "沿用本机默认" + (agent.configuredModel ? " · " + agent.configuredModel : "");
+    const detail = set ? "单独指定 " + set : "沿用本机默认" + (agent.configuredModel ? " · " + agent.configuredModel : "");
     return { local: true, legacy: false, id: agent.id, title: agent.label || agent.id, detail, override, effort: own };
   }
   // Choosing the current Agent again only matters when it clears something the Bot set itself.
@@ -89,7 +95,7 @@
     const message = String((err && err.message) || "");
     if (/[㐀-鿿]/.test(message)) return message;
     if (err && err.status === 409) return `「${bot}」的配置刚有变化，请重新打开后再试。`;
-    return "没能更换 Agent，请稍后再试。";
+    return "没能更换工具，请稍后再试。";
   }
   async function inventory(api, refresh = false) {
     const data = await api("/xbot-api/agents" + (refresh ? "?refresh=1" : ""));
@@ -108,9 +114,9 @@
     if (!found(agent)) return "未检测到";
     if (agent.supported !== true) return "暂未适配";
     const a = agent.activity || {}, bots = botNames(agent).length, parts = [readiness(agent).short];
-    if (bots) parts.push(bots + " 个 Bot");
+    if (bots) parts.push(bots + " 只猫猫");
     if (a.state === "running" || a.queued > 0) parts.push(activity(agent));
-    else if (bots && a.state !== "idle") parts.push("会话状态未知");
+    else if (bots && a.state !== "idle") parts.push("状态未知");
     return parts.join(" · ");
   }
   // A brand mark only where the runtime id and its client agree (the pairs the
@@ -167,16 +173,16 @@
     // ---- 一层：列表 ----
     function showList(from) {
       openId = null; onLevel(null);
-      const head = node("div", "sethd"); head.append(node("h2", "", "本地 Agent"));
-      const toolbar = node("div", "sktoolbar"); toolbar.setAttribute("role", "toolbar"); toolbar.setAttribute("aria-label", "本地 Agent 列表工具");
+      const head = node("div", "sethd"); head.append(node("h2", "", "本机工具"));
+      const toolbar = node("div", "sktoolbar"); toolbar.setAttribute("role", "toolbar"); toolbar.setAttribute("aria-label", "本机工具列表操作");
       const wrap = node("div", "sksearchwrap"), glyph = node("span", "sksic"); glyph.setAttribute("aria-hidden", "true");
-      const search = node("input", "sksearch"); search.type = "search"; search.placeholder = "搜索 Agent"; search.setAttribute("aria-label", "搜索 Agent"); search.autocomplete = "off"; search.value = query;
+      const search = node("input", "sksearch"); search.type = "search"; search.placeholder = "搜索工具"; search.setAttribute("aria-label", "搜索工具"); search.autocomplete = "off"; search.value = query;
       wrap.append(glyph, search);
       toolbar.append(stamp, wrap, again);
       const sections = node("div", "agent-sections"), rows = new Map();
-      const empty = node("div", "sknone"); empty.append(node("p", "", "没有检测到 Agent"));
+      const empty = node("div", "sknone"); empty.append(node("p", "", "没有检测到工具"));
       const none = node("div", "sknone"); none.setAttribute("aria-live", "polite");
-      none.append(node("p", "", "没有匹配的 Agent"), button("clearsrch", "清除搜索", () => { query = ""; search.value = ""; paint(); search.focus(); }));
+      none.append(node("p", "", "没有匹配的工具"), button("clearsrch", "清除搜索", () => { query = ""; search.value = ""; paint(); search.focus(); }));
       function item(agent) {
         const row = button("skrow agent-item", "", () => showDetail(agent.id)), tx = node("span", "tx");
         tx.append(node("b", "", agent.label || agent.id), node("span", "hint", summary(agent)));
@@ -210,8 +216,8 @@
       if (!agent) { showList(); return; }
       openId = id; repaint = null;
       const name = agent.label || agent.id, ready = readiness(agent), installed = found(agent), bots = botNames(agent);
-      onLevel({ title: name, backLabel: "本地 Agent", back: () => showList(id) });
-      const back = button("setback", "", () => showList(id)); back.append(node("span", "skback-chev"), "本地 Agent");
+      onLevel({ title: name, backLabel: "本机工具", back: () => showList(id) });
+      const back = button("setback", "", () => showList(id)); back.append(node("span", "skback-chev"), "本机工具");
       const head = node("div", "agent-dhead"), title = node("div", "skdetail-name agent-dname");
       title.tabIndex = -1; title.append(mark(agent), node("span", "", name));
       head.append(title, stamp, again);
@@ -220,14 +226,14 @@
       if (installed) status.push(["登录", [dot(ready.dot), ready.text]]);
       if (agent.supported !== true) status.push(["接入", "暂未适配"]);
       else if (installed) status.push(["选用", !selectable(agent) ? unavailable(agent) : ready.status === "configured" ? "可以选用" : "可以选用，未登录时执行会失败"]);
-      if (installed && (bots.length || (agent.activity && agent.activity.state === "running"))) status.push(["Bot 会话", activity(agent)]);
+      if (installed && (bots.length || (agent.activity && agent.activity.state === "running"))) status.push(["猫猫的对话", activity(agent)]);
       const parts = [back, head, error, section("状态", facts(status), ...(ready.status === "login_required" ? [loginHint(agent)] : []))];
 
       if (installed || bots.length) {
         const list = node("div", "setrows agent-bots");
         for (const bot of bots) list.append(node("div", "setrow", bot));
         if (!bots.length) list.append(node("div", "setrow agent-empty", "还没有"));
-        parts.push(section(bots.length ? "接入的 Bot · " + bots.length : "接入的 Bot", list));
+        parts.push(section(bots.length ? "用它的猫猫 · " + bots.length : "用它的猫猫", list));
       }
       if (installed) parts.push(section("本机默认", facts([["模型", agent.configuredModel || "未读取到"], ["推理强度", agent.configuredEffort || "未读取到"]])));
 
@@ -236,8 +242,8 @@
       if (agent.transport) evidence.push(["接入方式", code(agent.transport)]);
       if (seen.loginCommand) evidence.push(["登录命令", code(seen.loginCommand)]);
       if (seen.checkedAt) evidence.push(["检测于", when(seen.checkedAt)]);
-      evidence.push(["Agent ID", code(agent.id)]);
-      const more = node("details", "agent-more"), link = node("p", "setfoot agent-runtime"), runtime = node("a", "", "在运行面板查看原生详情");
+      evidence.push(["工具 ID", code(agent.id)]);
+      const more = node("details", "agent-more"), link = node("p", "setfoot agent-runtime"), runtime = node("a", "", "在运行面板查看详情");
       runtime.href = "/runtime.html"; runtime.target = "_blank"; runtime.rel = "noopener";
       link.append(runtime);
       more.append(node("summary", "", "检测详情"), facts(evidence), link);
@@ -265,7 +271,7 @@
       } catch {
         if (!current()) return;
         stamp.textContent = "";
-        fail("没能读取本地 Agent");
+        fail("没能读取本机工具");
       } finally {
         busy = false;
         if (current()) {
@@ -312,16 +318,16 @@
       const r = dialog.getBoundingClientRect();
       if (ev.target === dialog && !saving && (ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom)) close();
     });
-    const head = node("div", "binding-head"), titles = node("div", "binding-titles"), title = node("h2", "", "更换执行 Agent");
+    const head = node("div", "binding-head"), titles = node("div", "binding-titles"), title = node("h2", "", "更换工具");
     title.id = "agent-dialog-title"; dialog.setAttribute("aria-labelledby", title.id);
-    const now = !data.agent ? "当前 Agent 未读取" : "当前 " + view.title + (view.local ? "" : "（只读保留）");
+    const now = !data.agent ? "当前工具未读取" : "当前 " + view.title + (view.local ? "" : "（只读保留）");
     titles.append(title, node("p", "binding-sub", `${data.name} · ${now}`));
     const x = button("binding-close", "×", () => { if (!saving) close(); }); x.setAttribute("aria-label", "关闭");
     head.append(titles, x);
     const body = node("div", "binding-body"), note = node("p", "binding-note"), error = node("p", "bad"); error.setAttribute("role", "alert");
     const footer = node("div", "binding-footer"), cancel = button("secondary", "取消", () => { if (!saving) close(); });
-    const use = button("primary", "改用此 Agent", commit); use.disabled = true;
-    footer.append(button("binding-manage", "本地 Agent 设置…", () => { if (!saving) { close(); manage(); } }), cancel, use);
+    const use = button("primary", "改用这个工具", commit); use.disabled = true;
+    footer.append(button("binding-manage", "本机工具设置…", () => { if (!saving) { close(); manage(); } }), cancel, use);
     dialog.append(head, body, note, error, footer); document.body.append(dialog); dialog.showModal(); dialog.focus();
     const flat = (text, ...actions) => { const n = node("div", "binding-flat"); n.append(node("p", "", text), ...actions); return n; };
     const options = [];
@@ -346,12 +352,12 @@
       finally { saving = false; if (dialog.isConnected) { cancel.disabled = false; use.disabled = !pending || unchanged(view, pending); } }
     }
     async function load() {
-      body.replaceChildren(flat("正在读取本地 Agent…")); options.length = 0;
+      body.replaceChildren(flat("正在读取本机工具…")); options.length = 0;
       let agents;
       try { ({ agents } = await inventory(api)); }
-      catch { if (dialog.isConnected) body.replaceChildren(flat("没能读取本地 Agent", button("secondary", "重试", load))); return; }
+      catch { if (dialog.isConnected) body.replaceChildren(flat("没能读取本机工具", button("secondary", "重试", load))); return; }
       if (!dialog.isConnected) return;
-      if (!agents.length) { body.replaceChildren(flat("没有检测到 Agent", button("secondary", "查看本地 Agent", () => { close(); manage(); }))); return; }
+      if (!agents.length) { body.replaceChildren(flat("没有检测到工具", button("secondary", "查看本机工具", () => { close(); manage(); }))); return; }
       // One radio group across both sections; disabled rows are skipped.
       const group = node("div", "agent-groups"); group.setAttribute("role", "radiogroup"); group.setAttribute("aria-labelledby", title.id);
       const open = agents.filter(selectable), closed = agents.filter(a => !selectable(a));
@@ -398,7 +404,7 @@
       if (view.detail) tx.append(node("span", "bt-sub", view.detail));
       const chev = node("span", "skchev"); chev.setAttribute("aria-hidden", "true");
       b.replaceChildren(tx, ...(aside ? [aside] : []), chev);
-      b.setAttribute("aria-label", `执行 Agent：${view.title}${view.detail ? "，" + view.detail : ""}，点按更换`);
+      b.setAttribute("aria-label", `思考用的工具：${view.title}${view.detail ? "，" + view.detail : ""}，点按更换`);
     };
     paint();
     return b;

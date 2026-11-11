@@ -343,6 +343,29 @@ test('the status line leads with what waits for the owner and keeps every concur
   for (const k of ['approval', 'failure', 'running', 'queued', 'task']) assert.doesNotMatch(X.lead(k, 2) + X.TAG[k], /子代理|invocation|已完成|全部完成|回复/);
 });
 
+test('a cat drawn writing in the history is not said again on the line; waiting in line, a request and a failure stay', () => {
+  const X = rules();
+  const writing = (...ids: string[]) => new Set(ids);
+  // One cat writing its reply in view: the line has nothing to add (no 「宪宪正在处理」 above the typing row).
+  const one = X.activity(activity({ items: [{ id: 'r', kind: 'running', label: '宪宪正在处理', catId: 'cat-a' }] }));
+  assert.equal(X.line(one, { writing: writing('cat-a') }), null);
+  assert.equal(X.line(one, { writing: writing('cat-b') }).lead, '宪宪正在处理', 'another cat working out of view is still said');
+  assert.equal(X.line(one, { writing: writing() }).lead, '宪宪正在处理');
+  // A group's typing bubble before a cat is named stands for any running cat of this conversation.
+  assert.equal(X.line(one, { writing: writing('') }), null);
+  // What waits for the owner, a failure and the queue are never dropped; the run loses only its own count.
+  const lead = X.line(X.activity(busy()), { writing: writing('cat-a', '') });
+  assert.equal(lead.kind, 'approval');
+  assert.deepEqual(plain(lead.rest), ['排队 1', '任务 3'], 'the run in view is not counted again');
+  const queued = X.line(X.activity(activity({ items: [{ id: 'q', kind: 'queued', label: '你的消息在排队', catId: 'cat-a' }, { id: 'r', kind: 'running', label: '宪宪正在处理', catId: 'cat-a' }] })), { writing: writing('cat-a') });
+  assert.equal(queued.kind, 'queued', '排队中 stays');
+  const failed = X.line(X.activity(activity({ items: [{ id: 'f', kind: 'failure', label: '这次没完成', catId: 'cat-a' }, { id: 'r', kind: 'running', label: '宪宪正在处理', catId: 'cat-a' }], counts: { failure: 1, running: 1 } })), { writing: writing('cat-a') });
+  assert.deepEqual([failed.kind, plain(failed.rest)], ['failure', []]);
+  // Work the server counts but does not list keeps its count.
+  const unlisted = X.line(X.activity(activity({ items: [{ id: 'r', kind: 'running', label: '宪宪正在处理', catId: 'cat-a' }], counts: { running: 2 } })), { writing: writing('cat-a') });
+  assert.equal(unlisted.lead, '在处理');
+});
+
 test('sidebar: awaiting from approvals with their count, groups read from their activity, unknown is never idle, unread is the server count', () => {
   const X = rules();
   assert.deepEqual(plain(X.side({ state: 'awaiting', thread_id: 't', activity: busy() })), { kind: 'awaiting', text: '2 项等你确认', unread: 0, threadId: 't' });
@@ -1070,12 +1093,14 @@ test('the page loads the status-line scripts after workspace.js and before app.j
   assert.ok(at('workspace.js') < at('chat-experience-rules.js') && at('chat-experience-rules.js') < at('chat-experience.js') && at('chat-experience.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
   // Only the 开箱即用 extension (quick-create.css), the search palette (palette.css), 找得到 (chat-list.css, chat-history.css), 资料页与群 (profile.css, mention.css) and the live-reply styles (chat-live.css, last) come after.
-  assert.deepEqual(styles.slice(-9), ['chat-experience.css', 'quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'profile.css', 'mention.css', 'chat-cards.css', 'chat-live.css']);
+  assert.deepEqual(styles.slice(-10), ['chat-experience.css', 'quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'profile.css', 'mention.css', 'polish.css', 'chat-cards.css', 'chat-live.css']);
   // Conversation changes, reads, native events and redraws reach the module.
   assert.match(app, /workspace\.select\(state\.sel\);\n[^\n]*\n\s+experience\.select\(state\.sel\);/);
   assert.equal((app.match(/experience\.observe\(selection, /g) || []).length, 2, 'single chats and groups');
   assert.match(app, /experience\.touch\(\);/);
-  assert.equal((app.match(/experience\.rendered\(\);/g) || []).length, 4, 'both histories, drawn or empty');
+  assert.equal((app.match(/\n\s+experience\.rendered\(\);/g) || []).length, 4, 'both histories, drawn or empty');
+  // And when a reply starts or ends (chat-live.js), so the line drops or brings back 「…正在处理」.
+  assert.match(app, /changed: \(\) => \{ syncComposer\(\); paintWorkStatus\(\); experience\.rendered\(\); \},/);
   // History rows carry the native message ID (user, cat, group and reply-in-progress rows).
   assert.equal((app.match(/row\.dataset\.mid = /g) || []).length, 4);
   // The sidebar: groups get a line and a dot; 等你确认 is acted on in the chat's status line, never by guessing a card.

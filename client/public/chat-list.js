@@ -164,7 +164,9 @@
     if (!base) base = document.title || "clowder-bot";
     const all = H ? H.entries() || {} : {};
     const entries = [...Object.values(all.bots || {}), ...Object.values(all.groups || {})];
-    const next = R.title(base, R.total(entries));
+    // The open chat counts only while the tab is hidden: one in view is being read.
+    const inView = H && document.visibilityState !== "hidden" ? entryOf(keyOf(H.selected())) : null;
+    const next = R.title(base, R.total(entries, inView));
     if (document.title !== next) document.title = next;
   }
 
@@ -399,7 +401,11 @@
   let timer = 0;
   function init(hooks) {
     H = hooks;
-    if (!timer) { timer = setInterval(tick, 30000); watchFocus(); }
+    if (!timer) {
+      timer = setInterval(tick, 30000); watchFocus();
+      // Coming back to the tab: the open chat is in view again, so the title stops counting it.
+      if (typeof document.addEventListener === "function") document.addEventListener("visibilitychange", applyTitle);
+    }
     if (typeof window.addEventListener === "function") window.addEventListener("pagehide", persistOpen);
   }
 

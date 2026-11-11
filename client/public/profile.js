@@ -7,7 +7,7 @@
 //                            group's name is edited in place, with 「N 只猫猫」.
 //   catPage()                资料: 职责, 置顶, 新对话 and 历史对话, then one
 //                            folded 高级 (它用什么思考, 模型与画像, 任务与执行,
-//                            导出对话 / 复制 ID / 运行面板), 删除猫猫 last.
+//                            导出对话 / 复制名字 / 运行面板), 删除猫猫 last.
 //   groupPage()              成员: faces and names, 添加猫猫, 移出, how to talk
 //                            in a group, a folded 高级 with 任务, 删除群聊.
 //   groupMenu()              a sidebar group row's menu: 改名, 删除群聊.
@@ -343,7 +343,7 @@
     work.append(tasksSlot, node("h4", "ws-exec-head", "执行"), execSlot);
     const acts = node("div", "pf-actions");
     const exp = labelled("secondary pf-act", "download", "导出对话", () => H.exportChat(P.data.name || P.sel.id));
-    const copy = labelled("secondary pf-act", "clipboard", "复制 ID", () => H.copyId(P.data.name || P.sel.id));
+    const copy = labelled("secondary pf-act", "clipboard", "复制名字", () => H.copyId(P.data.name || P.sel.id));
     const runtime = node("a", "secondary pf-act");
     runtime.target = "_blank";
     runtime.rel = "noopener";

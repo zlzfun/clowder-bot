@@ -47,6 +47,7 @@ try {
 <link rel="stylesheet" href="/chat-history.css">
 <link rel="stylesheet" href="/profile.css">
 <link rel="stylesheet" href="/mention.css">
+<link rel="stylesheet" href="/polish.css">
 <link rel="stylesheet" href="/chat-cards.css">
 <link rel="stylesheet" href="/chat-live.css">
 </head>
@@ -103,8 +104,8 @@ try {
       <!-- Search and jump (palette.js): the ⌘K palette's way in. -->
       <div class="pal-entry-wrap"><button id="palette-open" class="pal-entry" type="button" aria-haspopup="dialog" aria-label="搜索"><span class="pal-entry-label">搜索</span></button></div>
       <div id="pin-row" class="pin-row"></div>
-      <nav id="roster" class="list" aria-label="Bot"></nav>
-      <nav id="remote-roster" class="list g7-remote" aria-label="其他电脑上的 Bot" hidden></nav>
+      <nav id="roster" class="list" aria-label="猫猫和群聊"></nav>
+      <nav id="remote-roster" class="list g7-remote" aria-label="其他电脑上的猫猫" hidden></nav>
     </div>
     <div class="side-foot">
       <button id="rail-new" class="railnew" type="button" aria-label="新建猫猫或群聊" data-tip="新建" data-tip-placement="right"></button>
@@ -216,7 +217,7 @@ try {
   <nav class="setnav">
    <button type="button" data-set="general"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M1 14h6"/><path d="M9 8h6"/><path d="M17 16h6"/></svg><span>通用</span></button>
    <button type="button" data-set="persona"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="16" x="3" y="4" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M6 16c.6-1.6 1.7-2.4 3-2.4s2.4.8 3 2.4"/><path d="M15 9h3"/><path d="M15 13h2"/></svg><span>模板</span></button>
-   <button type="button" data-set="agents"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m7 11 2-2-2-2"/><path d="M11 13h4"/></svg><span>本地 Agent</span></button>
+   <button type="button" data-set="agents"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m7 11 2-2-2-2"/><path d="M11 13h4"/></svg><span>本机工具</span></button>
    <button type="button" data-set="about"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg><span>关于</span></button>
   </nav>
   <div class="setmain">
@@ -242,9 +243,16 @@ try {
    <div class="setpane" data-spane="agents"><div id="settings-agents"></div></div>
    <div class="setpane" data-spane="about">
     <h2>关于</h2>
-    <p><a href="/runtime.html" target="_blank" rel="noopener">打开 Clowder AI 运行面板 · 队列、审批、记忆与原生详情</a></p>
     <div class="aboutlogo"><img class="mark" src="/brand-mark-256.png" alt="" width="48" height="48"><div><h3>clowder-bot</h3><div class="v"><span data-settings-version></span></div></div></div>
     <div class="kvrow"><span class="k">版本</span><span id="settings-version-status" aria-live="polite"></span><button id="settings-version" class="v" type="button" title="点击复制" aria-label="版本，点击复制" data-settings-version></button></div>
+    <!-- vocabulary: technical (设置 → 关于 may name the engine; see tests/vocabulary.test.ts) -->
+    <div class="setsec about-tech">
+     <h4>技术详情</h4>
+     <div class="setrows">
+      <a class="setrow about-link" href="/runtime.html" target="_blank" rel="noopener"><span class="tx"><b>运行面板</b><span class="hint">Clowder AI 的排队、确认、记忆和运行记录，在新标签页打开</span></span><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg></a>
+     </div>
+    </div>
+    <!-- vocabulary: end -->
     <p class="setfoot">版本来自当前运行的 clowder-bot。</p>
    </div>
    </div>
@@ -275,6 +283,8 @@ try {
 <script src="/chat-list.js"></script>
 <script src="/chat-history-rules.js"></script>
 <script src="/chat-history.js"></script>
+<script src="/chat-locate-rules.js"></script>
+<script src="/chat-locate.js"></script>
 <script src="/profile-rules.js"></script>
 <script src="/profile.js"></script>
 <script src="/mention-rules.js"></script>

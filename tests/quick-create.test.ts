@@ -152,7 +152,7 @@ function page(opts: { start?: Any; cats?: string[]; route?: (path: string, metho
   const context = vm.createContext({ window, document: doc, setTimeout: () => 0, clearTimeout: () => {}, console });
   for (const file of ['client/public/cat-avatars.js', 'client/public/quick-create-rules.js', 'client/public/quick-create.js']) vm.runInContext(read(file), context);
   const s = { start: opts.start ?? START.ready, cats: [...(opts.cats ?? [])] };
-  const calls: Call[] = [], opened: string[] = [], groups: string[] = [], more: Any[] = [], copied: string[] = [], errors: string[] = [];
+  const calls: Call[] = [], opened: string[] = [], groups: string[] = [], more: Any[] = [], copied: string[] = [], errors: string[] = [], notices: string[] = [];
   let refreshed = 0, lists = 0;
   const api = async (path: string, opt: { method?: string; body?: unknown } = {}) => {
     const call: Call = { path, method: opt.method || 'GET', ...(opt.body === undefined ? {} : { body: plain(opt.body) }) };
@@ -174,6 +174,8 @@ function page(opts: { start?: Any; cats?: string[]; route?: (path: string, metho
     copy: async (text: string) => { copied.push(text); return true; },
     refresh: async () => { refreshed++; opts.onRefresh?.(); },
     openCat: async (name: string) => { opened.push(name); if (opts.openCat) await opts.openCat(name); },
+    // A created cat's notice, said by the shell once its chat is open (app.js quietNote).
+    notice: (text: string) => { notices.push(opened.length + ':' + text); },
     openGroup: async (id: string) => { groups.push(id); },
     landing: () => null,
     more: (opener: unknown) => { more.push(opener); },
@@ -190,7 +192,7 @@ function page(opts: { start?: Any; cats?: string[]; route?: (path: string, metho
   doc.body.append(opener);
   const live: { opener: El | null } = { opener };
   return {
-    doc, Q, R: window.ClowderQuickCreateRules, s, calls, opened, groups, more, copied, errors, thread, paint, opener, live,
+    doc, Q, R: window.ClowderQuickCreateRules, s, calls, opened, groups, more, copied, errors, notices, thread, paint, opener, live,
     get refreshed() { return refreshed; }, get lists() { return lists; },
     posts: () => calls.filter(c => c.method === 'POST' && c.path === '/xbot-api/bots'),
     stage: async () => { const v = paint(Q.stage()); await settle(); return v; },
@@ -482,6 +484,43 @@ test('made but not opened: the stage says the cat is there and opens its chat on
   await settle();
   assert.deepEqual(p.opened, ['砚砚', '砚砚']);
   assert.equal(p.posts().length, 1);
+});
+
+test('a created cat\'s notice is said once, after its chat opens (first run, 新建猫猫, and 打开聊天 after a failed open)', async () => {
+  const NOTICE = '猫猫建好了，但有一项默认设置没写进去：在对话里让它设提醒可能不生效。';
+  const withNotice = (path: string, method: string, body: Any) => (path === '/xbot-api/bots' && method === 'POST' ? { name: body.name, native_id: 'bot-new', notice: '  ' + NOTICE + '\n' } : undefined);
+  // First run: the chat opens, then the notice, once.
+  const p = page({ route: withNotice });
+  button(await p.stage(), '带它回家').click();
+  await settle();
+  assert.deepEqual(p.opened, ['砚砚']);
+  assert.deepEqual(p.notices, ['1:' + NOTICE], 'after the open, trimmed, once');
+  // 新建猫猫's dialog: the same.
+  const q = page({ cats: ['团子'], route: withNotice });
+  q.Q.openCat({ opener: q.opener });
+  await settle();
+  button(q.layer()!, '创建').click();
+  await settle();
+  assert.equal(q.notices.length, 1);
+  assert.match(q.notices[0]!, /^1:猫猫建好了/);
+  // The chat did not open: nothing yet; 打开聊天 opens it and then says it.
+  let refuse = true;
+  const r = page({ route: withNotice, openCat: () => { if (refuse) throw fail(undefined, '连不上 clowder-bot'); } });
+  const stage = await r.stage();
+  button(stage, '带它回家').click();
+  await settle();
+  assert.deepEqual(r.notices, [], 'not before the chat is there');
+  refuse = false;
+  button(stage, '打开聊天').click();
+  await settle();
+  assert.deepEqual(r.notices, ['2:' + NOTICE]);
+  // No notice: nothing is said.
+  const s = page();
+  button(await s.stage(), '带它回家').click();
+  await settle();
+  assert.deepEqual(s.notices, []);
+  assert.equal(s.R.createdNotice({ notice: 42 }), '');
+  assert.equal(s.R.createdNotice(null), '');
 });
 
 test('the no-chat line speaks of 猫猫 and the list, and opens the list', () => {
@@ -894,7 +933,7 @@ test('the shell loads the module before app.js and its styles after every earlie
   assert.ok(at('quick-create-rules.js') < at('quick-create.js') && at('quick-create.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
   // After every earlier style; only the search palette, the 找得到 styles, 资料页与群 (profile.css, mention.css) and the live-reply styles (chat-live.css), which stay last, follow.
-  assert.deepEqual(styles.slice(styles.indexOf('chat-experience.css') + 1), ['quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'profile.css', 'mention.css', 'chat-cards.css', 'chat-live.css']);
+  assert.deepEqual(styles.slice(styles.indexOf('chat-experience.css') + 1), ['quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'profile.css', 'mention.css', 'polish.css', 'chat-cards.css', 'chat-live.css']);
   assert.match(html, /aria-label="新建猫猫或群聊"/);
   // Nothing open: the stage with no cats, else the no-chat line; both hide the composer, as does the pre-login hold.
   assert.match(app, /else if \(!state\.sel\) showNoChat\(\);/);

@@ -226,5 +226,32 @@
     return row;
   }
 
-  window.ClowderPresentation = Object.freeze({ isActivity, activityStatus, speaker, activityKey, activityTools, activityLine, greetings, greetingLine });
+  // A line break the cat wrote inside a paragraph is a line break. The reply
+  // renderer (app.js appendBlocks) joins a paragraph's lines with "\n", which a
+  // cat's bubble (white-space: normal) showed as a space: 「**任务**: …\n**触发**:
+  // …」 ran together. Each "\n" in the paragraph's own words becomes a <br>.
+  // Inline code and formulas keep their text as written. A bubble that already
+  // keeps breaks (the owner's, pre-wrap) gets one <br> for one "\n", so nothing
+  // doubles. Code blocks, tables and list items are drawn apart from paragraphs
+  // and never come here.
+  const KEEP_TEXT = /^(CODE|PRE|KBD|SAMP|SCRIPT|STYLE)$/;
+  function lineBreaks(root) {
+    const walk = (el) => {
+      for (const n of [...el.childNodes]) {
+        if (n.nodeType === 3) {
+          const parts = String(n.textContent).split("\n");
+          if (parts.length < 2) continue;
+          parts.forEach((part, i) => {
+            if (i) el.insertBefore(document.createElement("br"), n);
+            if (part) el.insertBefore(document.createTextNode(part), n);
+          });
+          n.remove();
+        } else if (n.nodeType === 1 && !KEEP_TEXT.test(n.tagName) && !/(^|\s)math-(inline|block|raw)(\s|$)/.test(n.className || "")) walk(n);
+      }
+    };
+    if (root) walk(root);
+    return root;
+  }
+
+  window.ClowderPresentation = Object.freeze({ isActivity, activityStatus, speaker, activityKey, activityTools, activityLine, greetings, greetingLine, lineBreaks });
 })();

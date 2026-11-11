@@ -12,8 +12,8 @@
     chev: '<svg class="ac-ic ac-chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>',
   };
   const LEAD = {
-    phone: "登录后，就能在手机上使用自己电脑上的 Bot。",
-    desk: "登录后即可使用本机上的 Bot；同一账号也能从手机连过来。",
+    phone: "登录后，就能在手机上找自己电脑上的猫猫聊天。",
+    desk: "登录后就能和这台电脑上的猫猫聊天；同一账号也能从手机连过来。",
   };
   const ERR = {
     credentials: "邮箱或密码不对",
@@ -81,7 +81,7 @@
   function showLogin(opts = {}) {
     view = "login";
     const form = el("form", "ac-auth"); form.noValidate = true;
-    form.append(el("h1", "", "登录"), Object.assign(el("p", "ac-lead"), { textContent: embedded ? "登录后，可把本机绑到账号，在手机上继续用这边的 Bot。" : (wide() ? LEAD.desk : LEAD.phone) }));
+    form.append(el("h1", "", "登录"), Object.assign(el("p", "ac-lead"), { textContent: embedded ? "登录后，可把本机绑到账号，在手机上继续和这边的猫猫聊天。" : (wide() ? LEAD.desk : LEAD.phone) }));
     const [fe, email] = field("acct-login-email", "邮箱", "email", "username", "you@example.com");
     const [fp, pass] = field("acct-login-pass", "密码", "password", "current-password", "密码");
     const err = errLine(), note = el("p", "ac-note");
@@ -120,7 +120,7 @@
   function showRegister() {
     view = "register";
     const form = el("form", "ac-auth"); form.noValidate = true;
-    form.append(el("h1", "", "创建账号"), el("p", "ac-lead", "用邮箱注册官方网关账号。之后可在手机上找到自己设备上的 Bot。"));
+    form.append(el("h1", "", "创建账号"), el("p", "ac-lead", "用邮箱注册官方网关账号。之后可在手机上找到自己设备上的猫猫。"));
     const [fe, email] = field("acct-reg-email", "邮箱", "email", "email", "you@example.com");
     const [fp, pass] = field("acct-reg-pass", "密码", "password", "new-password", "至少 8 位");
     const [fp2, pass2] = field("acct-reg-pass2", "确认密码", "password", "new-password", "再输入一次");
@@ -251,7 +251,7 @@
     if (a.unbound) {
       claim = el("div", "ac-claim");
       const tx = el("div", "ac-claim-tx");
-      tx.append(el("b", "", "把这台电脑绑到账号？"), el("p", "", "绑定后，手机和其它入口也能看到这台电脑上的 Bot。"));
+      tx.append(el("b", "", "把这台电脑绑到账号？"), el("p", "", "绑定后，手机和其它入口也能看到这台电脑上的猫猫。"));
       const err = errLine();
       const go = el("button", "ac-btn ac-pri", "绑定这台电脑"); go.type = "button";
       const skip = el("button", "ac-btn ac-ghost", "先不绑"); skip.type = "button";
@@ -288,7 +288,7 @@
       const h = el("div", "ac-h");
       h.append(el("span", "ac-dic", ICON.screen(18)), Object.assign(el("b"), { textContent: d.name }));
       const meta = el("div", "ac-meta");
-      meta.append(el("i", "ac-dot" + (d.online ? " ac-on" : "")), document.createTextNode(d.online ? "在线" : "离线"), el("span", "ac-sep", "·"), document.createTextNode(d.bots.length + " 个 Bot"));
+      meta.append(el("i", "ac-dot" + (d.online ? " ac-on" : "")), document.createTextNode(d.online ? "在线" : "离线"), el("span", "ac-sep", "·"), document.createTextNode(d.bots.length + " 只猫猫"));
       card.append(h, meta);
       if (d.bots.length) {
         const bots = el("div", "ac-bots"); bots.setAttribute("role", "list");
@@ -297,7 +297,7 @@
       }
       return card;
     });
-    cnt.replaceChildren(...lead(), ...cards, el("p", "ac-devfoot", "手机只是入口。重活仍在电脑上的 Bot 里做。"));
+    cnt.replaceChildren(...lead(), ...cards, el("p", "ac-devfoot", "手机只是入口。事情仍由电脑上的猫猫来做。"));
   }
 
   function botRow(b, open) {

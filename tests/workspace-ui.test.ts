@@ -427,7 +427,7 @@ test('a send that does not go out hands its files back; after a switch they wait
   // The conversation now runs in another thread: its files no longer belong.
   p.ws.observe(ada, 'thread-B', false);
   assert.equal(p.ws.attachReady(), 0);
-  assert.match(p.doc.getElementById('attach-note')!.textContent, /会话已更换/);
+  assert.match(p.doc.getElementById('attach-note')!.textContent, /对话已更换/);
 });
 
 test('an upload refused by the server keeps its row with the reason and a retry; removing it returns focus to the input', async () => {
@@ -586,6 +586,31 @@ const sectionOf = (root: El, title: string) => {
 };
 const namesIn = (box: El) => all(box).filter(e => e.classList.contains('wsf-name')).map(textOf);
 
+test('a directory route the server has not adapted is known by its code (not_adapted), never by its wording', async () => {
+  for (const [error, expected] of [
+    [Object.assign(failure(404, '此接口还没有适配'), { code: 'not_adapted' }), /当前后端还没有开放目录浏览。/],
+    // The old wording without the code is just a failure now: nothing reads the server's sentence.
+    [failure(404, '此 XBot 接口尚无原生适配；请使用运行面板'), /没能/],
+  ] as const) {
+    const p = page((path) => {
+      const bare = path.split('?')[0];
+      if (bare === '/xbot-api/bots/Ada/workspace') return view({});
+      if (bare === '/xbot-api/bots/Ada/files') return { threadId: 'thread-A', files: [] };
+      if (bare === '/xbot-api/bots/Ada/workspace-tree') throw error;
+      if (bare === '/xbot-api/bots/Ada/tasks') return { threadId: 'thread-A', tasks: [], cats };
+      throw failure(404, 'unexpected ' + path);
+    });
+    p.ws.select(ada);
+    p.ws.observe(ada, 'thread-A', true);
+    const root = p.ws.filesView(ada) as El;
+    p.panel.append(root);
+    await settle();
+    await setFold(foldOf(root, 'ws-more'), true);
+    await settle();
+    assert.match(textOf(foldOf(root, 'ws-more')), expected);
+  }
+});
+
 test('文件 shows deliverables and attachments; the working directory, its path and 存为交付物 wait folded in 更多文件', async () => {
   const p = filesPage({ filePolicy: { externalReadOnly: true } }, [served({ id: 'att-1', name: 'brief.md' }), served({ id: 'del-1', name: 'report-v1.md', kind: 'deliverable' })]);
   await settle();
@@ -631,7 +656,7 @@ test('with nothing saved yet the 文件 page explains snapshots; an older projec
   const empty = filesPage();
   await settle();
   assert.equal(textOf(sectionOf(empty.root, '交付物').querySelector('p')!), '还没有交付物。可以在下面的「更多文件」里，把完成的文件存为交付物：会保存一份带校验的快照，之后改动不影响它。');
-  assert.match(textOf(sectionOf(empty.root, '附件')), /这个会话还没有附件/);
+  assert.match(textOf(sectionOf(empty.root, '附件')), /这个对话还没有附件/);
 
   const p = filesPage({ workspacePath: '/w/projects/old/cats/cat-a', sharedPath: '/w/projects/old/shared' });
   await settle();
@@ -689,7 +714,7 @@ test('请求传球 is a request: the card keeps the 负责人 it read, and a ret
   const pick = all(form).find(e => e.tagName === 'SELECT')!;
   assert.deepEqual(all(pick).filter(o => o.tagName === 'OPTION').map(o => o.value), ['', 'cat-b'], 'targets are the other members, never the owner');
   same(p.doc.activeElement, pick, 'focus moves to the target list');
-  assert.match(textOf(form), /传给.*说明（可选）.*会请「宪宪」按原生流程传球；传球完成前，负责人不变。/);
+  assert.match(textOf(form), /传给.*说明（可选）.*会请「宪宪」把任务传过去；传球完成前，负责人不变。/);
   pick.value = 'cat-b';
   pick.dispatchEvent(new Ev('change'));
   all(form).find(e => e.tagName === 'TEXTAREA')!.value = '资料已整理好';
@@ -1305,7 +1330,7 @@ test('the same thread refreshed keeps the composer and the fold; reopening 历�
   p.ws.observe(ada, 'thread-N', true);
   await settle();
   assert.equal(p.ws.attachReady(), 0, 'the move drops files of the thread left behind');
-  assert.match(p.doc.getElementById('attach-note')!.textContent, /会话已更换/);
+  assert.match(p.doc.getElementById('attach-note')!.textContent, /对话已更换/);
   const now = () => rowsOf(node).map(r => [textOf(r.querySelector('.ws-conv-title')!), r.tagName]);
   assert.deepEqual(now(), [['新的对话', 'DIV'], ['Ada', 'BUTTON'], ['官网改版', 'BUTTON']]);
   p.server.releaseList();
@@ -1428,7 +1453,7 @@ test('a move to another thread of the same cat ends the old one: late A reads ca
   await settle();
   assert.equal(p.ws.threadId(), 'thread-B');
   assert.equal(p.chips().length, 0, 'the upload to A left with the move');
-  assert.match(p.doc.getElementById('attach-note')!.textContent, /会话已更换/);
+  assert.match(p.doc.getElementById('attach-note')!.textContent, /对话已更换/);
   assert.match(textOf(p.tasksHost), /thread-B 的任务/);
   assert.match(textOf(p.filesHost), /thread-B-\d+\.md/);
   assert.equal(foldOf(p.filesHost, 'ws-more').open, true, '更多文件 stays open for the same conversation');
@@ -1598,7 +1623,7 @@ test('the page loads the workspace scripts before app.js and their styles last; 
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
   // After every upstream and earlier style; only the status-line/memory, 开箱即用, 找得到, 资料页与群 and live-reply extensions (which build on it) follow.
   assert.ok(styles.indexOf('workspace.css') > styles.indexOf('chat-presentation.css'));
-  assert.deepEqual(styles.slice(styles.indexOf('workspace.css') + 1), ['chat-experience.css', 'quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'profile.css', 'mention.css', 'chat-cards.css', 'chat-live.css']);
+  assert.deepEqual(styles.slice(styles.indexOf('workspace.css') + 1), ['chat-experience.css', 'quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'profile.css', 'mention.css', 'polish.css', 'chat-cards.css', 'chat-live.css']);
   assert.doesNotMatch(app, /\/paste"/);
   // 文件 is a tab of both kinds of chat (profile-rules.js), drawn by the module.
   assert.match(read('client/public/profile-rules.js'), /\["files", "文件"\]/);

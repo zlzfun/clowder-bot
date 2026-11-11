@@ -105,6 +105,18 @@
     return e;
   }
   const active = () => [...S.replies.values()].some((e) => !e.r.done && !e.gone);
+  // Cats shown writing in the open history right now (a reply in progress, or
+  // a send's typing bubble that is not waiting in line); "" stands for a group
+  // bubble whose cat is not named yet. The status line leaves out what this
+  // row already shows (chat-experience.js).
+  function writing() {
+    const cats = new Set();
+    for (const e of all()) {
+      if (e.gone || e.r.done || !e.row || !e.row.isConnected || (e.wait && e.wait.queued)) continue;
+      cats.add(String(e.r.catId || ""));
+    }
+    return cats;
+  }
 
   // ------------------------------------------------------------- the live rows
   function dots() {
@@ -680,7 +692,7 @@
 
   window.ClowderLive = Object.freeze({
     init, select, event, lost, read, frame, commit, reconcile, rendered, attach,
-    expect, working, stopping, stopped, isStopping: () => !!S.stopping, sendButton, following, tick,
+    expect, working, stopping, stopped, isStopping: () => !!S.stopping, sendButton, following, tick, writing,
     // A history row its owner changed in place (chat-history.js's top row):
     // the next redraw reads its markup again instead of the one remembered.
     touched: (n) => { if (n) delete n._lvSig; },

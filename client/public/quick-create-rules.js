@@ -187,6 +187,12 @@
     if (!status || status >= 500) return { kind: "unsure", text: "没能确认猫猫建好没有。不改内容再点一次就好，不会多出一只。" };
     return { kind: "form", text: plain(message) ? message : "没能建好，请检查名字后再试。" };
   }
+  // A created cat's `notice` (POST /xbot-api/bots 201, docs/xbot-api.md「开箱
+  // 即用」): the cat exists, but one default setting could not be written. Said
+  // once, quietly, after its chat opens; "" when there is nothing to say.
+  function createdNotice(result) {
+    return result && typeof result.notice === "string" ? result.notice.replace(/\s+/g, " ").trim() : "";
+  }
   // A failed POST /xbot-api/groups. The request carries an idempotencyKey (it
   // names the group's directory and keys its native thread creation), so an
   // unsure answer is sent again unchanged under the same key and arrives at
@@ -202,6 +208,6 @@
   root.ClowderQuickCreateRules = Object.freeze({
     trim, nameProblem, groupNameProblem, groupName, freeName, defaultFace, suggestName, followsFace, NAME_INPUT_MAX, ABOUT_INPUT_MAX, aboutProblem,
     start, choices, choiceOf, loginCommand, sameStart, need, TOOL_LINE, unconfirmed,
-    catBody, groupBody, fingerprint, MAX_MEMBERS, catError, groupError, startError,
+    catBody, groupBody, fingerprint, MAX_MEMBERS, catError, groupError, startError, createdNotice,
   });
 })(typeof window !== "undefined" ? window : globalThis);

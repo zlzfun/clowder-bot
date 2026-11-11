@@ -229,7 +229,7 @@
       // were uploaded to (or were on their way to) the old thread.
       const had = S.pending.length > 0;
       clearPending();
-      if (had) S.note = "会话已更换，待发送的附件需要重新添加。";
+      if (had) S.note = "对话已更换，待发送的附件需要重新添加。";
     }
     S.threadId = id;
     if (first) { flushWaiters(); unpark(); } else paintComposer();
@@ -271,7 +271,7 @@
     if (S.threadId) return Promise.resolve(S.threadId);
     return new Promise((resolve, reject) => {
       const w = { gen, resolve: (v) => { clearTimeout(timer); resolve(v); }, reject: (e) => { clearTimeout(timer); reject(e); } };
-      const timer = setTimeout(() => { S.waiters = S.waiters.filter((x) => x !== w); reject(Object.assign(new Error("还没读到当前会话"), { late: true })); }, ms);
+      const timer = setTimeout(() => { S.waiters = S.waiters.filter((x) => x !== w); reject(Object.assign(new Error("还没读到当前对话"), { late: true })); }, ms);
       S.waiters.push(w);
     });
   }
@@ -396,7 +396,7 @@
     try { threadId = await whenThread(gen); }
     catch (e) {
       if (gen !== S.gen || !e.late) return;
-      for (const row of rows) if (S.pending.includes(row) && row.status === "waiting") Object.assign(row, { status: "failed", error: "还没读到当前会话" });
+      for (const row of rows) if (S.pending.includes(row) && row.status === "waiting") Object.assign(row, { status: "failed", error: "还没读到当前对话" });
       paintComposer();
       return;
     }
@@ -443,7 +443,7 @@
     paintComposer();
     whenThread(gen).then((id) => upload(row, id, gen), (e) => {
       if (gen !== S.gen || !S.pending.includes(row)) return;
-      Object.assign(row, { status: "failed", error: e.late ? "还没读到当前会话" : "稍后再试" });
+      Object.assign(row, { status: "failed", error: e.late ? "还没读到当前对话" : "稍后再试" });
       paintComposer();
     });
   }
@@ -494,7 +494,7 @@
       return false;
     }
     if (S.threadId && batch.threadId !== S.threadId) {
-      setNote("会话已更换，没发出去的附件属于原来的会话，需要重新添加。");
+      setNote("对话已更换，没发出去的附件属于原来的对话，需要重新添加。");
       return false;
     }
     const { rows, dropped } = R.restore(S.pending, batch.rows);
@@ -1133,7 +1133,7 @@
     });
     paintPart(w, "attach", fsig + (w.attach.all ? "+" : ""), () => {
       const shown = w.attach.all ? attached : attached.slice(0, 6);
-      const parts = fileList(shown, nativeDown ? "已保存的附件里还没有文件。对话里的其他文件暂时读不到。" : "这个会话还没有附件。可以点输入框左侧的回形针，或直接粘贴、拖入文件。");
+      const parts = fileList(shown, nativeDown ? "已保存的附件里还没有文件。对话里的其他文件暂时读不到。" : "这个对话还没有附件。可以点输入框左侧的回形针，或直接粘贴、拖入文件。");
       if (attached.length > shown.length) parts.push(button("text-btn ws-link ws-more-all", "显示全部 " + attached.length + " 个", () => { w.attach.all = true; paintFiles(); }));
       w.attach.body.replaceChildren(...parts);
     });
@@ -1280,7 +1280,7 @@
       Object.assign(S.tree, { area, path, data: data && typeof data === "object" ? data : { entries: [] }, state: "ready" });
     } catch (e) {
       if (!live(t) || req !== S.tree.req) return;
-      const missingRoute = e.status === 404 && !path && /尚无原生适配/.test(String(e.message || ""));
+      const missingRoute = e.status === 404 && !path && e.code === "not_adapted";
       Object.assign(S.tree, { area, path, data: null, state: missingRoute ? "unavailable" : "error", error: R.fileError(e, H.visibleError(e, "稍后再试")) });
     }
     paintFiles();
@@ -1307,7 +1307,7 @@
       loadFiles();
     } catch (e) {
       if (!live(t)) return;
-      S.markErrors = { ...S.markErrors, [k]: "没能保存：" + R.fileError(e, e.late ? "还没读到当前会话" : "稍后再试") };
+      S.markErrors = { ...S.markErrors, [k]: "没能保存：" + R.fileError(e, e.late ? "还没读到当前对话" : "稍后再试") };
     } finally {
       if (live(t)) {
         const marking = { ...S.marking };
@@ -1551,7 +1551,7 @@
     const faces = [];
     if (task.ownerCatId) {
       faces.push(node("span", "wst-owner-k", "负责人"), H.face(task.ownerCatId, nameOf(task.ownerCatId), "xs"), node("b", "", nameOf(task.ownerCatId)));
-      if (S.cats.length && !R.member(task.ownerCatId, S.cats)) faces.push(node("span", "wst-away", "（已不在这个会话）"));
+      if (S.cats.length && !R.member(task.ownerCatId, S.cats)) faces.push(node("span", "wst-away", "（已不在这个对话）"));
     } else faces.push(icon("person"), node("span", "", "还没有负责人"));
     c.owner.replaceChildren(...faces);
     // The background run, if there is a record; no record claims nothing.
@@ -1709,7 +1709,7 @@
     pick.addEventListener("change", () => { ok.disabled = c.busy || !pick.value; });
     acts.append(no, ok);
     form.append(field("传给", pick), field("说明（可选）", noteBox),
-      note("会请「" + nameOf(task.ownerCatId) + "」按原生流程传球；传球完成前，负责人不变。"), acts);
+      note("会请「" + nameOf(task.ownerCatId) + "」把任务传过去；传球完成前，负责人不变。"), acts);
     form.addEventListener("submit", (ev) => {
       ev.preventDefault();
       if (c.busy || !pick.value) return;

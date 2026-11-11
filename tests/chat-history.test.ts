@@ -547,7 +547,7 @@ test('a newest page whose records show no rows keeps the earlier rows loaded abo
   assert.deepEqual(ids(p), [...range(1, 20).map(m => m.id), 'm100']);
   // The group view: renderGroup's empty branch draws the top row instead of 没有消息 when there is one.
   const app = read('client/public/app.js');
-  assert.match(app, /if \(!chatHistory\.top\(inner\)\) inner\.append\(emptyState\(niceName\(who\) \|\| "群", "没有消息"/);
+  assert.match(app, /if \(!chatHistory\.top\(inner\)\) inner\.append\(emptyState\(niceName\(who\) \|\| "群聊", "还没有消息"/);
   const g = page();
   g.open({ type: 'group', id: 'g1' });
   g.app.thread = 'g1';

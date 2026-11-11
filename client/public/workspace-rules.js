@@ -124,7 +124,7 @@
     const status = error && error.status;
     if (status === 413) return "文件超过 20 MB";
     if (status === 404) return chinese(said) ? said : "文件已不存在";
-    if (status === 409) return chinese(said) ? said : "会话或文件已经变化";
+    if (status === 409) return chinese(said) ? said : "对话或文件已经变化";
     if (status === 415) return chinese(said) ? said : "这个文件只能下载";
     if (chinese(said)) return said.replace(/[。.]+$/, "");
     return fallback || "没能完成";
@@ -189,7 +189,7 @@
     task_assignment_changed: "任务的负责人或执行已经变化",
     "task assignment changed": "任务的负责人或执行已经变化",
     task_execution_must_stop: "这项任务还绑定着执行，先停止执行，或请负责人传球",
-    task_execution_stop_unproven: "原生还没有确认执行已经停止，暂时不能恢复",
+    task_execution_stop_unproven: "还没有确认这次执行已经停下，暂时不能恢复",
     background_control_unavailable: "当前状态不支持这个操作",
   };
   function taskError(error) {
