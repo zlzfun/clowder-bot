@@ -8,8 +8,9 @@
 //   keep the sidebar's order.
 // - What was said: GET /xbot-api/search?q= (docs/xbot-api.md「搜索」) takes 1–100
 //   characters after trimming; its results are newest first, with the match's
-//   place in the snippet. A scope keeps only one chat's results (its current
-//   conversation). How much was searched is said plainly: conversations that
+//   place in the snippet. One chat is searched with GET <chat>/search (its
+//   current conversation only). A cat is known to the server by its native ID,
+//   which never mixes with its name here. How much was searched is said plainly: conversations that
 //   could not be read (`failed`) and anything not looked at or not listed
 //   (`more`) are never shown as "nothing found".
 // - Keys: ⌘K (macOS) or Ctrl+K opens the palette; Alt+↑ / Alt+↓ go to the
@@ -26,17 +27,36 @@
   const CHATS = 8;
 
   const text = (v) => (v == null ? "" : String(v));
-  const fold = (v) => text(v).replace(/\s+/g, " ").trim().toLowerCase();
+  // Lower case one character at a time, so the name and the query fold alike
+  // and every folded position can be traced back to the name as given (some
+  // letters grow when lowered: İ becomes i plus a combining dot).
+  function lowered(v) {
+    const s = text(v);
+    let out = "";
+    const from = [];
+    let at = 0;
+    for (const ch of s) {
+      const low = ch.toLowerCase();
+      for (let k = 0; k < low.length; k++) from.push(at);
+      out += low;
+      at += ch.length;
+    }
+    from.push(s.length);
+    return { out, from };
+  }
+  const fold = (v) => lowered(text(v).replace(/\s+/g, " ").trim()).out;
   // A word starts after a space or a mark (latin and CJK punctuation).
   const BOUNDARY = /[\s\-_·•.,;:!?/\\|()[\]{}<>"'`~@#&*+=、，。；：！？（）《》【】「」『』—…]/;
 
   // How well a name answers what was typed, and where it matched in the name
   // as given: 4 the whole name, 3 its start, 2 the start of a later word,
-  // 1 anywhere, 0 not at all (case is ignored).
+  // 1 anywhere, 0 not at all (case is ignored). The range is null when the
+  // match does not begin and end on whole characters of the name, so a mark
+  // never lands on the wrong letters.
   function match(name, query) {
     const shown = text(name), q = fold(query);
     if (!q) return { score: 0, range: null };
-    const lower = shown.toLowerCase();
+    const { out: lower, from } = lowered(shown);
     let at = lower.indexOf(q);
     if (at < 0) return { score: 0, range: null };
     let score = 1;
@@ -48,9 +68,10 @@
         if (i > 0 && BOUNDARY.test(lower[i - 1])) { score = 2; at = i; break; }
       }
     }
-    if (score === 3) at = lower.length - lower.trimStart().length;
-    const end = Math.min(shown.length, at + q.length);
-    return { score, range: [at, end] };
+    if (score === 3 || score === 4) at = lower.length - lower.trimStart().length;
+    const end = at + q.length;
+    const whole = (at === 0 || from[at - 1] !== from[at]) && from[end - 1] !== from[end];
+    return { score, range: whole ? [from[at], from[end]] : null };
   }
 
   const keyOf = (chat) => (chat ? (chat.type === "group" ? "group:" : "bot:") + text(chat.id) : "");
@@ -111,28 +132,48 @@
     return { state: "ok", q };
   }
 
-  // A scope as the app names a chat ({type, id}: a cat by name or native ID,
-  // a group by ID), resolved against the chat list: the chat, and every ID a
-  // search result may name it by. Null when there is no such chat.
+  // A chat's lasting identity: a cat's native ID (its name can change, and a
+  // new cat can take an old name), a group's ID. A cat without a native ID has
+  // none, and is never matched by it.
+  const canon = (chat) => (chat ? (chat.type === "group" ? text(chat.id) : text(chat.nativeId)) : "");
+
+  // A chat named the way the app names it, resolved against the chat list.
+  // The two kinds of name never mix: {type, id} is the app's own (a cat by its
+  // name, a group by ID), {type: 'bot', nativeId} a cat by native ID; given
+  // both, they must agree. Null when there is no such chat. The result carries
+  // the identity a search result names it by.
   function scope(want, list) {
-    if (!want || !want.id) return null;
-    const type = want.type === "group" ? "group" : "bot", id = text(want.id);
-    const chat = (list || []).find((c) => c.type === type && (text(c.id) === id || (type === "bot" && c.nativeId && text(c.nativeId) === id)));
-    if (!chat) return null;
-    return { type, chat, ids: [...new Set([text(chat.id), ...(type === "bot" && chat.nativeId ? [text(chat.nativeId)] : [])])] };
+    if (!want || (!want.id && !want.nativeId)) return null;
+    const type = want.type === "group" ? "group" : "bot";
+    const all = (list || []).filter((c) => c.type === type);
+    const byId = want.id ? all.find((c) => text(c.id) === text(want.id)) : null;
+    const byNative = type === "bot" && want.nativeId ? all.find((c) => c.nativeId && text(c.nativeId) === text(want.nativeId)) : null;
+    if (want.id && !byId) return null;
+    if (type === "bot" && want.nativeId && (!byNative || (byId && byId !== byNative))) return null;
+    const chat = byId || byNative;
+    if (!chat || !canon(chat)) return null;
+    return { type, chat, canon: canon(chat) };
   }
 
-  // Only the scoped chat's hits, in its current conversation.
+  // Only the scoped chat's hits, in its current conversation, by its lasting identity.
   function scoped(results, sc) {
     if (!sc) return results || [];
-    return (results || []).filter((hit) => hit && hit.chat && hit.chat.type === sc.type && sc.ids.includes(text(hit.chat.id)) && hit.current !== false);
+    return (results || []).filter((hit) => hit && hit.chat && hit.chat.type === sc.type && text(hit.chat.id) === sc.canon && hit.current !== false);
   }
 
-  // The chat a hit belongs to, as the app knows it (a cat's hit names its native ID).
+  // The chat a hit belongs to, as the app knows it now: a server hit names a
+  // cat by native ID and a group by ID, never by name.
   function chatOf(hit, list) {
     if (!hit || !hit.chat) return null;
     const id = text(hit.chat.id);
-    return (list || []).find((c) => c.type === hit.chat.type && (text(c.id) === id || (c.type === "bot" && c.nativeId && text(c.nativeId) === id))) || null;
+    return (list || []).find((c) => c.type === hit.chat.type && canon(c) && canon(c) === id) || null;
+  }
+
+  // The same chat in a newer chat list, by its lasting identity (it may have
+  // been renamed, or be gone).
+  function fresh(chat, list) {
+    const id = canon(chat);
+    return id ? (list || []).find((c) => c.type === chat.type && canon(c) === id) || null : null;
   }
 
   const hitKey = (hit) => text(hit && hit.threadId) + ":" + text(hit && hit.messageId);
@@ -154,20 +195,22 @@
   // What a finished search says beyond its rows. Nothing found is said only
   // about what was read; unread conversations and anything not looked at or
   // not listed are said as such.
-  //   data: the /search answer; shown: rows listed (after a scope);
-  //   scopedTo: the scoped chat's name, if any.
-  function notes(data, { q = "", shown = 0, scopedTo = "" } = {}) {
+  //   data: the /search answer (or one chat's, GET <chat>/search); shown:
+  //   rows listed; scoped: it searched one chat's current conversation.
+  function notes(data, { q = "", shown = 0, scoped = false } = {}) {
     const failed = Math.max(0, Number(data && data.failed) || 0);
     const more = !!(data && data.more);
     const total = Array.isArray(data && data.results) ? data.results.length : 0;
-    const where = scopedTo ? "这段对话里" : "";
     const out = { empty: "", failed: "", more: "" };
-    if (!shown) out.empty = failed ? "能读到的对话里没有找到「" + q + "」。" : (where || "聊过的话里") + "没有找到「" + q + "」。";
-    if (failed) out.failed = "有 " + failed + " 个对话暂时读不到，没能在里面找" + (shown ? "，结果可能不全。" : "。");
-    if (more) {
-      if (total >= LIMIT) out.more = scopedTo ? "只看了所有聊天里最新的 " + LIMIT + " 条，这段对话里可能还有。" : "只列出了最新的 " + LIMIT + " 条，可能还有更多。";
-      else out.more = "只搜了最近的消息，更早的里可能还有。";
+    if (scoped) {
+      // One conversation: unread means nothing in it was searched.
+      if (failed) out.failed = "这段对话暂时读不到，没能在里面找。";
+      else if (!shown) out.empty = "这段对话里没有找到「" + q + "」。";
+    } else {
+      if (!shown) out.empty = failed ? "能读到的对话里没有找到「" + q + "」。" : "聊过的话里没有找到「" + q + "」。";
+      if (failed) out.failed = "有 " + failed + " 个对话暂时读不到，没能在里面找" + (shown ? "，结果可能不全。" : "。");
     }
+    if (more) out.more = total >= LIMIT ? "只列出了最新的 " + LIMIT + " 条，可能还有更多。" : "只搜了最近的消息，更早的里可能还有。";
     return out;
   }
 
@@ -219,6 +262,6 @@
 
   window.ClowderPaletteRules = Object.freeze({
     MAX_QUERY, LIMIT, DEBOUNCE, RECENT, CHATS,
-    match, keyOf, ordered, recent, chats, actions, query, scope, scoped, chatOf, hitKey, who, segments, notes, stamp, move, neighbor, shortcut,
+    match, keyOf, canon, ordered, recent, chats, actions, query, scope, scoped, chatOf, fresh, hitKey, who, segments, notes, stamp, move, neighbor, shortcut,
   });
 })();

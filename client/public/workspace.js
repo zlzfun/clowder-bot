@@ -1007,11 +1007,25 @@
   async function switchTo(threadId, opener) {
     if (!S.sel || isGroup()) return { ok: false, text: "先打开这只猫的对话，再切换。" };
     if (threadId && threadId === S.threadId) return { ok: true };
-    const gen = S.gen;
-    await loadConversations();
+    // This call's own read, never the list kept from before: a failed read
+    // switches nothing and says so, apart from a read that lacks the thread.
+    const gen = S.gen, req = ++S.convReq;
+    let list;
+    try {
+      const data = await H.api(scopePath() + "/conversations");
+      if (!data || !Array.isArray(data.conversations)) throw new Error("历史对话的返回格式无法识别");
+      list = R.conversations(data.conversations);
+    } catch (e) {
+      if (gen !== S.gen) return { ok: false };
+      if (req === S.convReq) { S.convBusy = false; paintConvs(); }
+      return { ok: false, text: e.status === 404 || e.status === 410 ? "当前后端还没有开放历史对话，这次没有切换。"
+        : "没能读取历史对话，这次没有切换：" + H.visibleError(e, "稍后再试") };
+    }
     if (gen !== S.gen) return { ok: false };
-    const c = (S.convs || []).find((x) => x.id === threadId);
-    if (!c) return { ok: false, text: S.convState === "error" ? "没能读取历史对话，稍后再试。" : "这段对话已不在这只猫的历史对话里。" };
+    // The fold shows what was just read (an older read still on its way is dropped).
+    if (req === S.convReq) { S.convs = list; S.convState = "ready"; S.convBusy = false; paintConvs(); }
+    const c = list.find((x) => x.id === threadId);
+    if (!c) return { ok: false, text: "这段对话已不在这只猫的历史对话里。" };
     return switchConversation(c, opener);
   }
 

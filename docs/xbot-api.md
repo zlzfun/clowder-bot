@@ -9,7 +9,7 @@ UI 保留 Bot 名称和文件夹概念，实际成员、执行和历史以 Clowd
 | 本地 Agent 接入 | `/agents` 原生发现；`/bots/:name/agent` 绑定执行者并恢复原生默认继承 |
 | 单聊/新会话 | 原生 Thread，preferredCats 为该成员；新建保留旧会话 |
 | 首次单聊的问候 | `POST /xbot-api/bots/:name/greeting` 以 `expectedThreadId` 绑定已打开的单聊，向这只猫发起一次普通的原生聊天请求 |
-| 群聊 | 原生 Thread，preferredCats 为显式成员；消息路由保持原生；不填名字时以成员名命名。`PATCH /groups/:id {name?, members?}` 改原生标题与 preferredCats；要移出的猫在群里还有进行中或排队的事时 409，不替用户停止 |
+| 群聊 | 原生 Thread，preferredCats 为显式成员；消息路由保持原生；不填名字时以成员名命名。`PATCH /groups/:id {name?, add?, remove?}` 改原生标题与 preferredCats：`add`／`remove` 是猫的名字，表达「加谁、移出谁」，由适配层读出原生当前的成员后套用（已在群里的不重复加，不在的移出不算错），同一个群的修改在 Bot 进程内逐个执行，所以页面上的名单过期也不会把别处刚做的修改抹掉；结果少于 2 只或多于 10 只时 400。仍接受整份名单 `members`（与 `add`／`remove` 不能同时用），它按字面覆盖，只适合确知名单是最新的调用方。要移出的猫在群里还有进行中或排队的事时 409，不替用户停止。原生没有带版本条件的成员修改，另一个不经过 Bot 的写入方（例如运行面板）与之并发时仍以后写为准 |
 | 找聊过的话 | `GET /search?q=` 当场读取每个会话最新一页原生消息并按聊天里的可见口径过滤，见下文「搜索」 |
 | 发消息/回复引用 | `/api/messages`，原生 ID 与幂等键 |
 | 历史/导出 | 原生消息；主界面最近 200 条，导出完整分页。单聊 `transcript` 与群聊 `GET /groups/:id` 都返回 `hasMore` 和上一页的游标 `before`，带 `?before=` 读更早的一页 |

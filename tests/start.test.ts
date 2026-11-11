@@ -223,4 +223,38 @@ test('a group can be made from its members alone and is then called after them',
   assert.equal((await r.call('/xbot-api/groups', 'POST', {})).status, 400);
   assert.equal((await r.call('/xbot-api/groups/' + encodeURIComponent('工作'), 'PATCH', { name: '工作（旧）' })).status, 400);
   assert.deepEqual(r.store.state.folders, ['工作']);
+  assert.equal((await r.call('/xbot-api/groups/' + encodeURIComponent('工作'), 'PATCH', { add: ['小团'] })).status, 400, 'a folder has no members');
+});
+
+test('a group member edit says what was meant and is applied to the group as it is now', async t => {
+  const r = await setup(t);
+  r.native.runtimes = [runtime('codex', 'openai', 'configured')];
+  for (const name of ['甲', '乙', '丙', '丁', '戊']) await r.call('/xbot-api/bots', 'POST', { name, simple: {}, idempotencyKey: randomUUID() });
+  const group = await (await r.call('/xbot-api/groups', 'POST', { members: ['甲', '乙', '丙'] })).json();
+  const edit = (body: unknown) => r.call(`/xbot-api/groups/${group.id}`, 'PATCH', body);
+  const members = async () => (await (await r.call('/xbot-api/groups')).json()).groups.find((g: any) => g.id === group.id).members;
+  // Another page added 丁 meanwhile. Taking 乙 out from a page that still shows 甲、乙、丙 must not take 丁 out with it.
+  assert.equal((await edit({ add: ['丁'] })).status, 200);
+  const removed = await edit({ remove: ['乙'] });
+  assert.equal(removed.status, 200); assert.deepEqual((await removed.json()).members, ['甲', '丙', '丁']);
+  // Two edits sent at the same moment both land: each works from what the one before left.
+  const [one, two] = await Promise.all([edit({ add: ['乙'] }), edit({ add: ['戊'] })]);
+  assert.deepEqual([one.status, two.status], [200, 200]);
+  assert.deepEqual((await members()).sort(), ['甲', '丙', '丁', '乙', '戊'].sort(), 'whichever arrived first');
+  // Adding a cat that is already in, or removing one that is not, changes nothing and is not an error.
+  assert.deepEqual((await (await edit({ add: ['甲'], remove: ['乙'] })).json()).members, ['甲', '丙', '丁', '戊']);
+  assert.deepEqual((await (await edit({ remove: ['乙'] })).json()).members, ['甲', '丙', '丁', '戊']);
+  // Limits and nonsense are refused before native is asked.
+  assert.equal((await edit({ remove: ['甲', '丙', '丁'] })).status, 400, 'fewer than two would remain');
+  assert.equal((await edit({ add: ['甲'], remove: ['甲'] })).status, 400);
+  assert.equal((await edit({ members: ['甲', '丙'], add: ['乙'] })).status, 400, 'one way of editing at a time');
+  assert.equal((await edit({ add: ['没有这只'] })).status, 404);
+  assert.deepEqual(await members(), ['甲', '丙', '丁', '戊']);
+  // A cat that still has work in the group is not taken out, whichever way the edit is written.
+  const busy = r.native.cats.find(cat => cat.name === '丁')!;
+  r.native.queues.set(group.id, { queue: [], activeInvocations: [{ catId: busy.id, invocationId: 'i1' }] } as never);
+  const refused = await edit({ remove: ['丁'] });
+  assert.equal(refused.status, 409); assert.match((await refused.json()).error, /还在这个群里处理事情/);
+  assert.equal((await edit({ remove: ['戊'] })).status, 200, 'another cat can still leave');
+  assert.deepEqual(await members(), ['甲', '丙', '丁']);
 });

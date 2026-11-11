@@ -983,12 +983,13 @@ function historyCat(opts: { list?: Any[]; hooks?: Record<string, unknown> } = {}
   const server = {
     thread: 'thread-A',
     list: opts.list ?? [{ id: 'thread-A', title: 'Ada', createdAt: T0 + 2000 }, { id: 'thread-P', title: '官网改版', createdAt: T0 + 1000 }],
-    busy: new Set<string>(), gate: null as Promise<unknown> | null, holdList: false, releaseList: () => {},
+    busy: new Set<string>(), gate: null as Promise<unknown> | null, holdList: false, releaseList: () => {}, failList: null as unknown,
   };
   const route: Route = (path, method, body) => {
     if (path === '/xbot-api/bots/Ada/workspace') return view({ threadId: server.thread });
     if (path === '/xbot-api/bots/Bob/workspace') return view({ threadId: 'thread-B' });
     if (path === '/xbot-api/bots/Ada/conversations') {
+      if (server.failList) { if (server.failList === 'malformed') return { nope: true }; throw server.failList; }
       const answer = { conversations: server.list.map(c => ({ ...c, current: c.id === server.thread })) };
       if (!server.holdList) return answer;
       server.holdList = false;
@@ -1119,6 +1120,30 @@ test('opening a saved conversation names the thread it saw; a busy refusal stays
   assert.deepEqual(rowsOf(next).map(r => [textOf(r.querySelector('.ws-conv-title')!), r.tagName]), [['Ada', 'BUTTON'], ['官网改版', 'DIV']]);
   same(p.doc.activeElement, rowFor(next, '官网改版'), 'focus lands on the conversation now open');
   assert.ok(!p.calls.some(c => c.path.includes('/projects') || (c.method === 'PUT' && c.path.endsWith('/workspace')) || c.path.endsWith('/new')), 'never a project, a workspace switch or a new thread');
+});
+
+test('a switch asked from elsewhere needs this call\'s own list read: a failed or malformed read switches nothing and says so, apart from a list that lacks the thread (review 5)', async () => {
+  const p = historyCat();
+  const node = await openCat(p);
+  await setFold(foldOf(node, 'ws-conv-fold'), true);
+  assert.equal(rowsOf(node).length, 2, 'the list was read once and is kept for the fold');
+  p.server.failList = failure(503, '服务出了点问题，请稍后再试。');
+  const failed = plain(await p.ws.switchTo('thread-P'));
+  assert.equal(failed.ok, false);
+  assert.equal(failed.text, '没能读取历史对话，这次没有切换：服务出了点问题，请稍后再试。');
+  assert.equal(p.count('PUT', '/xbot-api/bots/Ada/conversation'), 0, 'the list kept from before is not trusted for this');
+  assert.deepEqual(p.reselected, []);
+  p.server.failList = 'malformed';
+  assert.match(plain(await p.ws.switchTo('thread-P')).text, /^没能读取历史对话，这次没有切换：/);
+  p.server.failList = failure(404, 'Not found');
+  assert.equal(plain(await p.ws.switchTo('thread-P')).text, '当前后端还没有开放历史对话，这次没有切换。');
+  assert.equal(p.count('PUT', '/xbot-api/bots/Ada/conversation'), 0);
+  // Read fine but without the thread: said as such.
+  p.server.failList = null;
+  assert.deepEqual(plain(await p.ws.switchTo('thread-X')), { ok: false, text: '这段对话已不在这只猫的历史对话里。' });
+  // And with it: switched.
+  assert.deepEqual(plain(await p.ws.switchTo('thread-P')), { ok: true });
+  assert.deepEqual(p.reselected, [ada]);
 });
 
 test('the same switch asked from elsewhere (the search palette, by thread) keeps its rules and says how it ended', async () => {
