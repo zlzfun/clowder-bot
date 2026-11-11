@@ -25,6 +25,8 @@ export class NativeFixture implements NativeTransport {
   messages = new Map<string, NativeMessage[]>();
   /** A smaller page than the callers ask for, to show paging without hundreds of messages. */
   pageLimit?: number;
+  /** …or for one conversation only, by thread. */
+  pageLimits = new Map<string, number>();
   queues = new Map<string, any>();
   taskRows: any[] = [];
   approvalItems: any[] = [];
@@ -68,7 +70,7 @@ export class NativeFixture implements NativeTransport {
       // The newest page, or the one before a cursor (`<order>:<message id>`), like native: `limit` at most, and whether older ones remain.
       const all = this.messages.get(url.searchParams.get('threadId')!) ?? [], cursor = url.searchParams.get('before');
       const end = cursor ? all.findIndex(message => message.id === cursor.slice(cursor.indexOf(':') + 1)) : all.length;
-      const limit = Math.min(Number(url.searchParams.get('limit')) || 200, this.pageLimit ?? Infinity), start = Math.max(0, (end < 0 ? 0 : end) - limit);
+      const limit = Math.min(Number(url.searchParams.get('limit')) || 200, this.pageLimit ?? Infinity, this.pageLimits.get(url.searchParams.get('threadId')!) ?? Infinity), start = Math.max(0, (end < 0 ? 0 : end) - limit);
       result = { messages: all.slice(start, end < 0 ? 0 : end), hasMore: start > 0 };
     }
     else if (path === '/api/messages' && method === 'POST') result = { status: 'queued', userMessageId: 'message-1', entries: [{ entryId: 'queue-1', targetCatId: body.mentions?.[0] }], queuePosition: 1 };

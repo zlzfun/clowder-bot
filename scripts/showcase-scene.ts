@@ -22,7 +22,7 @@ export interface Script {
   blocks?: Array<Record<string, unknown>>; proposal?: Proposal; files?: Array<{ name: string; mime: string; bytes: Buffer }>;
 }
 
-const MIN = 60_000, HOUR = 60 * MIN, DAY = 24 * HOUR;
+const MIN = 60_000, HOUR = 60 * MIN;
 const enc = encodeURIComponent;
 const text = (value: string) => Buffer.from(value, 'utf8');
 
@@ -159,18 +159,24 @@ class Chat {
     const time = this.time(at);
     return this.push({ id: this.native.id(time), type, catId: null, timestamp: time, content, ...(source ? { source } : {}) });
   }
-  ask(cat: NativeCat, at: number, proposal: Proposal) { return this.native.propose(this.threadId, cat, proposal, this.time(at)); }
+  /** A request for the owner's yes, about what the owner last said. */
+  ask(cat: NativeCat, at: number, proposal: Proposal) { return this.native.propose(this.threadId, cat, proposal, this.time(at), this.owner?.id); }
   answer(item: Record<string, any>, approve: boolean, at: number) { return this.native.decide(item, approve, this.time(at)); }
 }
 
 const choice = (id: string, type: 'select' | 'multi-select' | 'confirm', title: string, options: Array<Record<string, unknown>>, more: Record<string, unknown> = {}) =>
   ({ id, kind: 'interactive', v: 1, interactiveType: type, title, options, ...more });
+// The staged times are this machine's local times, so the reminders are set in its own time zone.
+export const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const schedule = (name: string, expression: string, message = name): Proposal => ({ feature: 'F139', title: '提议新建定时任务', summary: `Create schedule: ${name}`,
-  detail: { mutationKind: 'create', message, trigger: { type: 'cron', expression, timezone: 'Asia/Shanghai' } } });
+  detail: { mutationKind: 'create', message, trigger: { type: 'cron', expression, timezone: zone } } });
 const preference = (takeaway: string, quote: string): Proposal => ({ feature: 'F221', title: '提议捕捉品味信号', summary: `Taste [authentic-expression]: ${takeaway}`,
   detail: { takeaway, quote, privacy: 'sensitive' } });
 
-export async function seedShowcase({ native, base }: { native: PreviewNative; base: string }): Promise<{ plays: Record<string, string> }> {
+/** A chat's demo line and where it is sent: a cat's own chat or a group, by native id. */
+export type Play = { line: string; cat?: string; group?: string };
+
+export async function seedShowcase({ native, base }: { native: PreviewNative; base: string }): Promise<{ plays: Map<string, Play> }> {
   const call = async (method: string, path: string, body?: unknown, raw?: Buffer) => {
     const response = await fetch(base + '/xbot-api' + path, { method,
       ...(raw ? { headers: { 'Content-Type': 'application/octet-stream' }, body: new Uint8Array(raw) } : body !== undefined ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) });
@@ -179,12 +185,13 @@ export async function seedShowcase({ native, base }: { native: PreviewNative; ba
     return data;
   };
   const now = Date.now(), ago = (ms: number) => now - ms;
-  /** The latest `hour:minute` that is already a little while ago, `days` days further back. */
+  /** `hour:minute` on the calendar day `days` after the day of `from` (negative: before); a day is a calendar day, whatever its length. */
+  const on = (from: number, days: number, hour: number, minute = 0) => { const date = new Date(from); date.setDate(date.getDate() + days); date.setHours(hour, minute, 0, 0); return date.getTime(); };
+  /** The latest `hour:minute` that is already a little while ago, `days` calendar days further back. */
   const clock = (days: number, hour: number, minute = 0) => {
-    const date = new Date(now); date.setHours(hour, minute, 0, 0);
-    let time = date.getTime();
-    while (time > now - 30 * MIN) time -= DAY;
-    return time - days * DAY;
+    let time = on(now, 0, hour, minute);
+    if (time > now - 30 * MIN) time = on(time, -1, hour, minute);
+    return on(time, -days, hour, minute);
   };
 
   // One cat per template, called what the template is called; the tools alternate so both ways of writing a reply are on show.
@@ -285,23 +292,23 @@ export async function seedShowcase({ native, base }: { native: PreviewNative; ba
 
   // ── 小鲸鱼 · 说一句就设提醒；到点它在这里叫你 ──────────────────────────────────
   {
-    const room = chat('dsh'), nine = clock(0, 9, 0), start = nine - 2 * DAY - 12 * HOUR;
+    const room = chat('dsh'), nine = clock(0, 9, 0), start = on(nine, -3, 21, 0);
     room.say(start, '以后每天早上 9 点，提醒我看一眼当天的日程。');
     room.reply(whale, start + 30_000, '好。我设一个每天早上 9 点的定时，等你点头。');
     const daily = room.answer(room.ask(whale, start + 40_000, schedule('看当天的日程', '0 9 * * *', '看一眼当天的日程')), true, start + 2 * MIN)!;
-    const fired = [nine - DAY, nine].map((at, index) => {
+    const fired = [on(nine, -1, 9, 0), nine].map((at, index) => {
       const due = room.engine(at, 'connector', '[定时任务] 看一眼当天的日程', { connector: 'scheduler', label: '定时任务' });
       return room.reply(whale, at + 25_000, index ? '早。今天只有一件：14:00 读书会选书。上午是空的。' : '早。今天有两件事：10:30 周会；15:00 和暹罗猫对首页的配色。', { to: due.id });
     });
     Object.assign(daily, { runStats: { total: 2, delivered: 2, failed: 0, skipped: 0 },
-      runs: [nine, nine - DAY].map(at => ({ outcome: 'RUN_DELIVERED', scheduled_at: new Date(at).toISOString(), fired_at: new Date(at).toISOString(), started_at: new Date(at).toISOString(), error_summary: null })) });
+      runs: [nine, on(nine, -1, 9, 0)].map(at => ({ outcome: 'RUN_DELIVERED', scheduled_at: new Date(at).toISOString(), fired_at: new Date(at).toISOString(), started_at: new Date(at).toISOString(), error_summary: null })) });
     daily.lastRun = daily.runs[0];
     await seen(whale, room, fired[1]!);
     // The newest request is still waiting: unread, and listed as 等你确认.
     room.say(ago(9 * MIN), '每周五下午 5 点，再提醒我写周报。');
     room.reply(whale, ago(8 * MIN + 30_000), '可以，每周五 17:00。这个也等你确认。');
     room.ask(whale, ago(8 * MIN + 20_000), schedule('写周报', '0 17 * * 5', '该写周报了'));
-    live.set(room.threadId, (_cat, said) => ({ reply: '可以。我先按「每天 22:00」设一个，等你点头；想改时间，在我资料里的「定时」改。',
+    live.set(room.threadId, (_cat, said) => ({ reply: '可以。我先按「每天 22:00」设一个，等你点头。想换个时间，就在我资料的「定时」里把它删掉，再跟我说一遍。',
       proposal: schedule(said.replace(/\s+/g, ' ').slice(0, 16), '0 22 * * *', said.replace(/\s+/g, ' ').slice(0, 60)) }));
   }
 
@@ -327,9 +334,9 @@ export async function seedShowcase({ native, base }: { native: PreviewNative; ba
   {
     const room = chat('bengal'), start = clock(2, 16, 40);
     room.say(start, '给「页边」画一张启动图，再录一段 10 秒的操作演示。');
-    room.reply(bengal, start + 2 * MIN, '', { status: 'failed', reason: 'Tool call timed out after 120s: image_generation' });
+    room.reply(bengal, start + 2 * MIN, '', { status: 'failed', reason: 'timeout' });
     room.say(start + 3 * MIN, '那先只画启动图。');
-    room.reply(bengal, start + 4 * MIN, '来了来了！启动图我想这样画：一只猫趴在摊开的书上，书页的边上', { status: 'interrupted', reason: 'The runtime restarted while this reply was being written.' });
+    room.reply(bengal, start + 4 * MIN, '来了来了！启动图我想这样画：一只猫趴在摊开的书上，书页的边上', { status: 'interrupted', reason: 'process_restart' });
     room.say(start + 9 * MIN, '继续。');
     const last = room.reply(bengal, start + 11 * MIN, '画好了，第一稿的说明在卡片里；我还录了一段语音讲解。', { blocks: [
       { id: 'draft', kind: 'card', v: 1, title: '启动图 · 第 1 稿', tone: 'success', bodyMarkdown: '一只猫趴在摊开的书上，页边写满了批注。主色取自首页的纸页感配色。',
@@ -337,7 +344,7 @@ export async function seedShowcase({ native, base }: { native: PreviewNative; ba
       { id: 'voice', kind: 'audio', v: 1, url: '/uploads/preview/voice-note.mp3', title: '语音讲解' }] });
     await seen(bengal, room, last);
     // Every other try fails, so 再发一次 can be seen doing its job.
-    live.set(room.threadId, (_cat, _said, turn) => turn % 2 ? { think: 1500, reply: '我试试看…', fail: 'Tool call timed out after 120s: image_generation' }
+    live.set(room.threadId, (_cat, _said, turn) => turn % 2 ? { think: 1500, reply: '我试试看…', fail: 'timeout' }
       : { think: 900, reply: '这次成了！第二稿把猫挪到了书页的右下角，左上留给应用的名字。', blocks: [{ id: 'draft-' + randomUUID().slice(0, 6), kind: 'card', v: 1, title: '启动图 · 第 2 稿', tone: 'success',
           bodyMarkdown: '猫在右下角，书页占满全屏，名字压在左上。', fields: [{ label: '尺寸', value: '1290 × 2796' }, { label: '格式', value: 'PNG' }] }] });
   }
@@ -378,7 +385,7 @@ export async function seedShowcase({ native, base }: { native: PreviewNative; ba
   }
 
   // ── 产品评审（群）· 直接说由一只接待；@ 谁谁答；各有各的颜色 ────────────────────────
-  const plays: Record<string, string> = {};
+  const plays = new Map<string, Play>();
   {
     const name = '产品评审', group = await call('POST', '/groups', { name, members: [ragdoll.name, maine.name, siamese.name], idempotencyKey: randomUUID() });
     const room = new Chat(native, group.id), start = clock(1, 15, 20);
@@ -396,7 +403,7 @@ export async function seedShowcase({ native, base }: { native: PreviewNative; ba
     const lines: Record<string, string[]> = { [ragdoll.id]: ['我会先把深色那套颜色定下来，别的都好改。', '结构我再过一遍，明天给结论。'],
       [maine.id]: ['字体子集。不做这个，别的优化都白搭。', '先把对比度的问题改了再说。'], [siamese.id]: ['标题再大一号！翻开第一眼就得是它。', '红书签要不要会动？我想让它轻轻晃一下。'] };
     live.set(group.id, (cat, _said, turn) => ({ think: 400 + (turn % 3) * 500, reply: lines[cat.id]![Math.floor((turn - 1) / 3) % 2]! }));
-    plays[name] = `@${ragdoll.name} @${maine.name} @${siamese.name} 各说一句：今天最想改哪里？`;
+    plays.set(name, { group: group.id, line: `@${ragdoll.name} @${maine.name} @${siamese.name} 各说一句：今天最想改哪里？` });
   }
 
   // ── 读书会（群）· 四只猫的群；群里也能投票 ────────────────────────────────────
@@ -412,30 +419,32 @@ export async function seedShowcase({ native, base }: { native: PreviewNative; ba
     room.say(start + 4 * MIN, '投票吧。');
     room.reply(whale, start + 5 * MIN, '那就在这儿投：', { blocks: [choice('vote', 'select', '这个月读哪一本', [{ id: 'fast', label: '《思考，快与慢》' }, { id: 'guns', label: '《枪炮、病菌与钢铁》' },
       { id: 'list', label: '《清单革命》' }, { id: 'month', label: '《人月神话》' }], { disabled: true, selectedIds: ['list'] })] });
-    room.say(start + 6 * MIN, '我选了：《清单革命》');
+    room.say(start + 6 * MIN, '我选了：《清单革命》（这个月读哪一本）');
     await read(`/groups/${enc(group.id)}`, group.id, room.reply(whale, start + 7 * MIN, '定了，《清单革命》。周六晚上 8 点，我提前一天提醒大家。'));
     const lines: Record<string, string> = { [whale.id]: '下次是周六晚上 8 点，读《清单革命》的前三章。', [li.id]: '我带了三条想挑刺的地方，到时候说。',
       [van.id]: '我已经读完了，做了一页笔记，会前发给大家。', [gold.id]: '我负责计时，每人五分钟。' };
     live.set(group.id, cat => ({ reply: lines[cat.id]! }));
-    plays[name] = `@${whale.name} 下次读书会是什么时候？`;
+    plays.set(name, { group: group.id, line: `@${whale.name} 下次读书会是什么时候？` });
   }
 
-  // What the owner's profile and preferences already hold (read-only in the app, kept by the engine).
-  native.memoryViews.profile = { readStatus: 'ready', entries: [{ id: 'about-owner', title: '关于你', status: 'active', proposals: [], updatedAt: clock(4, 19, 0),
+  // What the owner's profile already holds (read-only in the app, kept by the engine): native's opening capsule, under native's own title.
+  native.memoryViews.profile = { readStatus: 'ready', entries: [{ id: 'capsule', type: 'profile', layer: 'capsule', title: '开场简介', status: 'active', proposals: [], updatedAt: clock(4, 19, 0),
     content: '在做一款叫「页边」的读书笔记应用。\n习惯晚上读书；每个月和朋友办一次读书会。\n喜欢先听结论。',
     revision: 'sha256:' + '0'.repeat(63) + '1' }] };
 
-  // Each chat's own canned reply; the first one in a single chat says plainly that it is canned.
-  const turns = new Map<string, number>(), direct = new Set(Object.values(threads));
+  // Each chat's own canned reply. The first one that goes through in a chat — a single chat or a group — says plainly that it is canned.
+  const turns = new Map<string, number>(), told = new Set<string>();
   native.scene = (threadId, cat, said) => {
     const make = live.get(threadId);
     if (!make) return undefined;
     const turn = (turns.get(threadId) ?? 0) + 1; turns.set(threadId, turn);
     const script = make(cat, said, turn);
-    return turn === 1 && direct.has(threadId) && !script.fail ? { ...script, reply: script.reply + '\n\n（这里是示例环境，回复是预先写好的。）' } : script;
+    if (script.fail || told.has(threadId)) return script;
+    told.add(threadId);
+    return { ...script, reply: script.reply + '\n\n（这里是示例环境，回复是预先写好的。）' };
   };
-  Object.assign(plays, { [ragdoll.name]: '把“每周回顾”的提醒文案也想一版。', [maine.name]: '再帮我看一眼导出的那段。', [siamese.name]: '再给我几个方向。',
-    [van.name]: '把上面的决定整理成一页。', [whale.name]: '每天晚上 10 点提醒我记一条读书笔记。', [li.name]: '以后给我的建议不要超过三条。',
-    [bengal.name]: '再画一版启动图。', [gold.name]: '这周进度怎么样？' });
+  for (const [face, line] of Object.entries({ ragdoll: '把“每周回顾”的提醒文案也想一版。', 'maine-coon': '再帮我看一眼导出的那段。', siamese: '再给我几个方向。',
+    'turkish-van': '把上面的决定整理成一页。', dsh: '每天晚上 10 点提醒我记一条读书笔记。', 'dragon-li': '以后给我的建议不要超过三条。',
+    bengal: '再画一版启动图。', 'golden-chinchilla': '这周进度怎么样？' })) plays.set(cats[face]!.name, { line, cat: cats[face]!.id });
   return { plays };
 }

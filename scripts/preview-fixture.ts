@@ -66,8 +66,6 @@ export class PreviewNative extends NativeFixture {
   schedules: Array<Record<string, any>> = [];
   /** Conversation notes by thread (GET /api/memory?threadId=). */
   notes = new Map<string, Array<{ key: string; value: string; updatedAt: number }>>();
-  /** Conversations read a few messages at a time, to show earlier pages loading without hundreds of messages. */
-  pageLimits = new Map<string, number>();
   /** A staged scene's own reply for a chat (scripts/showcase-scene.ts); undefined keeps the typed-word replies below. */
   scene?: (threadId: string, cat: NativeCat, text: string) => Script | undefined;
   constructor() { super(); this.runtimes = agentSets.ready!; }
@@ -94,21 +92,21 @@ export class PreviewNative extends NativeFixture {
       const target = resolve(String(body.parentPath), String(body.name));
       if (target.startsWith(workspaceRoot + sep)) mkdirSync(target, { recursive: true });
     }
-    if (url.pathname === '/api/messages' && method === 'GET') {
-      // One conversation may be read in smaller pages than the rest (see pageLimits).
-      const own = this.pageLimits.get(url.searchParams.get('threadId') ?? ''), usual = this.pageLimit;
-      if (own) { this.pageLimit = Math.min(own, usual ?? Infinity); try { return await super.request(path, options); } finally { this.pageLimit = usual; } }
-    }
-    if (url.pathname === '/api/memory') {
-      const id = method === 'GET' || method === 'DELETE' ? url.searchParams.get('threadId') ?? '' : String(body.threadId), list = this.notes.get(id) ?? [];
+    if (url.pathname === '/api/memory' && ['GET', 'POST', 'DELETE'].includes(method)) {
+      const write = method === 'POST';
+      if (write && (typeof body?.threadId !== 'string' || typeof body.key !== 'string' || typeof body.value !== 'string')) throw new ApiError(400, 'Invalid request');
+      const id = write ? body.threadId as string : url.searchParams.get('threadId') ?? '', list = this.notes.get(id) ?? [];
       if (method === 'GET') return done({ entries: list });
-      if (method === 'POST') { this.notes.set(id, [...list.filter(note => note.key !== body.key), { key: body.key, value: body.value, updatedAt: Date.now() }]); return done({ key: body.key }); }
-      if (method === 'DELETE') { this.notes.set(id, list.filter(note => note.key !== url.searchParams.get('key'))); return done({ status: 'ok' }); }
+      if (write) { this.notes.set(id, [...list.filter(note => note.key !== body.key), { key: body.key, value: body.value, updatedAt: Date.now() }]); return done({ key: body.key }); }
+      this.notes.set(id, list.filter(note => note.key !== url.searchParams.get('key'))); return done({ status: 'ok' });
     }
-    // Where a remembered preference came from: the conversation that asked for it.
+    // Where a remembered preference came from, as native answers it (routes/taste-browse-source.ts): the owner's
+    // own message that the request was about, under the conversation's title — not the cat's request card.
     if (parts[2] === 'memory' && parts[3] === 'taste' && parts[5] === 'source' && method === 'GET') {
       const from = this.memoryViews.taste.entries.find((entry: any) => entry.id === parts[4])?.from;
-      return done(from ? { status: 'ready', title: '提出这个偏好的那句话', canOpen: true, ...from } : { status: 'not_recorded' });
+      const thread = from && this.threads.get(from.threadId);
+      return done(thread && from.messageId ? { status: 'ready', title: thread.title?.trim() || null, canOpen: true, threadId: thread.id, messageId: from.messageId }
+        : { status: 'not_recorded', title: null, canOpen: false });
     }
     if (url.pathname === '/api/bot-cat-templates' && method === 'GET') return done({ breeds: breeds.map(id => ({ id, name: breedNames[id]![0] })),
       templates: breeds.map((id, index) => ({ id: 'seed:' + id, revision: index + 1, name: breedNames[id]![0], nameHint: breedNames[id]![1], source: { kind: 'user' },
@@ -160,9 +158,10 @@ export class PreviewNative extends NativeFixture {
     }
     if (url.pathname === '/api/schedule/tasks' && method === 'GET') return done({ tasks: this.schedules, botScheduleVersion: 1, botSchedulerReady: true });
     if (url.pathname === '/api/schedule/tasks' && method === 'POST') {
+      if (typeof body?.params?.targetCatId !== 'string' || typeof body.deliveryThreadId !== 'string' || !body.trigger) throw new ApiError(400, 'Invalid request');
       // A reminder set by hand in a cat's 定时 page; the same request sent again finds the one it made.
       const made = this.schedules.find(task => task.botIdempotencyKey === body.botIdempotencyKey)
-        ?? this.remind('dyn-' + Date.now() + '-' + randomBytes(3).toString('hex'), body.params.targetCatId, body.deliveryThreadId, body.display.label, body.params.message, body.trigger);
+        ?? this.remind('dyn-' + Date.now() + '-' + randomBytes(3).toString('hex'), body.params.targetCatId, body.deliveryThreadId, body.display?.label ?? '定时任务', String(body.params.message ?? ''), body.trigger);
       made.botIdempotencyKey = body.botIdempotencyKey;
       return done({ success: true, task: { id: made.id } });
     }
@@ -209,7 +208,7 @@ export class PreviewNative extends NativeFixture {
    * registered in the hub and anchored to that message. The cards are in the shapes the real engine
    * writes them (copied from the isolated runtime, 2026-11-11).
    */
-  propose(threadId: string, cat: NativeCat, proposal: Proposal, at = Date.now()) {
+  propose(threadId: string, cat: NativeCat, proposal: Proposal, at = Date.now(), about?: string) {
     const id = 'proposal_' + randomBytes(8).toString('hex'), detail = proposal.detail as any, name = String(proposal.summary).replace(/^[^:]*:\s*/, '');
     const taskId = 'dyn-' + at + '-' + randomBytes(3).toString('hex');
     const card = proposal.feature === 'F139'
@@ -224,7 +223,9 @@ export class PreviewNative extends NativeFixture {
     const list = this.messages.get(threadId) ?? []; this.messages.set(threadId, list); list.push(cardMessage);
     const item: Record<string, any> = { proposalId: id, sourceFeatureId: proposal.feature, requesterCatId: cat.id, summary: proposal.summary, detail: proposal.detail, resolution: 'open',
       inlineApprovable: true, decisionMode: 'approve-reject', createdAt: at, expiresAt: at + 7 * 86400000,
-      navigation: { state: 'anchored', approvalCardRef: { threadId, messageId: cardMessage.id } }, taskId };
+      navigation: { state: 'anchored', approvalCardRef: { threadId, messageId: cardMessage.id } }, taskId,
+      // The owner's message the request is about (native: sourceMessageId / approvalOriginRef).
+      ...(about ? { sourceMessageId: about, approvalOriginRef: { kind: 'message', threadId, messageId: about } } : {}) };
     this.hub.push(item); return item;
   }
   /**
@@ -241,9 +242,11 @@ export class PreviewNative extends NativeFixture {
         producerId: item.sourceFeatureId, canonicalProposalId: item.proposalId, resolution: approve ? 'accepted' : 'rejected', approvalCardRef: ref, decidedAt: at } } } });
     if (!approve) return;
     if (item.sourceFeatureId === 'F139' && item.detail?.mutationKind === 'create') return this.remind(item.taskId, item.requesterCatId, ref.threadId, name, item.detail.message ?? name, item.detail.trigger);
-    if (item.sourceFeatureId === 'F221') this.memoryViews.taste.entries.push({ id: 'taste-' + randomBytes(6).toString('hex'), title: '你的偏好', takeaway: item.detail.takeaway,
-      quotes: item.detail.quote ? [item.detail.quote] : [], scene: '你明确要求记住的', status: 'active', when: new Date(at).toISOString(),
-      revision: 'sha256:' + createHash('sha256').update(String(item.detail.takeaway)).digest('hex'), from: { threadId: ref.threadId, messageId: ref.messageId } });
+    // A kept preference as native lists it (routes/taste-browse-model.ts): titled by its takeaway, dated by the day it was proposed.
+    if (item.sourceFeatureId === 'F221') this.memoryViews.taste.entries.unshift({ id: 'taste-' + randomBytes(12).toString('hex'), type: 'taste',
+      title: String(item.detail.takeaway).slice(0, 160), takeaway: item.detail.takeaway, quotes: item.detail.quote ? [item.detail.quote] : [],
+      scene: '用户明确要求记住的个人偏好', status: 'active', when: new Date(item.createdAt).toLocaleDateString('sv'), takeawayCandidate: null, pendingCorrectionCount: 0,
+      revision: 'sha256:' + createHash('sha256').update(String(item.detail.takeaway)).digest('hex'), from: { threadId: ref.threadId, messageId: item.sourceMessageId } });
   }
   /** A file a cat hands over with a reply: a native file block on the message, its bytes where native keeps uploads, and a line in the thread's catalogue. */
   publish(threadId: string, message: NativeMessage, file: { name: string; mime: string; bytes: Buffer }) {
@@ -343,7 +346,7 @@ export class PreviewNative extends NativeFixture {
     for (const file of files) this.publish(threadId, message, file);
     settle('completed');
     this.emit(threadId, { type: 'done', ...stamp, isFinal: true, timestamp: Date.now() }, true);
-    if (proposal) { this.propose(threadId, cat, proposal); this.emit(threadId, { type: 'thread_updated' }); }
+    if (proposal) { this.propose(threadId, cat, proposal, Date.now(), user.id); this.emit(threadId, { type: 'thread_updated' }); }
   }
 }
 
@@ -357,9 +360,9 @@ runtime.store.state.deviceName = showcase ? '示例环境' : '预览环境';
 // 团子 answers the way Claude Code does, 栗子 the way Codex does (see turn()).
 if (!showcase) for (const [index, name] of ['团子', '栗子', '年糕'].slice(0, Math.max(0, Math.min(3, Number(process.env.PREVIEW_CATS ?? 2)))).entries())
   await runtime.bridge.createBot({ name, simple: { face: breeds[[7, 1, 2][index]!]!, agent: ['claude', 'codex', 'claude'][index]! }, idempotencyKey: randomUUID() });
-/** The staged scene's demo line for each chat, by the chat's name (see `{"play": …}` below). */
-let plays: Record<string, string> = {};
-runtime.app.post('/__preview', (req, res) => {
+/** The staged scene's demo line for each chat and where it goes, by the chat's name (see `{"play": …}` below). */
+let plays = new Map<string, { line: string; cat?: string; group?: string }>();
+runtime.app.post('/__preview', async (req, res) => {
   const input = req.body ?? {};
   if (typeof input.agents === 'string') { if (!agentSets[input.agents]) return res.status(400).json({ error: 'agents: ' + Object.keys(agentSets).join(' | ') }); native.runtimes = agentSets[input.agents]!; }
   if (typeof input.speed === 'number' && input.speed > 0 && input.speed <= 20) native.speed = input.speed;
@@ -368,11 +371,12 @@ runtime.app.post('/__preview', (req, res) => {
   if (typeof input.page === 'number') native.pageLimit = input.page >= 2 && input.page <= 200 ? Math.floor(input.page) : undefined;
   // {"play": "布偶猫"}: the owner's demo line for that chat is sent through the real adapter, so its staged reply can be watched being written.
   if (typeof input.play === 'string') {
-    const line = plays[input.play];
-    if (!line) return res.status(404).json({ error: 'play: ' + (Object.keys(plays).join(' | ') || '(only in the showcase)') });
-    const cat = native.cats.find(known => known.name === input.play);
-    const group = cat ? undefined : [...native.threads.values()].find(thread => thread.title === input.play && runtime.store.state.groupThreadIds.includes(thread.id));
-    void (cat ? runtime.bridge.direct(cat).then(thread => runtime.bridge.send(thread, { text: line }, cat)) : runtime.bridge.send(group!, { text: line })).catch(error => console.error('[preview]', error));
+    const target = plays.get(input.play), cat = target?.cat ? native.cats.find(known => known.id === target.cat) : undefined;
+    const group = target?.group ? native.threads.get(target.group) : undefined;
+    if (!target || (!cat && !group)) return res.status(404).json({ error: 'play: ' + ([...plays.keys()].join(' | ') || '(only in the showcase)') });
+    // Answered once the adapter has accepted the line; a line it refused is not reported as played.
+    try { await (cat ? runtime.bridge.direct(cat).then(thread => runtime.bridge.send(thread, { text: target.line }, cat)) : runtime.bridge.send(group!, { text: target.line })); }
+    catch (error) { return res.status(502).json({ error: 'play: ' + (error instanceof Error ? error.message : 'not sent') }); }
   }
   res.json({ agents: Object.entries(agentSets).find(([, set]) => set === native.runtimes)?.[0], speed: native.speed, approvals: native.hubFails ? 'failing' : 'working', cats: native.cats.map(cat => cat.name) });
 });
@@ -389,5 +393,7 @@ const server = runtime.app.listen(port, '127.0.0.1', () => {
     console.log(`showcase (staged chats on the scripted fixture, no engine): http://127.0.0.1:${port}  ·  guide: http://127.0.0.1:${port}/tour/`);
   }).catch(error => { console.error('[showcase] could not stage the chats:', error); process.exitCode = 1; close(); });
 });
-const close = () => { void runtime.close().finally(() => server.close(() => { rmSync(dir, { recursive: true, force: true }); process.exit(0); })); };
+const close = () => { void runtime.close().finally(() => server.close(() => { rmSync(dir, { recursive: true, force: true }); process.exit(process.exitCode ?? 0); })); };
+// Started by another program (a test) with PREVIEW_PARENT=stdin: when that program goes away, however it ends, so does this.
+if (process.env.PREVIEW_PARENT === 'stdin') process.stdin.on('end', close).on('error', close).resume();
 for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, close);
