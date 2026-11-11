@@ -15,6 +15,11 @@ const botBody = { name: label, persona: z.string().max(32768).optional(), descri
   avatar_seed: seed.optional(), templateId: z.string().optional(), timezone: z.string().max(80).optional(),
   runtimeId: z.string().max(100).optional(), catConfig: catConfigSchema.optional(),
   sourceTemplate: sourceTemplateSchema.optional(), idempotencyKey: z.string().uuid().optional() };
+// The eight portraits of client/public/cat-avatars.js.
+const faces = ['ragdoll', 'maine-coon', 'siamese', 'turkish-van', 'dsh', 'dragon-li', 'bengal', 'golden-chinchilla'] as const;
+const simpleCat = z.object({ face: z.enum(faces).optional(), about: z.string().trim().max(2000).optional(), agent: z.string().min(1).max(100).optional() }).strict();
+// A group's name is a native thread title, free text unlike a cat's @-mentionable name.
+const groupTitle = z.string().trim().min(1).max(64).regex(/^[^<>\x00-\x1f\x7f]+$/, '名字包含不支持的字符');
 const sse = (res: Response, event: string, data: unknown) => {
   if (!res.destroyed && !res.writableEnded) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 };
@@ -76,8 +81,8 @@ export function createXbotCoreRouter(bridge: BotBridge) {
       })).filter(m => m.native.type !== 'assistant' || !!m.text.trim() || m.attachments.length > 0 || m.presentation_kind === 'activity' || 'in_progress' in m) });
   });
   router.post('/bots', async (req, res) => {
-    const input = z.object(botBody).strict().superRefine((value, ctx) => {
-      if (value.catConfig && !value.idempotencyKey) ctx.addIssue({ code: 'custom', path: ['idempotencyKey'], message: '创建猫猫需要请求标识' });
+    const input = z.object({ ...botBody, simple: simpleCat.optional() }).strict().superRefine((value, ctx) => {
+      if ((value.catConfig || value.simple) && !value.idempotencyKey) ctx.addIssue({ code: 'custom', path: ['idempotencyKey'], message: '创建猫猫需要请求标识' });
     }).parse(req.body);
     const cat = await bridge.createBot(input);
     res.status(201).json({ name: cat.name, native_id: cat.id });
@@ -111,22 +116,27 @@ export function createXbotCoreRouter(bridge: BotBridge) {
     delete store.state.bots[cat.id]; store.save(); res.json({ status: 'ok', history: 'preserved_by_clowder_ai' });
   });
   router.post('/groups', async (req, res) => {
-    const input = z.object({ name: label, members: z.array(z.string()).min(2).max(10).optional(), projectId: z.string().optional() }).strict().parse(req.body);
+    const input = z.object({ name: groupTitle.optional(), members: z.array(z.string()).min(2).max(10).optional(), projectId: z.string().optional() }).strict().parse(req.body);
     if (input.projectId) throw new ApiError(410, '新群聊会自动分配文件目录，无需关联项目');
     if (!input.members) {
-      if (store.state.folders.includes(input.name)) throw new ApiError(409, '分组已存在');
-      store.state.folders.push(input.name); store.save(); return res.json({ name: input.name });
+      const folder = label.parse(input.name);
+      if (store.state.folders.includes(folder)) throw new ApiError(409, '分组已存在');
+      store.state.folders.push(folder); store.save(); return res.json({ name: folder });
     }
     const members = await Promise.all(input.members.map(name => bot(name)));
     if (new Set(members.map(c => c.id)).size !== members.length) throw new ApiError(400, '成员不能重复');
     const directoryKey = randomUUID();
-    const thread = await bridge.newThread(input.name, members.map(c => c.id), directoryKey, await bridge.workspaces.groupPath(directoryKey));
+    // Unnamed, a group is called after its members; it can be renamed later.
+    const joined = members.map(c => c.name).join('、');
+    const title = input.name ?? (joined.length > 64 ? joined.slice(0, 63) + '…' : joined);
+    const thread = await bridge.newThread(title, members.map(c => c.id), directoryKey, await bridge.workspaces.groupPath(directoryKey));
     store.state.groupThreadIds.push(thread.id); store.save(); res.status(201).json(bridge.groupItem(thread, members));
   });
   router.patch('/groups/:name', async (req, res) => {
-    const input = z.object({ name: label }).strict().parse(req.body);
+    const input = z.object({ name: groupTitle }).strict().parse(req.body);
     const index = store.state.folders.indexOf(req.params.name);
     if (index >= 0) {
+      label.parse(input.name);
       if (store.state.folders.includes(input.name) && input.name !== req.params.name) throw new ApiError(409, '分组已存在');
       store.state.folders[index] = input.name;
       for (const meta of Object.values(store.state.bots)) if (meta.folder === req.params.name) meta.folder = input.name;

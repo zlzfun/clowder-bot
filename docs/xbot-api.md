@@ -5,10 +5,11 @@ UI 保留 Bot 名称和文件夹概念，实际成员、执行和历史以 Clowd
 | XBot 行为 | 原生映射 |
 | --- | --- |
 | Bot 创建/职责/重命名/删除 | `/api/cats`；删除成员保留原生历史 |
+| 首次启动与只填名字建猫 | `GET /start` 把原生 Agent 检测说成「能不能直接开聊」；`POST /bots` 的 `simple` 用原生默认值建猫，见下文「开箱即用」 |
 | 本地 Agent 接入 | `/agents` 原生发现；`/bots/:name/agent` 绑定执行者并恢复原生默认继承 |
 | 单聊/新会话 | 原生 Thread，preferredCats 为该成员；新建保留旧会话 |
 | 首次单聊的问候 | `POST /xbot-api/bots/:name/greeting` 以 `expectedThreadId` 绑定已打开的单聊，向这只猫发起一次普通的原生聊天请求 |
-| 群聊 | 原生 Thread，preferredCats 为显式成员；消息路由保持原生 |
+| 群聊 | 原生 Thread，preferredCats 为显式成员；消息路由保持原生；不填名字时以成员名命名 |
 | 发消息/回复引用 | `/api/messages`，原生 ID 与幂等键 |
 | 历史/导出 | 原生消息；主界面最近 200 条，导出完整分页 |
 | 状态/停止 | 原生 queue、activeInvocations、withdraw、cancel；单成员取消不取消兄弟任务 |
@@ -18,6 +19,23 @@ UI 保留 Bot 名称和文件夹概念，实际成员、执行和历史以 Clowd
 | 头像/文件夹/置顶 | Bot presentation store |
 
 运行面板补充原生队列、会话链、原生消息分页、记忆 catalog/search、Agent 与审批。F306 question/approval/elicitation 使用原生 revision、cardRef、operationId；其他支持内联操作的审批按原生 manifest 转发。需要完整原生会话卡片的交互不会自动批准。
+
+## 开箱即用
+
+`GET /xbot-api/start[?refresh=1]` 是原生 `/api/cats/native-runtimes` 检测结果的一句话版本，只读，不安装、不登录、不调用模型：
+
+- `ready`、`agent {id, label, confirmed}`：新猫默认会用的本机 Agent。规则与旧的隐式选择相同：先取有登录记录（`configured`）的，其次是已安装且适配层能绑定的；`confirmed: false` 表示装了但没能确认登录。
+- `blocked`：`null`、`login_required`（有装好但需要登录的）或 `no_agent`。
+- `agents[]`：适配层能绑定的那几种（Codex、Claude Code、Kimi）各自的 `state`：`ready`、`unknown`、`login`、`missing`，以及原生给出的 `loginCommand`。
+- `cats`：现有猫的数量。
+
+`POST /xbot-api/bots` 增加第三种请求体 `{name, simple: {face?, about?, agent?}, idempotencyKey}`：
+
+- 仍然只调用一次已有的原生创建（`/api/bot-cat-templates/instantiate`，P005），不新增机制。Agent 取 `simple.agent` 或上面的默认；模型与推理强度沿用该 Agent 的本机默认（`inherit`），猫种由原生按模型推断（`auto`）。
+- `face` 只决定头像（八张猫脸之一）。`about` 是用户写的一句用途，成为职责与简介；不写时用一段通用的「随叫随到的伙伴」职责，并显式给出性格与简介，避免原生按猫种补上偏工程的默认画像。
+- 必须带 `idempotencyKey`，同一个键重发得到同一只猫；不能与 `catConfig`、`runtimeId`、`templateId`、`persona`、`description` 混用。没有可用 Agent 时 422，说明要先装好并登录。
+
+`POST /xbot-api/groups` 带 `members` 时 `name` 可省略，群名取成员名用「、」连接（超过 64 字截断），之后可改名。群名是原生 Thread 标题，按自由文本校验；不带 `members` 时同一路由仍是建侧栏分组，分组名沿用原来的字符限制。
 
 问候复用固定版本 `42017e0c` 的 `POST /api/messages`。原生身份上下文包含猫名、角色说明与性格（`assets/prompt-templates/s1-identity.md`）。适配层指定单个成员、`next_work` 与同一猫和会话的稳定幂等键。首次请求先检查原生历史和队列，已有对话返回 `exists`。检查与准入是两个操作，并发到达的用户消息由原生队列决定顺序。创建猫和读取历史各自独立，生成失败时猫仍可正常聊天。
 

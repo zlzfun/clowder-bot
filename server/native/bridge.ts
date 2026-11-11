@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { ApiError } from '../errors.js';
 import { ProductStore } from '../product-store.js';
 import type { NativeCat, NativeMessage, NativeThread, NativeTransport } from './types.js';
-import { runtimeUnavailable, supportsRuntime } from './agents.js';
+import { defaultRuntime, runtimeUnavailable, supportsRuntime } from './agents.js';
 import { messageDisplayText, messagePresentation, replyInProgress } from './message-presentation.js';
 import { avatarBreed, type CatConfig, type SourceTemplate } from './cat-templates.js';
 import { Workspaces } from '../workspaces.js';
@@ -40,7 +40,14 @@ export interface QueueView {
 }
 export interface RoleTemplate { id: string; name: string; nickname?: string; roleDescription: string; personality?: string; teamStrengths?: string; color: { primary: string; secondary: string } }
 export interface CreateBot { name: string; persona?: string; description?: string; avatar_seed?: string; templateId?: string; timezone?: string; runtimeId?: string;
-  catConfig?: CatConfig; sourceTemplate?: { id: string; revision: number }; idempotencyKey?: string }
+  catConfig?: CatConfig; sourceTemplate?: { id: string; revision: number }; idempotencyKey?: string;
+  /** A name and, optionally, a face and a line about what the cat is for. Everything else uses native defaults. */
+  simple?: { face?: string; about?: string; agent?: string } }
+// The role a cat gets when the owner only named it. The owner can change it later in the cat's profile.
+const defaultRole = '随叫随到的伙伴：聊天、答疑、查资料、写东西、整理文件，交代的事会动手做完。说话自然简洁，先给结果，拿不准的地方再问。';
+// Said explicitly so the breed's stock engineering portrait is not filled in for a cat the owner only named.
+const defaultPersonality = '亲切耐心，讲得清楚；做事利落，不绕弯子。';
+const defaultStrengths = '聊天答疑、查资料、写东西、整理文件';
 
 export class BotBridge {
   private directCreates = new Map<string, Promise<NativeThread>>();
@@ -237,7 +244,24 @@ export class BotBridge {
         active, queued };
     }), groups: this.store.state.groupThreadIds.map(id => ({id,thread_id:id,activity:views.find(view => view.threadId === id) ?? this.activity.unavailable(id)})), others: [] };
   }
-  async createBot(input: CreateBot, source?: NativeCat) {
+  async createBot(input: CreateBot, source?: NativeCat): Promise<NativeCat> {
+    if (input.simple) {
+      if (source || input.catConfig || input.sourceTemplate || input.runtimeId || input.templateId || input.persona !== undefined || input.description !== undefined)
+        throw new ApiError(400, '快速创建只需要名字，不能与其他配置混用');
+      if (!input.idempotencyKey) throw new ApiError(400, '创建猫猫需要请求标识');
+      const { simple, ...rest } = input, about = simple.about?.trim();
+      // Same native creation as the full form: the local Agent's own defaults
+      // for model and effort, the breed native works out from them.
+      const runtimes = await this.runtimes(true);
+      const runtime = simple.agent ? runtimes.find(r => r.id === simple.agent) : defaultRuntime(runtimes);
+      if (!runtime) throw new ApiError(422, simple.agent ? '找不到选的这个助手程序，请重新选择。' : '这台电脑上还没有可以用的助手程序，装好并登录 Claude Code 或 Codex 后再试。');
+      const unavailable = runtimeUnavailable(runtime);
+      if (unavailable) throw new ApiError(422, unavailable);
+      return this.createBot({ ...rest, ...(simple.face ? { avatar_seed: `cat:${simple.face}` } : {}),
+        catConfig: { runtimeId: runtime.id, breed: { mode: 'auto' }, model: { mode: 'inherit' }, effort: { mode: 'inherit' },
+          portrait: { roleDescription: about || defaultRole, personality: defaultPersonality,
+            teamStrengths: about ? (about.length > 60 ? about.slice(0, 59) + '…' : about).replace(/\s+/g, ' ') : defaultStrengths } } });
+    }
     if (input.catConfig) {
       if (source || input.runtimeId || input.templateId || input.persona !== undefined || input.description !== undefined)
         throw new ApiError(400, '创建配置不能与旧版字段混用');
@@ -261,7 +285,7 @@ export class BotBridge {
     if (!template) throw new ApiError(503, '上游角色模板不可用');
     const runtimes = await this.runtimes();
     const installed = runtimes.filter(r => r.installed && supportsRuntime(r) && !runtimeUnavailable(r));
-    const runtime = input.runtimeId ? runtimes.find(r => r.id === input.runtimeId) : source ? installed.find(r => r.clientId === source.clientId) : installed.find(r => r.readiness?.status === 'configured') ?? installed[0];
+    const runtime = input.runtimeId ? runtimes.find(r => r.id === input.runtimeId) : source ? installed.find(r => r.clientId === source.clientId) : defaultRuntime(runtimes);
     if (!runtime) throw new ApiError(422, '请先安装并配置本地 Agent，再选择接入。');
     const unavailable = runtimeUnavailable(runtime);
     if (unavailable) throw new ApiError(422, unavailable);

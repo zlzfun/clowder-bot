@@ -15,6 +15,11 @@ export function runtimeUnavailable(runtime: NativeRuntime): string | null {
   if (runtime.readiness?.status === 'not_installed') return '本机尚未检测到这个 Agent';
   return null;
 }
+/** The local Agent a new cat uses when the owner did not pick one: one with a login record first, else any installed and adapted one. */
+export function defaultRuntime(runtimes: NativeRuntime[]): NativeRuntime | undefined {
+  const usable = runtimes.filter(runtime => !runtimeUnavailable(runtime));
+  return usable.find(runtime => runtime.readiness?.status === 'configured') ?? usable[0];
+}
 export function runtimeForCat(cat: NativeCat, runtimes: NativeRuntime[]): NativeRuntime | undefined {
   if (cat.configurationSource !== 'native_tool' || cat.accountRef || cat.agentProvider || cat.carrier === 'acp') return;
   return runtimes.find(r => supportsRuntime(r) && r.clientId === cat.clientId);
@@ -56,6 +61,30 @@ export async function agentInventory(bridge: BotBridge, refresh = false) {
         activity: { state: active === null ? 'unknown' : active > 0 ? 'running' : 'idle', active, queued, scope: 'bot_threads' },
       };
     }),
+  };
+}
+
+/**
+ * What the first screen needs to know before the owner has any cat: whether a
+ * chat can start right away, and if not, what is in the way. It is the native
+ * discovery read in everyday terms; nothing is installed, logged in or called.
+ */
+export async function startSummary(bridge: BotBridge, refresh = false) {
+  const [runtimes, cats] = await Promise.all([bridge.runtimes(refresh), bridge.cats()]);
+  const adapted = runtimes.filter(supportsRuntime), chosen = defaultRuntime(runtimes);
+  const state = (runtime: NativeRuntime) => {
+    const status = runtime.readiness?.status ?? (runtime.installed ? 'unknown' : 'not_installed');
+    return !runtime.installed || status === 'not_installed' ? 'missing' as const
+      : status === 'login_required' ? 'login' as const : status === 'configured' ? 'ready' as const : 'unknown' as const;
+  };
+  const agents = adapted.map(runtime => ({ id: runtime.id, label: runtime.label, state: state(runtime),
+    ...(runtime.readiness?.loginCommand ? { loginCommand: runtime.readiness.loginCommand } : {}) }));
+  return {
+    cats: cats.length, ready: !!chosen,
+    // `confirmed` is false when the tool is installed but its login could not be checked.
+    agent: chosen ? { id: chosen.id, label: chosen.label, confirmed: chosen.readiness?.status === 'configured' } : null,
+    blocked: chosen ? null : agents.some(agent => agent.state === 'login') ? 'login_required' as const : 'no_agent' as const,
+    agents, checkedAt: Date.now(),
   };
 }
 

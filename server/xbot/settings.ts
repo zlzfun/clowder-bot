@@ -3,13 +3,14 @@ import { hostname } from 'node:os';
 import { z } from 'zod';
 import { ApiError } from '../errors.js';
 import { BotBridge, encode } from '../native/bridge.js';
-import { agentInventory, bindAgent } from '../native/agents.js';
+import { agentInventory, bindAgent, startSummary } from '../native/agents.js';
 import { type CatTemplate, presentTemplate } from '../native/cat-templates.js';
 
 export function createXbotSettingsRouter(bridge: BotBridge) {
   const router = Router(), { native, store } = bridge;
   const unsupported = (reason: string): never => { throw new ApiError(501, reason); };
   router.get('/agents', async (req, res) => res.json(await agentInventory(bridge, req.query.refresh === '1')));
+  router.get('/start', async (req, res) => res.json(await startSummary(bridge, req.query.refresh === '1')));
   router.post('/agents/:id/models', async (req, res) => {
     const input = z.object({ model: z.string().max(512).optional(), refresh: z.boolean().optional() }).strict().parse(req.body ?? {});
     res.json(await native.request('/api/cats/runtime-models', { method: 'POST', body: { runtimeId: req.params.id, ...input } }));
