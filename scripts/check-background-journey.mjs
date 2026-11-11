@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { nativeDataDir } from '../shared/data-location.mjs';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
@@ -11,7 +12,7 @@ const base = `http://127.0.0.1:${process.env.PORT || 3210}`;
 const id = process.env.BOT_BACKGROUND_RESUME || randomUUID().slice(0, 8), name = `后台旅程验收-${id}`;
 assert.match(id, /^[a-f0-9]{8}$/, 'resume must name one isolated acceptance run');
 const artifacts = resolve('.runtime/background-journey', id);
-const workspace = resolve(process.env.BOT_RUNTIME_DATA_DIR || 'data/native', 'workspace');
+const workspace = resolve(nativeDataDir(resolve(import.meta.dirname, '..')), 'workspace');
 const fixture = join(workspace, '.bot-validation', id);
 mkdirSync(artifacts, { recursive: true }); mkdirSync(fixture, { recursive: true });
 const evidence = process.env.BOT_BACKGROUND_RESUME

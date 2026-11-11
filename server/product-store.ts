@@ -1,5 +1,5 @@
 import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname } from 'node:path';
 import { z } from 'zod';
 
 export interface BotPresentation {
@@ -68,7 +68,7 @@ const presentationSchema = z.object({
 /** Presentation, workspace references and file manifests only; never execution, messages, memory or credentials. */
 export class ProductStore {
   readonly state: ProductState;
-  constructor(readonly file = resolve('data/bot/presentation.json')) {
+  constructor(readonly file: string) {
     if (existsSync(file)) {
       const data = JSON.parse(readFileSync(file, 'utf8'));
       const parsed = presentationSchema.safeParse(data);

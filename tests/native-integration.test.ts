@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { nativeDataDir } from '../shared/data-location.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
@@ -12,7 +13,7 @@ const enabled = process.env.BOT_NATIVE_TEST === '1';
 test('native contracts: catalog, durable threads, notes, Socket.IO, sessions and queue', { skip: !enabled }, async () => {
   const native = new NativeClient(`http://127.0.0.1:${process.env.BOT_NATIVE_PORT || 4331}`, `http://127.0.0.1:${process.env.PORT || 3210}`);
   const suffix = randomUUID().slice(0, 8);
-  const bridge = new BotBridge(native, new ProductStore(resolve(`.runtime/integration-${suffix}.json`)), resolve(process.env.BOT_RUNTIME_DATA_DIR || 'data/native', 'workspace'));
+  const bridge = new BotBridge(native, new ProductStore(resolve(`.runtime/integration-${suffix}.json`)), resolve(nativeDataDir(resolve(import.meta.dirname, '..')), 'workspace'));
   const health = await native.request<any>('/api/health');
   assert.equal(health.callbackAuth.backend, 'redis'); assert.equal(health.callbackAuth.durability, 'durable');
   let catId: string | undefined, threadId: string | undefined;
@@ -62,7 +63,7 @@ test('native contracts: catalog, durable threads, notes, Socket.IO, sessions and
 test('real native queue rejects an out-of-roster member without creating its session', { skip: !enabled }, async () => {
   const native = new NativeClient(`http://127.0.0.1:${process.env.BOT_NATIVE_PORT || 4331}`, `http://127.0.0.1:${process.env.PORT || 3210}`);
   const suffix = randomUUID().slice(0, 8);
-  const bridge = new BotBridge(native, new ProductStore(resolve(`.runtime/policy-${suffix}.json`)), resolve(process.env.BOT_RUNTIME_DATA_DIR || 'data/native', 'workspace'));
+  const bridge = new BotBridge(native, new ProductStore(resolve(`.runtime/policy-${suffix}.json`)), resolve(nativeDataDir(resolve(import.meta.dirname, '..')), 'workspace'));
   const cats: string[] = []; let threadId: string | undefined;
   try {
     const member = await bridge.createBot({ name: `成员-${suffix}`, runtimeId: 'codex' }); cats.push(member.id);

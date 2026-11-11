@@ -16,6 +16,16 @@
 
 启动器同时持有数据目录锁与构建目录锁，阻止同一构建被其他配置并发使用或重建；准备脚本会加载 `.env` 中的自定义数据路径。构建来源摘要包含锁文件和全部补丁字节；编译成功后才写完成标记。`runtime:start` 拒绝不完整或过期构建。`verify:upstream` 检查子模块、生成目录的 HEAD、补丁逐字节结果及未记录的源码改动。不要在生成目录修业务代码。
 
+## 数据位置
+
+猫在数据目录下的 `native/workspace/cats/<猫>` 里工作。Claude Code 会加载工作目录各级上层的 `CLAUDE.md`，Codex 会读所在 Git 仓库的 `AGENTS.md`，所以数据一旦放在某个代码仓库里，每只猫每一轮都会读到那个仓库写给开发者的说明（2026-11-11 在隔离运行时的会话记录里核实过：本仓库的 `CLAUDE.md` 和 Claude 记忆索引都在猫的上下文里）。
+
+规则在 `shared/data-location.mjs`，启动脚本和 Bot 服务共用：
+
+- `BOT_DATA_DIR` 指定数据根目录；其下是 `native/`（原生数据）和 `bot/presentation.json`（Bot 展示数据）。`BOT_RUNTIME_DATA_DIR`、`BOT_PRODUCT_DATA_FILE` 仍可分别覆盖。
+- 都没设置时：这个检出里已经有 `data/native` 或 `data/bot` 的，继续用 `./data`，不会因为默认值变了而把已有数据晾在一边；全新的检出用 `~/.clowder-bot`。
+- `runtime:start` 发现数据目录位于某个 Git 检出之内时会打印提示。已有实例要搬到仓库外，需要停服务、备份、移动，并处理原生会话里保存的绝对路径；这一步要先在数据副本上验证，不随升级自动发生。
+
 ## 差异台账
 
 | 编号 | 改动位置 | 原因/影响 | 退出条件 |

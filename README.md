@@ -46,8 +46,8 @@ flowchart LR
 - `.runtime/`：按 `upstream.lock.json` 生成的独立构建目录，自动应用已登记的外置补丁。
 - `server/native/`：原生会话认证、消息/成员映射和实时事件转接，不实现第二套推理或调度。
 - `server/xbot/`：XBot 协议适配；`client/` 保留聊天布局、猫猫头像与猫咖配色。
-- `data/bot/presentation.json`：保存头像、文件夹、置顶、原生 Thread／消息引用、会话已读游标和文件元数据；文件快照保存在 Bot 文件目录，长期记忆和运行状态仍由原生管理。
-- `data/native/`：原生配置、Redis AOF、SQLite、transcripts、工具与账号数据。可通过 `BOT_RUNTIME_DATA_DIR` 调整。
+- `bot/presentation.json`（在数据目录下）：保存头像、文件夹、置顶、原生 Thread／消息引用、会话已读游标和文件元数据；文件快照保存在 Bot 文件目录，长期记忆和运行状态仍由原生管理。
+- 数据目录：新安装默认在 `~/.clowder-bot/`（`native/` 是原生配置、Redis AOF、SQLite、transcripts、工具与账号数据；`bot/presentation.json` 是上面的展示数据），放在仓库之外是为了不让猫读到本仓库写给开发者的 `CLAUDE.md`／`AGENTS.md`。检出里已有 `data/` 的继续使用它。可用 `BOT_DATA_DIR` 指定，见 [维护说明](docs/upstream-maintenance.md)「数据位置」。
 
 原自研 Orchestrator、Provider、上下文拼接、JSON 消息/记忆存储和演示路径已经移除。规划、工具执行、A2A、持久化队列、会话恢复、上下文和长期记忆由上游实现。
 

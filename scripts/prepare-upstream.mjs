@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, renameSync, copyFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fingerprint, lock } from './upstream-source.mjs';
+import { nativeDataDir } from '../shared/data-location.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 if (Number(process.versions.node.split('.')[0]) !== lock.nodeMajor) throw new Error(`Use Node ${lock.nodeMajor}. Current: ${process.version}`);
@@ -19,7 +20,7 @@ if (git('rev-parse', 'HEAD') !== lock.commit) throw new Error('Submodule revisio
 if (git('status', '--porcelain')) throw new Error('Upstream checkout must remain pristine. Put reviewed changes in patches/.');
 const digest = fingerprint();
 const marker = resolve(build, '.bot-build-source');
-const runtimeLock = resolve(process.env.BOT_RUNTIME_DATA_DIR || resolve(root, 'data/native'), 'runtime.lock');
+const runtimeLock = resolve(nativeDataDir(root), 'runtime.lock');
 for (const file of [runtimeLock, resolve(build, '.bot-runtime.lock'), resolve(root, '.runtime/native-runtime.lock')]) {
   if (!existsSync(file)) continue;
   const owner = JSON.parse(readFileSync(file, 'utf8'));

@@ -13,13 +13,16 @@ import { createXbotSchedulesRouter } from './xbot/schedules.js';
 import { createWorkspaceRouter } from './xbot/workspaces.js';
 import { createMemoryRouter } from './xbot/memory.js';
 import { createActivityRouter } from './xbot/activity.js';
+import { nativeDataDir, productDataFile } from '../shared/data-location.mjs';
+
+const root = resolve(import.meta.dirname, '..');
 
 export function createApp(options: { dataFile?: string; native?: NativeTransport; staticDir?: string; workspace?: string; allowedOrigins?: string[] } = {}) {
   const port = Number(process.env.PORT || 3210);
   const origins = new Set(options.allowedOrigins ?? [`http://127.0.0.1:${port}`, `http://localhost:${port}`, 'http://127.0.0.1:5173', 'http://localhost:5173']);
   const native = options.native ?? new NativeClient(`http://127.0.0.1:${process.env.BOT_NATIVE_PORT || 4331}`, `http://127.0.0.1:${port}`);
-  const store = new ProductStore(options.dataFile ?? process.env.BOT_PRODUCT_DATA_FILE);
-  const bridge = new BotBridge(native, store, options.workspace ?? resolve(process.env.BOT_RUNTIME_DATA_DIR || 'data/native', 'workspace'));
+  const store = new ProductStore(options.dataFile ?? productDataFile(root));
+  const bridge = new BotBridge(native, store, options.workspace ?? resolve(nativeDataDir(root), 'workspace'));
   const app = express();
   app.disable('x-powered-by');
   app.use((req, res, next) => {

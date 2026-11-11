@@ -6,13 +6,19 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, symlink
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { fingerprint, lock } from './upstream-source.mjs';
+import { enclosingRepository, nativeDataDir } from '../shared/data-location.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 if (Number(process.versions.node.split('.')[0]) !== lock.nodeMajor) throw new Error('Clowder AI requires Node 24.');
 const binary = resolve(root, lock.build);
 if (!existsSync(join(binary, 'packages/api/dist/index.js'))) throw new Error('Run npm run runtime:prepare first.');
 if (!existsSync(join(binary, '.bot-build-complete')) || readFileSync(join(binary, '.bot-build-complete'), 'utf8').trim() !== fingerprint()) throw new Error('Native build is incomplete or stale. Run npm run runtime:prepare.');
-const data = resolve(process.env.BOT_RUNTIME_DATA_DIR || join(root, 'data/native'));
+const data = nativeDataDir(root);
+{
+  // Cats work under this directory and their CLIs read the instruction files above it.
+  const repository = enclosingRepository(data);
+  if (repository) console.warn(`提示：运行数据在代码仓库 ${repository} 里（${data}）。猫每一轮都会读到这个仓库写给开发者的 CLAUDE.md / AGENTS.md，回答会受影响，也更慢更贵。建议把数据放到仓库之外，见 docs/upstream-maintenance.md「数据位置」。`);
+}
 const workspace = join(data, 'workspace');
 const apiPort = Number(process.env.BOT_NATIVE_PORT || 4331);
 const redisPort = Number(process.env.BOT_REDIS_PORT || 6392);
