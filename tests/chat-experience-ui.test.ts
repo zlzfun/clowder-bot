@@ -501,22 +501,21 @@ test('more than six items: the list starts short, 查看其余 N 项 opens every
 });
 
 // 确认与提醒 (chat-cards.js answers a request on its own card in the history).
-test('with request cards in the chat, 去确认 goes to the card, and only falls back to the runtime panel when the card is not drawn; a waiting request is named as its card names it', async () => {
+test('with request cards in the chat, 去确认 goes to the card, and only falls back to the runtime panel when the card is not drawn; the label is the server\'s own words', async () => {
   const found: Any[] = [];
   const p = page(path => (path.endsWith('/activity') ? busy() : {}), {
     confirm: (item: Any) => { found.push(item.proposalId); return item.proposalId === 'p1'; },
-    approvalLabel: (item: Any) => (item.proposalId === 'p1' ? '宪宪想设一个定时' : ''),
   });
   p.cx.select(ada);
   p.cx.observe(ada, 'thread-A', true);
   await settle();
-  assert.equal(textOf(p.strip().querySelector('.cx-row')!), '2 项等你确认宪宪想设一个定时· 处理中 1 · 排队 1 · 任务 3');
+  assert.equal(textOf(p.strip().querySelector('.cx-row')!), '2 项等你确认宪宪想运行 npm publish· 处理中 1 · 排队 1 · 任务 3');
   p.strip().querySelector('.cx-row')!.click();
   const items = p.strip().querySelectorAll('.cx-item');
   // One action per request: 去确认 (the card answers it), no separate 查看.
   assert.equal(buttons(items[0], '查看').length, 0);
   const go = (k: number) => all(items[k]).find(e => e.tagName === 'A')!;
-  assert.deepEqual([textOf(go(0)), go(0).href, go(0).target, go(0).getAttribute('aria-label')], ['去确认', '/runtime.html', '_blank', '去确认：宪宪想设一个定时']);
+  assert.deepEqual([textOf(go(0)), go(0).href, go(0).target, go(0).getAttribute('aria-label')], ['去确认', '/runtime.html', '_blank', '去确认：宪宪想运行 npm publish']);
   const inHistory = new Ev('click');
   go(0).dispatchEvent(inHistory);
   assert.equal(inHistory.defaultPrevented, true, 'the card is in the history: no new tab');

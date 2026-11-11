@@ -57,6 +57,16 @@ export function approvalReceiptText(receipt: NonNullable<ReturnType<typeof appro
   return receipt.state === 'approved' ? yes : receipt.state === 'rejected' ? no : '这件事已经结束。';
 }
 
+/**
+ * A reminder that came due: the engine's scheduler puts its message into the
+ * conversation as a connector line ("[定时任务] 该喝水了") and wakes the cat with
+ * it. Returns the reminder's own words, without the engine's tag.
+ */
+export function scheduledReminder(message: NativeMessage): string | undefined {
+  if (message.type !== 'connector' || record(message.source).connector !== 'scheduler') return undefined;
+  return message.content.replace(/^\s*\[定时任务\]\s*/, '').trim() || undefined;
+}
+
 /** A reply the engine is still producing: an unpublished draft or a response that has not settled. */
 export function replyInProgress(message: NativeMessage): boolean {
   return message.type === 'assistant'

@@ -37,7 +37,10 @@ const tones = ['info', 'success', 'warning', 'danger'] as const;
 function requestWords(producer: unknown, block: Record<string, unknown>): { kind: RequestKind; title: string; body?: string } {
   const heading = text(block.title, 300) ?? '', colon = heading.search(/[：:]/);
   const label = colon >= 0 ? clip(heading.slice(colon + 1).trim(), 80) : '';
-  const said = plainLine(typeof block.bodyMarkdown === 'string' ? block.bodyMarkdown : '');
+  // The card's first paragraph is what it is about; the engine labels it in bold ("**猫的判断（假设）：** …")
+  // and follows it with context written for its own client (场景, the quoted words).
+  const first = (typeof block.bodyMarkdown === 'string' ? block.bodyMarkdown : '').trim().split(/\n\s*\n/)[0] ?? '';
+  const said = plainLine(first.replace(/^\*\*[^*\n]{1,40}[：:]\*\*\s*/, ''));
   const body = (value: string) => value ? { body: clip(value, 400) } : {};
   switch (producer) {
     case 'F139': {
@@ -47,7 +50,7 @@ function requestWords(producer: unknown, block: Record<string, unknown>): { kind
       const remove = /删除|取消|移除|停用/.test(colon >= 0 ? heading.slice(0, colon) : heading);
       return { kind: 'schedule', title: remove ? '想取消一个定时' : '想设一个定时', ...body([label, when].filter(Boolean).join(' · ')) };
     }
-    case 'F221': return { kind: 'preference', title: '想记住你的一个偏好', ...body(said.replace(/^猫的判断[：:]\s*/, '')) };
+    case 'F221': return { kind: 'preference', title: '想记住你的一个偏好', ...body(said) };
     case 'F231': return { kind: 'profile', title: '想更新关于你的资料', ...body(said) };
     case 'F276': return { kind: 'person', title: '想记下一位相关的人', ...body(said) };
     case 'F306': return { kind: 'question', title: '有件事要问你', ...body(said || label || heading) };

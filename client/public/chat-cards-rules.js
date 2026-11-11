@@ -39,25 +39,33 @@
     return { threadId: str(data.threadId), list };
   }
 
-  // The engine's own summary of a request leads with an English tag
-  // ("Taste [authentic-expression]: …", "Create schedule: …"); only its words
-  // are shown, and only where the open list's own wording is not known.
-  function summary(text) {
-    return oneLine(text).replace(/^[A-Za-z][A-Za-z ]{0,40}(?:\[[^\]]{0,80}\])?\s*[:：]\s*/, "");
+  // How an answered request turned out, from the engine's receipt (state),
+  // said for what it was. A schedule request either sets a timer or removes
+  // one; its title says which.
+  const OUTCOME = {
+    preference: ["已记住这个偏好", "没有记这个偏好"],
+    profile: ["已更新关于你的资料", "没有更新关于你的资料"],
+    person: ["已记下这个人", "没有记这个人"],
+    schedule: ["已设好这个定时", "没有设这个定时"],
+    unschedule: ["已取消这个定时", "这个定时还留着"],
+    other: ["已同意", "已拒绝"],
+  };
+  function outcome(kind, state, title = "") {
+    if (state === "closed") return "已结束";
+    const words = OUTCOME[kind === "schedule" && /取消/.test(title) ? "unschedule" : kind] || OUTCOME.other;
+    return state === "approved" ? words[0] : state === "rejected" ? words[1] : "已处理";
   }
 
-  // How an answered request turned out, from the engine's receipt (state).
-  const OUTCOME = {
-    preference: { approved: "已记住", rejected: "没有记" },
-    profile: { approved: "已更新", rejected: "没有更新" },
-    person: { approved: "已记下", rejected: "没有记" },
-    schedule: { approved: "已按你的确认处理", rejected: "没有改动" },
-    other: { approved: "已同意", rejected: "已拒绝" },
-  };
-  function outcome(kind, state) {
-    if (state === "closed") return "已结束";
-    const words = OUTCOME[kind] || OUTCOME.other;
-    return state === "approved" ? words.approved : state === "rejected" ? words.rejected : "已处理";
+  // A request in the chat's own words, from the best source at hand: the open
+  // list's entry, else this page's last sight of it, else the row itself (the
+  // server's card.approval: kind, a title without its subject, body). The
+  // engine's own card title and Markdown body are never the words.
+  function wording(approval, item, seen, catName) {
+    const known = item || seen || null;
+    if (known) return { kind: known.kind, title: known.title, body: oneLine(known.body), quote: known.quote || "" };
+    const a = approval && typeof approval === "object" ? approval : {};
+    const said = oneLine(a.title), who = oneLine(catName) || "猫猫";
+    return { kind: KINDS.includes(a.kind) ? a.kind : "other", title: who + (said || "有件事等你确认"), body: oneLine(a.body), quote: "" };
   }
 
   // A request that is close to running out says so quietly; one that is not
@@ -73,26 +81,25 @@
   }
 
   // What a request card shows.
-  //   fact:  the transcript's card block ({approval: {id, state?}, title, body});
+  //   fact:  the transcript's card block ({approval: {id, kind, title, body?, state?}});
   //   item:  the open request with that ID, or null when it is not listed;
   //   list:  how this conversation's open list stands: "idle" (not read yet),
   //          "loading", "ready", "error" or "missing" (no such route);
-  //   seen:  the request as this page last listed it (its words, once it is
-  //          no longer open);
+  //   seen:  the request as this page last listed it;
   //   local: the owner's answer from this page: {phase: "sending"|"sent"|"error",
   //          decision, settled (true|false|null), error: {text, detail}};
   //   fresh: the list was asked for after that answer;
   //   catName: who asked (the message's cat), now: the time.
-  // mode "ask" is the card with its actions (busy: the answer being sent;
-  // waiting: not read yet); mode "line" is one settled or neutral line.
+  // mode "ask" is the card (its actions only ever from the open list; busy:
+  // the answer being sent; waiting / note: why there are none); mode "line"
+  // is one settled or neutral line.
   function card({ fact, item = null, list = "idle", seen = null, local = null, fresh = false, catName = "", now = 0 }) {
-    const state = fact && fact.approval ? fact.approval.state : "";
-    const known = item || seen || null;
-    const kind = known ? known.kind : "other";
-    const what = known ? oneLine(known.body) || known.title : summary(fact && fact.body) || summary(fact && fact.title);
-    const line = (tone, text, icon, more = {}) => ({ mode: "line", kind, tone, icon, text, what, runtime: false, ...more });
+    const approval = fact && fact.approval ? fact.approval : {};
+    const state = approval.state || "";
+    const w = wording(approval, item, seen, catName);
+    const line = (tone, text, icon, more = {}) => ({ mode: "line", kind: w.kind, tone, icon, text, what: w.body, runtime: false, ...more });
     if (state === "approved" || state === "rejected" || state === "closed") {
-      return line(state === "approved" ? "ok" : state === "rejected" ? "no" : "exp", outcome(kind, state), state === "approved" ? "check" : state === "rejected" ? "x" : "clock");
+      return line(state === "approved" ? "ok" : state === "rejected" ? "no" : "exp", outcome(w.kind, state, w.title), state === "approved" ? "check" : state === "rejected" ? "x" : "clock");
     }
     const phase = local ? local.phase : "";
     if (phase === "sent") {
@@ -107,22 +114,18 @@
     }
     // No longer open, and nothing on this page says how: neutral.
     if (list === "ready" && !item && phase !== "sending") return line("neutral", "已处理", "circle-check");
+    const base = { mode: "ask", kind: w.kind, title: w.title, body: w.body, quote: w.quote, actions: [], busy: "", waiting: "", note: "", runtime: false, expiry: "", error: null };
     if (!item) {
-      if (list === "error" || list === "missing") {
-        return line("neutral", list === "missing" ? "这件事要在运行面板里处理" : "暂时读不到这件事现在的状态", "info", { runtime: true });
-      }
-      // Not read yet: the card without its actions (none may be stale).
-      return {
-        mode: "ask", kind, title: known ? known.title : (oneLine(catName) || "猫猫") + "有件事等你确认", body: what, quote: known ? known.quote : "",
-        actions: [], busy: "", waiting: "正在读取…", note: "", runtime: false, expiry: "", error: null,
-      };
+      // Drawn from the row alone, without actions: only the open list gives them.
+      if (list === "error") return { ...base, note: "暂时读不到这件事现在的状态，先不能在这里回答", runtime: true };
+      if (list === "missing") return { ...base, note: "这件事要在运行面板里处理", runtime: true };
+      return { ...base, waiting: "正在读取…" };
     }
     const actions = [];
     if (item.reject) actions.push({ decision: "reject", label: item.reject.label });
     if (item.approve) actions.push({ decision: "approve", label: item.approve.label });
     return {
-      mode: "ask", kind: item.kind, title: item.title || (oneLine(catName) || "猫猫") + "有件事等你确认", body: item.body, quote: item.quote,
-      actions, busy: phase === "sending" ? local.decision : "", waiting: "",
+      ...base, actions, busy: phase === "sending" ? local.decision : "",
       // Agreeing is not possible here: where it is, instead of a dead button.
       note: item.approve ? "" : item.note || "这一项要在运行面板里处理", runtime: !item.approve,
       expiry: expiry(item.expiresAt, now),
@@ -186,10 +189,12 @@
   const optionText = (o) => (o.emoji ? o.emoji + " " + o.label : o.label);
 
   // What a choice block shows. local: this page's pick in progress:
-  //   {phase: "idle"|"sending"|"recording"|"recorded"|"unsent"|"unrecorded"|"refused",
+  //   {phase: "idle"|"sending"|"recording"|"recorded"|"unsent"|"unrecorded"|"refused"|"conflict",
   //    picks (multiple), ids, text (the message sent), selected (the server's record), error}.
   // It shows answered only from the record: the transcript's (answered,
-  // selected) or the answer route's own reply.
+  // selected) or the answer route's own reply. "conflict" is the server
+  // saying it was already answered (409): nothing is offered again on this
+  // page; a read of the message that shows its record shows it answered.
   function choice(block, local = null) {
     const phase = local ? local.phase : "idle";
     const recorded = block.answered ? block.selected || [] : phase === "recorded" ? local.selected || [] : null;
@@ -197,18 +202,20 @@
       const picked = recorded.map((id) => (block.options || []).find((o) => o.id === id)).filter(Boolean);
       return { mode: "answered", picked: picked.map((o) => ({ id: o.id, text: optionText(o) })) };
     }
-    const busy = phase === "sending" || phase === "recording";
+    const working = phase === "sending" || phase === "recording";
+    const busy = working || phase === "conflict";
     let note = "", tone = "";
     if (phase === "sending") note = "正在发送…";
     else if (phase === "recording") note = "已发出，正在记下这次选择…";
     else if (phase === "unsent") { note = "没发出去，可以再选一次。"; tone = "bad"; }
     else if (phase === "unrecorded") { note = "已经发出「" + oneLine(local.text) + "」，但没能记下这次选择" + (local.error && local.error.text ? "：" + local.error.text : "") + "。可以再选一次。"; tone = "bad"; }
     else if (phase === "refused") { note = (local.error && local.error.text) || "这次选择没有被接受"; tone = "bad"; }
+    else if (phase === "conflict") note = ((local.error && local.error.text) || "这个选项已经回答过了") + "，这里不再提供选择。";
     const picks = block.mode === "multiple" && local && Array.isArray(local.picks) ? local.picks : [];
     return {
       mode: "ask", busy, note, tone, picks,
       // The option being sent, for its busy look.
-      sending: busy && local && Array.isArray(local.ids) ? local.ids : [],
+      sending: working && local && Array.isArray(local.ids) ? local.ids : [],
       full: block.mode === "multiple" && !!block.max && picks.length >= block.max,
       ready: block.mode === "multiple" && canPick(block, picks),
       retry: phase === "unrecorded",
@@ -272,7 +279,7 @@
   }
 
   window.ClowderCardsRules = Object.freeze({
-    KINDS, approvals, summary, outcome, expiry, card, failure,
+    KINDS, approvals, outcome, wording, expiry, card, failure,
     buildSelectionMessage, choiceMessage, canPick, optionText, choice,
     diffLines, hiddenText, ending, request, words, resend, count, oneLine,
   });

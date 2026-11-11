@@ -418,6 +418,8 @@
 
   async function refreshStatus() {
     let data;
+    // The sign-in session this read belongs to: an answer that lands after signing out never notifies (chat-notify.js).
+    const notifyTicket = notify.ticket();
     // A failed read keeps the last lists, said to be possibly out of date (chat-list.js).
     try { data = await api("/xbot-api/bots/status"); } catch (e) { chatList.stale(true); throw e; }
     chatList.stale(false);
@@ -430,7 +432,7 @@
     stStatus.groups = groups;
     state.others = data && Array.isArray(data.others) ? data.others : null;
     // A finished reply or a new request in a chat not in view: a desktop notification, if the owner turned them on.
-    notify.observe(data);
+    notify.observe(data, notifyTicket);
     renderLists();
     paintStatus();
     // The stop control follows what the status says runs or waits in this chat.
@@ -444,6 +446,7 @@
       try { sessionStorage.setItem("xbot-selected-bot", state.sel.id); } catch (e) {}
     }
     authenticated = false;
+    notify.reset(); // nothing read before signing out notifies afterwards (chat-notify.js)
     closeSettings(false);
     closeModal();
     closePops();
@@ -4424,8 +4427,10 @@
     live.select(chatKey(state.sel));
     // And its earlier pages, the header's ⋯ menu and the suggestions (chat-history.js).
     chatHistory.select(state.sel);
-    // And the open requests read for it, and its cards' frames (chat-cards.js).
+    // And the open requests read for it, and its cards' frames (chat-cards.js);
+    // the other tabs learn which chat this one shows (chat-notify.js).
     cards.select(state.sel);
+    notify.tell();
     stopState = null;
     state.streaming = 0;
     state.pendingSends = [];
@@ -6168,9 +6173,12 @@
   // The send shows at once (the owner's bubble 发送中, and the cat's typing
   // bubble from chat-live.js); the server's answer is only its admission, and
   // the reply arrives on the thread's event stream and in the transcript.
-  // sent: called once the server took the message (a choice's pick and
-  // 再发一次 in chat-cards.js go through this same path).
-  async function sendText(text, pending, images, files, sent) {
+  // card: a card's own action (a choice's pick, 再发一次 in chat-cards.js)
+  // sends its own words through this same path. The composer's draft and
+  // quote are not its own: they are never taken, and words that did not go
+  // out stay with the card (which offers the action again), never in the
+  // composer or the chat's draft. card.sent() is called once the server took it.
+  async function sendText(text, pending, images, files, card) {
     text = (text || "").trim();
     images = images || [];
     files = files && files.ids && files.ids.length ? files : null;
@@ -6181,7 +6189,7 @@
     // The quote goes with this send and leaves the composer now, so a switch
     // before the answer cannot keep it as this chat's draft; it comes back
     // only if the send does not go out.
-    const quote = state.replyTo && state.replyTo.seq > 0 ? state.replyTo : null;
+    const quote = !card && state.replyTo && state.replyTo.seq > 0 ? state.replyTo : null;
     if (quote) clearQuote();
     ++state.threadLoad;
     // One key per message: resending the same words and files after an
@@ -6260,7 +6268,7 @@
         throw err;
       }
       markSent();
-      try { if (sent) sent(); } catch (err) { /* the caller's own bookkeeping never fails the send */ }
+      try { if (card && card.sent) card.sent(); } catch (err) { /* the caller's own bookkeeping never fails the send */ }
       // The native admission (an event stream for a cat, JSON for a group): it
       // names the owner's message, so its row is matched when the history has it.
       const json = (res.headers.get("content-type") || "").includes("application/json");
@@ -6275,7 +6283,7 @@
     } catch (e) {
       // Session expired mid-send: keep the text so the input gets it back
       // after the owner logs in again (showLogin already dropped the thread).
-      if (!accepted && !authenticated) {
+      if (!accepted && !authenticated && !card) {
         const key = "xbot-draft:" + (selection.type === "group" ? "group:" : "") + selection.id;
         try { sessionStorage.setItem(key, text); } catch (err) {}
       }
@@ -6283,7 +6291,7 @@
       // wait for this conversation to open again.
       const filesBack = !accepted && files ? workspace.giveBack(files) : false;
       // Not sent: the words and quote go back to their chat's draft if the owner left it.
-      if (state.sel !== selection) { if (!accepted) chatList.giveBack(selection, text, quote); return; }
+      if (state.sel !== selection) { if (!accepted && !card) chatList.giveBack(selection, text, quote); return; }
       setStatus("");
       reply.drop();
       if (accepted) {
@@ -6322,7 +6330,11 @@
       const fileNote = files && !accepted ? (filesBack ? "，附件已放回" : "；附件需要重新添加") : "";
       // The quote comes back with its words, never onto newer words in the composer.
       if (!accepted && quote && !state.replyTo && !composerText(input).trim()) { state.replyTo = quote; paintQuoteBar(); }
-      if (!composerText(input).trim() && text) {
+      if (card && !accepted) {
+        // A card's words stay with the card, which says so and offers the action again.
+        marker.replaceChildren(el("span", "", failed));
+        announceSend("没发出去");
+      } else if (!composerText(input).trim() && text) {
         composerSet(text);
         composerRefreshHeight();
         marker.replaceChildren(el("span", "", failed + "，原文还在输入框里" + fileNote + pictureNote));
@@ -7405,9 +7417,8 @@
     obscured: () => !$("setpage").hidden || !lightbox.hidden
       || (window.innerWidth < 768 && (panel.classList.contains("open") || sidebar.classList.contains("open"))),
     focusTask: (id) => workspace.focusTask(id),
-    // 去确认 finds the request's card in the history (chat-cards.js); a waiting request is named by its card's title.
+    // 去确认 finds the request's card in the history (chat-cards.js).
     confirm: (item) => cards.find(item),
-    approvalLabel: (item) => cards.label(item),
     // A confirmed read clears that conversation's dot at once; the next status poll agrees.
     onRead: (sel, threadId) => {
       const st = sel.type === "group" ? stStatus.groups[sel.id] : stStatus.map[sel.id];
@@ -7451,17 +7462,24 @@
   cards.init({
     api, apiFetch, icon, thread,
     render: (parent, text) => appendMarkdown(parent, displayText(text)),
-    send: (text, sent) => sendText(text, null, null, null, sent),
+    // A card's own words: the composer's draft and quote are left alone.
+    send: (text, sent) => sendText(text, null, null, null, { sent }),
     reload: () => { state.sig = ""; return loadThread().catch(() => {}); },
   });
   // Desktop notifications (chat-notify.js), from the status polled above: a
   // click focuses the tab and opens that chat (and finds a request's card).
   notify.init({
-    selection: () => (state.peer ? null : state.sel),
+    // A cat is told apart by its native ID too: its name can change.
+    selection: () => (state.peer || !state.sel ? null : { ...state.sel, nativeId: state.sel.type === "bot" ? botCatId(state.sel.id) : "" }),
+    signedIn: () => authenticated,
     chatName: (note) => (note.type === "group" ? niceName(((state.groups || []).find((g) => g.id === note.id) || {}).name || "") : ""),
     open: async (note) => {
       if (!$("setpage").hidden) closeSettings(false);
-      if (note.type === "group") await pickGroup(note.id); else await pickBot(note.id);
+      // The chat as it is now: a cat by its native ID (renamed since, it is still the same cat).
+      const bot = note.type === "bot" ? (state.bots || []).find((b) => note.nativeId ? String(b.native_id || b.id || "") === note.nativeId : b.name === note.id) : null;
+      const group = note.type === "group" ? (state.groups || []).find((g) => g.id === note.id) : null;
+      if (!bot && !group) { showToast(note.type === "group" ? "这个群聊已经不在了" : "这只猫猫已经不在了", "info"); return; }
+      if (group) await pickGroup(group.id); else await pickBot(bot.name);
       if (note.kind === "approval") cards.locateSoon(state.sel, { proposalId: note.proposalId, messageId: note.messageId });
     },
   });
@@ -7656,7 +7674,7 @@
   api("/xbot-api/session").then(async data => {
     if (data.authed) await ownerSession(data);
     else if (legacyLogin) showLogin();
-    else await window.XBotAccount.boot({owner: name => enterOwner(name).catch(() => showLogin()), signedOut: () => { forgetOwner(); authenticated = false; booted = false; shell.hidden = true; }});
+    else await window.XBotAccount.boot({owner: name => enterOwner(name).catch(() => showLogin()), signedOut: () => { forgetOwner(); authenticated = false; notify.reset(); booted = false; shell.hidden = true; }});
   }).catch(() => showLogin());
   // 把 session 里的入口语境交给设备模块：官网入口（隧道/代理）底栏写账号设备数。
   function syncDevicesSession(data) { if (window.xbotDevices) window.xbotDevices.setSession({ remote: !!data.remote }); }

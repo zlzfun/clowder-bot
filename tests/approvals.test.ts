@@ -53,7 +53,11 @@ test('a native schedule trigger reads as a time of day, not an expression', () =
   assert.equal(triggerWords({ type: 'interval', ms: 120 * 60000 }), '每 2 小时');
   assert.equal(triggerWords({ type: 'interval', ms: 2880 * 60000 }), '每 2 天');
   assert.match(triggerWords({ type: 'once', fireAt: Date.UTC(2026, 10, 13, 1, 0) }), /11月13日/);
-  assert.equal(triggerWords(undefined), '按原生计划');
+  assert.equal(triggerWords(undefined), '按设定的时间');
+  // A one-off counted from the moment it is agreed to, as the engine writes it for "3 分钟后提醒我".
+  assert.equal(triggerWords({ type: 'once', delayMs: 180000, relativeTo: 'approval' }), '同意后 3 分钟');
+  assert.equal(triggerWords({ type: 'once', delayMs: 7200000 }), '2 小时后');
+  assert.equal(triggerWords({ type: 'once', delayMs: 20000, relativeTo: 'approval' }), '同意后 1 分钟');
 });
 
 test('what waits for the owner in a chat is said in chat words; nothing is decided by reading', async t => {

@@ -55,6 +55,9 @@ test('a cat’s cards, lists, choices and diffs come through as chat blocks; wha
   assert.deepEqual(schedule('提议删除定时任务：喝水提醒', 'not json'), { id: 'sp1', kind: 'schedule', title: '想取消一个定时', body: '喝水提醒' });
   assert.deepEqual(schedule('一件别的事', {}, 'F999'), { id: 'sp1', kind: 'other', title: '有件事等你确认', body: '一件别的事' });
   assert.equal(requestLine(reply({ rich: { blocks: [card] } })), '想记住你的一个偏好：偏好简短');
+  // The engine's preference card as it really writes it: only the judgement is what was asked.
+  assert.equal(requestLine(reply({ rich: { blocks: [{ ...card, bodyMarkdown: '**猫的判断（假设）：** 用户偏好简短、结论优先的表达方式，避免冗长前铺垫\n\n**场景：** 用户明确要求记住的个人偏好：喜欢简洁直接\n\n> 我喜欢回答简短一点、先说结论' }] } })),
+    '想记住你的一个偏好：用户偏好简短、结论优先的表达方式，避免冗长前铺垫');
   assert.equal(requestLine(reply({ rich: { blocks: [checklist] } })), undefined);
   assert.equal(blockLine(blocks.slice(2)), '选口味'); assert.equal(blockLine(blocks.slice(3)), 'app.ts'); assert.equal(blockLine([]), '');
   assert.equal(blockLine([{ id: 'x', kind: 'checklist', items: [{ id: 'a', text: '买猫粮', checked: false }] }]), '买猫粮');
