@@ -8,6 +8,8 @@
 
 2026-11-11 在隔离运行时（`.runtime/dev/`，独立构建、数据与端口）用 Claude Code 实测两轮：一条 131 字的回复分 64 个 `text` 事件到达；带工具的一轮依次是 `invocation_created`、`thinking`、`tool_use Write`、`tool_use Read`、36 个 `text`、`done`。每个 `text` 事件的 `extra.outputLayout.contentRevision.length` 都等于到这一片为止的累计长度（UTF-16 单位），两轮全部核对一致。
 
+同一天用 Codex（`gpt-5.6-sol`）实测一轮：工具名是 `file_change`（带改动的文件列表）与 `command_execution`（带命令行）；没有 `thinking` 的 `system_info`，而是大量 `status` 事件（`thinking`、`streaming`、逐项的 `done`）；正文除了 35 个追加片段，还有 3 个 `textMode: 'replace'` 的整段（每段结束和收尾署名时），长度同样与 `contentRevision.length` 一致。
+
 ## `live` 事件
 
 同一条 SSE 上，每个原生事件仍先原样发出 `native`；能画进聊天的那几类，紧接着多发一条 `live`。字段只有画面需要的几项，用量、会话、追踪等不带。
@@ -15,8 +17,8 @@
 | `kind` | 来源 | 字段 | 含义 |
 | --- | --- | --- | --- |
 | `start` | `system_info` 内层 `invocation_created` | `messageId`（取 `lifecycleResponseMessageId`）、`catId` | 这只猫开始写这条回复，此时还没有字 |
-| `thinking` | `system_info` 内层 `thinking` | `messageId`、`catId` | 在想；思考内容不下发 |
-| `step` | `tool_use` | `messageId`、`catId`、`tool`（原生工具名）、`target?` | 正在做一步。`target` 只从已知含义的字段取：读写文件的工具取文件名，抓取网页取主机名，搜索取查询词，Grep/Glob 取匹配式，Task/Agent 取任务标题（都压成一行、最多 40 字）。命令行从不下发，包括 Bash 自带的说明；其他工具不取任何字段；模型写的查询词或标题里带绝对路径时整项不下发 |
+| `thinking` | `system_info` 内层 `thinking`（Claude Code），或 `status` 且内容为 `thinking`（Codex） | `messageId`、`catId` | 在想；思考内容不下发 |
+| `step` | `tool_use` | `messageId`、`catId`、`tool`（原生工具名）、`target?` | 正在做一步。`target` 只从已知含义的字段取：读写文件的工具取文件名，抓取网页取主机名，搜索取查询词，Grep/Glob 取匹配式，Task/Agent 取任务标题，Codex 的 `file_change` 取第一个改动文件的文件名（都压成一行、最多 40 字）。命令行从不下发，包括 Bash 自带的说明；其他工具不取任何字段；模型写的查询词或标题里带绝对路径时整项不下发 |
 | `text` | `text` 且 `origin: 'stream'` | `messageId`、`catId`、`text`（这一片）、`end?`（这一片之后整条回复的原生长度）、`replace?` | 正文增量。`textMode: 'replace'` 时带 `replace: true`，表示整条换成这一片 |
 | `done` | `done`，或未标为 `transient` 的 `error` | `messageId`、`catId` | 这只猫的这条回复不再继续写了。它**不表示成功**：原生在停止和失败之后同样发 `done`（上游 `PerCatTerminalDispositionCollector`：单凭 `done` 不能证明成功）。结局（完成、已停止、没完成）以随后读取的会话为准。标为 `transient` 的错误不算结束 |
 

@@ -46,6 +46,12 @@ function stepTarget(tool: string, input: unknown): string | undefined {
     }
     return undefined;
   }
+  // Codex reports a file edit as `file_change` with the files it touched.
+  if (name === 'file_change' && Array.isArray(fields.changes)) {
+    const first = record(fields.changes[0]).path;
+    const file = typeof first === 'string' ? first.trim().replace(/[\\/]+$/, '').split(/[\\/]/).pop() : undefined;
+    return file ? clip(file, 60) : undefined;
+  }
   if (/^(webfetch|web_fetch)$/.test(name)) {
     try { return typeof fields.url === 'string' ? clip(new URL(fields.url).hostname, 60) : undefined; } catch { return undefined; }
   }
@@ -90,6 +96,8 @@ export function liveEvent(event: NativeEvent, threadId: string): LiveEvent | nul
       }
       return null;
     }
+    // Codex has no thinking marker of its own kind; its transient status says the same.
+    case 'status': return messageId && event.content === 'thinking' ? { kind: 'thinking', messageId, catId } : null;
     // Native ends a cat's turn with `done` or with an error that is not marked transient.
     // Neither says the reply succeeded: a `done` also follows a stop or a failure.
     case 'done': return messageId ? { kind: 'done', messageId, catId } : null;

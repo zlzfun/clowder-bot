@@ -39,8 +39,11 @@ test('only the reply stream of this thread is drawn live', () => {
   assert.equal(liveEvent({ ...piece, messageId: undefined }, T), null);
   assert.equal(liveEvent({ ...piece, catId: null }, T), null);
   assert.equal(liveEvent(piece, 'thread-2'), null, 'an event of another thread');
-  for (const type of ['queue_updated', 'thread_updated', 'session_init', 'resync', 'tool_result', 'status', undefined])
+  for (const type of ['queue_updated', 'thread_updated', 'session_init', 'resync', 'tool_result', undefined])
     assert.equal(liveEvent({ ...stamp, type }, T), null, String(type));
+  // Codex's transient status: only "thinking" is drawn; "streaming" and its per-item "done" are not the end of a turn.
+  assert.deepEqual(liveEvent({ ...stamp, type: 'status', content: 'thinking' }, T), { kind: 'thinking', messageId: MID, catId: CAT });
+  for (const content of ['streaming', 'done', '', undefined]) assert.equal(liveEvent({ ...stamp, type: 'status', content }, T), null, String(content));
 });
 
 test('a step names the tool and what it works on, never a command or a whole path', () => {
@@ -65,6 +68,11 @@ test('a step names the tool and what it works on, never a command or a whole pat
     assert.deepEqual(step(tool, input), { kind: 'step', messageId: MID, catId: CAT, tool }, tool + JSON.stringify(input));
   assert.deepEqual(step('Task', { description: '整理 src/app 里的测试' }), { kind: 'step', messageId: MID, catId: CAT, tool: 'Task', target: '整理 src/app 里的测试' });
   assert.deepEqual(step('mcp__cat-cafe-collab__cat_cafe_post_message', 'not an object'), { kind: 'step', messageId: MID, catId: CAT, tool: 'mcp__cat-cafe-collab__cat_cafe_post_message' });
+  // Codex names: a file edit lists the files it touched; a shell command carries nothing.
+  assert.deepEqual(step('file_change', { status: 'completed', changes: [{ path: '/Users/me/ws/cats/bot-1/note.txt', kind: { type: 'add' }, diff: '你好' }, { path: '/x/y.md' }] }),
+    { kind: 'step', messageId: MID, catId: CAT, tool: 'file_change', target: 'note.txt' });
+  assert.deepEqual(step('file_change', { changes: [] }), { kind: 'step', messageId: MID, catId: CAT, tool: 'file_change' });
+  assert.deepEqual(step('command_execution', { command: '/bin/zsh -lc "sed -n 1p note.txt"' }), { kind: 'step', messageId: MID, catId: CAT, tool: 'command_execution' });
   assert.equal(step('', {}), null);
 });
 
