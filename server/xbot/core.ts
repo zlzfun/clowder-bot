@@ -4,6 +4,7 @@ import { liveEvent } from '../native/live.js';
 import { clip } from '../native/text.js';
 import { messageBlocks } from '../native/blocks.js';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { ApiError } from '../errors.js';
 import { BotBridge, encode } from '../native/bridge.js';
@@ -11,6 +12,8 @@ import type { NativeCat } from '../native/types.js';
 import { agentBinding } from '../native/agents.js';
 import { catConfigSchema, catConfiguration, sourceTemplateSchema } from '../native/cat-templates.js';
 
+// The version shown in 关于 is the package's, read once.
+const version: string = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
 const label = z.string().trim().min(1).max(64).regex(/^[\p{L}\p{N}_ .-]+$/u, '名字包含不支持的字符');
 const seed = z.string().min(1).max(80).regex(/^[^<>\x00-\x1f\x7f]+$/);
 const botBody = { name: label, persona: z.string().max(32768).optional(), description: z.string().max(500).optional(),
@@ -42,7 +45,7 @@ export function createXbotCoreRouter(bridge: BotBridge) {
   };
   router.get('/session', async (_req, res) => {
     await native.request('/api/health');
-    res.json({ authed: true, owner: 'local', owner_name: '你', app: false, version: '0.2.0', tip: '', remote: false, engine: 'clowder-ai' });
+    res.json({ authed: true, owner: 'local', owner_name: '你', app: false, version, tip: '', remote: false, engine: 'clowder-ai' });
   });
   router.get('/bots', async (_req, res) => res.json({ bots: (await bridge.cats()).map(cat => bridge.botItem(cat)) }));
   router.get('/bots/status', async (_req, res) => res.json(await bridge.statuses()));

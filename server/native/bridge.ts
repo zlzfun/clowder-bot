@@ -52,6 +52,10 @@ const defaultRole = '随叫随到的伙伴：聊天、答疑、查资料、写�
 const defaultPersonality = '亲切耐心，讲得清楚；做事利落，不绕弯子。';
 const defaultStrengths = '聊天答疑、查资料、写东西、整理文件';
 
+const hex = (value: unknown): value is string => typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value);
+/** Only a well-formed colour pair is passed on; the value ends up in a style. */
+const accent = (cat: NativeCat) => hex(cat.color?.primary) && hex(cat.color?.secondary) ? { primary: cat.color.primary, secondary: cat.color.secondary } : undefined;
+
 export class BotBridge {
   private directCreates = new Map<string, Promise<NativeThread>>();
   private greetingRequests = new Map<string, Promise<GreetingAdmission>>();
@@ -78,6 +82,8 @@ export class BotBridge {
       primary: cat.isDefaultResponder === true, group: meta.folder ?? '', avatar: meta.avatarData ? 'custom' : 'generated',
       avatar_seed: meta.avatarSeed ?? `cat:${meta.templateId ?? cat.breedId ?? 'ragdoll'}`,
       avatar_url: meta.avatarData ? `/xbot-api/bots/${encode(cat.name)}/avatar?v=${meta.avatarUpdated}` : '',
+      // The cat's own native colour pair, for a quiet accent in its chat.
+      ...(accent(cat) ? { accent: accent(cat) } : {}),
       thread_id: meta.activeThreadId, native_id: cat.id, project_id: meta.projectId ?? null };
   }
   /**

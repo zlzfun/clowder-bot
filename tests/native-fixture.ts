@@ -28,7 +28,7 @@ export class NativeFixture implements NativeTransport {
     if (path === '/api/health') result = { status: 'ok', callbackAuth: { backend: 'redis', durability: 'durable' } };
     else if (path === '/api/projects/mkdir' && method === 'POST') result = { createdPath: join(body.parentPath, body.name), name: body.name };
     else if (url.pathname === '/api/projects/browse') result = { current: url.searchParams.get('path'), entries: [] };
-    else if (path === '/api/cat-templates') result = { templates: ['ragdoll','maine-coon','siamese','turkish-van','dsh','dragon-li','bengal','golden-chinchilla'].map(id => ({ id, name: id, roleDescription: 'Native role', color: { primary: '#888', secondary: '#eee' } })), clientDefaults: {} };
+    else if (path === '/api/cat-templates') result = { templates: ['ragdoll','maine-coon','siamese','turkish-van','dsh','dragon-li','bengal','golden-chinchilla'].map(id => ({ id, name: id, roleDescription: 'Native role', color: { primary: '#888888', secondary: '#eeeeee' } })), clientDefaults: {} };
     else if (url.pathname === '/api/cats/native-runtimes') result = { runtimes: this.runtimes };
     else if (path === '/api/accounts') result = { providers: [] };
     else if (path === '/api/cats' && method === 'GET') result = { cats: this.cats };

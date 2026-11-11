@@ -95,6 +95,12 @@ test('a cat needs only a name: one unpatched native creation with the Agent’s 
   assert.equal(r.native.calls.some(c => c.path.startsWith('/api/bot-cat-templates')), false, 'not the locally patched template route');
   const item = (await (await r.call('/xbot-api/bots')).json()).bots[0];
   assert.deepEqual([item.name, item.avatar_seed, item.templateId, item.native_id], ['团子', 'cat:ragdoll', 'ragdoll', sent.catId]);
+  // The face's native colour pair travels with the cat for a quiet accent; anything that is not a colour does not.
+  assert.deepEqual(item.accent, { primary: '#888888', secondary: '#eeeeee' });
+  r.native.cats[0]!.color = { primary: 'red; background:url(x)', secondary: '#eeeeee' };
+  assert.equal('accent' in (await (await r.call('/xbot-api/bots')).json()).bots[0], false);
+  r.native.cats[0]!.color = { primary: '#888888', secondary: '#eeeeee' };
+  assert.match((await (await r.call('/xbot-api/session')).json()).version, /^\d+\.\d+\.\d+$/);
 
   // The same request again is the same cat, even if the tools look different by then.
   r.native.runtimes = [runtime('codex', 'openai', 'configured'), runtime('claude', 'anthropic', 'login_required')];

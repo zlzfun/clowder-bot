@@ -18,6 +18,7 @@ UI 保留 Bot 名称和文件夹概念，实际成员、执行和历史以 Clowd
 | 上下文压缩 | 原生 compact-native；工具不支持时保留原生错误 |
 | 定时任务 | 每猫 `/bots/:name/routines` 映射原生 reminder 模板及 schedule/tasks；创建、启停、删除、触发记录见 [接口说明](schedules-api.md) |
 | 头像/文件夹/置顶 | Bot presentation store |
+| 每只猫的强调色 | `bots[].accent {primary, secondary}` 取自原生成员的 `color`（只在两个值都是 `#rrggbb` 时下发），供聊天里做低调的强调色 |
 
 运行面板补充原生队列、会话链、原生消息分页、记忆 catalog/search、Agent 与审批。F306 question/approval/elicitation 使用原生 revision、cardRef、operationId；其他支持内联操作的审批按原生 manifest 转发。需要完整原生会话卡片的交互不会自动批准。
 
