@@ -27,7 +27,7 @@
       "file": "app.js",
       "target": "client/public/app.js",
       "sourceSha256": "1248f793493826bf044359c71e7d8772ccc3472d6021d6abb979dff9b6cb29bc",
-      "sha256": "eb5ee3b19311e843599af8446d3083538c6312705f9fcc60006be81c130875e8",
+      "sha256": "5802fba222b428dae712d46c5dcfe8b33d08f9a598d330064f394c6b089ed330",
       "unchanged": false
     },
     {
@@ -761,9 +761,9 @@
     },
     {
       "target": "client/public/chat-list-rules.js",
-      "description": "Contact-list rules without DOM or network: the status poll's activity.last checked (owner or cat, time, one plain line, files), the preview line (你：… for the owner, 名字：… for a cat in a group, the single chat's cat bare, [文件] / [文件] N 个 for a file-only line), short relative times in one style (刚刚, N 分钟前, today's clock, 昨天, weekday, M月D日, Y/M/D) with a full stamp, recency order (newest first, rows with nothing said keep their order, ties never swap), unread count from two up and the page title's total, the greeting's owner name (none for the default 你), and per-chat drafts (words plus a single chat's quote), and the link that opens a chat (/#chat=<URL-encoded name>: the name read from the fragment, the cat with that name else the first group chat with it, the quiet line when nothing answers)",
-      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 找得到, part one (docs/xbot-frontend.md item 30); the chat link added by local Claude Code (claude-opus-5-5) on 2026-11-12 (docs/xbot-frontend.md item 36)",
-      "sha256": "37ff3b6fc251c9c4ff979a736af42a2b461f9f6cb2b07e0e7df6a1f70f7226d2"
+      "description": "Contact-list rules without DOM or network: the status poll's activity.last checked (owner or cat, time, one plain line, files), the preview line (你：… for the owner, 名字：… for a cat in a group, the single chat's cat bare, [文件] / [文件] N 个 for a file-only line), short relative times in one style (刚刚, N 分钟前, today's clock, 昨天, weekday, M月D日, Y/M/D) with a full stamp, recency order (newest first, rows with nothing said keep their order, ties never swap), unread count from two up and the page title's total, the greeting's owner name (none for the default 你), and per-chat drafts (words plus a single chat's quote), and the link that opens a chat (/#chat=<URL-encoded name>: the name read from the fragment, the cat with that name else the first group chat with it, the quiet lines when nothing answers to the name and when an open dialog holds the link back)",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 找得到, part one (docs/xbot-frontend.md item 30); the chat link added by local Claude Code (claude-opus-5-5) on 2026-11-12 (docs/xbot-frontend.md item 36); review fixes for the chat link (not-found and held-back wording) by local Claude Code (claude-opus-5-5) on 2026-11-12",
+      "sha256": "c14e801075a1e12e15a49446ea6b5682aeb9c75a3e372cb2c32e73960f2ba1ba"
     },
     {
       "target": "client/public/chat-list.js",

@@ -7389,13 +7389,20 @@
     let remembered = "";
     try { remembered = sessionStorage.getItem("xbot-selected-bot") || ""; } catch (e) {}
     const home = state.bots.find((b) => b.name === remembered) || state.bots.find((b) => b.primary) || state.bots[0];
-    // A link to a chat (/#chat=<name>) opens that chat instead of the remembered one.
+    // A link to a chat (/#chat=<name>) opens that chat instead of the remembered
+    // one. A name nothing answers to says so (linkMissing) and the app then
+    // carries on as usual with the remembered chat: on purpose, the line names
+    // the chat that was not found, so it is never read as the one that opened.
     const linked = openLinked();
     if (linked) await linked;
     else if (!state.sel && home) await selectBot(home.name);
     else if (!state.sel) showNoChat();
     linkReady = true;
-    syncPanelDefault();
+    // A link that came while the first chat was opening waited in the address: open it now.
+    const late = openLinked();
+    if (late) await late;
+    // The drawer opens by itself only when no link asked for a chat to be shown.
+    if (!linked && !late) syncPanelDefault();
   }
 
   // A link that opens a chat: /#chat=<name> (chat-list-rules.js linkName) opens
@@ -7403,7 +7410,11 @@
   // list opens it (pickBot / pickGroup: a chat already open stays as it is,
   // and the one left keeps its draft). The fragment leaves the address first,
   // so a reload or a later switch is not sent back to that chat. A name nothing
-  // answers to opens nothing and says so once. #login-code and every other
+  // answers to opens nothing and says so once. What covers the conversation is
+  // put away first (uncover), so the chat that opens is the one in view; but a
+  // dialog that holds the owner's input or a decision (linkHeld) is never
+  // thrown away for a link: the link then opens nothing and says why, and can
+  // be opened again once the dialog is closed. #login-code and every other
   // fragment are left alone. Returns the opening when a chat is opened.
   function openLinked() {
     const name = listRules.linkName(location.hash);
@@ -7412,7 +7423,31 @@
     if (!name) return null;
     const target = listRules.linked(name, state.bots, state.groups);
     if (!target) { quietNote(listRules.linkMissing(name)); return null; }
+    if (linkHeld()) { quietNote(listRules.linkHeld(name)); return null; }
+    uncover();
     return Promise.resolve(target.type === "group" ? pickGroup(target.id) : pickBot(target.id));
+  }
+  // An open dialog with the owner's own input or a decision waiting (a create
+  // form, a confirmation, a dialog of the drawer): any modal dialog except the
+  // views that are only looked at (settings, the search palette, the picture
+  // viewer), which uncover() puts away.
+  function linkHeld() {
+    for (const d of document.querySelectorAll('[aria-modal="true"], dialog[open]')) {
+      if (d.id === "setpage" || d.id === "lightbox" || d.closest(".pal")) continue;
+      if (!d.hidden && !d.closest("[hidden]")) return true;
+    }
+    return false;
+  }
+  // The views that only show something, put away so the chat a link opens is in
+  // view: menus, settings, the search palette, the picture viewer and the
+  // drawer over the conversation (closed without changing whether it opens
+  // next time).
+  function uncover() {
+    closePops();
+    if (!$("setpage").hidden) closeSettings(false);
+    if (window.ClowderPalette && window.ClowderPalette.isOpen()) window.ClowderPalette.close({ restore: false });
+    closeShots();
+    if (panel.classList.contains("open")) panelOpen(false);
   }
   // …and the same when the address changes to one while the app is open (after
   // boot, which reads the first one itself).

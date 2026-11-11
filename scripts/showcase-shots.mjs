@@ -5,15 +5,26 @@
 // the light theme and once in the dark one (showcase/shots/<name>-light.png,
 // <name>-dark.png). It starts nothing itself:
 //
-//   npm run showcase                                   (in one terminal; restart it first, so
+//   TZ=Asia/Shanghai npm run showcase                  (in one terminal; restart it first, so
 //                                                       the chats are as staged, not as you left them)
 //   BASE=http://127.0.0.1:3230/ node scripts/showcase-shots.mjs
 //
-// The staged chats are dated relative to "now", so all pictures are taken in
-// one run, the light and the dark page side by side at each step. Two of them
-// change what is staged: 布偶猫 plays its demo (the reply is caught while it is
-// being written) and the contact list is taken first, before opening a chat
-// clears its unread count. ONLY=live,group retakes some (the rest keep theirs).
+// It clicks through the chats it pictures (opens them, picks options, plays a
+// demo), so before anything else it asks BASE what it is: only the scripted
+// preview answers GET /__preview, and only {preview: true, scene: "showcase",
+// staged: true} goes ahead. Anything else (a real instance, even one with the
+// same cat names; the plain preview; no answer) is refused in one sentence.
+//
+// The pictures show times and a reminder's time zone, so the browser runs in
+// the showcase's own zone (the /__preview answer's `zone`), and the committed
+// set is taken from a showcase started with TZ=Asia/Shanghai (the adapter's
+// default zone for a cat), which makes it the same whichever machine retakes
+// it. The staged chats are dated relative to "now", so all pictures are taken
+// in one run, the light and the dark page side by side at each step. Two of
+// them change what is staged: 布偶猫 plays its demo (the reply is caught while
+// it is being written) and the contact list is taken first, before opening a
+// chat clears its unread count. ONLY=live,group retakes some (the rest keep
+// theirs).
 //
 // Playwright is not a dependency of this repository: it is loaded from
 // PLAYWRIGHT_MODULES (a node_modules directory that has it); CHROMIUM may name
@@ -26,7 +37,20 @@ import { join, resolve } from 'node:path';
 const root = resolve(import.meta.dirname, '..');
 const out = join(root, 'showcase', 'shots');
 const base = new URL(process.env.BASE || 'http://127.0.0.1:3230/');
-if (base.port === '3210') throw new Error('BASE must be a showcase (npm run showcase), never the instance on 3210.');
+if (base.port === '3210') { console.error('BASE must be a showcase (npm run showcase), never the instance on 3210.'); process.exit(1); }
+
+// What BASE is, asked before anything is loaded or clicked (GET changes nothing there).
+let identity = null;
+try {
+  const answer = await fetch(new URL('/__preview', base), { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(5000) });
+  identity = answer.ok ? await answer.json() : null;
+} catch { identity = null; }
+if (!(identity && typeof identity === 'object' && identity.preview === true && identity.scene === 'showcase' && identity.staged === true)) {
+  console.error(`${base.href} is not the showcase with its chats staged (its GET /__preview did not say so), so nothing was opened or taken; start it with npm run showcase and point BASE at it.`);
+  process.exit(1);
+}
+const zone = typeof identity.zone === 'string' && /^[A-Za-z_]+(?:\/[A-Za-z0-9_+-]+)*$/.test(identity.zone) ? identity.zone : undefined;
+
 const modules = process.env.PLAYWRIGHT_MODULES || join(homedir(), '.npm/_npx/31e32ef8478fbf80/node_modules');
 let chromium;
 try { ({ chromium } = createRequire(join(modules, 'noop.js'))('playwright')); }
@@ -35,28 +59,18 @@ const shell = join(homedir(), 'Library/Caches/ms-playwright/chromium_headless_sh
 const executablePath = process.env.CHROMIUM || (existsSync(shell) ? shell : undefined);
 const only = new Set((process.env.ONLY || '').split(',').map(s => s.trim()).filter(Boolean));
 const wanted = (name) => !only.size || only.has(name);
-
-// The showcase is what BASE serves: the eight template cats and the two groups.
-const cast = ['布偶猫', '缅因猫', '暹罗猫', '梵花猫', '小鲸鱼', '狸花猫', '孟加拉猫', '金渐层'];
-const get = async (path) => { const r = await fetch(new URL(path, base)); if (!r.ok) throw new Error(`${path} → ${r.status}`); return r.json(); };
 const preview = async (body) => {
   const r = await fetch(new URL('/__preview', base), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!r.ok) throw new Error(`/__preview ${JSON.stringify(body)} → ${r.status} ${await r.text()}`);
   return r.json();
 };
-try {
-  const names = (await get('/xbot-api/bots')).bots.map(b => b.name);
-  if (!cast.every(n => names.includes(n))) throw new Error('the staged cats are not there');
-} catch (error) {
-  console.error(`${base.href} is not running the showcase (${error.message}); start it with npm run showcase and set BASE.`);
-  process.exit(1);
-}
+console.log(`showcase at ${base.href}, time zone ${zone ?? '(the browser\'s own)'}`);
 
 mkdirSync(out, { recursive: true });
 const browser = await chromium.launch({ executablePath });
 const pages = [];
 for (const theme of ['light', 'dark']) {
-  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, colorScheme: theme, reducedMotion: 'reduce' });
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, colorScheme: theme, reducedMotion: 'reduce', timezoneId: zone });
   const page = await ctx.newPage();
   page.on('pageerror', e => console.error(`[${theme}] page error: ${e.message}`));
   page.on('console', m => { if (m.type() === 'error') console.error(`[${theme}] console: ${m.text().slice(0, 200)}`); });
