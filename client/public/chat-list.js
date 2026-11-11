@@ -61,7 +61,7 @@
   function preview(kind, id) {
     const key = (kind === "group" ? "group:" : "bot:") + id;
     if (!isOpen(key)) {
-      const d = R.draftLine(drafts.get(key));
+      const d = R.draftLine(drafts.get(draftKeyOf({ type: kind === "group" ? "group" : "bot", id })));
       if (d) {
         const line = node("span", "preview cl-draft");
         line.append(node("span", "cl-draft-tag", "草稿："), document.createTextNode(d));
@@ -289,35 +289,80 @@
       sessionStorage.setItem(STORE, JSON.stringify(all));
     } catch (e) { /* storage unavailable or full: the drafts live for this page only */ }
   }
-  let left = "";
-  // Leaving a chat: what is in the composer (and, in a single chat, the
-  // message it quotes) stays with that chat.
-  function leave(sel) {
-    const key = keyOf(sel);
-    left = key;
-    if (!H || !key) return;
-    const quote = sel.type === "bot" ? H.composer.quote() : null;
-    if (drafts.put(key, H.composer.text(), quote)) save();
+  // A chat's draft key (chat-list-rules.js draftKey): a cat by its native ID,
+  // so a rename keeps its draft and a new cat that reuses a deleted one's
+  // name starts empty. A draft saved under the old name key moves over once.
+  function draftKeyOf(sel) {
+    if (!sel || !sel.id) return "";
+    const id = sel.type === "bot" && H && H.catId ? String(H.catId(sel.id) || "") : "";
+    const key = R.draftKey(sel, id);
+    if (id && drafts.move("bot:" + sel.id, key)) save();
+    return key;
   }
-  // Opening a chat: its own draft comes back, or the composer is empty. A
-  // chat opened again in place (a new or another saved conversation) keeps
-  // its words but not its quote, which belonged to the conversation before.
+  // The open chat: its key as it was opened (a rename must not lose it), and
+  // a restored quote still waiting for a read to show its conversation.
+  let open = null;
+  const isOpenChat = (sel) => !!open && !!sel && open.type === sel.type && open.id === sel.id;
+  // Leaving a chat: what is in the composer (and, in a single chat, the
+  // message it quotes, with its conversation) stays with that chat.
+  function leave(sel) {
+    if (!H || !sel || !sel.id) { open = null; return; }
+    const key = isOpenChat(sel) ? open.key : draftKeyOf(sel);
+    const quote = sel.type === "bot" ? H.composer.quote() || (open && open.quote) : null;
+    open = null;
+    if (key && drafts.put(key, H.composer.text(), quote)) save();
+  }
+  // Opening a chat: its own draft comes back, or the composer is empty. Its
+  // quote waits for the first read of the chat (read) and comes back only if
+  // the chat is still in the conversation the quote was taken in.
   function enter(sel) {
-    const key = keyOf(sel);
-    const again = !!key && left === key;
-    left = "";
-    if (!H || !key) return;
+    open = null;
+    if (!H || !sel || !sel.id) return;
+    const key = draftKeyOf(sel);
     const d = drafts.take(key);
     save();
+    open = { type: sel.type, id: sel.id, key, quote: d && sel.type === "bot" ? d.quote : null };
     H.composer.set(d ? d.text : "");
-    H.composer.setQuote(d && !again && sel.type === "bot" ? d.quote : null);
+    H.composer.setQuote(null);
+  }
+  // Each transcript read of the open single chat (threadId: its conversation
+  // now): a waiting quote comes back if it belongs here and is dropped if not;
+  // a quote in the composer from another conversation (the chat moved
+  // meanwhile, say in another tab) is taken away, so a reply never points at
+  // a message of the wrong conversation.
+  function read(sel, threadId) {
+    if (!H || !isOpenChat(sel) || !threadId) return;
+    const now = H.composer.quote();
+    if (now && now.thread && now.thread !== threadId) H.composer.setQuote(null);
+    const waiting = open.quote;
+    open.quote = null;
+    if (waiting && R.quoteFits(waiting, threadId) && !H.composer.quote()) H.composer.setQuote(waiting);
+  }
+  // A send that did not go out, after the owner left its chat: its words and
+  // quote go back to that chat's draft, unless the owner wrote a new one there.
+  function giveBack(sel, text, quote) {
+    if (!sel || !sel.id) return false;
+    const key = draftKeyOf(sel);
+    if (!key || drafts.get(key)) return false;
+    if (drafts.put(key, text, sel.type === "bot" ? quote : null)) { save(); return true; }
+    return false;
+  }
+  // A cat deleted for good: its draft goes too (by its ID and its old name key).
+  function forget(sel) {
+    if (!sel || !sel.id) return;
+    const key = draftKeyOf(sel);
+    let changed = drafts.drop(key);
+    changed = drafts.drop("bot:" + sel.id) || changed;
+    if (open && open.key === key) open = null;
+    if (changed) save();
   }
   // A reload keeps the open chat's draft too (sessionStorage, this tab only).
   function persistOpen() {
     if (!H) return;
-    const sel = H.selected(), key = keyOf(sel);
+    const sel = H.selected();
+    const key = isOpenChat(sel) ? open.key : draftKeyOf(sel);
     const text = key ? H.composer.text() : "";
-    const quote = key && sel.type === "bot" ? H.composer.quote() : null;
+    const quote = key && sel.type === "bot" ? H.composer.quote() || (open && open.quote) : null;
     save(key && (text.trim() || quote) ? { key, text, quote } : null);
   }
 
@@ -325,7 +370,9 @@
   // Hooks from app.js:
   //   entries()   the status poll's {bots: {name: entry}, groups: {id: entry}};
   //   selected()  the open chat ({type, id}) or null;
-  //   composer    {text(), set(text), quote(), setQuote(q)}.
+  //   catId(name) a cat's native ID (drafts are kept by it);
+  //   composer    {text(), set(text), quote(), setQuote(q)}; a quote is
+  //               {seq, text, thread} (thread: the conversation it was taken in).
   let timer = 0;
   function init(hooks) {
     H = hooks;
@@ -334,8 +381,8 @@
   }
 
   window.ClowderList = Object.freeze({
-    init, preview, paint, tick, title, leave, enter, persist: persistOpen,
+    init, preview, paint, tick, title, leave, enter, read, giveBack, forget, persist: persistOpen, stale,
     // For tests and diagnostics only.
-    draft: (sel) => drafts.get(keyOf(sel)),
+    draft: (sel) => drafts.get(draftKeyOf(sel)),
   });
 })();
