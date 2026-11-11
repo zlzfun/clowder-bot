@@ -8,6 +8,20 @@ export function replyInProgress(message: NativeMessage): boolean {
 }
 
 /**
+ * How a reply that did not finish normally ended, from the native response
+ * lifecycle: stopped by the owner, failed (with native's own reason when it
+ * gave one, for an optional details view) or interrupted. Undefined for a
+ * reply that completed or is still being written.
+ */
+export function replyEnding(message: NativeMessage): { how: 'stopped' | 'failed' | 'interrupted'; reason?: string } | undefined {
+  if (message.type !== 'assistant') return undefined;
+  const status = message.lifecycle?.status, reason = message.lifecycle?.reason;
+  const how = status === 'failed' ? 'failed' : status === 'interrupted' ? 'interrupted' : status === 'canceled' || status === 'cancelled' ? 'stopped' : undefined;
+  if (!how) return undefined;
+  return { how, ...(how !== 'stopped' && typeof reason === 'string' && reason.trim() ? { reason: reason.trim().slice(0, 2000) } : {}) };
+}
+
+/**
  * Display-only text, shared by direct and group chats. Native records stay
  * untouched. A reply still in progress has whatever was written so far, which
  * may be nothing: the row then carries `in_progress` and the chat draws a
@@ -18,6 +32,7 @@ export function messageDisplayText(message: NativeMessage, threadId: string): st
   const content = message.type === 'assistant' && text.trim() === 'SILENT' ? '' : text;
   if (content || replyInProgress(message)) return content;
   if (['canceled', 'cancelled'].includes(message.lifecycle?.status ?? '')) return '已停止';
+  if (message.lifecycle?.status === 'interrupted') return '中途被打断，没有写完';
   return message.lifecycle?.status === 'failed' ? '这次没完成，请查看详情' : '';
 }
 

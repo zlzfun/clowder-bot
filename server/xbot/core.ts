@@ -1,5 +1,5 @@
 import express, { type Response } from 'express';
-import { messageDisplayText, replyInProgress } from '../native/message-presentation.js';
+import { messageDisplayText, replyEnding, replyInProgress } from '../native/message-presentation.js';
 import { liveEvent } from '../native/live.js';
 import { clip } from '../native/text.js';
 import { messageBlocks } from '../native/blocks.js';
@@ -86,6 +86,7 @@ export function createXbotCoreRouter(bridge: BotBridge) {
         return { id: m.id, time: new Date(m.timestamp).toISOString(), sender: m.type === 'user' ? 'local' : name,
           kind: m.type === 'user' ? 'person' : 'bot', text: messageDisplayText(m, thread.id),
           status: m.lifecycle?.status ?? (m.isDraft ? 'processing' : 'complete'), ...(replyInProgress(m) ? { in_progress: true } : {}),
+          ...(replyEnding(m) ? { ended: replyEnding(m) } : {}),
           attachments: bridge.workspaces.messageFiles(thread.id, m),
           ...(rich.blocks.length ? { blocks: rich.blocks } : {}), ...(rich.hidden ? { blocks_hidden: rich.hidden } : {}), ...presentation, native: m };
       }).filter(m => m.native.type !== 'assistant' || !!m.text.trim() || m.attachments.length > 0 || m.presentation_kind === 'activity'

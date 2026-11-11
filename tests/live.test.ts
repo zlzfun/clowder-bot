@@ -173,6 +173,17 @@ test('a reply in progress is a row of its own: typing while it has no words, its
   assert.equal((await read()).find(m => m.id === 'reply').content, '已停止');
   r.native.messages.set(thread.id, [user, reply({ lifecycle: { kind: 'response', status: 'failed' } })]);
   assert.match((await read()).find(m => m.id === 'reply').content, /没完成/);
+  // How it ended travels with the row, with native's own reason for an optional details view; a normal reply has none.
+  const ended = async (fields: Partial<NativeMessage>) => { r.native.messages.set(thread.id, [user, reply(fields)]); return (await read()).find(m => m.id === 'reply')?.ended; };
+  assert.deepEqual(await ended({ content: '写到一半', lifecycle: { kind: 'response', status: 'failed', reason: ' provider_error: overloaded ' } }), { how: 'failed', reason: 'provider_error: overloaded' });
+  assert.deepEqual(await ended({ lifecycle: { kind: 'response', status: 'failed' } }), { how: 'failed' });
+  assert.deepEqual(await ended({ content: '写到一半', lifecycle: { kind: 'response', status: 'canceled', reason: 'user' } }), { how: 'stopped' });
+  assert.deepEqual(await ended({ content: '写到一半', lifecycle: { kind: 'response', status: 'interrupted' } }), { how: 'interrupted' });
+  assert.equal(await ended({ content: '好了', lifecycle: { kind: 'response', status: 'completed' } }), undefined);
+  assert.equal(await ended({ content: '在写', lifecycle: { kind: 'response', status: 'processing' } }), undefined);
+  // An interrupted reply without words still says what happened instead of vanishing.
+  r.native.messages.set(thread.id, [user, reply({ lifecycle: { kind: 'response', status: 'interrupted' } })]);
+  assert.match((await read()).find(m => m.id === 'reply').content, /打断/);
 
   const peer = await r.bridge.createBot({ name: 'Bob' });
   const group = await (await r.call('/xbot-api/groups', 'POST', { name: 'Team', members: ['Ada', 'Bob'] })).json();

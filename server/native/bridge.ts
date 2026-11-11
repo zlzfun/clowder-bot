@@ -3,7 +3,7 @@ import { ApiError } from '../errors.js';
 import { ProductStore } from '../product-store.js';
 import type { NativeCat, NativeMessage, NativeThread, NativeTransport } from './types.js';
 import { defaultRuntime, runtimeUnavailable, supportsRuntime } from './agents.js';
-import { messageDisplayText, messagePresentation, replyInProgress } from './message-presentation.js';
+import { messageDisplayText, messagePresentation, replyEnding, replyInProgress } from './message-presentation.js';
 import { avatarBreed, type CatConfig, type SourceTemplate } from './cat-templates.js';
 import { clip } from './text.js';
 import { messageBlocks } from './blocks.js';
@@ -162,7 +162,7 @@ export class BotBridge {
       if (message.type === 'user' && message.id === source) continue;
       const seq = this.store.sequence(thread.id, message.id);
       const text = messageDisplayText(message, thread.id), inProgress = replyInProgress(message);
-      const rich = message.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(message);
+      const rich = message.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(message), ending = replyEnding(message);
       // At the top of a page that continues further back, what came just before is not known; no quote is guessed there.
       const quoted = message.replyTo && message.replyTo !== source
         && !(message.type !== 'user' && (message.replyTo === lastUser || (lastUser === undefined && page.hasMore))) ? message.replyTo : undefined;
@@ -171,6 +171,7 @@ export class BotBridge {
         content: text, ...presentation, time: new Date(message.timestamp).toISOString(),
         reply_to: quoted ? this.store.state.messageRefs[thread.id]?.[quoted] ?? 0 : 0,
         status: message.lifecycle?.status ?? (message.isDraft ? 'processing' : 'complete'), ...(inProgress ? { in_progress: true } : {}),
+        ...(ending ? { ended: ending } : {}),
         attachments: this.workspaces.messageFiles(thread.id, message),
         // Cards, checklists and choices the cat attached; `blocks_hidden` counts what the chat cannot draw yet.
         ...(rich.blocks.length ? { blocks: rich.blocks } : {}), ...(rich.hidden ? { blocks_hidden: rich.hidden } : {}), native: message };
