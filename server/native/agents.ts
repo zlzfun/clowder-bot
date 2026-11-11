@@ -9,10 +9,10 @@ export function supportsRuntime(runtime: NativeRuntime): boolean {
     && !runtime.acp && !runtime.agyCarrier;
 }
 export function runtimeUnavailable(runtime: NativeRuntime): string | null {
-  if (!runtime.installed) return '本机尚未检测到这个 Agent';
-  if (!supportsRuntime(runtime)) return '此 Agent 的接入方式尚未适配';
-  if (runtime.readiness?.status === 'login_required') return '请先在本机 Agent 中完成登录';
-  if (runtime.readiness?.status === 'not_installed') return '本机尚未检测到这个 Agent';
+  if (!runtime.installed) return '这台电脑上还没有装这个工具';
+  if (!supportsRuntime(runtime)) return '这个工具的接入方式还不支持';
+  if (runtime.readiness?.status === 'login_required') return '这个工具还没有登录，请先登录';
+  if (runtime.readiness?.status === 'not_installed') return '这台电脑上还没有装这个工具';
   return null;
 }
 /**
