@@ -81,6 +81,8 @@ BOT_MODEL_SMOKE=1 npm run test:native
 BOT_BACKGROUND_SMOKE=1 npm run test:background-journey
 ```
 
+界面预览不需要引擎和模型：`npm run preview:fixture` 在 **http://127.0.0.1:3230** 用脚本化的协议替身运行真实的适配层，按固定上游的事件形态回放一轮回复（逐字输出、步骤、停止、失败），也能摆出本机没有可用 Agent、需要登录等首屏状态（`POST /__preview {"agents":"ready|unknown|login|none"}`）。回复是固定文本并写明是预览；数据在临时目录，退出即删，不会成为运行时的后备路径。
+
 原生集成测试使用专用临时成员和会话，结束时通过原生接口删除测试成员、软删除测试会话，不清空存储。更多验收与上游回归命令见 [维护说明](docs/upstream-maintenance.md)。
 
 后台旅程验收保留独立 Bot、聊天与 `.runtime/background-journey/` 证据，不删除原有数据。它核对原生子任务身份、定向消息、连续心跳和完成回报，不能代替所有复杂任务或进程故障恢复的验证。

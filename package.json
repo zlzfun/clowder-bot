@@ -11,6 +11,7 @@
     "dev:server": "node --watch --env-file-if-exists=.env --import tsx server/index.ts",
     "build": "tsc --noEmit && vite build",
     "start": "node --env-file-if-exists=.env --import tsx server/index.ts",
+    "preview:fixture": "node --import tsx scripts/preview-fixture.ts",
     "test": "node --import tsx --test tests/*.test.ts",
     "smoke": "node --env-file-if-exists=.env --import tsx scripts/check-production.mjs",
     "verify:frontend": "node scripts/verify-xbot-frontend.mjs",
