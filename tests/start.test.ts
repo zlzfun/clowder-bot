@@ -92,6 +92,8 @@ test('a cat needs only a name: one unpatched native creation with the Agent’s 
   assert.match(sent.roleDescription, /随叫随到/);
   assert.ok(sent.personality && sent.teamStrengths, 'a stock engineering portrait is not left to fill in');
   for (const field of ['breedId', 'cli', 'accountRef', 'carrier', 'provider']) assert.equal(field in sent, false, field);
+  // A Claude Code cat starts with the CLI's own schedulers off (memberCliArgs); a Codex cat has no such arguments.
+  assert.deepEqual(sent.cliConfigArgs, ['--settings', '{"skillOverrides":{"schedule":"off","loop":"off"}}', '--disallowedTools', 'RemoteTrigger,CronCreate,CronDelete,CronList']);
   assert.equal(r.native.calls.some(c => c.path.startsWith('/api/bot-cat-templates')), false, 'not the locally patched template route');
   const item = (await (await r.call('/xbot-api/bots')).json()).bots[0];
   assert.deepEqual([item.name, item.avatar_seed, item.templateId, item.native_id], ['团子', 'cat:ragdoll', 'ragdoll', sent.catId]);
@@ -120,7 +122,7 @@ test('a cat needs only a name: one unpatched native creation with the Agent’s 
   const about = '帮我管理每周的读书笔记，\n周五提醒我整理';
   assert.equal((await r.call('/xbot-api/bots', 'POST', { name: '栗子', simple: { face: 'golden-chinchilla', about, agent: 'codex' }, idempotencyKey: randomUUID() })).status, 201);
   const second = creations().at(-1)!.body;
-  assert.equal(second.clientId, 'openai');
+  assert.equal(second.clientId, 'openai'); assert.equal('cliConfigArgs' in second, false);
   assert.equal(second.roleDescription, about);
   assert.equal(second.teamStrengths, '帮我管理每周的读书笔记， 周五提醒我整理');
   const chestnut = (await (await r.call('/xbot-api/bots')).json()).bots.find((b: any) => b.name === '栗子');

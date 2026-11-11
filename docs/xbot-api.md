@@ -37,6 +37,7 @@ UI 保留 Bot 名称和文件夹概念，实际成员、执行和历史以 Clowd
 - 请求体只有成员本身的字段：`catId`、名字与别名、所选猫脸对应角色模板的颜色、职责／性格／简介、`clientId`、`configurationSource: 'native_tool'`、`defaultModel: ''`。模型与推理强度不写，沿用该 Agent 的本机默认。不传 `breedId`，由原生按新成员处理；头像只存在 Bot 的展示数据里。
 - Agent 取 `simple.agent` 或上面的默认。`face` 只决定头像和颜色（八张猫脸之一；不选时按 Agent 取对应的那张）。`about` 是用户写的一句用途，成为职责与简介；不写时用一段通用的「随叫随到的伙伴」职责。
 - 幂等用上游成员创建自带的请求身份：请求头 `x-cat-cafe-onboarding-journey: clowder-bot-simple` 与 `idempotency-key: onboarding:clowder-bot-simple:cat:<idempotencyKey>`（`config/member-create-receipt.ts`）。`catId` 由 `idempotencyKey` 推导，所以同一个键、同样的内容重发得到同一只猫；同一个键换了内容由原生拒绝（409）。重发时如果那只猫已经在，就不再按当前的 Agent 检测结果拦截。这一路径 2026-11-11 在隔离运行时上实测过创建、重放和冲突。
+- 绑定 Claude Code 的猫，成员记录里带一组默认的「额外 CLI 参数」（上游成员编辑里的 `cliConfigArgs`，受支持的成员级设置）：`--settings {"skillOverrides":{"schedule":"off","loop":"off"}} --disallowedTools RemoteTrigger,CronCreate,CronDelete,CronList`，关掉 CLI 自带的云端定时，让「每天 9 点提醒我」走引擎的定时工具和它的确认。Codex 没有自带定时，不写参数。同样的默认值用于 `PUT /bots/:name/agent` 换 Agent；带 `catConfig` 的完整创建在成员建好后补一次 `PATCH /api/cats/:id`（成员已有参数时不动，补不上也不影响创建）。设置 JSON 里不能有空白：上游按空白切分参数。只影响此后新建或重新绑定的猫，已有的猫不改。
 - 必须带 `idempotencyKey`；不能与 `catConfig`、`runtimeId`、`templateId`、`persona`、`description` 混用。没有可用 Agent 时 422，说明要先装好并登录；同名 409。
 
 `POST /xbot-api/groups` 带 `members` 时 `name` 可省略，群名取成员名用「、」连接（超过 64 字截断），之后可改名。可带 `idempotencyKey`（UUID）：它同时是群目录的名字和原生 Thread 创建的幂等键，应答丢失后用同一个键重发得到同一个群，不会建出第二个。群名是原生 Thread 标题，按自由文本校验；不带 `members` 时同一路由仍是建侧栏分组，分组名沿用原来的字符限制。

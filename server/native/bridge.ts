@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { ApiError } from '../errors.js';
 import { ProductStore } from '../product-store.js';
 import type { NativeCat, NativeMessage, NativeThread, NativeTransport } from './types.js';
-import { defaultRuntime, runtimeUnavailable, supportsRuntime } from './agents.js';
+import { defaultRuntime, memberCliArgs, runtimeUnavailable, supportsRuntime } from './agents.js';
 import { approvalReceipt, approvalReceiptText, messageDisplayText, messagePresentation, replyEnding, replyInProgress, rosterRefusals } from './message-presentation.js';
 import { avatarBreed, type CatConfig, type SourceTemplate } from './cat-templates.js';
 import { clip } from './text.js';
@@ -303,9 +303,17 @@ export class BotBridge {
         method: 'POST', body: { name: input.name, catConfig: input.catConfig,
           ...(input.sourceTemplate ? { sourceTemplate: input.sourceTemplate } : {}), idempotencyKey: input.idempotencyKey ?? randomUUID() },
       });
-      const cat = result.cat;
+      let cat = result.cat;
       if (!cat?.id || !cat.breedId) throw new ApiError(502, '原生创建结果缺少猫猫身份');
-      const identity = avatarBreed(cat.breedId);
+      // The template route creates the member without the default CLI arguments (see memberCliArgs);
+      // they are added as a second native step. If that step fails the cat exists and works, only
+      // without them, and re-selecting its Agent in the profile applies them.
+      const args = memberCliArgs(cat.clientId);
+      if (args.length && !(Array.isArray(cat.cliConfigArgs) && cat.cliConfigArgs.length)) {
+        cat = await this.native.request<{ cat: NativeCat }>(`/api/cats/${encode(cat.id)}`, { method: 'PATCH',
+          body: { expectedRevision: cat.configurationRevision, cliConfigArgs: args } }).then(updated => updated.cat?.id ? updated.cat : cat).catch(() => cat);
+      }
+      const identity = avatarBreed(cat.breedId ?? result.cat.breedId!);
       Object.assign(this.store.bot(cat.id), { templateId: identity, avatarSeed: input.avatar_seed || `cat:${identity}`,
         timezone: input.timezone, ...(result.sourceTemplate ? { sourceTemplate: result.sourceTemplate } : {}) });
       this.store.save();
@@ -331,6 +339,7 @@ export class BotBridge {
       personality: source?.personality ?? template.personality,
       teamStrengths: input.description ?? source?.teamStrengths ?? template.teamStrengths,
       clientId: runtime.clientId, configurationSource: 'native_tool', defaultModel: '',
+      ...(memberCliArgs(runtime.clientId).length ? { cliConfigArgs: memberCliArgs(runtime.clientId) } : {}),
     } });
     Object.assign(this.store.bot(cat.id), { templateId: template.id, avatarSeed: input.avatar_seed, timezone: input.timezone });
     this.store.save();
@@ -365,7 +374,8 @@ export class BotBridge {
       body: { catId, name, displayName: name, nickname: name, color: template.color, mentionPatterns: [`@${name}`, `@${catId}`],
         roleDescription: about || defaultRole, personality: defaultPersonality,
         teamStrengths: about ? clip(about.replace(/\s+/g, ' '), 60) : defaultStrengths,
-        clientId: runtime.clientId, configurationSource: 'native_tool', defaultModel: '' } }).catch(error => {
+        clientId: runtime.clientId, configurationSource: 'native_tool', defaultModel: '',
+        ...(memberCliArgs(runtime.clientId).length ? { cliConfigArgs: memberCliArgs(runtime.clientId) } : {}) } }).catch(error => {
       if (error instanceof ApiError && error.status === 409) throw new ApiError(409, '这次创建和上一次的内容不一样，或者名字已被占用，请重新创建', error.details);
       throw error;
     });
