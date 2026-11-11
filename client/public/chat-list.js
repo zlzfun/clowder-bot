@@ -413,6 +413,8 @@
 
   window.ClowderList = Object.freeze({
     init, preview, paint, tick, title, leave, enter, read, giveBack, forget, persist: persistOpen, stale,
+    // The last status read failed and the list says so (chat-presence.js drops its typing dots then).
+    isStale: () => !!staleLine && !staleLine.hidden,
     // For tests and diagnostics only.
     draft: (sel) => drafts.get(draftKeyOf(sel)),
   });

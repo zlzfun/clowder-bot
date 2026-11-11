@@ -88,14 +88,19 @@
   // ---- What the header says while cats reply ----
   // From the same live state the reply rows show (ClowderLive.presence()),
   // in a messenger's few words: what the reply's quiet line says in detail
-  // (在看 说明.md, 在运行命令 …), the header says in short.
-  const LOOKING = new Set(["look", "dig", "web", "site", "lookup", "memory", "browser"]);
+  // (在看 说明.md, 在运行命令 …), the header says in short. 在查资料… only for
+  // tools known to read or search (reading files, searching them, a web
+  // search, reading a page, and Codex's equivalents); a browser or a memory
+  // tool proves no lookup, so it gets broader words.
+  const LOOKING = new Set(["look", "dig", "web", "site"]);
   function doing(reply, verb) {
     if (!reply) return "";
     if (reply.phase === "thinking") return "在想…";
     if (reply.phase === "step") {
       const kind = typeof verb === "function" ? str(verb(reply.tool)) : "";
       if (LOOKING.has(kind)) return "在查资料…";
+      if (kind === "lookup") return "在查找…";
+      if (kind === "browser") return "在用浏览器…";
       if (kind === "write" || kind === "edit") return "在写文件…";
       if (kind === "run") return "在运行命令…";
       if (kind === "split") return "在分头处理…";
@@ -105,10 +110,14 @@
     // Started, or writing words (also before the first word: the typing bubble).
     return "正在输入…";
   }
-  // now: {stopping, replies: [{catId, phase, tool}]}; name(catId): a cat's
-  // name; group: a group chat (says who). "" when no cat is replying.
+  // now: {stopping, replies: [{catId, phase, tool, unsure}]}; name(catId): a
+  // cat's name; group: a group chat (says who). "" when no cat is replying.
+  // A reply whose stream was lost and that nothing has confirmed since
+  // (unsure) makes no claim at all: the header says nothing about it until
+  // an event or a read shows it again.
+  const sure = (now) => (now && Array.isArray(now.replies) ? now.replies : []).filter((r) => r && str(r.catId) && !r.unsure);
   function headerLine(now, name, group, verb) {
-    const replies = (now && Array.isArray(now.replies) ? now.replies : []).filter((r) => r && str(r.catId));
+    const replies = sure(now);
     if (!replies.length) return "";
     if (now.stopping) return "正在停止…";
     if (!group) return doing(replies[replies.length - 1], verb);
@@ -119,41 +128,74 @@
     if (cats.length === 2 && names.every(Boolean)) return names.join("、") + "正在输入…";
     return cats.length + " 只猫猫正在输入…";
   }
+  // What one polite announcement says when that changes: the header's words
+  // (in a single chat with the cat's name, since nothing else is read with
+  // them), or 排队中 while a send waits behind other work. "" says nothing.
+  function spokenLine(now, name, group, verb) {
+    const words = headerLine(now, name, group, verb);
+    if (words) {
+      if (group || now.stopping) return words;
+      const last = sure(now).at(-1);
+      return str(typeof name === "function" ? name(last.catId) : "") + words;
+    }
+    return now && Array.isArray(now.waiting) && now.waiting.some((w) => w && w.queued) ? "排队中" : "";
+  }
 
   // ---- A sidebar row while its cat replies ----
+  // A status entry's own conversation is running: its activity (the row's
+  // own single chat, or the group's thread) was read whole and lists an
+  // active invocation, and the last status poll succeeded (stale: it failed,
+  // so what it said earlier may be out of date). A cat's overall state
+  // ("running") is not enough: it also counts its work in other chats.
+  function ownActive(entry, stale) {
+    const a = entry && entry.activity;
+    return !stale && !!a && a.readStatus === "ready" && Array.isArray(a.active) && a.active.length > 0;
+  }
   // kind: the status poll's state for that chat (experience rules' side());
   // live: the open chat's header words ("" for any other chat, or when
-  // nothing is being written). "live": the row says the live words with the
-  // typing dots; "status": the status's own busy line, with typing dots for
-  // its spinner; "": as it is. What needs the owner (等你确认, a failure, a
-  // state that cannot be told) is never covered.
-  function rowShows(kind, live) {
+  // nothing is being written); own: ownActive() for that row. "live": the
+  // row says the live words with the typing dots; "status": the status's own
+  // busy line, its spinner drawn as typing dots; "": as it is. What needs the
+  // owner (等你确认, a failure, a state that cannot be told) is never covered.
+  function rowShows(kind, live, own) {
     if (kind === "awaiting" || kind === "failure" || kind === "unknown") return "";
     if (str(live)) return "live";
-    return kind === "running" ? "status" : "";
+    return own ? "status" : "";
   }
 
   // ---- Seen: the engine picked up the owner's message ----
-  // The owner's own messages (single chat role "user", group kind "person"),
-  // and the cats' (role "assistant", kind "bot"); a refusal said by name
-  // (notice) is not an answer.
+  // The owner's own messages (single chat role "user", group kind "person").
   const ownerRow = (m) => !!m && (m.role === "user" || m.kind === "person") && !m.internal;
-  const catRow = (m) => !!m && (m.role === "assistant" || m.kind === "bot") && !m.notice;
   const midOf = (m) => (m && (m.native_message_id || m.id) != null ? String(m.native_message_id || m.id) : "");
-  // owner message ID → the cats (native IDs) whose reply answers it, in order.
-  // A reply carries the engine's record (native); its replyTo is the owner's
-  // message it answers. Only a reply that exists says so: a message waiting
-  // in the queue, or one that did not go out, has none.
+  // A cat's reply that began: the engine's own assistant record with its cat
+  // (system, connector and delivery records are not; nor is a refusal or a
+  // reminder line, notice), with evidence the cat started on it: it is being
+  // produced (a processing response or a draft), it has words, files, cards
+  // or tool steps of its own, or it finished normally. A reply that failed,
+  // was stopped or interrupted before producing anything proves nothing.
+  function began(m) {
+    const n = m && m.native;
+    if (!n || n.type !== "assistant" || !str(n.catId) || m.notice) return false;
+    const status = n.lifecycle && typeof n.lifecycle.status === "string" ? n.lifecycle.status : "";
+    if (status === "processing" || n.isDraft === true) return true;
+    if (str(n.content).trim()) return true;
+    if ((m.attachments || []).length || (m.blocks || []).length || Number(m.blocks_hidden) > 0) return true;
+    if (Array.isArray(n.toolEvents) && n.toolEvents.length > 0) return true;
+    return status === "completed";
+  }
+  // owner message ID → the cats (native IDs) whose reply answers it, in
+  // order. The reply's native replyTo names the owner message it answers.
+  // Only a reply that began says so: a message waiting in the queue, one
+  // that did not go out, or one whose reply failed before starting has none.
   function picked(messages) {
     const owners = new Set(), out = new Map();
     for (const m of messages || []) if (ownerRow(m) && midOf(m)) owners.add(midOf(m));
     for (const m of messages || []) {
-      if (!catRow(m)) continue;
-      const to = m.native && typeof m.native.replyTo === "string" ? m.native.replyTo : "";
+      if (!began(m)) continue;
+      const to = typeof m.native.replyTo === "string" ? m.native.replyTo : "";
       if (!to || !owners.has(to)) continue;
-      const cat = String(m.native_cat_id || (m.native && m.native.catId) || "");
       const list = out.get(to) || [];
-      if (cat && !list.includes(cat)) list.push(cat);
+      if (!list.includes(m.native.catId)) list.push(m.native.catId);
       out.set(to, list);
     }
     return out;
@@ -171,8 +213,16 @@
     return names.slice(0, 2).join("、") + "等 " + names.length + " 只猫猫看到了";
   }
 
+  // ---- The calendar day, for 今天 / 昨天 separators ----
+  // The local day a time falls on: when it changes, labels drawn as 今天 or
+  // 昨天 are out of date.
+  function dayOf(t) {
+    const d = new Date(t);
+    return Number.isFinite(d.getTime()) ? d.getFullYear() + "-" + (d.getMonth() + 1) + "-" + d.getDate() : "";
+  }
+
   window.ClowderPresenceRules = Object.freeze({
     accent, rgb, contrast, legible, tints, accentCss, INK, MARK,
-    headerLine, rowShows, picked, seenMark, seenWords,
+    headerLine, spokenLine, ownActive, rowShows, began, picked, seenMark, seenWords, dayOf,
   });
 })();
