@@ -98,7 +98,7 @@
 ## 5．知道它记住了什么
 
 - **先纠正范围**：`/xbot-api/bots/:name/memory` 目前转接 `/api/memory?threadId=…`，是当前会话共享便笺，不是该猫全部长期记忆。保留已有便笺和数据，不迁移成第二套长期记忆。附件分支群聊「记忆」页没有读取数据，却写着“对它说「记住……」就会出现在这里”；这条承诺应随入口收敛一并纠正。
-- **第一步已有原生接口**：`GET /api/memory/profile` 读取用户画像；`GET /api/memory/taste` 读取偏好。两者均有按 ID／revision 读取详情和来源的接口，已在上游生产启动代码注册；Bot 当前白名单尚未开放这两组路径。优先适配这两类，不先把所有文档索引、人物资料和召回统计堆入入口。
+- **第一步已有原生接口**：`GET /api/memory/profile` 读取用户画像；`GET /api/memory/taste` 读取偏好。两者均有按 ID／revision 读取详情和来源的接口，已在上游生产启动代码注册；写下这一条时 Bot 白名单尚未开放这两组路径，首批实施后已由 `/xbot-api/memory/profile|taste` 只读提供（见上文「首批实施」）。优先适配这两类，不先把所有文档索引、人物资料和召回统计堆入入口。
 - **读取必须保留语义**：展示原生内容、来源与实际范围；区分已保存、待确认、部分可读和暂时不可读。Profile／Taste 并非简单的“每猫私有记忆”；不得按当前猫名擅自改变归属，也不把 owner 私有资料注入群聊消息。
 - **第二步逐类开放操作**：Profile 支持 `replace_content`、`hard_forget`；Taste 支持 `confirm_takeaway`、`correct`、`retire`、`hard_forget`。复用各自 `POST …/:memoryId/actions`，不造统一删除接口。按原生条目／文档粒度操作，不把画像全文伪装成可独立删除的一条偏好。
 - **权限与并发**：原生要求 owner session、合法 Origin、CSRF；写入还要求 `requestId`、`expectedRevision`，遗忘要求 `confirmed: true`。现有 NativeClient 可承载会话与 CSRF，但新增路径仍需按方法收窄、实测 owner 范围；过期版本重新读取，不能默默覆盖。超时或多个操作部分成功时逐项核对回执，不批量宣布成功。
