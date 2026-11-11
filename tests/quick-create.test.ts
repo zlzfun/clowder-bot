@@ -152,7 +152,7 @@ function page(opts: { start?: Any; cats?: string[]; route?: (path: string, metho
   const context = vm.createContext({ window, document: doc, setTimeout: () => 0, clearTimeout: () => {}, console });
   for (const file of ['client/public/cat-avatars.js', 'client/public/quick-create-rules.js', 'client/public/quick-create.js']) vm.runInContext(read(file), context);
   const s = { start: opts.start ?? START.ready, cats: [...(opts.cats ?? [])] };
-  const calls: Call[] = [], opened: string[] = [], groups: string[] = [], more: Any[] = [], copied: string[] = [], errors: string[] = [], notices: string[] = [];
+  const calls: Call[] = [], opened: string[] = [], groups: string[] = [], more: Any[] = [], copied: string[] = [], errors: string[] = [], notices: Any[] = [];
   let refreshed = 0, lists = 0;
   const api = async (path: string, opt: { method?: string; body?: unknown } = {}) => {
     const call: Call = { path, method: opt.method || 'GET', ...(opt.body === undefined ? {} : { body: plain(opt.body) }) };
@@ -175,7 +175,8 @@ function page(opts: { start?: Any; cats?: string[]; route?: (path: string, metho
     refresh: async () => { refreshed++; opts.onRefresh?.(); },
     openCat: async (name: string) => { opened.push(name); if (opts.openCat) await opts.openCat(name); },
     // A created cat's notice, said by the shell once its chat is open (app.js quietNote).
-    notice: (text: string) => { notices.push(opened.length + ':' + text); },
+    // A created cat's notice, held by the shell until that cat's chat opens (app.js holdNotice).
+    notice: (held: Any) => { notices.push({ ...held, openedBefore: opened.length }); },
     openGroup: async (id: string) => { groups.push(id); },
     landing: () => null,
     more: (opener: unknown) => { more.push(opener); },
@@ -486,41 +487,77 @@ test('made but not opened: the stage says the cat is there and opens its chat on
   assert.equal(p.posts().length, 1);
 });
 
-test('a created cat\'s notice is said once, after its chat opens (first run, 新建猫猫, and 打开聊天 after a failed open)', async () => {
+test('a created cat\'s notice is handed to the shell by the cat\'s identity, whether or not its chat opens (first run, 新建猫猫, a failed open)', async () => {
   const NOTICE = '猫猫建好了，但有一项默认设置没写进去：在对话里让它设提醒可能不生效。';
   const withNotice = (path: string, method: string, body: Any) => (path === '/xbot-api/bots' && method === 'POST' ? { name: body.name, native_id: 'bot-new', notice: '  ' + NOTICE + '\n' } : undefined);
-  // First run: the chat opens, then the notice, once.
+  const held = (n: Any) => ({ name: n.name, nativeId: n.nativeId, text: n.text });
+  // First run: held (trimmed, with the native ID) as soon as the cat exists, before its chat opens.
   const p = page({ route: withNotice });
   button(await p.stage(), '带它回家').click();
   await settle();
   assert.deepEqual(p.opened, ['砚砚']);
-  assert.deepEqual(p.notices, ['1:' + NOTICE], 'after the open, trimmed, once');
-  // 新建猫猫's dialog: the same.
-  const q = page({ cats: ['团子'], route: withNotice });
+  assert.deepEqual(p.notices.map(held), [{ name: '砚砚', nativeId: 'bot-new', text: NOTICE }]);
+  assert.equal(p.notices[0].openedBefore, 0, 'handed over before the open: the shell says it when the chat is open');
+  // 新建猫猫's dialog whose open fails: the dialog is gone, but the notice is held all the same.
+  const q = page({ cats: ['团子'], route: withNotice, openCat: () => { throw fail(undefined, '连不上 clowder-bot'); } });
   q.Q.openCat({ opener: q.opener });
   await settle();
   button(q.layer()!, '创建').click();
   await settle();
-  assert.equal(q.notices.length, 1);
-  assert.match(q.notices[0]!, /^1:猫猫建好了/);
-  // The chat did not open: nothing yet; 打开聊天 opens it and then says it.
+  assert.equal(q.layer(), null, 'the dialog closed');
+  assert.deepEqual(q.errors, ['连不上 clowder-bot']);
+  assert.deepEqual(q.notices.map(held), [{ name: '砚砚', nativeId: 'bot-new', text: NOTICE }]);
+  // The stage's 打开聊天 after a failed open hands it over once, not again.
   let refuse = true;
   const r = page({ route: withNotice, openCat: () => { if (refuse) throw fail(undefined, '连不上 clowder-bot'); } });
   const stage = await r.stage();
   button(stage, '带它回家').click();
   await settle();
-  assert.deepEqual(r.notices, [], 'not before the chat is there');
   refuse = false;
   button(stage, '打开聊天').click();
   await settle();
-  assert.deepEqual(r.notices, ['2:' + NOTICE]);
-  // No notice: nothing is said.
+  assert.equal(r.notices.length, 1);
+  // No notice: nothing is held.
   const s = page();
   button(await s.stage(), '带它回家').click();
   await settle();
   assert.deepEqual(s.notices, []);
   assert.equal(s.R.createdNotice({ notice: 42 }), '');
   assert.equal(s.R.createdNotice(null), '');
+});
+
+test('the shell says a held notice once, when that cat\'s chat is actually open, however it opens', () => {
+  const app = read('client/public/app.js');
+  const take = (name: string) => {
+    const m = new RegExp(`\\n {2}(?:async )?function ${name}\\([^\\n]*\\) \\{\\n[\\s\\S]*?\\n {2}\\}\\n`).exec(app);
+    assert.ok(m, name);
+    return m[0];
+  };
+  const said: string[] = [];
+  const out: Any = {};
+  const bots: Any[] = [];
+  vm.runInNewContext('const heldNotices = new Map();' + take('holdNotice') + take('sayHeldNotice') + 'out.hold = holdNotice; out.say = sayHeldNotice;', {
+    out, Map, String, botCatId: (name: string) => (bots.find(b => b.name === name) || {}).native_id || '', quietNote: (t: string) => said.push(t),
+  });
+  out.hold({ name: '砚砚', nativeId: 'bot-new', text: '有一项默认设置没写进去。' });
+  out.say('团子');
+  assert.deepEqual(said, [], 'another cat');
+  out.say('砚砚');
+  assert.deepEqual(said, [], 'not yet in the list: its identity is not known under that name');
+  bots.push({ name: '砚砚', native_id: 'bot-new' });
+  out.say('砚砚');
+  assert.deepEqual(said, ['有一项默认设置没写进去。']);
+  out.say('砚砚');
+  assert.equal(said.length, 1, 'once');
+  // Without a native ID it is held by name.
+  out.hold({ name: '年糕', nativeId: '', text: '另一句。' });
+  out.say('年糕');
+  assert.deepEqual(said.at(-1), '另一句。');
+  // Wiring: selectBot says it after the chat is drawn; both creation paths hold, neither says it directly.
+  assert.match(take('selectBot'), /await loadThread\(\);\n\s+\/\/[^\n]*\n\s+if \(state\.sel === selection\) sayHeldNotice\(name\);/);
+  assert.match(app, /notice: \(held\) => holdNotice\(held\),/);
+  assert.match(app, /if \(created\.notice\) holdNotice\(\{ name: created\.name, nativeId: created\.native_id \|\| "", text: created\.notice \}\);\n\s+await refreshLists\(\);/);
+  assert.doesNotMatch(app, /quietNote\(created\.notice\)/);
 });
 
 test('the no-chat line speaks of 猫猫 and the list, and opens the list', () => {

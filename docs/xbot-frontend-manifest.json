@@ -27,7 +27,7 @@
       "file": "app.js",
       "target": "client/public/app.js",
       "sourceSha256": "1248f793493826bf044359c71e7d8772ccc3472d6021d6abb979dff9b6cb29bc",
-      "sha256": "f15a3523a47746f45fc8fd60b3278199e3e89f10e51165ef35648c071a8bc2c8",
+      "sha256": "586b2f6cf8a89eca5378e94621786ce48308d0ab784d29fe31e24555ed36e1cc",
       "unchanged": false
     },
     {
@@ -153,7 +153,7 @@
       "file": "index.html",
       "target": "client/index.html",
       "sourceSha256": "a4160c18e23489fbc6a9e21fe494e1ac52840a67b2e138997400a0b42835b556",
-      "sha256": "3335e50ec77884fe09cdc2999541667420787c541cb50f69203dbc5cfe0f957e",
+      "sha256": "3d4ac99a97f1f28bebbaa68256e8fc71843340a0f1caff124a49e02d3724f0e4",
       "unchanged": false
     },
     {
@@ -733,7 +733,7 @@
       "target": "client/public/quick-create.js",
       "description": "The first-run 「领一只猫猫回家」 stage (eight clay faces as one radio group, the chosen one stepping forward, the nickname as the name, 带它回家, the quiet tool line with a select when more than one is usable and the unconfirmed-login note with its copyable command), the blocked states with 重新检测 (?refresh=1, says plainly when nothing changed, focus kept), inline creation errors and the same-key retry of an unsure request, the portrait gliding to the header face on success (skipped under reduced motion), the made-but-not-opened state, the no-chat line with 打开列表, the quick 新建猫猫 dialog (optional 它主要帮你做什么 as simple.about, 更多设置 handing over to the unchanged template creator) and the 新建群聊 dialog (face chips in pick order, 2–10 members, optional name whose placeholder is the generated name, unsure answers told to look before retrying); one dialog at a time, Escape, Tab and focus kept inside and returned to the opener",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 开箱即用 (docs/xbot-api.md「开箱即用」); review fixes by local Claude Code (claude-opus-5-5) on 2026-11-11: lost-answer retry under the original key, keyed group creation, tool switch keeps focus, picked face kept across blocked, input caps by code points, live opener for focus return, stage reconciled when the first cat arrives elsewhere",
-      "sha256": "591ab6c95c4e733350fa6c37321e86be3a8b50859408b70dc98b7f74364de38e"
+      "sha256": "f9185857fd3e246ecb27296c4a20af1182aa65cae7aafd471e7ed56ddfd12635"
     },
     {
       "target": "client/public/quick-create.css",
@@ -751,7 +751,7 @@
       "target": "client/public/palette.js",
       "description": "The ⌘K / Ctrl+K palette and 搜索 at the top of the sidebar (a full-height sheet on phones): instant name filtering, a debounced search of what was said with stale requests cancelled and late answers dropped, hits with chat, speaker, marked snippet and time, plain notes for unread conversations and unsearched or unlisted messages, retry; an empty query lists recent chats and the actions registry (ClowderPalette.actions: 新建猫猫, 新建群聊, 设置, 切换深浅色 by default, each the app's own function; others may add or replace entries); Enter opens a chat, or opens a hit's chat and finds the message through the replaceable ClowderPalette.locate (by default chat-experience.js's locate among the rows on screen; a message not shown is said to be further back), a hit in a cat's earlier conversation asks first and switches through workspace.switchTo (refusals shown); open({scope, query}) searches one chat; ↑/↓, Enter, Esc, Tab kept inside, focus returned, the shell inert while open; Alt+↑/↓ open the previous / next chat in sidebar order; no records kept; one chat searched through GET /xbot-api/bots/:name/search or /groups/:id/search with a scope-aware request key; every chosen row resolved again against the current chat list by lasting identity and refused in place when gone (also after the earlier-conversation question); continuations bound to an operation generation so a late chat opening or switch never closes, focuses or speaks over a newer palette; composition cancels pending searches and shows nothing for the text before it; a hidden shell (sign-in), another dialog or a 401 closes the palette without moving focus, its search cancelled and inert lifted",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for search and jump (round 3b) (docs/xbot-api.md「搜索」); review fixes by local Claude Code (claude-opus-5-5) on 2026-11-11 (sign-in transitions, stale rows, IME, operation generation, per-chat route)",
-      "sha256": "6f6847adb170648cdeb6a5ae2c6f6b4a2818ab24f32137944df9cf61ce4e081a"
+      "sha256": "2dab12401b864ac57eb11991c7e3ae73a07d88d2f160c4f915b2373e109fceac"
     },
     {
       "target": "client/public/palette.css",
@@ -787,7 +787,7 @@
       "target": "client/public/chat-history.js",
       "description": "Earlier messages (newest-page reads merged with the pages the owner scrolled back to; a quiet top row: 查看更早的消息 / 正在加载… / 没有更早的消息了 / failure with 重试, changed in place and re-read by the keyed redraw; scrolling near the top loads; answers for a chat or conversation left behind discarded), the chat header's ⋯ menu (新对话 and 历史对话 for a cat, 在对话里查找 only when window.ClowderPalette exists; arrows, Escape back to ⋯), the 新对话 dialog over the existing POST /xbot-api/bots/:name/new (says the old conversation stays under 历史对话 and what the cat remembers is kept; busy, switching and unsure answers said plainly), 历史对话 opening the existing list in 详情, and the suggestions under a cat's greeting that send on a tap",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 找得到, part one (docs/xbot-frontend.md item 30)",
-      "sha256": "12e235a17529be1af8fbe49e0ecc809459360ba75be4bd5694bfcfa1bb66789f"
+      "sha256": "8627b2dd6790e0b99156d0a448f1fa27ba54f8a621a6d9fa755c4d6b614d8d42"
     },
     {
       "target": "client/public/chat-history.css",
@@ -889,19 +889,19 @@
       "target": "client/public/chat-locate-rules.js",
       "description": "Pure rules for finding one message of the open chat further back than the loaded history: match by native message ID or seq, whether to read one more earlier page or stop (a bounded number of pages), and the quiet progress and truthful stop wording",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 打磨 6a · one voice and a clean finish (docs/xbot-frontend.md item 33)",
-      "sha256": "0420ea46a00a0d840ee5c78fbbab987990edd76dc8bba4c94ef8e7025a7e7773"
+      "sha256": "84489ffb4eb4fd96f6b883ec6725c70e5dcec1518eb8fb8bb4f7f93d3fc8e858"
     },
     {
       "target": "client/public/chat-locate.js",
       "description": "window.ClowderLocate: centres, flashes and focuses a message of the open chat; when it is not drawn yet, reads earlier pages through chat-history.js's own loader until it is, with one quiet note, and stops quietly when the chat changes or a newer search starts. Used by the search palette's locate and a quote's jump",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 打磨 6a · one voice and a clean finish (docs/xbot-frontend.md item 33)",
-      "sha256": "1175323a2b44bf66491dcb162f243c333bf8b37e744765f4ecbc85ffcaa89e19"
+      "sha256": "7258b1fae84d2c17b83ff039cd26bcff47f71aa313f1fa931ac800d22401f2b4"
     },
     {
       "target": "client/public/polish.css",
       "description": "Styles for 6a: the found message's quiet ring that follows its bubble and a flash that reads in dark mode, 设置 → 关于's runtime link as a settings row, and the consistency fixes from the audit; existing tokens and keyframes only",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 打磨 6a · one voice and a clean finish (docs/xbot-frontend.md item 33)",
-      "sha256": "924b38de8bd19a90a82bd35901b216beb60c01008c524f8f6d4935ce1768538e"
+      "sha256": "bbfffb0eeda11858e91846eee045c57a8d2712829412470f40d843422180235f"
     }
   ]
 }

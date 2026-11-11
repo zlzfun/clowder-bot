@@ -538,7 +538,8 @@
     // true: found; null: not found and the locate said why itself (the app's
     // replacement reads earlier pages, chat-locate.js); false: not found.
     let ok = false;
-    try { const r = await api.locate({ ...chatArgs(chat), messageId: hit.messageId, threadId: hit.threadId }); ok = r === null ? null : !!r; }
+    // `still`: this choice is still the palette's latest (reopening it or choosing again ends the lookup).
+    try { const r = await api.locate({ ...chatArgs(chat), messageId: hit.messageId, threadId: hit.threadId, still: () => op === S.op }); ok = r === null ? null : !!r; }
     catch (e) { ok = false; }
     if (op !== S.op) return;
     if (ok === false) note(after + "这条消息不在已显示的消息里，可能在更早的记录里。");
@@ -727,11 +728,13 @@
     init, open, close,
     isOpen: () => S.open,
     actions,
-    // Replaceable: async ({type, id, nativeId?, messageId, threadId}) =>
+    // Replaceable: async ({type, id, nativeId?, messageId, threadId, still}) =>
     // boolean | null. Called after the palette opened that chat; true once the
     // message is on screen and highlighted; null when it was not found and the
-    // locate already told the owner why (the palette then says nothing more). type/id name the chat as the app
-    // does (a cat by name, a group by ID); nativeId is the cat's native ID.
+    // locate already told the owner why (the palette then says nothing more).
+    // type/id name the chat as the app does (a cat by name, a group by ID);
+    // nativeId is the cat's native ID; still() is false once the palette moved
+    // on (reopened, or another choice), and a lookup still running then stops.
     locate: locateOnScreen,
   };
   window.ClowderPalette = api;

@@ -270,7 +270,7 @@ test('the shell wires 模板 and 新建猫猫 to the template module and retires
   assert.doesNotMatch(app, /XBotPersonaCards|persona-cards?["'/]|人设卡/);
   // 新建猫猫 opens the module's single create layer; the shell sends no create request of its own.
   assert.match(app, /item\("plus", "新建猫猫", \(\) => openNewBot\(anchor\)\)/);
-  assert.match(app, /ClowderCatTemplates\.openCreate\(\{[\s\S]*?onCreated: async \(created\) => \{\s*await refreshLists\(\);\s*await selectBot\(created\.name\);/);
+  assert.match(app, /ClowderCatTemplates\.openCreate\(\{[\s\S]*?onCreated: async \(created\) => \{\s*\/\/[^\n]*\n\s*if \(created\.notice\) holdNotice\([^\n]*\);\s*await refreshLists\(\);\s*await selectBot\(created\.name\);/);
   assert.match(app, /manageAgents: \(\) => openSettings\("agents"\)/);
   assert.doesNotMatch(app, /["']\/xbot-api\/bots["']\s*,\s*\{\s*method:\s*["']POST/);
   assert.doesNotMatch(app, /新建 Bot|XBotAgents\.field/);
