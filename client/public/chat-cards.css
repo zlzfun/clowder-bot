@@ -57,6 +57,7 @@ html[data-theme="dark"] .ck-blocks { --cardx: var(--x-bot-bubble); }
 .ck-ask-choice button.ask-opt { width: 100%; border: 0; background: transparent; color: var(--x-text); font: inherit; font-size: 14.5px; text-align: left; }
 .ck-ask-choice .ask-opt[aria-disabled="true"] { opacity: .55; }
 .ck-ask-choice .ask-opt[aria-disabled="true"]:hover { background: transparent; }
+.ck-ask-choice .ask-opt[aria-disabled="true"]:hover .opt-badge { background: var(--badge-bg); color: var(--badge-ink); }
 .ck-ask-choice .ask-opt.on { background: var(--x-fill-2); }
 .ck-ask-choice .ask-opt.on .opt-badge { background: var(--accent); color: var(--primary-text); }
 .ck-ask-choice .opt-badge .icon { width: 14px; height: 14px; stroke-width: 2.4; }
@@ -135,6 +136,9 @@ html[data-theme="dark"] .ck-blocks { --cardx: var(--x-bot-bubble); }
 /* ---- A receipt or a refusal: a quiet centred line in the history. */
 .thread-inner > .ck-notice { margin-top: 14px; }
 .thread-inner > .ck-notice + .msg { margin-top: 14px; }
+/* A reminder that came due: the schedule card's alarm clock before its words, on a soft pill. */
+.sysline.ck-reminder { gap: var(--x-s2); padding: var(--x-s1) var(--x-s5); border-radius: var(--x-r-pill); background: var(--x-fill-1); color: var(--x-text-2); font-size: var(--x-fs-sm); }
+.sysline.ck-reminder .icon { width: 14px; height: 14px; flex: none; color: var(--x-muted); }
 
 /* ---- 设置 → 通用 → 通知. */
 .ck-notify-said { margin-top: var(--x-s3); }
