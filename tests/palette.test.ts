@@ -70,19 +70,57 @@ test('only 1–100 characters after trimming are sent; a scope keeps one chat\'s
   assert.equal(R.query('字'.repeat(100)).state, 'ok');
   assert.equal(R.query('字'.repeat(101)).state, 'long');
   const list = chatsFixture();
-  const byName = R.scope({ type: 'bot', id: '团子' }, list), byId = R.scope({ type: 'bot', id: 'cat-1' }, list);
-  assert.deepEqual(plain(byName.ids), ['团子', 'cat-1']);
-  assert.equal(byId.chat.id, '团子');
+  const byName = R.scope({ type: 'bot', id: '团子' }, list), byNative = R.scope({ type: 'bot', nativeId: 'cat-1' }, list);
+  assert.equal(byName.canon, 'cat-1', 'a scope carries the identity the server names the cat by');
+  assert.equal(byNative.chat.id, '团子');
+  assert.equal(R.scope({ type: 'bot', id: '团子', nativeId: 'cat-1' }, list).chat.id, '团子', 'both, agreeing');
+  assert.equal(R.scope({ type: 'bot', id: '团子', nativeId: 'cat-3' }, list), null, 'both, disagreeing');
+  assert.equal(R.scope({ type: 'bot', id: 'cat-1' }, list), null, 'id is the app\'s name for a cat, never a native ID');
   assert.equal(R.scope({ type: 'bot', id: 'nobody' }, list), null);
   assert.equal(R.scope({ type: 'group', id: 'cat-1' }, list), null, 'a group scope never matches a cat');
   const hit = (type: string, id: string, current: boolean, messageId: string) => ({ chat: { type, id, name: '' }, threadId: 't-' + messageId, current, messageId });
-  const results = [hit('bot', 'cat-1', true, 'a'), hit('bot', 'cat-1', false, 'b'), hit('bot', 'cat-3', true, 'c'), hit('group', 'g-1', true, 'd')];
-  assert.deepEqual(R.scoped(results, byName).map((h: Any) => h.messageId), ['a'], 'not the cat\'s earlier conversation, not another chat');
+  const results = [hit('bot', 'cat-1', true, 'a'), hit('bot', 'cat-1', false, 'b'), hit('bot', 'cat-3', true, 'c'), hit('group', 'g-1', true, 'd'), hit('bot', '团子', true, 'by-name')];
+  assert.deepEqual(R.scoped(results, byName).map((h: Any) => h.messageId), ['a'], 'not the cat\'s earlier conversation, not another chat, never by name');
   assert.deepEqual(R.scoped(results, R.scope({ type: 'group', id: 'g-1' }, list)).map((h: Any) => h.messageId), ['d']);
-  assert.equal(R.scoped(results, null).length, 4);
+  assert.equal(R.scoped(results, null).length, 5);
   assert.equal(R.chatOf(results[0], list).id, '团子');
   assert.equal(R.chatOf(results[3], list).name, '读书会');
   assert.equal(R.chatOf(hit('bot', 'gone', true, 'x'), list), null);
+  assert.equal(R.chatOf(results[4], list), null, 'a hit names a cat by native ID only');
+  // The same chat in a newer list: renamed, it is found by its native ID; gone, it is not.
+  const renamed = list.map((c: Any) => (c.nativeId === 'cat-1' ? { ...c, id: '团团', name: '团团' } : c));
+  assert.equal(R.fresh(list[0], renamed).id, '团团');
+  assert.equal(R.fresh(list[0], list.slice(1)), null);
+  assert.equal(R.fresh(list[3], list).id, 'g-1');
+  assert.equal(R.fresh({ type: 'bot', id: '团子', name: '团子' }, list), null, 'without a native ID nothing is guessed');
+});
+
+test('a cat\'s name and another cat\'s native ID never stand in for each other (review 3)', () => {
+  const R = rules();
+  // One cat is named like another cat's native ID, and listed first.
+  const list = [
+    { type: 'bot', id: 'bot-x2', name: 'bot-x2', nativeId: 'n-1' },
+    { type: 'bot', id: '栗子', name: '栗子', nativeId: 'bot-x2' },
+  ];
+  const hitOf = (catId: string) => ({ chat: { type: 'bot', id: catId, name: '' }, threadId: 't', current: true, messageId: 'm-' + catId });
+  assert.equal(R.chatOf(hitOf('bot-x2'), list).id, '栗子', 'a server hit names 栗子 by its native ID');
+  assert.equal(R.chatOf(hitOf('n-1'), list).id, 'bot-x2');
+  const named = R.scope({ type: 'bot', id: 'bot-x2' }, list);
+  assert.equal(named.chat.nativeId, 'n-1', 'the app\'s id is the name');
+  assert.deepEqual(R.scoped([hitOf('bot-x2'), hitOf('n-1')], named).map((h: Any) => h.messageId), ['m-n-1'], '栗子\'s messages never come in');
+  assert.equal(R.scope({ type: 'bot', nativeId: 'bot-x2' }, list).chat.id, '栗子');
+  assert.equal(R.scope({ type: 'bot', id: 'bot-x2', nativeId: 'bot-x2' }, list), null, 'two different cats: refused, not guessed');
+});
+
+test('a mark in a name lands on the letters that matched, even where lowering a letter changes its length (review 7)', () => {
+  const R = rules();
+  // İ lowers to i plus a combining dot: two code units for one.
+  assert.deepEqual(plain(R.match('İpek', 'pek')), { score: 1, range: [1, 4] });
+  assert.equal('İpek'.slice(1, 4), 'pek');
+  assert.deepEqual(plain(R.match('Ada İpek', 'pek')), { score: 1, range: [5, 8] });
+  // A query that ends inside a lowered letter's expansion marks nothing (still a match).
+  assert.deepEqual(plain(R.match('İpek', 'i')), { score: 3, range: null });
+  assert.deepEqual(plain(R.match('  团子', '团子')), { score: 4, range: [2, 4] });
   assert.equal(R.who({ from: 'owner', catName: '团子' }), '你');
   assert.equal(R.who({ from: 'cat', catName: '团子' }), '团子');
 });
@@ -104,10 +142,11 @@ test('what a search says beyond its rows: nothing found only about what was read
   assert.equal(R.notes(data(3, false, 1), { q: '纸箱', shown: 3 }).failed, '有 1 个对话暂时读不到，没能在里面找，结果可能不全。');
   assert.equal(R.notes(data(3, true), { q: '纸箱', shown: 3 }).more, '只搜了最近的消息，更早的里可能还有。', 'fewer than 30: older messages were not looked at');
   assert.equal(R.notes(data(30, true), { q: '纸箱', shown: 30 }).more, '只列出了最新的 30 条，可能还有更多。');
-  // Scoped: the server's 30 newest may have crowded this chat out.
-  const scoped = R.notes(data(30, true), { q: '纸箱', shown: 0, scopedTo: '团子' });
-  assert.equal(scoped.empty, '这段对话里没有找到「纸箱」。');
-  assert.equal(scoped.more, '只看了所有聊天里最新的 30 条，这段对话里可能还有。');
+  // One chat (its own route): about that conversation only.
+  assert.deepEqual(plain(R.notes(data(0), { q: '纸箱', shown: 0, scoped: true })), { empty: '这段对话里没有找到「纸箱」。', failed: '', more: '' });
+  assert.deepEqual(plain(R.notes(data(0, false, 1), { q: '纸箱', shown: 0, scoped: true })), { empty: '', failed: '这段对话暂时读不到，没能在里面找。', more: '' }, 'unread is not "nothing found"');
+  assert.equal(R.notes(data(30, true), { q: '纸箱', shown: 30, scoped: true }).more, '只列出了最新的 30 条，可能还有更多。');
+  assert.equal(R.notes(data(4, true), { q: '纸箱', shown: 4, scoped: true }).more, '只搜了最近的消息，更早的里可能还有。');
 });
 
 test('times read short; ↑/↓ wrap round; Alt+↑/↓ stop at either end; the shortcuts are ⌘K on macOS, Ctrl+K elsewhere and Alt+arrows, never while composing', () => {
@@ -200,9 +239,19 @@ class El extends Base {
   replaceChildren(...items: Array<Base | string>) { for (const k of [...this.kids]) k.remove(); this.append(...items); }
   contains(n: Base | null): boolean { for (let x: Base | null = n; x; x = x.parent) if (x === this) return true; return false; }
   closest(sel: string): El | null { for (let x: El | null = this; x; x = x.parent) if (matches(x, sel)) return x; return null; }
-  getClientRects() { return this.closest('[hidden]') || !this.isConnected ? [] : [{}]; }
+  // Laid out only when connected, not hidden and not hidden by the page's
+  // CSS for this width (doc.cssHidden: classes a media query sets to display: none).
+  getClientRects() {
+    for (let x: El | null = this; x; x = x.parent) if (x.hidden || [...this.doc.cssHidden].some(c => x!.classList.contains(c))) return [];
+    return this.isConnected ? [{}] : [];
+  }
   addEventListener(type: string, fn: (ev: Any) => void) { const l = this.listeners.get(type) ?? []; l.push(fn); this.listeners.set(type, l); }
-  focus() { if (!this.isConnected) return; this.doc.activeElement = this; dispatch(this.doc, this, 'focusin', {}); }
+  // As a browser: an element that is not laid out, or sits in an inert subtree, does not take focus.
+  focus() {
+    if (!this.getClientRects().length) return;
+    for (let x: El | null = this; x; x = x.parent) if (x.inert) return;
+    this.doc.activeElement = this; dispatch(this.doc, this, 'focusin', {});
+  }
   select() { this.selected = true; }
   scrollIntoView() { this.scrolled++; }
   click() { dispatch(this.doc, this, 'click', {}); }
@@ -225,7 +274,7 @@ function matches(n: El, sel: string): boolean {
   return true;
 }
 class Doc {
-  body: El; activeElement: El | null = null; listeners = new Map<string, Array<(ev: Any) => void>>();
+  body: El; activeElement: El | null = null; listeners = new Map<string, Array<(ev: Any) => void>>(); cssHidden = new Set<string>();
   constructor() { this.body = new El(this, 'body'); }
   createElement(tag: string) { return new El(this, tag); }
   createElementNS(_ns: string, tag: string) { return new El(this, tag); }
@@ -244,8 +293,10 @@ function dispatch(doc: Doc, target: El, type: string, init: Record<string, unkno
 
 // ---------------------------------------------------------------- the page
 type Hit = { chat: { type: string; id: string; name: string }; threadId: string; current: boolean; messageId: string; time: string; from: string; catName?: string; snippet: string; match: [number, number] };
-function page(opts: { mac?: boolean; chats?: Any[]; order?: Any[]; selection?: Any } = {}) {
+function page(opts: { mac?: boolean; chats?: Any[]; order?: Any[]; selection?: Any; phone?: boolean } = {}) {
   const doc = new Doc();
+  // palette.css: 取消 only on a phone; esc and the key hints only on a desktop.
+  for (const c of opts.phone ? ['pal-esc', 'pal-foot'] : ['pal-cancel']) doc.cssHidden.add(c);
   const h = (tag: string, id = '', cls = '') => { const e = doc.createElement(tag); if (id) e.id = id; if (cls) e.className = cls; return e; };
   const shell = h('div', 'shell'), side = h('div', '', 'side-scroll'), entryWrap = h('div', '', 'pal-entry-wrap');
   const entry = h('button', 'palette-open', 'pal-entry'), composer = h('div', 'input'), thread = h('div', 'thread');
@@ -265,7 +316,9 @@ function page(opts: { mac?: boolean; chats?: Any[]; order?: Any[]; selection?: A
   };
   const calls: Array<{ path: string; opt: Any; resolve: (v: unknown) => void; reject: (e: unknown) => void }> = [];
   const log: Any[] = [];
-  const state = { selection: opts.selection ?? { type: 'bot', id: '团子' }, chats: opts.chats ?? chatsFixture(), order: opts.order ?? null, blocked: false, switchOut: { ok: true } as Any };
+  // openGate / switchGate: when set, opening a chat or the switch waits for them (a slow app).
+  const state = { selection: opts.selection ?? { type: 'bot', id: '团子' }, chats: opts.chats ?? chatsFixture(), order: opts.order ?? null, blocked: false,
+    switchOut: { ok: true } as Any, openGate: null as Promise<unknown> | null, switchGate: null as Promise<Any> | null };
   const experience = { located: [] as string[], locate: async (item: Any) => { experience.located.push(item.messageId); return true; } };
   const window: Any = { ClowderExperience: experience };
   const context = vm.createContext({
@@ -286,9 +339,9 @@ function page(opts: { mac?: boolean; chats?: Any[]; order?: Any[]; selection?: A
     order: () => state.order ?? state.chats.map((c: Any) => ({ type: c.type, id: c.id })),
     face: (chat: Any) => { const f = h('span', '', 'avatar'); f.dataset.tip = chat.name; return f; },
     selection: () => state.selection,
-    open: async (sel: Any) => { log.push(['open', sel.type, sel.id]); state.selection = { ...sel }; },
+    open: async (sel: Any) => { log.push(['open', sel.type, sel.id]); if (state.openGate) await state.openGate; state.selection = { ...sel }; },
     history: (sel: Any) => thread.children.find((n: El) => n.dataset.chat === sel.type + ':' + sel.id) ?? null,
-    switchConversation: async (threadId: string) => { log.push(['switch', threadId]); return state.switchOut; },
+    switchConversation: async (threadId: string) => { log.push(['switch', threadId]); return state.switchGate ? state.switchGate : state.switchOut; },
     newCat: (opener: Any) => log.push(['newCat', opener && opener.id]),
     newGroup: (opener: Any) => log.push(['newGroup', opener && opener.id]),
     settings: () => log.push(['settings']),
@@ -296,7 +349,7 @@ function page(opts: { mac?: boolean; chats?: Any[]; order?: Any[]; selection?: A
     setTheme: (mode: string) => log.push(['theme', mode]),
     note: (text: string) => log.push(['note', text]),
     focusComposer: () => log.push(['focusComposer']),
-    blocked: () => state.blocked,
+    blocked: () => state.blocked || shell.hidden, // app.js passes shell.hidden
   });
   const root = () => doc.body.find('pal')[0];
   const input = () => doc.getElementById('pal-input')!;
@@ -461,18 +514,29 @@ test('↑/↓ choose (wrapping), Enter on a chat opens it and hands focus to the
   p.key(p.input(), 'Enter');
   assert.equal(p.P.isOpen(), false);
   assert.deepEqual(p.log.filter(l => l[0] === 'open'), [['open', 'group', 'g-2']]);
-  // Tab cycles among the palette's own controls only.
+  // Tab cycles among the palette's own controls that are laid out: on a
+  // desktop 取消 is hidden by the page's CSS, so the field is the only stop.
   p.P.open();
-  const input = p.input(), cancel = p.root().find('pal-cancel')[0];
+  const input = p.input();
   p.key(input, 'Tab');
-  assert.equal(p.doc.activeElement, cancel);
-  p.key(cancel, 'Tab');
-  assert.equal(p.doc.activeElement, input, 'back round to the field');
-  p.key(input, 'Tab', { shiftKey: true });
-  assert.equal(p.doc.activeElement, cancel);
-  // Focus that wanders out comes back.
+  assert.equal(p.doc.activeElement, input);
+  // The shell behind is inert: nothing in it takes focus.
   p.composer.focus();
   assert.equal(p.doc.activeElement, input);
+  // Focus that wanders out elsewhere comes back.
+  const stray = p.h('button'); p.doc.body.append(stray);
+  stray.focus();
+  assert.equal(p.doc.activeElement, input);
+  // A phone: 取消 is a stop, both ways round.
+  const m = page({ phone: true });
+  m.P.open();
+  const cancel = m.root().find('pal-cancel')[0];
+  m.key(m.input(), 'Tab');
+  assert.equal(m.doc.activeElement, cancel);
+  m.key(cancel, 'Tab');
+  assert.equal(m.doc.activeElement, m.input(), 'back round to the field');
+  m.key(m.input(), 'Tab', { shiftKey: true });
+  assert.equal(m.doc.activeElement, cancel);
 });
 
 test('Enter on a found message opens its chat and finds it on screen with the existing locate; one the chat does not show is said to be further back', async () => {
@@ -506,7 +570,7 @@ test('Enter on a found message opens its chat and finds it on screen with the ex
   await p.answer(2, { results: [p.hit({ messageId: 'm-older', threadId: 'th-9' })], more: false, failed: 0 });
   p.key(p.input(), 'Enter');
   await p.flush();
-  assert.deepEqual(plain(asked), [{ type: 'bot', id: '团子', messageId: 'm-older', threadId: 'th-9' }]);
+  assert.deepEqual(plain(asked), [{ type: 'bot', id: '团子', nativeId: 'cat-1', messageId: 'm-older', threadId: 'th-9' }], 'the app\'s name and the native ID, never one standing for the other');
 });
 
 test('a message of a cat\'s earlier conversation says so first; switching goes through the existing 历史对话 switch, its refusal is shown and nothing moves', async () => {
@@ -552,9 +616,9 @@ test('a message of a cat\'s earlier conversation says so first; switching goes t
   assert.deepEqual(p.experience.located, ['m-1']);
 });
 
-test('a scope searches one chat\'s current conversation: the chat list and the actions step aside, and the scope can be removed', async () => {
+test('a scope searches one chat\'s current conversation through its own route: the chat list and the actions step aside, and the scope can be removed', async () => {
   const p = page();
-  p.P.open({ scope: { type: 'bot', id: 'cat-1' } });
+  p.P.open({ scope: { type: 'bot', id: '团子' } });
   assert.equal(p.root().find('pal-scope')[0].hidden, false);
   assert.equal(p.root().find('pal-scope-name')[0].textContent, '团子');
   assert.equal(p.input().placeholder, '在和团子的聊天里查找');
@@ -562,27 +626,50 @@ test('a scope searches one chat\'s current conversation: the chat list and the a
   assert.deepEqual(p.notes(), ['输入要在和团子的聊天里找的话。']);
   p.type('团子');
   assert.deepEqual(p.heads(), [], 'no chat list while scoped');
+  assert.deepEqual(p.notes(), ['正在这个聊天里找…']);
   p.advance(220);
+  assert.equal(p.calls[0].path, '/xbot-api/bots/' + encodeURIComponent('团子') + '/search?q=' + encodeURIComponent('团子'), 'GET <chat>/search, not the 30 newest of all chats');
+  // Only this cat's current conversation is shown, by its native ID, whatever comes back.
   await p.answer(0, { results: [
     p.hit({ messageId: 'here' }), p.hit({ messageId: 'earlier', current: false }),
     p.hit({ messageId: 'other', chat: { type: 'bot', id: 'cat-3', name: '大团子' } }),
     p.hit({ messageId: 'group', chat: { type: 'group', id: 'g-1', name: '读书会' } }),
-  ], more: false, failed: 0 });
+  ], more: true, failed: 0 });
   assert.deepEqual(p.heads(), ['找到的消息']);
   assert.equal(p.rows().length, 1);
   assert.equal(p.rows()[0].getAttribute('aria-label')!.startsWith('团子，'), true);
-  // Backspace in the empty field removes the scope.
+  assert.deepEqual(p.notes(), ['只搜了最近的消息，更早的里可能还有。']);
+  // Unread is said as such, never as nothing found.
+  p.type('读不到');
+  p.advance(220);
+  await p.answer(1, { results: [], more: false, failed: 1 });
+  assert.deepEqual(p.notes(), ['这段对话暂时读不到，没能在里面找。']);
+  // Backspace in the empty field removes the scope; the same words then search everything.
+  p.type('团子');
+  p.advance(220);
+  await p.answer(2, { results: [p.hit({ messageId: 'here' })], more: false, failed: 0 });
   p.type('');
   p.key(p.input(), 'Backspace');
   assert.equal(p.root().find('pal-scope')[0].hidden, true);
   assert.deepEqual(p.heads(), ['最近', '操作']);
-  // A query passed in is searched.
+  p.type('团子');
+  assert.equal(p.rows().some(r => r.classList.contains('pal-message')), false, 'one chat\'s answer is not shown as everyone\'s');
+  p.advance(220);
+  assert.equal(p.calls.at(-1)!.path, '/xbot-api/search?q=' + encodeURIComponent('团子'));
+  // A group by its ID; a query passed in is searched.
   p.P.close();
   p.P.open({ scope: { type: 'group', id: 'g-1' }, query: '纸箱' });
   assert.equal(p.input().value, '纸箱');
   assert.equal(p.input().placeholder, '在这个群聊里查找');
   p.advance(220);
-  assert.equal(p.calls.at(-1)!.path, '/xbot-api/search?q=' + encodeURIComponent('纸箱'));
+  assert.equal(p.calls.at(-1)!.path, '/xbot-api/groups/g-1/search?q=' + encodeURIComponent('纸箱'));
+  // A cat by native ID only when asked that way.
+  p.P.close();
+  p.P.open({ scope: { type: 'bot', id: 'cat-1' } });
+  assert.equal(p.root().find('pal-scope')[0].hidden, true, 'a native ID is not a cat\'s name');
+  p.P.close();
+  p.P.open({ scope: { type: 'bot', nativeId: 'cat-1' } });
+  assert.equal(p.root().find('pal-scope-name')[0].textContent, '团子');
 });
 
 test('actions run the app\'s own functions after the palette closed; the registry adds, replaces and removes entries; with no cat 新建群聊 is not offered', async () => {
@@ -654,6 +741,167 @@ test('the default locate finds a message only in the open chat\'s drawn history 
   assert.equal(await p.P.locate({ type: 'bot', id: 'nobody', messageId: 'a' }), false);
   p.history('group:g-2', 'a');
   assert.equal(await p.P.locate({ type: 'group', id: 'g-1', messageId: 'a' }), false, 'another chat\'s history is not this one\'s');
+});
+
+// ------------------------------------------------- review fixes (2026-11-11)
+test('a sign-in or another dialog taking over closes the palette without moving focus, cancels its search and lifts inert (review 1)', async () => {
+  const p = page();
+  const login = p.h('input'); p.doc.body.append(login); // outside the shell, as #login is
+  p.P.open();
+  p.type('纸箱');
+  p.advance(220);
+  assert.equal(p.calls.length, 1);
+  // A poll answered 401: the app hid the shell and focused its sign-in field.
+  p.shell.hidden = true;
+  login.focus();
+  assert.equal(p.P.isOpen(), false);
+  assert.equal(p.doc.activeElement, login, 'the sign-in keeps its focus');
+  assert.equal(p.shell.inert, false);
+  assert.equal(p.calls[0].opt.signal.aborted, true, 'its search is cancelled');
+  // The search's own 401 does the same.
+  p.shell.hidden = false;
+  p.composer.focus();
+  p.P.open();
+  p.type('猫');
+  p.advance(220);
+  p.calls[1].reject(Object.assign(new Error('unauthorized'), { status: 401 }));
+  await p.flush();
+  assert.equal(p.P.isOpen(), false);
+  assert.equal(p.shell.inert, false);
+  assert.notEqual(p.doc.activeElement, p.composer, 'focus is not handed back into the shell: the app shows its sign-in');
+  // A dialog that comes up over it (a device prompt, say) is not fought over.
+  p.P.open();
+  const dialog = p.h('div'); dialog.setAttribute('aria-modal', 'true');
+  const ok = p.h('button'); dialog.append(ok); p.doc.body.append(dialog);
+  ok.focus();
+  assert.equal(p.P.isOpen(), false);
+  assert.equal(p.doc.activeElement, ok);
+});
+
+test('a row is resolved again when chosen: a renamed cat opens by its new name, a gone chat is refused in place, also after the earlier-conversation question (review 2)', async () => {
+  const p = page({ selection: { type: 'group', id: 'g-1' } });
+  p.P.open();
+  p.type('团子');
+  // Renamed on another device since the rows were drawn.
+  p.state.chats = p.state.chats.map((c: Any) => (c.nativeId === 'cat-1' ? { ...c, id: '团团', name: '团团' } : c));
+  p.key(p.input(), 'Enter'); // the first row: 团子 (the whole name)
+  await p.flush();
+  assert.deepEqual(p.log.filter(l => l[0] === 'open'), [['open', 'bot', '团团']], 'by native ID, under its name now');
+  // Removed since: refused, nothing opened, the palette stays with the caret in the field.
+  p.log.length = 0;
+  p.P.open();
+  p.type('大团子');
+  p.state.chats = p.state.chats.filter((c: Any) => c.nativeId !== 'cat-3');
+  p.key(p.input(), 'Enter');
+  await p.flush();
+  assert.deepEqual(p.log, []);
+  assert.equal(p.P.isOpen(), true);
+  assert.equal(p.doc.activeElement, p.input());
+  assert.equal(p.notes()[0], '「大团子」已经不在列表里了。');
+  assert.equal(p.rowText().some(t => t.startsWith('大团子')), false, 'the gone row leaves');
+  // A message whose chat is gone: said as gone, not as "maybe further back".
+  p.type('纸箱');
+  p.advance(220);
+  await p.answer(0, { results: [p.hit({ chat: { type: 'group', id: 'g-2', name: '团子小队' } })], more: false, failed: 0 });
+  p.state.chats = p.state.chats.filter((c: Any) => c.id !== 'g-2');
+  p.key(p.input(), 'Enter');
+  await p.flush();
+  assert.deepEqual(p.log, []);
+  assert.equal(p.P.isOpen(), true);
+  assert.equal(p.notes()[0], '这条消息所在的聊天已经不在列表里了。');
+  // The cat goes while the earlier-conversation question is up.
+  p.type('天气');
+  p.advance(220);
+  await p.answer(1, { results: [p.hit({ chat: { type: 'bot', id: 'cat-1', name: '团子' }, current: false, threadId: 'th-old' })], more: false, failed: 0 });
+  p.key(p.input(), 'Enter');
+  const yes = p.doc.activeElement!;
+  assert.equal(yes.textContent, '切换到那段对话');
+  p.state.chats = p.state.chats.filter((c: Any) => c.nativeId !== 'cat-1');
+  yes.click();
+  await p.flush();
+  assert.deepEqual(p.log, [], 'no chat opened, no switch asked');
+  assert.equal(p.P.isOpen(), true);
+  assert.equal(p.root().find('pal-confirm')[0].hidden, true, 'back at the list');
+  assert.equal(p.doc.activeElement, p.input());
+  assert.equal(p.notes()[0], '这条消息所在的聊天已经不在列表里了。');
+  // An action that stopped applying since it was drawn.
+  let allowed = true;
+  p.P.actions.add({ id: 'temp', label: '临时操作', when: () => allowed, run: () => p.log.push(['temp']) });
+  p.type('临时');
+  assert.deepEqual(p.rowText(), ['临时操作']);
+  allowed = false;
+  p.key(p.input(), 'Enter');
+  await p.flush();
+  assert.deepEqual(p.log, []);
+  assert.equal(p.P.isOpen(), true);
+  assert.equal(p.notes()[0], '「临时操作」现在用不了。');
+});
+
+test('starting to compose a word cancels what was waiting for the text before it, shows nothing for that text, and searches the committed word (review 4)', async () => {
+  const p = page();
+  const compose = (kind: string, value?: string) => { if (value !== undefined) p.input().value = value; dispatch(p.doc, p.input(), kind, {}); };
+  p.P.open();
+  p.type('old');
+  compose('compositionstart');
+  p.advance(500);
+  assert.equal(p.calls.length, 0, 'the text before the word is not searched');
+  // Keys of the word being composed change nothing.
+  p.input().value = 'oldzhi';
+  dispatch(p.doc, p.input(), 'input', { isComposing: true });
+  p.advance(500);
+  assert.equal(p.calls.length, 0);
+  compose('compositionend', '纸箱');
+  p.advance(220);
+  assert.equal(p.calls.length, 1);
+  assert.equal(p.calls[0].path, '/xbot-api/search?q=' + encodeURIComponent('纸箱'));
+  // An answer for the text before a composition never paints under it.
+  p.type('再');
+  p.advance(220);
+  assert.equal(p.calls.length, 2);
+  compose('compositionstart');
+  assert.equal(p.calls[1].opt.signal.aborted, true);
+  await p.answer(1, { results: [p.hit({ snippet: '再', match: [0, 1] })], more: false, failed: 0 });
+  assert.equal(p.rows().some(r => r.classList.contains('pal-message')), false);
+  assert.equal(p.notes().some(n => /正在找|没有找到/.test(n)), false, 'nothing said about the old text either');
+  // The answer for the first word, arriving late, is dropped too.
+  await p.answer(0, { results: [p.hit()], more: false, failed: 0 });
+  assert.equal(p.rows().some(r => r.classList.contains('pal-message')), false);
+});
+
+test('what a choice does after waiting stops once a new palette is opened: a slow switch neither closes it nor takes its focus (review 6)', async () => {
+  const p = page();
+  p.history('bot:团子', 'm-1');
+  let release: (v: Any) => void = () => {};
+  p.state.switchGate = new Promise((r) => { release = r; });
+  p.P.open();
+  p.type('纸箱');
+  p.advance(220);
+  await p.answer(0, { results: [p.hit({ current: false, threadId: 'th-old', messageId: 'm-1' })], more: false, failed: 0 });
+  p.key(p.input(), 'Enter');
+  p.doc.activeElement!.click(); // 切换到那段对话
+  await p.flush();
+  assert.deepEqual(p.log, [['open', 'bot', '团子'], ['switch', 'th-old']]);
+  // While the switch is on its way, the owner searches again.
+  p.composer.focus();
+  p.P.open();
+  p.type('栗子');
+  release({ ok: true });
+  await p.flush();
+  assert.equal(p.P.isOpen(), true, 'the new palette stays');
+  assert.equal(p.input().value, '栗子');
+  assert.equal(p.doc.activeElement, p.input());
+  assert.deepEqual(p.experience.located, [], 'the old message is not jumped to under it');
+  assert.equal(p.log.some(l => l[0] === 'note'), false);
+  // Likewise a slow chat opening: a newer palette is not closed or left without focus.
+  let opened: (v?: unknown) => void = () => {};
+  p.state.openGate = new Promise((r) => { opened = r; });
+  p.type('大团子');
+  p.key(p.input(), 'Enter');
+  p.P.open();
+  opened();
+  await p.flush();
+  assert.equal(p.P.isOpen(), true);
+  assert.equal(p.log.some(l => l[0] === 'focusComposer'), false, 'focus is not handed to the composer under the new palette');
 });
 
 // ------------------------------------------------------------------ wiring

@@ -23,8 +23,16 @@
 //   conversation says so first, then moves the cat there through the existing
 //   历史对话 switch (workspace.js), which keeps its rules: it refuses while
 //   either conversation is busy, and that refusal is shown.
-// - open({scope}) searches one chat only (its current conversation): the
-//   chat list and the actions step aside.
+// - open({scope}) searches one chat only, through its own route (GET
+//   /xbot-api/bots/:name/search or /groups/:id/search: its current
+//   conversation): the chat list and the actions step aside. A scope names
+//   the chat as the app does ({type, id}: a cat by name, a group by ID) or a
+//   cat by {type: 'bot', nativeId}; the two never mix.
+// - A chosen row is resolved again against the chat list as it is now, by
+//   lasting identity, and refused in place when its chat is gone. What a
+//   choice does after waiting (a chat opening, a switch) stops once a newer
+//   choice or a new palette exists. A sign-in or another dialog taking over
+//   closes the palette without moving focus.
 // - Keys: ↑/↓ choose, Enter opens, Esc closes (or steps back from a question),
 //   Tab stays inside, and focus goes back where it was. Alt+↑ / Alt+↓ open the
 //   previous / next chat in the sidebar's order.
@@ -43,7 +51,14 @@
   const registry = new Map();
   const S = {
     open: false, raw: "", scope: null, items: [], active: -1, opener: null, confirm: null, composing: false, inert: false,
-    search: { seq: 0, timer: 0, ctrl: null, state: "idle", q: "", data: null, error: "", final: false },
+    // op numbers every opening and every choice: what a choice does after it
+    // waited (opening a chat, a switch) goes on only while it is still the
+    // latest, so it never closes, focuses or speaks over a newer palette.
+    op: 0,
+    // A choice that could not go ahead (its chat is gone), said in the palette.
+    refusal: "",
+    // key: the scope and words the request (or answer) is for.
+    search: { seq: 0, timer: 0, ctrl: null, state: "idle", key: "", q: "", data: null, error: "", final: false },
   };
 
   // ------------------------------------------------------------------ helpers
@@ -174,7 +189,14 @@
       if (t === card || t === body || t === list || t === bar) ev.preventDefault();
     });
     root.addEventListener("keydown", onLayerKey);
-    input.addEventListener("compositionstart", () => { S.composing = true; });
+    // While a word is being composed, nothing searched for the text before it
+    // may still arrive or be shown; the committed word is searched afterwards.
+    input.addEventListener("compositionstart", () => {
+      S.composing = true;
+      if (!S.open) return;
+      resetSearch();
+      paint(true);
+    });
     input.addEventListener("compositionend", () => { S.composing = false; onInput(); });
     input.addEventListener("input", (ev) => { if (S.composing || (ev && ev.isComposing)) return; onInput(); });
     ui = { root, card, bar, chip, chipName, input, esc, cancel, body, list, notes, confirm, foot };
@@ -183,6 +205,9 @@
   // ------------------------------------------------------------- open / close
   function blocked() {
     if (!H || !ui) return true;
+    // Signed out or on an account screen: the shell is hidden.
+    const shell = document.getElementById("shell");
+    if (shell && shell.hidden) return true;
     try { if (H.blocked && H.blocked()) return true; } catch (e) { return true; }
     // Another dialog is up (settings, a create form, the picture viewer …).
     for (const d of document.querySelectorAll('[aria-modal="true"], dialog[open]')) {
@@ -195,6 +220,8 @@
   function openFrom(opener, opts = {}) {
     if (!H || !ui) return false;
     if (!S.open && blocked()) return false;
+    S.op++;
+    S.refusal = "";
     if (!S.open) {
       const here = document.activeElement;
       S.opener = opener || (here && here !== document.body && !ui.root.contains(here) ? here : null);
@@ -242,41 +269,56 @@
     const s = S.search;
     clearTimeout(s.timer);
     if (s.ctrl) s.ctrl.abort();
-    Object.assign(s, { seq: s.seq + 1, timer: 0, ctrl: null, state: "idle", q: "", data: null, error: "", final: false });
+    Object.assign(s, { seq: s.seq + 1, timer: 0, ctrl: null, state: "idle", key: "", q: "", data: null, error: "", final: false });
   }
+  // The scope and words a search is for: an answer for other words, or for
+  // the whole list instead of one chat (or the other way round), is not shown.
+  const searchKey = (q) => (S.scope ? R.keyOf(S.scope.chat) : "") + "\n" + q;
   // After the query changed: what was said is searched once typing rests. The
   // same words again keep the answer (or the request) already there; any
-  // other words cancel the request before them.
+  // other words cancel the request before them. Nothing is asked while a
+  // word is being composed.
   function schedule(force = false) {
-    const s = S.search, v = R.query(S.raw);
-    if (!force && v.state === "ok" && v.q === s.q && (s.state === "ready" || s.state === "waiting")) return;
-    clearTimeout(s.timer);
-    if (s.ctrl) s.ctrl.abort();
-    Object.assign(s, { seq: s.seq + 1, timer: 0, ctrl: null, data: null, error: "", final: false });
-    if (v.state !== "ok") { s.state = v.state === "long" ? "long" : "idle"; s.q = ""; return; }
+    const s = S.search, v = R.query(S.raw), key = searchKey(v.q);
+    if (!force && v.state === "ok" && key === s.key && (s.state === "ready" || s.state === "waiting")) return;
+    resetSearch();
+    if (v.state !== "ok" || S.composing) { s.state = v.state === "long" ? "long" : "idle"; return; }
     s.state = "waiting";
+    s.key = key;
     s.q = v.q;
     const seq = s.seq;
     s.timer = setTimeout(() => run(seq, v.q), force ? 0 : R.DEBOUNCE);
   }
+  // One chat's current conversation has its own route (GET <chat>/search),
+  // so its matches are never crowded out by other chats'.
+  function searchPath(q) {
+    const sc = S.scope, words = "search?q=" + encodeURIComponent(q);
+    if (!sc) return "/xbot-api/" + words;
+    return "/xbot-api/" + (sc.type === "group" ? "groups/" : "bots/") + encodeURIComponent(sc.chat.id) + "/" + words;
+  }
   async function run(seq, q) {
     const s = S.search;
-    if (seq !== s.seq || !S.open) return;
+    if (seq !== s.seq || !S.open || S.composing) return;
     s.timer = 0;
     const ctrl = typeof AbortController === "function" ? new AbortController() : null;
     s.ctrl = ctrl;
+    const scoped = !!S.scope;
     let data = null, error = null;
-    try { data = await H.api("/xbot-api/search?q=" + encodeURIComponent(q), ctrl ? { signal: ctrl.signal } : {}); }
+    try { data = await H.api(searchPath(q), ctrl ? { signal: ctrl.signal } : {}); }
     catch (e) { error = e; }
-    // A newer query, a close or a cancel since: this answer is not for what is on screen.
-    if (seq !== s.seq || !S.open) return;
+    // A newer query, a close, a cancel or a word being composed since: this answer is not for what is on screen.
+    if (seq !== s.seq || !S.open || S.composing) return;
     s.ctrl = null;
+    // Signed out: the app shows its sign-in; the palette steps out of the way.
+    if (error && error.status === 401) { close({ restore: false }); return; }
     if (!error && (!data || !Array.isArray(data.results))) error = new Error("搜索的返回格式无法识别");
     if (error) {
       s.state = "error";
       s.final = error.status === 404;
-      s.error = error.status === 404 ? "当前后端还没有开放消息搜索。"
-        : "没能搜索聊过的话：" + (H.visibleError ? H.visibleError(error, "稍后再试") : "稍后再试");
+      const said = String((error && error.message) || "");
+      s.error = error.status !== 404 ? (scoped ? "没能在这个聊天里找：" : "没能搜索聊过的话：") + (H.visibleError ? H.visibleError(error, "稍后再试") : "稍后再试")
+        : !scoped ? "当前后端还没有开放消息搜索。"
+        : /[㐀-鿿]/.test(said) ? "没能在这个聊天里找：" + said : "当前后端还没有开放在聊天里查找。";
     } else {
       s.state = "ready";
       s.data = { results: data.results.filter((hit) => hit && hit.chat && hit.messageId), more: !!data.more, failed: Number(data.failed) || 0 };
@@ -287,6 +329,7 @@
   function onInput() {
     if (!S.open) return;
     S.raw = ui.input.value;
+    S.refusal = "";
     if (S.confirm) back(false);
     schedule();
     paint(false);
@@ -321,7 +364,7 @@
     }
     const s = S.search;
     let hits = [];
-    if (s.state === "ready" && s.q === v.q) {
+    if (s.state === "ready" && v.q && s.key === searchKey(v.q)) {
       hits = R.scoped(s.data.results, S.scope);
       if (hits.length) sections.push({ title: S.scope ? "找到的消息" : "聊过的话", rows: hits.map((hit) => ({ kind: "message", key: "m:" + R.hitKey(hit), hit, chat: R.chatOf(hit, chats) })) });
     }
@@ -406,21 +449,22 @@
   function paintNotes(v, hitCount, rowCount) {
     const out = [];
     const say = (text, cls) => { const p = node("p", "pal-note" + (cls ? " " + cls : ""), text); out.push(p); return p; };
-    const s = S.search;
+    const s = S.search, current = s.key === searchKey(v.q);
+    if (S.refusal) say(S.refusal, "pal-bad");
     if (v.state === "long") say("最多可以搜 " + R.MAX_QUERY + " 个字。");
     else if (!v.q && S.scope) say(S.scope.type === "group" ? "输入要在这个群聊里找的话。" : "输入要在和" + S.scope.chat.name + "的聊天里找的话。");
-    else if (v.q && s.state === "waiting") say("正在找聊过的话…", "pal-wait");
-    else if (v.q && s.state === "error") {
+    else if (v.q && current && s.state === "waiting") say(S.scope ? "正在这个聊天里找…" : "正在找聊过的话…", "pal-wait");
+    else if (v.q && current && s.state === "error") {
       const p = say(s.error, "pal-bad");
       if (!s.final) p.append(document.createTextNode(" "), button("text-btn pal-retry", "重试", () => { schedule(true); paint(true); ui.input.focus(); }));
-    } else if (v.q && s.state === "ready") {
-      const n = R.notes(s.data, { q: v.q, shown: hitCount, scopedTo: S.scope ? S.scope.chat.name : "" });
+    } else if (v.q && current && s.state === "ready") {
+      const n = R.notes(s.data, { q: v.q, shown: hitCount, scoped: !!S.scope });
       if (n.empty) say(n.empty);
       if (n.failed) say(n.failed, "pal-warn");
       if (n.more) say(n.more);
     }
     // Said once to a screen reader: how much is listed.
-    if (v.q && s.state === "ready") {
+    if (v.q && current && s.state === "ready") {
       const chats = rowCount - hitCount - S.items.filter((it) => it.kind === "action").length;
       out.push(node("span", "visually-hidden", (S.scope ? "" : "找到 " + Math.max(0, chats) + " 个聊天，") + hitCount + " 条消息。"));
     }
@@ -432,27 +476,48 @@
     if (!S.scope) return;
     S.scope = null;
     paintScope();
+    schedule();
     paint(false);
     ui.input.focus();
   }
 
   // ------------------------------------------------------------------ choose
+  // A row is what the lists said when it was drawn; by the time it is chosen
+  // a cat may have been renamed or removed (the lists are read every few
+  // seconds). Every choice is resolved again against the chat list as it is
+  // now, by lasting identity (a cat's native ID, a group's ID); one that is
+  // gone is refused in place and the palette stays, with the caret in the field.
   async function choose(item) {
     if (!item || !S.open) return;
+    const op = ++S.op;
     if (item.kind === "chat") {
+      const chat = R.fresh(item.chat, chatList());
+      if (!chat) { refuse("「" + item.chat.name + "」已经不在列表里了。"); return; }
       close({ restore: false });
-      await openChat({ type: item.chat.type, id: item.chat.id });
-      if (H.focusComposer) H.focusComposer();
+      await openChat({ type: chat.type, id: chat.id });
+      if (op === S.op && !S.open && H.focusComposer) H.focusComposer();
       return;
     }
     if (item.kind === "action") {
-      const run = item.action.run, context = ctx();
+      const action = actions.get(item.action.id);
+      if (!action || !R.actions([action], "", ctx()).length) { refuse("「" + item.action.label + "」现在用不了。"); return; }
+      const context = ctx();
       close();
-      try { await run(context); } catch (e) { note(H.visibleError ? H.visibleError(e) : "没能完成，稍后再试。"); }
+      try { await action.run(context); } catch (e) { note(H.visibleError ? H.visibleError(e) : "没能完成，稍后再试。"); }
       return;
     }
-    if (item.hit.current === false) { ask(item); return; }
-    await goMessage(item);
+    const chat = R.chatOf(item.hit, chatList());
+    if (!chat) { refuse("这条消息所在的聊天已经不在列表里了。"); return; }
+    if (item.hit.current === false) { ask({ ...item, chat }); return; }
+    await goMessage({ ...item, chat }, op);
+  }
+
+  // Said in the palette: the lists are drawn again (the gone row leaves) and the caret stays in the field.
+  function refuse(text) {
+    S.refusal = text;
+    if (S.confirm) back(false);
+    paint(false);
+    ui.input.focus();
   }
 
   function note(text) { if (text && H && H.note) H.note(text); }
@@ -460,16 +525,20 @@
   async function openChat(sel) {
     try { await H.open(sel); return true; } catch (e) { return false; }
   }
+  const chatArgs = (chat) => ({ type: chat.type, id: chat.id, ...(chat.type === "bot" && chat.nativeId ? { nativeId: chat.nativeId } : {}) });
 
-  // Find a message of a chat's current conversation.
-  async function goMessage(item, after = "") {
+  // Find a message of a chat's current conversation. op: the choice it
+  // belongs to; once a newer one (or a new palette) exists, it stops quietly.
+  async function goMessage(item, op, after = "") {
     const { hit, chat } = item;
+    if (op !== S.op) return;
     close({ restore: false });
-    if (!chat) { note("这个聊天已经不在列表里了。"); return; }
-    if (!after) await openChat({ type: chat.type, id: chat.id });
+    if (!after && !(await openChat({ type: chat.type, id: chat.id }))) return;
+    if (op !== S.op) return;
     let ok = false;
-    try { ok = !!(await api.locate({ type: chat.type, id: chat.id, messageId: hit.messageId, threadId: hit.threadId })); }
+    try { ok = !!(await api.locate({ ...chatArgs(chat), messageId: hit.messageId, threadId: hit.threadId })); }
     catch (e) { ok = false; }
+    if (op !== S.op) return;
     if (!ok) note(after + "这条消息不在已显示的消息里，可能在更早的记录里。");
   }
 
@@ -502,17 +571,26 @@
     ui.notes.hidden = !ui.notes.firstChild;
     if (refocus) ui.input.focus();
   }
+  // Confirmed: the cat is resolved again (it may have gone while the question
+  // was up), its chat opened, and the existing 历史对话 switch asked. Each
+  // step goes on only while this is still the latest choice.
   async function switchAndGo(item) {
-    const { hit, chat } = item;
+    if (!S.open) return;
+    const op = ++S.op, { hit } = item;
+    const chat = R.chatOf(hit, chatList());
+    if (!chat || chat.type !== "bot") { refuse("这条消息所在的聊天已经不在列表里了。"); return; }
     close({ restore: false });
-    if (!chat || chat.type !== "bot") { note("这个聊天已经不在列表里了。"); return; }
     if (!(await openChat({ type: "bot", id: chat.id }))) return;
+    if (op !== S.op) return;
     if (!H.switchConversation) { note("现在没法切换到那段对话。"); return; }
     let out = null;
     try { out = await H.switchConversation(hit.threadId); }
     catch (e) { out = { ok: false, text: "没能切换：" + (H.visibleError ? H.visibleError(e, "稍后再试") : "稍后再试") }; }
+    if (op !== S.op) return;
     if (!out || !out.ok) { if (out && out.text) note(out.text); return; }
-    await goMessage(item, "已切换到那段对话，但");
+    const now = R.chatOf(hit, chatList());
+    if (!now) { note("已切换到那段对话，但这只猫已经不在列表里了。"); return; }
+    await goMessage({ ...item, chat: now }, op, "已切换到那段对话，但");
   }
 
   // ------------------------------------------------------------------ locate
@@ -525,9 +603,9 @@
     if (host && host.querySelectorAll) for (const r of host.querySelectorAll("[data-mid]")) if (r.dataset.mid === id) hit = r;
     return hit;
   }
-  async function locateOnScreen({ type, id, messageId } = {}) {
+  async function locateOnScreen({ type, id, nativeId, messageId } = {}) {
     if (!H || !messageId) return false;
-    const sc = R.scope({ type, id }, chatList());
+    const sc = R.scope({ type, id, nativeId }, chatList());
     if (!sc) return false;
     const sel = { type: sc.type, id: sc.chat.id };
     if (R.keyOf(selection()) !== R.keyOf(sel) && !(await openChat(sel))) return false;
@@ -627,18 +705,30 @@
       entry.addEventListener("click", () => openFrom(entry, {}));
     }
     document.addEventListener("keydown", onPageKey);
-    // Focus that wanders out while the palette is up comes back to the field.
-    document.addEventListener("focusin", (ev) => { if (S.open && ui && !ui.root.contains(ev.target)) ui.input.focus(); });
+    // Focus that wanders out while the palette is up comes back to the field,
+    // unless the page changed under it: the shell went away for the sign-in
+    // (a 401 anywhere), or another dialog came up. Then the palette closes
+    // without taking focus anywhere, its search cancelled and the shell no
+    // longer inert, so the sign-in or that dialog keeps its focus.
+    document.addEventListener("focusin", (ev) => {
+      if (!S.open || !ui || ui.root.contains(ev.target)) return;
+      if (blocked()) close({ restore: false });
+      else ui.input.focus();
+    });
+    const shell = document.getElementById("shell");
+    if (shell && typeof MutationObserver === "function") {
+      new MutationObserver(() => { if (S.open && blocked()) close({ restore: false }); }).observe(shell, { attributes: true, attributeFilter: ["hidden"] });
+    }
   }
 
   const api = {
     init, open, close,
     isOpen: () => S.open,
     actions,
-    // Replaceable: async ({type, id, messageId, threadId}) => boolean. Called
-    // after the palette opened that chat; true once the message is on screen
-    // and highlighted. type/id name the chat as the app does (a cat by name,
-    // a group by ID).
+    // Replaceable: async ({type, id, nativeId?, messageId, threadId}) =>
+    // boolean. Called after the palette opened that chat; true once the
+    // message is on screen and highlighted. type/id name the chat as the app
+    // does (a cat by name, a group by ID); nativeId is the cat's native ID.
     locate: locateOnScreen,
   };
   window.ClowderPalette = api;
