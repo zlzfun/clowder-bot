@@ -27,7 +27,7 @@
       "file": "app.js",
       "target": "client/public/app.js",
       "sourceSha256": "1248f793493826bf044359c71e7d8772ccc3472d6021d6abb979dff9b6cb29bc",
-      "sha256": "7ba56002a459b70e9f9d09ce0e99445d94c63e774a51d28852fb7d34254098b7",
+      "sha256": "175d66ce0131c3fb62b2a16da3171bc1071a9b59efe132477c5819b9c5ee29c0",
       "unchanged": false
     },
     {
@@ -787,7 +787,7 @@
       "target": "client/public/chat-history.js",
       "description": "Earlier messages (newest-page reads merged with the pages the owner scrolled back to; a quiet top row: 查看更早的消息 / 正在加载… / 没有更早的消息了 / failure with 重试, changed in place and re-read by the keyed redraw; scrolling near the top loads; answers for a chat or conversation left behind discarded), the chat header's ⋯ menu (新对话 and 历史对话 for a cat, 在对话里查找 only when window.ClowderPalette exists; arrows, Escape back to ⋯), the 新对话 dialog over the existing POST /xbot-api/bots/:name/new (says the old conversation stays under 历史对话 and what the cat remembers is kept; busy, switching and unsure answers said plainly), 历史对话 opening the existing list in 详情, and the suggestions under a cat's greeting that send on a tap",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 找得到, part one (docs/xbot-frontend.md item 30)",
-      "sha256": "38b54560ca7b902685f4a875aa10c9d7903e4c1bacdd0fe7cbbec9049cb82ae5"
+      "sha256": "8b0ddb2c1f324812779867c66aeffa873b429ff38d940c3e8d1c28a03da4f8f7"
     },
     {
       "target": "client/public/chat-history.css",
@@ -797,15 +797,15 @@
     },
     {
       "target": "client/public/profile-rules.js",
-      "description": "资料页与群 rules without DOM or network: the drawer's tabs per kind of chat (a cat 资料/文件/记忆/定时, a group 成员/文件) with the retired 详情/任务/轨迹/上下文 names mapped to where their content now lives (任务 opens 高级), the cat's native colour pair taken only as #rrggbb, no breed row for a cat whose breed is its own ID, 新对话 refusals in everyday words, a group's members matched to the loaded cats (an unnamed cat marked and never sent back), who may leave while two stay, the PATCH members body (the whole new list, added last), the 2–10 limits, the group name rule shared with 新建群聊 (cleared → the members' names), the one-line how-to-talk hint (全体 = @ each member, never the engine's @全体) and group refusals (a 409 is the server's own sentence)",
+      "description": "资料页与群 rules without DOM or network: the drawer's tabs per kind of chat (a cat 资料/文件/记忆/定时, a group 成员/文件) with the retired 详情/任务/轨迹/上下文 names mapped to where their content now lives (任务 opens 高级), the cat's native colour pair taken only as #rrggbb, no breed row for a cat whose breed is its own ID, 新对话 refusals in everyday words, a group's members matched to the loaded cats (an unnamed cat marked and never sent back), who may leave while two stay, member edits as intent ({add}/{remove}, applied by the server to the roster as it is now) and the answered group record, the 2–10 limits, the group name rule shared with 新建群聊 (cleared → the members' names), the one-line how-to-talk hint (全体 = @ each member, never the engine's @全体) and group refusals (a 409 is the server's own sentence)",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 资料页与群 (docs/xbot-frontend.md item 31; docs/xbot-api.md group PATCH/DELETE)",
-      "sha256": "544b11849584013593ee69de7ccbd2e6c751fc89a0a724dd82e6b7ce58b092fd"
+      "sha256": "eeb0b2ff70a05cd0cbb28a7808334785ad46827a37b1f842d420528b85a0a05b"
     },
     {
       "target": "client/public/profile.js",
-      "description": "The drawer's identity head (a cat's portrait on a quiet wash of its own native colour; a group's face, its name edited in place with Enter/Esc and 「N 只猫猫」), the cat 资料 page (职责 or the way to write one, 置顶 as a switch, 新对话 via POST /xbot-api/bots/:name/new with what happens to the conversation and an attachment confirmation, workspace.js's 历史对话, one folded 高级 drawn on first open with the shell's Agent row, 模型与画像, task and run cards, 导出对话 / 复制 ID / 运行面板, 删除猫猫 last), the group 成员 page (faces and names, 添加猫猫 as face chips, 移出 with a second click within three seconds while two stay, PATCH /xbot-api/groups/:id {members}, a 409 shown as the server says and nothing stopped, the how-to-talk line, 高级 with task cards, 删除群聊 with DELETE after a confirmation that the history is kept) and a group row's menu (改名, 删除群聊); pages kept per chat across repaints, one dialog at a time with Escape, Tab and focus kept inside",
+      "description": "The drawer's identity head (a cat's portrait on a quiet wash of its own native colour; a group's face, its name edited in place with Enter/Esc and 「N 只猫猫」), the cat 资料 page (职责 or the way to write one, 置顶 as a switch, 新对话 via POST /xbot-api/bots/:name/new with what happens to the conversation and an attachment confirmation, workspace.js's 历史对话, one folded 高级 drawn on first open with the shell's Agent row, 模型与画像, task and run cards, 导出对话 / 复制 ID / 运行面板, 删除猫猫 last), the group 成员 page (faces and names, 添加猫猫 as face chips, 移出 with a second click within three seconds while two stay, PATCH /xbot-api/groups/:id {add}/{remove} with the answered roster shown and the freshest record read before an edit, a 409 shown as the server says and nothing stopped, the how-to-talk line, 高级 with task cards, 删除群聊 with DELETE after a confirmation that the history is kept) and a group row's menu (改名, 删除群聊; arrows, Home/End, Esc, focus back to the row by the group's id); pages kept per chat across repaints and acting for the current selection, the pin switch showing only the confirmed state (busy while saving), one dialog at a time with Escape and Tab kept inside even while busy and the page behind inert",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 资料页与群 (docs/xbot-frontend.md item 31; docs/xbot-api.md group PATCH/DELETE)",
-      "sha256": "234713d6db8880af511881a0cdf3e9736423e8dea1e32321383433f1931daa49"
+      "sha256": "22cf9d0f57cda945a55298c5a7f4ac5730811e1f3580870d6bc9ec726ef4bf33"
     },
     {
       "target": "client/public/profile.css",
@@ -815,15 +815,15 @@
     },
     {
       "target": "client/public/mention-rules.js",
-      "description": "Group composer @ rules without DOM or network: the mention at the caret (after a space, line start or punctuation; never inside an address or across lines; a full-width @ too), members starting with the query first then containing it, 「全体」 with two or more members, and the draft after picking (@名字 and one space; 全体 writes one explicit mention per member not already mentioned, never @全体/@all, because the engine's @all reaches every cat the owner has)",
+      "description": "Group composer @ rules without DOM or network: the mention at the caret (after a space, line start or punctuation; never inside an address or across lines; a full-width @ too), members starting with the query first then containing it, 「全体」 with two or more members, the names already mentioned (the longest name at each @), and the draft after picking (@名字 and one space; 全体 writes one explicit mention per member not already mentioned, never @全体/@all, because the engine's @all reaches every cat the owner has)",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 资料页与群 (docs/xbot-frontend.md item 31; docs/xbot-api.md group PATCH/DELETE)",
-      "sha256": "f44e55918eb2610bd99b12e2e4cbc116f5f46c0bfda539845f36c59078e5fa4d"
+      "sha256": "82787e1d3d60efc56f1b2b38fef3b50ff2155b517562800e9648eb470438d055"
     },
     {
       "target": "client/public/mention.js",
-      "description": "The group composer's @ list above the composer: this group's members and 「全体」, ↑/↓, Enter/Tab to insert, Esc to dismiss until another @, click or tap to insert without losing the caret, IME compositions left alone, listbox/option roles with aria-activedescendant; the edit goes through the composer's own render and undo history; nothing in single chats; the text is sent as typed",
+      "description": "The group composer's @ list above the composer: this group's members and 「全体」, ↑/↓, Enter/Tab to insert, Esc to dismiss until another @, click or tap to insert without losing the caret, IME compositions left alone, listbox/option roles with aria-activedescendant; before a key or click picks it reads the draft, caret and members again (undo, a member who left), changes the composer makes by itself refresh it, and a send (Enter or Ctrl/⌘+Enter) closes it; the edit goes through the composer's own render and undo history; nothing in single chats; the text is sent as typed",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 资料页与群 (docs/xbot-frontend.md item 31; docs/xbot-api.md group PATCH/DELETE)",
-      "sha256": "aebd98d2062bd3160f10f1e336d4c620306dcc928d03398de23eb66e6488f04e"
+      "sha256": "227a2638b95792ebc36d9d0e2eaadb8ad7b87e4d2014e00cb33c18c90ea222ea"
     },
     {
       "target": "client/public/mention.css",

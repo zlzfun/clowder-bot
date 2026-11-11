@@ -387,7 +387,7 @@ test('新对话 refused or unsure: busy in the server\'s eyes is said plainly, a
 
 const app_shown = (p: Any, thread: string) => { p.app.shown = thread; };
 
-test('新对话 from another entry (the drawer\'s 资料) is the same dialog: it names the conversation on screen, a changed one is said and read again, and focus returns to that entry', async () => {
+test('新对话 from another entry (the drawer\'s 资料) is the same dialog: it names the conversation on screen once, a retry after a lost answer cannot start a second one, and focus returns to that entry', async () => {
   const p = page();
   const cat = { type: 'bot', id: '团子' };
   p.open(cat);
@@ -399,15 +399,36 @@ test('新对话 from another entry (the drawer\'s 资料) is the same dialog: it
   assert.equal(text(d.querySelector('h2')), '和团子开始新对话');
   d.key('Escape');
   assert.ok(p.doc.activeElement === entry, 'focus back on the drawer\'s 新对话');
+  // The dialog names T1, the conversation on screen when it opened.
   p.window.ClowderHistory.newConversation(cat, entry);
   d = p.doc.querySelector('.ch-modal')!;
-  d.querySelector('button[type="submit"]')!.click();
+  const submit = () => d.querySelector('button[type="submit"]')!.click();
+  submit();
   assert.deepEqual(plain(p.calls[0]), { path: '/xbot-api/bots/%E5%9B%A2%E5%AD%90/new', opt: { method: 'POST', body: { expectedThreadId: 'T1' } } });
-  // The conversation changed under the page (one that did start, or one opened elsewhere): said, and the chat read again.
+  // The answer is lost, though the request did start T2; the chat reads again and now shows T2 (review 2026-11-11, item 3).
+  p.fail(new Error('连不上 clowder-bot'));
+  await p.settle();
+  assert.equal(text(d.querySelector('.error')), '没能确认新对话有没有开始。先看一眼对话，再决定要不要重试。');
+  app_shown(p, 'T2');
+  // A retry must not start T3: no request, the change is said, and the owner starts over.
+  submit();
+  await p.settle();
+  assert.equal(p.calls.length, 1, 'nothing more is sent');
+  assert.equal(text(d.querySelector('.error')), '这段对话刚换过了，没有再开新对话。先看一眼对话；还要开新对话的话，关掉这里再点一次「新对话」。');
+  submit();
+  assert.equal(p.calls.length, 1, 'still nothing: a new 新对话 is needed');
+  d.key('Escape');
+  // Opened again, the dialog names T2; the server saying it changed (one opened elsewhere) ends this dialog's attempt too.
+  p.window.ClowderHistory.newConversation(cat, entry);
+  d = p.doc.querySelector('.ch-modal')!;
+  submit();
+  assert.deepEqual(plain(p.calls[1].opt), { method: 'POST', body: { expectedThreadId: 'T2' } });
   p.fail(Object.assign(new Error('会话已变化，请刷新后重试'), { status: 409 }));
   await p.settle();
-  assert.equal(text(d.querySelector('.error')), '这段对话刚换过了。先看一眼对话，再决定要不要开新对话。');
-  assert.equal(p.app.reloads, 1);
+  assert.equal(text(d.querySelector('.error')), '这段对话刚换过了，没有再开新对话。先看一眼对话；还要开新对话的话，关掉这里再点一次「新对话」。');
+  assert.equal(p.app.reloads, 2);
+  submit();
+  assert.equal(p.calls.length, 2);
   assert.deepEqual(p.app.reopened, []);
 });
 

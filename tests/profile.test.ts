@@ -130,6 +130,15 @@ class Doc {
   createElement(tag: string) { return new El(this, tag.toUpperCase()); }
   createElementNS(_ns: string, tag: string) { return new El(this, tag.toUpperCase()); }
   get activeElement(): El { return this.focused && this.focused.isConnected ? this.focused : this.body; }
+  // Listeners on the document itself are kept but never reached (no event here bubbles past the body).
+  docListeners: Array<[string, unknown]> = [];
+  addEventListener(type: string, fn: unknown) { this.docListeners.push([type, fn]); }
+  getElementById(id: string): El | null { return all(this.body).find(e => e.id === id) ?? null; }
+  // '#id' or '.class' only (what the modules ask the document for).
+  querySelector(sel: string): El | null {
+    const m = /^([.#])([\w-]+)$/.exec(sel.trim());
+    return m ? all(this.body).find(e => (m[1] === '#' ? e.id === m[2] : has(e, m[2]))) ?? null : null;
+  }
 }
 const all = (root: El): El[] => root.children.flatMap(c => [c, ...all(c)]);
 const has = (n: El, cls: string) => n.classList.contains(cls);
@@ -557,6 +566,64 @@ test('新对话 on 资料 opens the shared dialog (the header ⋯ menu\'s own) f
   assert.equal(d.calls.length, 0, 'the request, its idle check and its refusals belong to chat-history.js');
 });
 
+// The drawer with the real chat-history.js behind its 新对话, wired the way
+// app.js wires both; reopen() does what selectBot does: a new selection
+// object for the same cat, the chat on a new conversation, the drawer drawn again.
+function drawerWithHistory() {
+  const env = load([...RULES, 'client/public/profile.js', 'client/public/chat-history-rules.js', 'client/public/chat-history.js']);
+  const { doc, window } = env;
+  const top = doc.createElement('div'); top.className = 'top-inner';
+  const thread = doc.createElement('div'); thread.id = 'thread';
+  const form = doc.createElement('form'); form.id = 'composer';
+  const input = doc.createElement('div'); input.id = 'input';
+  form.append(input);
+  const panel = doc.createElement('aside');
+  doc.body.append(top, thread, form, panel);
+  const shell: Any = { sel: { type: 'bot', id: '快手' }, thread: 'T1', posts: [] as Any[], passed: [] as boolean[], n: 1 };
+  const api = async (path: string, opt: Any = {}) => {
+    if (/\/new$/.test(path)) { shell.posts.push(plain(opt.body ?? null)); return { status: 'ok', conversation_id: 'T' + (shell.n + 1) }; }
+    throw fail(404);
+  };
+  const made = (tag: string, cls: string) => { const n = doc.createElement(tag); n.className = cls; return n; };
+  const P = window.ClowderProfile, Hy = window.ClowderHistory;
+  const draw = () => { panel.replaceChildren(P.catPage(shell.sel, PROFILE)); };
+  P.init({
+    api, icon: (name: string) => made('svg', 'icon ' + name), visibleError: (e: Error) => e.message, toast: () => {},
+    cats: () => CATS, catFace: () => made('span', 'avatar'), catFaceSig: () => 'f', groupFace: () => made('span', 'avatar'), groupFaceSig: () => 'g', unknownFace: () => made('span', 'avatar'),
+    agent: () => ({ sig: 'a', node: () => made('div', 'agent') }), config: () => ({ sig: 'c', node: () => null }),
+    tasks: () => made('section', 'wst'), exec: () => made('div', 'task-view'), syncExec: () => {}, conversations: () => null, runtimeHref: () => '',
+    newConversation: (sel: Any, opener: El) => { shell.passed.push(sel === shell.sel); return Hy.newConversation(sel, opener); },
+    editProfile: () => {}, pin: async () => {}, exportChat: () => {}, copyId: () => {}, deleteCat: () => {},
+    groupChanged: async () => {}, groupDeleted: async () => {}, closePops: () => {},
+    selected: () => shell.sel, groups: () => [], groupRow: () => null, fallbackFocus: () => input,
+  });
+  Hy.init({
+    api, visibleError: (e: Error) => e.message, thread,
+    selected: () => shell.sel, name: (sel: Any) => sel.id,
+    reload: async () => {},
+    reopen: async (sel: Any) => { shell.n++; shell.thread = 'T' + shell.n; shell.sel = { type: 'bot', id: sel.id }; draw(); },
+    send: () => {}, sendBusy: () => false, working: () => false, pendingFiles: () => 0,
+    threadId: () => shell.thread, conversations: async () => 1, openDetails: async () => {},
+    place: (_a: El, menu: El) => doc.body.append(menu), toast: () => {}, status: () => {},
+  });
+  Hy.select(shell.sel);
+  draw();
+  return { ...env, shell, panel, start: () => { one(panel, 'pf-new').click(); one(named(doc.body, 'ch-modal')[0]!, 'modal-card').dispatch('submit'); } };
+}
+
+test('新对话 twice in a row from the drawer, with the real dialog behind it: the page acts for the selection the shell has now, so the second one is sent too (review item 2)', async () => {
+  const w = drawerWithHistory();
+  w.start();
+  await settle();
+  assert.deepEqual(w.shell.posts, [{ expectedThreadId: 'T1' }]);
+  assert.equal(w.shell.thread, 'T2', 'reopened on the new conversation, as a new selection object');
+  w.start();
+  await settle();
+  assert.deepEqual(w.shell.posts, [{ expectedThreadId: 'T1' }, { expectedThreadId: 'T2' }], 'the second 新对话 was sent, naming the conversation on screen');
+  assert.deepEqual(w.shell.passed, [true, true], 'each time for the selection the shell has now, not the one the page was built with');
+  assert.equal(named(w.doc.body, 'ch-modal').length, 0);
+});
+
 const GROUP = { type: 'group', id: 'g1' };
 
 test('成员: faces and names, 移出 only while two would stay, a second click within three seconds confirms, and the PATCH says only who leaves', async () => {
@@ -751,6 +818,81 @@ test('删除群聊 and the sidebar menu: 改名 and 删除群聊 only; deleting 
   assert.equal(refused.log.includes('deleted:g1'), false);
 });
 
+test('a group row\'s menu works from the keyboard: arrows, Home/End, Esc back to the row — found again by the group\'s id after the list redrew it — and a dialog it opened gives focus back there too (review item 6)', () => {
+  const d = drawer();
+  const menu = d.P.groupMenu(d.group());
+  d.doc.body.append(menu);
+  const items = all(menu).filter(n => n.tagName === 'BUTTON');
+  assert.equal(menu.getAttribute('role'), 'menu');
+  items[0].focus();
+  items[0].key('ArrowDown'); assert.equal(d.doc.activeElement, items[1]);
+  items[1].key('ArrowDown'); assert.equal(d.doc.activeElement, items[0], 'wraps');
+  items[0].key('ArrowUp'); assert.equal(d.doc.activeElement, items[1]);
+  items[1].key('Home'); assert.equal(d.doc.activeElement, items[0]);
+  items[0].key('End'); assert.equal(d.doc.activeElement, items[1]);
+  // The list drew the row anew meanwhile: Esc closes the menu and lands on the new row.
+  const row = d.doc.createElement('button'); d.doc.body.append(row); d.s.rows.g1 = row;
+  const esc = items[1].key('Escape');
+  assert.equal(esc.stopped, true, 'the page\'s Esc does not also close the drawer');
+  assert.ok(d.log.includes('closePops'));
+  assert.equal(d.doc.activeElement, row);
+  // 改名 from the menu; the row is drawn anew again while its dialog is open.
+  const again = d.P.groupMenu(d.group()); d.doc.body.append(again);
+  all(again).filter(n => n.tagName === 'BUTTON')[0].click();
+  const row2 = d.doc.createElement('button'); d.doc.body.append(row2); d.s.rows.g1 = row2; row.remove();
+  one(d.layer()!, 'pf-card').key('Escape');
+  assert.equal(d.layer(), null);
+  assert.equal(d.doc.activeElement, row2);
+  // The shell focuses the first item when it places the menu (app.js openGroupMenu).
+  assert.match(read('client/public/app.js'), /panelMore = menu;\n\s+menu\.querySelector\("\.menu-row"\)\?\.focus\(\);/);
+});
+
+test('a dialog keeps the keyboard while it works: with every button waiting Tab stays on the card, and the page behind is inert until it closes (review item 7)', async () => {
+  let release!: () => void;
+  const d = drawer({ route: (_p, method) => (method === 'DELETE' ? new Promise((r) => { release = () => r({ status: 'ok' }); }) : undefined) });
+  const page = d.show(d.P.groupPage(GROUP, d.group()));
+  one(page, 'pf-remove').click();
+  const layer = d.layer()!, card = one(layer, 'pf-card');
+  assert.equal(d.panel.inert, true, 'the page behind is out of reach');
+  card.dispatch('submit');
+  assert.ok(all(card).filter(n => n.tagName === 'BUTTON').every(b => b.disabled), 'both buttons wait');
+  assert.equal(d.doc.activeElement, card);
+  const tab = card.key('Tab');
+  assert.equal(tab.defaultPrevented, true, 'Tab does not leave for the page');
+  assert.equal(d.doc.activeElement, card);
+  assert.equal(card.key('Tab', { shiftKey: true }).defaultPrevented, true);
+  release();
+  await settle();
+  assert.equal(d.layer(), null);
+  assert.equal(d.panel.inert, false, 'reachable again');
+});
+
+test('leaving the group name with Tab lets focus go on (an unchanged name, or a changed one that is saved); Enter and Esc bring it back to the name (review item 8)', async () => {
+  const d = drawer();
+  const head = d.show(d.P.groupHead(GROUP, d.group()));
+  const next = d.doc.createElement('button'); d.doc.body.append(next);
+  one(head, 'pf-name').click();
+  next.focus();
+  one(head, 'pf-name-input').dispatch('blur');
+  await settle();
+  assert.equal(named(head, 'pf-name-input').length, 0, 'the edit closed');
+  assert.equal(d.doc.activeElement, next, 'focus stayed where Tab took it');
+  assert.equal(d.writes().length, 0);
+  one(head, 'pf-name').click();
+  one(head, 'pf-name-input').value = '晨会';
+  next.focus();
+  one(head, 'pf-name-input').dispatch('blur');
+  await settle();
+  assert.deepEqual(d.writes().map(c => c.body), [{ name: '晨会' }]);
+  assert.equal(d.doc.activeElement, next);
+  assert.equal(one(head, 'pf-name-text').textContent, '晨会', 'shown from the answer');
+  // Enter on an unchanged name: back on the name.
+  one(head, 'pf-name').click();
+  one(head, 'pf-name-input').key('Enter');
+  await settle();
+  assert.equal(d.doc.activeElement, one(head, 'pf-name'));
+});
+
 // ---------------------------------------------------------------- the @ list (mention.js)
 function composer(opts: { members?: string[] | null } = {}) {
   const env = load(['client/public/mention-rules.js', 'client/public/mention.js']);
@@ -760,6 +902,17 @@ function composer(opts: { members?: string[] | null } = {}) {
   doc.body.append(form);
   const s: Any = { text: '', caret: 0, members: opts.members === undefined ? ['快手', '墨点'] : opts.members };
   const applied: Array<[string, number]> = [];
+  // As app.js: the composer's own Enter (send, Ctrl/⌘+Enter too) sits on the
+  // input and is registered before the @ list; the form's submit is the send;
+  // the page's Esc (closing the drawer) listens on the document, here the body.
+  const page: string[] = [];
+  input.addEventListener('keydown', (ev: Ev) => {
+    if (ev.key !== 'Enter' || ev.shiftKey || ev.isComposing) return;
+    ev.preventDefault();
+    form.dispatch('submit');
+  });
+  form.addEventListener('submit', () => page.push('send'));
+  doc.body.addEventListener('keydown', (ev: Ev) => { if (ev.key === 'Escape' || ev.key.startsWith('Arrow')) page.push(ev.key); });
   window.ClowderMention.init({
     input, composer: form,
     icon: (name: string) => { const i = doc.createElement('svg'); i.dataset.icon = name; return i; },
@@ -769,9 +922,6 @@ function composer(opts: { members?: string[] | null } = {}) {
     caret: () => s.caret,
     apply: (text: string, caret: number) => { applied.push([text, caret]); s.text = text; s.caret = caret; },
   });
-  // The page's own Enter (send) and Esc (close the drawer) listen further up.
-  const page: string[] = [];
-  doc.body.addEventListener('keydown', (ev: Ev) => page.push(ev.key));
   input.focus();
   const type = (text: string, caret = text.length) => { s.text = text; s.caret = caret; input.dispatch('input'); };
   const list = () => named(form, 'mx-pop')[0] ?? null;
@@ -800,9 +950,52 @@ test('@ in a group lists its members and 全体; ↑/↓ move, Enter inserts @�
   assert.deepEqual(c.page, [], 'neither the arrows nor Enter reached the page');
   assert.equal(c.list(), null);
   assert.equal(c.input.getAttribute('aria-controls'), null);
-  // With the list closed, Enter is the page's again.
+  // With the list closed, Enter is the composer's again: it sends.
   c.input.key('Enter');
-  assert.deepEqual(c.page, ['Enter']);
+  assert.deepEqual(c.page, ['send']);
+});
+
+test('the list never acts on what it saw: after the composer\'s own undo Enter sends instead of inserting, Ctrl/⌘+Enter sends and closes it, a member who left is not inserted, a send closes it (review item 4)', () => {
+  const c = composer();
+  c.type('@快');
+  assert.deepEqual(c.options(), ['快手']);
+  // The composer's undo (composerApply) changes the draft with no input event.
+  c.s.text = ''; c.s.caret = 0;
+  const enter = c.input.key('Enter');
+  assert.deepEqual(c.applied, [], 'nothing inserted');
+  assert.equal(c.list(), null);
+  assert.equal(enter.defaultPrevented, true, 'prevented by the composer\'s own send');
+  assert.deepEqual(c.page, ['send'], 'the Enter was the composer\'s');
+  // Ctrl/⌘+Enter with the list open: it sends, and the list goes with it.
+  c.type('请 @');
+  c.input.key('Enter', { metaKey: true });
+  assert.equal(c.list(), null);
+  assert.deepEqual(c.applied, []);
+  assert.deepEqual(c.page, ['send', 'send']);
+  c.type('请 @');
+  c.input.key('Enter', { ctrlKey: true });
+  assert.equal(c.list(), null);
+  assert.deepEqual(c.page, ['send', 'send', 'send']);
+  // A member who left while the list was open: the key shows the list as it is now instead of inserting the old row.
+  c.type('@');
+  assert.deepEqual(c.options(), ['快手', '墨点', '全体@ 群里每一只']);
+  c.s.members = ['墨点', '年糕'];
+  c.input.key('Enter');
+  assert.deepEqual(c.applied, []);
+  assert.deepEqual(c.options(), ['墨点', '年糕', '全体@ 群里每一只']);
+  c.input.key('Enter');
+  assert.deepEqual(c.applied, [['@墨点 ', 4]]);
+  // A click on a row no longer offered inserts nothing.
+  c.type('@');
+  const row = c.list()!.children[0];
+  c.s.members = ['年糕', '快手'];
+  row.dispatch('click');
+  assert.equal(c.applied.length, 1);
+  // A send from anywhere (the page's submit) closes an open list.
+  c.type('@');
+  assert.notEqual(c.list(), null);
+  c.form.dispatch('submit');
+  assert.equal(c.list(), null);
 });
 
 test('「全体」 writes one @ per member, never @全体; typing narrows the list; Tab inserts; a click inserts too', () => {
@@ -882,6 +1075,12 @@ test('the shell wires 资料页与群: scripts before app.js, styles before the 
   assert.match(app, /btn\.dataset\.groupMenu = "true";/);
   assert.match(app, /const sidebarBot = \(target\) => target\.closest\?\.\("\[data-bot-menu\], \[data-group-menu\]"\);/);
   assert.match(app, /const menu = profile\.groupMenu\(g\);/);
+  // Review fixes: the drawer follows each poll's record, takes the answered one at once, and finds a row again by the group's id.
+  assert.match(app, /if \(state\.sel && state\.sel\.type === "group" && panel\.classList\.contains\("open"\)\) paintPanel\(\);/);
+  assert.match(app, /groupChanged: async \(id, record\) => \{\n\s+if \(record\) state\.groups = state\.groups\.map\(/);
+  assert.match(app, /groupRow: \(id\) => \[\.\.\.document\.querySelectorAll\("#roster \.item\[data-group\]"\)\]\.find\(\(n\) => n\.dataset\.group === id\)/);
+  assert.match(app, /selected: \(\) => state\.sel,\n\s+groups: \(\) => state\.groups,/);
+  assert.doesNotMatch(read('client/public/profile.js'), /membersBody|body: \{ members/);
   // The @ list: members only in a group; the edit goes through the composer's own history.
   assert.match(app, /if \(!state\.sel \|\| state\.sel\.type !== "group" \|\| state\.peer\) return null;/);
   assert.match(app, /apply: composerEdit,/);
