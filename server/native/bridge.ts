@@ -68,7 +68,7 @@ export class BotBridge {
   runtimes(refresh = false): Promise<NativeRuntime[]> { return this.native.request<{ runtimes: NativeRuntime[] }>(`/api/cats/native-runtimes${refresh ? '?refresh=1' : ''}`).then(r => r.runtimes); }
   async cat(name: string): Promise<NativeCat> {
     const cat = (await this.cats()).find(c => c.name === name || c.id === name);
-    if (!cat) throw new ApiError(404, '找不到这个 Bot');
+    if (!cat) throw new ApiError(404, '找不到这只猫猫');
     return cat;
   }
   botItem(cat: NativeCat) {
@@ -291,7 +291,7 @@ export class BotBridge {
       return cat;
     }
     if (input.sourceTemplate) throw new ApiError(400, '缺少创建配置');
-    if ((await this.cats()).some(c => c.name.toLowerCase() === input.name.toLowerCase())) throw new ApiError(409, '已有同名 Bot');
+    if ((await this.cats()).some(c => c.name.toLowerCase() === input.name.toLowerCase())) throw new ApiError(409, '已经有一只叫这个名字的猫猫了');
     const templates = await this.templates();
     const requestedTemplate = input.templateId ?? (source ? this.store.bot(source.id).templateId : undefined) ?? 'ragdoll';
     const template = templates.templates.find(t => t.id === requestedTemplate);
@@ -331,8 +331,9 @@ export class BotBridge {
     const runtime = existing ? runtimes.find(r => supportsRuntime(r) && r.clientId === existing.clientId)
       : simple.agent ? runtimes.find(r => r.id === simple.agent) : defaultRuntime(runtimes);
     if (!runtime) throw new ApiError(422, simple.agent ? '找不到选的这个助手程序，请重新选择。' : '这台电脑上还没有可以用的助手程序，装好并登录 Claude Code 或 Codex 后再试。');
-    const unavailable = existing ? null : runtimeUnavailable(runtime);
-    if (unavailable) throw new ApiError(422, unavailable);
+    // Said with the tool's name: the first screen has no "Agent" vocabulary.
+    if (!existing && runtimeUnavailable(runtime)) throw new ApiError(422, runtime.readiness?.status === 'login_required'
+      ? `${runtime.label} 还没有登录，登录后再试。` : `这台电脑上的 ${runtime.label} 现在用不了，换一个或稍后再试。`);
     const face = simple.face ?? ({ anthropic: 'ragdoll', openai: 'maine-coon', kimi: 'turkish-van' } as Record<string, string>)[runtime.clientId] ?? 'ragdoll';
     const template = (await this.templates()).templates.find(t => t.id === face);
     if (!template) throw new ApiError(503, '暂时读不到猫猫的外观资料，请稍后再试');
@@ -374,8 +375,8 @@ export class BotBridge {
     if (!catId) await this.native.request(`/api/threads/${encode(threadId)}/queue`, { method: 'DELETE' });
     else for (const entry of queue.queue) {
       if (entry.status !== 'processing' && (entry.targetCatId === catId || entry.targetCats?.includes(catId))) {
-        if (entry.targetCats && (entry.targetCats.length !== 1 || entry.targetCats[0] !== catId)) throw new ApiError(409, '该队列项包含其他成员，请在运行面板按队列项撤回');
-        if (typeof entry.messageId !== 'string') throw new ApiError(409, '该队列项缺少原生来源，无法安全撤回');
+        if (entry.targetCats && (entry.targetCats.length !== 1 || entry.targetCats[0] !== catId)) throw new ApiError(409, '这条排队的消息还发给了别的猫猫，暂时不能只撤回这一只的');
+        if (typeof entry.messageId !== 'string') throw new ApiError(409, '这条排队的消息暂时无法撤回');
         const exact = new URLSearchParams({ expectedSourceMessageId: entry.messageId, expectedTargetCatId: catId });
         await this.native.request(`/api/threads/${encode(threadId)}/queue/${encode(entry.id)}?${exact}`, { method: 'DELETE' });
       }

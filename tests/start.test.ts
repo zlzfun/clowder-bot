@@ -130,7 +130,7 @@ test('quick creation refuses what it cannot do truthfully', async t => {
   r.native.runtimes = [runtime('codex', 'openai', 'login_required'), runtime('claude', 'anthropic', 'not_installed')];
   const [status, error] = await post({ name: '团子', simple: {}, idempotencyKey: key });
   assert.equal(status, 422); assert.match(error, /Claude Code 或 Codex/);
-  assert.deepEqual(await post({ name: '团子', simple: { agent: 'codex' }, idempotencyKey: key }), [422, '请先在本机 Agent 中完成登录']);
+  assert.deepEqual(await post({ name: '团子', simple: { agent: 'codex' }, idempotencyKey: key }), [422, 'Codex 还没有登录，登录后再试。']);
   assert.equal((await post({ name: '团子', simple: { agent: 'nope' }, idempotencyKey: key }))[0], 422);
   r.native.runtimes = [runtime('codex', 'openai', 'configured')];
   assert.equal((await post({ name: '团子', simple: {} }))[0], 400, 'a retry must be recognisable');

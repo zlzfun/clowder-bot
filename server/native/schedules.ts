@@ -57,7 +57,7 @@ export class BotSchedules {
   private async nativeList(requireReady = false): Promise<NativeSchedule[]> {
     const data = await this.bridge.native.request<{ tasks: NativeSchedule[]; botScheduleVersion?: number; botSchedulerReady?: boolean }>('/api/schedule/tasks');
     if (data.botScheduleVersion !== 1) throw new ApiError(503, '定时任务需要更新 Clowder AI 运行时，请运行 npm run runtime:prepare 后重新启动运行时');
-    if (requireReady && data.botSchedulerReady !== true) throw new ApiError(503, '原生调度器仍在启动，请稍后重试');
+    if (requireReady && data.botSchedulerReady !== true) throw new ApiError(503, '定时功能还在启动，请稍后再试');
     if (!Array.isArray(data.tasks)) throw new ApiError(502, '原生定时任务列表格式无效');
     return data.tasks;
   }

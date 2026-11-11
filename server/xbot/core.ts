@@ -96,7 +96,7 @@ export function createXbotCoreRouter(bridge: BotBridge) {
     const cat = await bot(req.params.name);
     const input = z.object({ ...botBody, name: label.optional(), group: z.string().max(80).optional() }).omit({ runtimeId: true, templateId: true, catConfig: true, sourceTemplate: true, idempotencyKey: true }).strict().parse(req.body);
     if (input.group && !store.state.folders.includes(input.group)) throw new ApiError(400, '分组不存在');
-    if (input.name && (await bridge.cats()).some(c => c.id !== cat.id && c.name.toLowerCase() === input.name!.toLowerCase())) throw new ApiError(409, '已有同名 Bot');
+    if (input.name && (await bridge.cats()).some(c => c.id !== cat.id && c.name.toLowerCase() === input.name!.toLowerCase())) throw new ApiError(409, '已经有一只叫这个名字的猫猫了');
     const update: Record<string, unknown> = {};
     if (input.name) Object.assign(update, { name: input.name, displayName: input.name, nickname: input.name, mentionPatterns: [`@${input.name}`, `@${cat.id}`] });
     if (input.persona !== undefined) update.roleDescription = z.string().trim().min(1).parse(input.persona);
@@ -189,7 +189,7 @@ export function createXbotCoreRouter(bridge: BotBridge) {
   };
   router.get('/bots/:name/avatar', async (req, res) => {
     const meta = store.bot((await bot(req.params.name)).id);
-    if (!meta.avatarData) throw new ApiError(404, '这个 Bot 使用生成的头像');
+    if (!meta.avatarData) throw new ApiError(404, '这只猫猫用的是自带的头像');
     res.set({ 'Content-Type': meta.avatarMime!, 'X-Content-Type-Options': 'nosniff' }).send(Buffer.from(meta.avatarData, 'base64'));
   });
   router.post('/bots/:name/avatar', express.raw({ type: 'multipart/form-data', limit: '3mb' }), async (req, res) => {
@@ -281,7 +281,7 @@ export function createXbotCoreRouter(bridge: BotBridge) {
   }).strict().refine(v => v.text.length > 0 || !!v.attachments?.length, { message: '请填写消息或选择附件' });
   router.post('/bots/:name/messages', async (req, res) => {
     const input = messageBody.parse(req.body);
-    if (input.images?.length) throw new ApiError(422, '图片请使用 Clowder AI 原生上传与消息内容块接口');
+    if (input.images?.length) throw new ApiError(422, '图片请作为附件发送');
     const cat = await bot(req.params.name), thread = await bridge.direct(cat);
     const receipt = await bridge.send(thread, input, cat);
     // Native HTTP acknowledges durable admission. Do not hold a fake run open or cancel on disconnect.
@@ -290,7 +290,7 @@ export function createXbotCoreRouter(bridge: BotBridge) {
   });
   router.post('/groups/:id/messages', async (req, res) => {
     const input = messageBody.parse(req.body);
-    if (input.images?.length) throw new ApiError(422, '图片请使用原生消息接口');
+    if (input.images?.length) throw new ApiError(422, '图片请作为附件发送');
     const receipt = await bridge.send(await bridge.group(req.params.id), input);
     res.status(202).json({ ...receipt, status: 'queued' });
   });
