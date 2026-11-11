@@ -47,6 +47,25 @@ export function triggerWords(trigger: unknown): string {
   return '按原生计划';
 }
 
+/**
+ * A pending request in a few everyday words, for the one-line status above the
+ * composer and the contact list ("等你确认：…"). The hub's own summaries are in
+ * the engine's wording ("Create schedule: 每周五写周报", "Profile update: …").
+ */
+export function approvalLine(item: Record<string, unknown>): string {
+  const summary = typeof item.summary === 'string' ? item.summary.replace(/\s+/g, ' ').trim() : '', detail = record(item.detail);
+  switch (item.sourceFeatureId) {
+    case 'F221': return '记住你的一个偏好';
+    case 'F231': return '更新关于你的资料';
+    case 'F276': return '记下一位相关的人';
+    case 'F139': {
+      const label = clip(summary.replace(/^(?:Create|Delete) schedule:\s*/, ''), 60);
+      return `${detail.mutationKind === 'delete' ? '取消一个定时' : '设一个定时'}${label ? `「${label}」` : ''}`;
+    }
+    default: return clip(summary, 160);
+  }
+}
+
 function present(item: Item, cats: NativeCat[], base: string | undefined): ApprovalCard | null {
   const nav = record(item.navigation), card = record(nav.approvalCardRef), detail = record(item.detail);
   if (typeof item.proposalId !== 'string' || nav.state !== 'anchored' || typeof card.messageId !== 'string') return null;
