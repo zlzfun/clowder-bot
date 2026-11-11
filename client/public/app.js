@@ -426,7 +426,7 @@
     // The sign-in session this read belongs to: an answer that lands after signing out never notifies (chat-notify.js).
     const notifyTicket = notify.ticket();
     // A failed read keeps the last lists, said to be possibly out of date (chat-list.js).
-    try { data = await api("/xbot-api/bots/status"); } catch (e) { chatList.stale(true); throw e; }
+    try { data = await api("/xbot-api/bots/status"); } catch (e) { chatList.stale(true); presence.rows(); throw e; }
     chatList.stale(false);
     const map = {};
     for (const b of (data && data.bots) || []) if (b && b.bot) map[b.bot] = b;
@@ -7540,6 +7540,10 @@
     bots: () => state.bots || [],
     selected: () => (state.peer ? null : state.sel),
     status: () => ({ bots: stStatus.map, groups: stStatus.groups }),
+    // A failed status read: its typing dots go (refreshStatus repaints them through presence.rows()).
+    stale: () => chatList.isStale(),
+    // The calendar day changed: the open history is drawn again, so 今天 / 昨天 follow.
+    redraw: () => { state.sig = ""; loadThread().catch(() => {}); },
   });
   // 开箱即用 (quick-create.js) draws with these and opens what it made.
   quick.init({

@@ -129,6 +129,10 @@
   function vouched(r, d) {
     return r.held.some((p) => p.end <= d.length && d.slice(p.start, p.end) === p.text);
   }
+  // Words a draft brought that the stream had not shown were written after
+  // whatever step or thinking the stream last reported: the reply is writing
+  // words now, and that older description is no longer vouched for.
+  function wrote(r) { r.phase = "text"; r.step = null; }
   function draft(r, value) {
     const d = str(value);
     if (!r || d === r.text) return false;
@@ -137,6 +141,7 @@
       r.text = d;
       r.broken = true;
       drain(r);
+      wrote(r);
       return true;
     }
     if (r.text.startsWith(d)) return false;
@@ -144,12 +149,22 @@
     r.held = r.held.filter((p) => p.end > d.length);
     r.broken = true;
     drain(r);
+    wrote(r);
     return true;
   }
 
   // The stream lost events (a reconnect, a sequence gap): nothing can follow
   // on without a native position any more.
   function lost(r) { if (r) r.broken = true; }
+  // After such a loss, a read shows the reply still being produced: that much
+  // is confirmed; what it was doing then (a step, thinking) is not, so it
+  // reads as merely started until the stream says more. true when it changed.
+  function recover(r) {
+    if (!r || (r.phase !== "step" && r.phase !== "thinking")) return false;
+    r.phase = "start";
+    r.step = null;
+    return true;
+  }
 
   // ---- What the chat shows of the words so far ----
   // As the server does for finished replies: a trailing paw signature on its
@@ -317,7 +332,7 @@
   const signature = (html) => str(html).replace(/\b(xbot-glyph|clowder-cat-crop)-\d+\b/g, "$1-#");
 
   window.ClowderLiveRules = Object.freeze({
-    reply, apply, draft, lost, display, leading, drawable, stepWords, phrase, structural, gap, receipt, signature,
+    reply, apply, draft, lost, recover, display, leading, drawable, stepWords, phrase, structural, gap, receipt, signature,
     // A native tool name's everyday kind ("look", "run", … or ""), for the
     // header's shorter words (chat-presence-rules.js).
     verb,

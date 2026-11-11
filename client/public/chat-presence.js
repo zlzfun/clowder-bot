@@ -7,9 +7,13 @@
 // What it shows, all from facts the page already has:
 //   - under the cat's name in the header, 正在输入… / 在查资料… / 在想… while
 //     the engine writes a reply: chat-live.js's own replies (watched), so the
-//     header, the reply row and its quiet line always agree;
+//     header, the reply row and its quiet line always agree; nothing about a
+//     reply whose stream was lost until it is confirmed again; the same said
+//     once per change in one polite live region;
 //   - typing dots on a sidebar row while its cat replies: the open chat from
-//     those same replies, any other chat from the status poll;
+//     those same replies, any other chat only while the status poll read
+//     that chat's own activity as running (and the poll did not fail);
+//   - the day separators drawn again when the calendar day changes;
 //   - each cat's own colour where it stays legible (one style element keyed
 //     by the speaker the history already writes on each row);
 //   - a paw by the owner's latest message the engine picked up (a reply that
@@ -68,12 +72,15 @@
   }
 
   // -------------------------------------------------------------- the header
-  function liveWords() {
+  function liveNow() {
     const sel = selected();
-    if (!sel || !H.live || typeof H.live.presence !== "function") return "";
+    if (!sel || !H.live || typeof H.live.presence !== "function") return null;
     const now = H.live.presence();
-    if (!now || now.key !== keyOf(sel)) return "";
-    return R.headerLine(now, nameOf, sel.type === "group", verb);
+    return now && now.key === keyOf(sel) ? { now, group: sel.type === "group" } : null;
+  }
+  function liveWords() {
+    const at = liveNow();
+    return at ? R.headerLine(at.now, nameOf, at.group, verb) : "";
   }
   let sub = null;
   function header(words) {
@@ -81,12 +88,42 @@
     if (!chip) return;
     if (!sub || sub.parentElement !== chip) {
       sub = node("span", "pz-sub");
-      sub.setAttribute("aria-hidden", "true"); // the reply's own quiet line is the announced one
+      sub.setAttribute("aria-hidden", "true"); // read out once through the polite region below
       chip.append(sub);
     }
     // The last words stay while the line fades out.
     if (words && sub.textContent !== words) sub.textContent = words;
     chip.classList.toggle("pz-on", !!words);
+    if (words) fit();
+  }
+  // The line runs no further than the header's free width: up to the first
+  // control right of the chip (⋯, the update button) or the bar's own edge,
+  // so a long group line never slides under the menu or off a narrow screen.
+  function fit() {
+    const chip = H.chip, bar = chip && chip.parentElement;
+    if (!sub || !bar || typeof sub.getBoundingClientRect !== "function" || typeof bar.getBoundingClientRect !== "function") return;
+    const c = chip.getBoundingClientRect(), s = sub.getBoundingClientRect();
+    let right = bar.getBoundingClientRect().right;
+    for (const b of bar.querySelectorAll("button")) {
+      if (b === chip || (chip.contains && chip.contains(b)) || typeof b.getBoundingClientRect !== "function") continue;
+      const r = b.getBoundingClientRect();
+      if (r.width > 0 && r.left >= c.left + c.width / 2 && r.left < right) right = r.left;
+    }
+    sub.style.maxWidth = Math.max(0, Math.floor(right - 8 - s.left)) + "px";
+  }
+  // One polite region for the whole chat: what the cats are doing, said once
+  // each time it changes (never for each streamed piece).
+  let region = null, spoken = "";
+  function say(words) {
+    if (words === spoken) return;
+    spoken = words;
+    if (!region) {
+      region = node("div", "visually-hidden");
+      region.setAttribute("role", "status");
+      region.setAttribute("aria-live", "polite");
+      document.body.append(region);
+    }
+    region.textContent = words;
   }
 
   // ------------------------------------------------------------- the sidebar
@@ -96,17 +133,21 @@
     for (let i = 0; i < 3; i++) d.append(node("i"));
     return d;
   }
-  // A row's state in the status poll (experience rules' side()).
-  function kindOf(row) {
+  // A row's entry in the status poll, and its state there (experience rules' side()).
+  function entryOf(row) {
     const all = H.status ? H.status() || {} : {};
+    return (row.dataset.bot ? (all.bots || {})[row.dataset.bot] : (all.groups || {})[row.dataset.group]) || null;
+  }
+  function kindOf(entry) {
     const X = window.ClowderExperienceRules;
-    const entry = row.dataset.bot ? (all.bots || {})[row.dataset.bot] : (all.groups || {})[row.dataset.group];
     return entry && X && typeof X.side === "function" ? X.side(entry).kind : "idle";
   }
   // row → {line: our line, was: the line it covers}: the open chat's row
   // while its cat writes. The shell's repaint replaces our line like its own
   // (it is the row's .preview); otherwise the covered line comes back here.
   const own = new WeakMap();
+  // Our typing dots → the status line's spinner they stand in for.
+  const spins = new WeakMap();
   function paintRow(row, shows, words) {
     const mine = own.get(row);
     if (shows === "live") {
@@ -128,29 +169,41 @@
       own.delete(row);
       if (mine.line.isConnected) mine.line.replaceWith(mine.was);
     }
-    // The status's own busy line: its spinner becomes the typing dots.
+    // The status's own busy line: its spinner is drawn as typing dots only
+    // while this row's own conversation is confirmed running, and goes back
+    // to the spinner as soon as that is no longer known.
+    const line = kids(row.querySelector(".item-body") || row).find((c) => has(c, "preview") && has(c, "st") && has(c, "run"));
+    if (!line) return;
+    const ours = kids(line).find((c) => has(c, "pz-dots"));
     if (shows === "status") {
-      const line = kids(row.querySelector(".item-body") || row).find((c) => has(c, "preview") && has(c, "st") && has(c, "run"));
       const spin = kids(line).find((c) => has(c, "st-spin"));
-      if (spin) spin.replaceWith(dots());
-    }
+      if (spin) { const d = dots(); spins.set(d, spin); spin.replaceWith(d); }
+    } else if (ours && spins.has(ours)) ours.replaceWith(spins.get(ours));
   }
+  // The calendar day of the last drawing: when it changes (midnight, a
+  // laptop woken the next morning), the 今天 / 昨天 separators are redrawn.
+  let drawnDay = "";
   function rows(roster) {
     if (!H) return;
     colours();
+    const day = R.dayOf(Date.now());
+    if (drawnDay && day !== drawnDay && H.redraw) { drawnDay = day; H.redraw(); }
     const root = roster || document.getElementById("roster");
     if (!root) return;
-    const open = keyOf(selected()), live = liveWords();
+    const open = keyOf(selected()), live = liveWords(), stale = !!(H.stale && H.stale());
     for (const row of root.querySelectorAll(".item[data-bot], .item[data-group]")) {
       const key = row.dataset.bot ? "bot:" + row.dataset.bot : "group:" + row.dataset.group;
-      paintRow(row, R.rowShows(kindOf(row), key === open ? live : ""), live);
+      const entry = entryOf(row);
+      paintRow(row, R.rowShows(kindOf(entry), key === open ? live : "", R.ownActive(entry, stale)), live);
     }
   }
-  // chat-live.js said its replies may have changed: the header and the open
-  // chat's row follow at once, only when the words actually change.
+  // chat-live.js said its replies may have changed: the header, the open
+  // chat's row and the announcement follow at once, only on a real change.
   let lastWords = null;
   function onLive() {
     if (!H) return;
+    const at = liveNow();
+    say(at ? R.spokenLine(at.now, nameOf, at.group, verb) : "");
     const words = liveWords();
     if (words === lastWords) return;
     lastWords = words;
@@ -170,6 +223,8 @@
     mark.setAttribute("role", "img");
     mark.setAttribute("aria-label", words);
     mark.dataset.tip = words;
+    // A stable target: hover or focus shows who saw it (the shell's tooltip).
+    mark.tabIndex = 0;
     if (cat) mark.dataset.cat = cat;
     const s = document.createElementNS(SVG, "svg");
     s.setAttribute("viewBox", "0 0 24 24");
@@ -192,6 +247,7 @@
     if (!inner) return;
     const first = !drawn.has(inner);
     drawn.add(inner);
+    drawnDay = R.dayOf(Date.now());
     // The owner's messages as the history drew them (a send still waiting
     // for its row is not one of them).
     const owners = new Map();
@@ -231,6 +287,12 @@
     const g = el.cloneNode(true);
     if (typeof g.animate !== "function") return;
     for (const n of [g, ...g.querySelectorAll("[id]")]) n.removeAttribute("id");
+    // A picture of a dialog, not a dialog: no modal semantics, so nothing
+    // (the palette's own guard among them) takes it for one that is open.
+    for (const n of [g, ...g.querySelectorAll("[aria-modal], [role]")]) {
+      n.removeAttribute("aria-modal");
+      if (/dialog/.test(n.getAttribute("role") || "")) n.removeAttribute("role");
+    }
     // Typed words are a property, not markup: the copy shows them too.
     const from = el.querySelectorAll("input, textarea"), to = g.querySelectorAll("input, textarea");
     from.forEach((f, i) => { if (to[i]) to[i].value = f.value; });
@@ -266,10 +328,13 @@
   //   bots()          the cats as listed (name, native_id, accent);
   //   selected()      the open chat ({type, id}), null in the two-cat exchange;
   //   status()        the status poll's {bots: {name: entry}, groups: {id: entry}};
-  //   catName(catId)  a cat's name by its native ID ("" when unknown).
+  //   stale()         the last status poll failed (what it said may be out of date);
+  //   catName(catId)  a cat's name by its native ID ("" when unknown);
+  //   redraw()        draw the open history again (its day separators).
   function init(hooks) {
     H = hooks || {};
     if (H.live && typeof H.live.watch === "function") H.live.watch(onLive);
+    if (typeof window.addEventListener === "function") window.addEventListener("resize", () => { if (H.chip && H.chip.classList.contains("pz-on")) fit(); });
     const root = document.documentElement;
     if (root && typeof window.MutationObserver === "function") {
       new window.MutationObserver(() => { surfacesAt = null; colours(); }).observe(root, { attributes: true, attributeFilter: ["data-theme"] });
