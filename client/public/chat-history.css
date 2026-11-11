@@ -12,7 +12,9 @@
 .top-inner > .ch-more[hidden], .main.peer .top-inner > .ch-more { display: none; }
 .top-inner.ch-has-more > .top-title { max-width: calc(100% - 88px); }
 .top-inner.ch-has-more > .update-btn { margin-right: 40px; }
-.ch-menu { width: 188px; }
+/* Its own menu (not .folder-menu, which the sidebar's redraw removes): the
+   .pop box placed by the shell's placeMenu, without .pop's anchoring. */
+.pop.ch-menu { bottom: auto; left: auto; right: auto; min-width: 0; width: 188px; }
 
 /* The top of the history: 查看更早的消息, 正在加载…, 没有更早的消息了, or a failure with 重试. */
 .ch-older {

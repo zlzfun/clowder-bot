@@ -146,11 +146,24 @@
   // What the owner was writing in each chat, kept for this browser session
   // and only for chats other than the one open (the composer holds that
   // one). A draft is its text and, in a single chat, the message it quotes.
+  // A chat is known by what does not change: a cat by its native ID (its name
+  // can), a group by its ID. A quote names its message by the conversation's
+  // own number, so it carries that conversation (thread): a quote without
+  // one could land on another message elsewhere and is not kept.
   const MAX = 16000;
   function quoteOf(q) {
     if (!q || typeof q !== "object") return null;
-    const seq = Number(q.seq);
-    return Number.isSafeInteger(seq) && seq > 0 ? { seq, text: str(q.text).slice(0, 2000) } : null;
+    const seq = Number(q.seq), thread = str(q.thread);
+    return Number.isSafeInteger(seq) && seq > 0 && thread ? { seq, text: str(q.text).slice(0, 2000), thread } : null;
+  }
+  // The quote may go into this conversation (thread) only if it was taken there.
+  const quoteFits = (q, thread) => !!q && !!thread && q.thread === thread;
+  // A draft's key: "cat:<native ID>" for a cat whose ID is known, else the
+  // name ("bot:<name>", the old key, read once and moved), "group:<id>".
+  function draftKey(sel, catId) {
+    if (!sel || !sel.id) return "";
+    if (sel.type === "group") return "group:" + sel.id;
+    return catId ? "cat:" + catId : "bot:" + sel.id;
   }
   function drafts(saved) {
     const map = new Map();
@@ -173,6 +186,14 @@
       // The draft goes back into the composer: the store lets go of it.
       take(key) { const d = map.get(str(key)) || null; map.delete(str(key)); return d; },
       drop: (key) => map.delete(str(key)),
+      // An old name-keyed draft moves to the chat's lasting key (once; never over a newer one).
+      move(from, to) {
+        from = str(from); to = str(to);
+        if (!from || !to || from === to || !map.has(from)) return false;
+        if (!map.has(to)) map.set(to, map.get(from));
+        map.delete(from);
+        return true;
+      },
       toJSON: () => Object.fromEntries(map),
     };
   }
@@ -184,6 +205,6 @@
   }
 
   window.ClowderListRules = Object.freeze({
-    plain, last, readWhole, preview, ago, stamp, order, unread, badge, total, title, greetName, drafts, draftLine, oneLine,
+    plain, last, readWhole, preview, ago, stamp, order, unread, badge, total, title, greetName, drafts, draftLine, draftKey, quoteFits, oneLine,
   });
 })();

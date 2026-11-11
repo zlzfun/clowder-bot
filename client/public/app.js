@@ -416,7 +416,10 @@
   }
 
   async function refreshStatus() {
-    const data = await api("/xbot-api/bots/status");
+    let data;
+    // A failed read keeps the last lists, said to be possibly out of date (chat-list.js).
+    try { data = await api("/xbot-api/bots/status"); } catch (e) { chatList.stale(true); throw e; }
+    chatList.stale(false);
     const map = {};
     for (const b of (data && data.bots) || []) if (b && b.bot) map[b.bot] = b;
     stStatus.map = map;
@@ -3316,7 +3319,8 @@
     const near = state.firstRender || live.following();
     if (!messages || !messages.length) {
       const who = group && group.name;
-      inner.append(emptyState(niceName(who) || "群", "没有消息", who, groupFace(group)));
+      // Records that show no rows may still have earlier ones (chat-history.js): offer those instead.
+      if (!chatHistory.top(inner)) inner.append(emptyState(niceName(who) || "群", "没有消息", who, groupFace(group)));
       const shown = live.commit(inner, sendFeedback(inner, messages));
       state.firstRender = false;
       if (near) thread.scrollTop = thread.scrollHeight;
@@ -4600,6 +4604,8 @@
         // this thread (accepted or unconfirmed); absent when there is none.
         const read = { selection, threadId: data.thread_id ? String(data.thread_id) : "", messages, history, greeting: data.greeting == null ? null : data.greeting };
         state.chatRead = read;
+        // A restored quote comes back only into the conversation it was taken in (chat-list.js).
+        chatList.read(selection, read.threadId);
         // A truly empty chat, read while the page is visible, invites its cat
         // to say hello: once per thread, never awaited, so no answer holds up
         // this render. Polls, native events and redraws only read it again.
@@ -5072,6 +5078,7 @@
     ], async () => {
       try {
         await api("/xbot-api/bots/" + encodeURIComponent(name), { method: "DELETE" });
+        chatList.forget({ type: "bot", id: name }); // its draft goes too (a new cat may reuse the name)
       } catch (e) {
         const msg = e.message || "";
         if (/primary/i.test(msg)) throw new Error("它是默认接待的猫猫，暂时不能删。");
@@ -6149,6 +6156,11 @@
     // queued behind it (native continue_current); nothing is interrupted.
     if ((!text && !images.length && !files) || !state.sel) return;
     const selection = state.sel;
+    // The quote goes with this send and leaves the composer now, so a switch
+    // before the answer cannot keep it as this chat's draft; it comes back
+    // only if the send does not go out.
+    const quote = state.replyTo && state.replyTo.seq > 0 ? state.replyTo : null;
+    if (quote) clearQuote();
     ++state.threadLoad;
     // One key per message: resending the same words and files after an
     // unknown outcome reuses it, so a send that did land is not repeated.
@@ -6212,7 +6224,7 @@
       // conversation that changed (another saved conversation) in the meantime.
       const threadId = files ? files.threadId : workspace.threadId();
       if (threadId) payload.expectedThreadId = threadId;
-      if (state.replyTo && state.replyTo.seq > 0) payload.reply_to = state.replyTo.seq;
+      if (quote && (!quote.thread || !threadId || quote.thread === threadId)) payload.reply_to = quote.seq;
       const res = await apiFetch("/xbot-api/" + (selection.type === "group" ? "groups/" : "bots/") + encodeURIComponent(selection.id) + "/messages", {
         method: "POST",
         credentials: "same-origin",
@@ -6235,7 +6247,6 @@
       if (answer.error) throw new Error(answer.error);
       if (state.sel !== selection) return;
       state.sig = "";
-      clearQuote();
       settle();
       await loadThread();
     } catch (e) {
@@ -6248,7 +6259,8 @@
       // The files of a send that did not go out return to the composer, or
       // wait for this conversation to open again.
       const filesBack = !accepted && files ? workspace.giveBack(files) : false;
-      if (state.sel !== selection) return;
+      // Not sent: the words and quote go back to their chat's draft if the owner left it.
+      if (state.sel !== selection) { if (!accepted) chatList.giveBack(selection, text, quote); return; }
       setStatus("");
       reply.drop();
       if (accepted) {
@@ -6285,6 +6297,8 @@
       // picture came with it, and the row says what the picture needs.
       const pictureNote = images.length ? "；图片要重新贴一次" : "";
       const fileNote = files && !accepted ? (filesBack ? "，附件已放回" : "；附件需要重新添加") : "";
+      // The quote comes back with its words, never onto newer words in the composer.
+      if (!accepted && quote && !state.replyTo && !composerText(input).trim()) { state.replyTo = quote; paintQuoteBar(); }
       if (!composerText(input).trim() && text) {
         composerSet(text);
         composerRefreshHeight();
@@ -7071,7 +7085,8 @@
   function armQuote(seq, text) {
     const n = Number(seq);
     if (!n || !state.sel || state.sel.type !== "bot" || state.peer) return;
-    state.replyTo = { seq: n, text: String(text || "").trim() };
+    // thread: the conversation the quoted message is in (its seq means nothing elsewhere).
+    state.replyTo = { seq: n, text: String(text || "").trim(), thread: workspace.threadId() || "" };
     paintQuoteBar();
     input.focus();
   }
@@ -7422,6 +7437,7 @@
   chatList.init({
     entries: () => ({ bots: stStatus.map, groups: stStatus.groups }),
     selected: () => state.sel,
+    catId: (name) => botCatId(name),
     composer: {
       text: () => composerText(input),
       set: (text) => { composerSet(text); composerRefreshHeight(); syncComposer(); },

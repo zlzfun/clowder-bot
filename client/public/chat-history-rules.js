@@ -22,21 +22,40 @@
     return id == null || id === "" ? "" : "m:" + String(id);
   }
 
+  // A cursor's native order (`<timelineOrderAt|timestamp>:<id>`), or null.
+  function order(cursor) {
+    const c = str(cursor), at = c.indexOf(":");
+    if (at <= 0) return null;
+    const n = Number(c.slice(0, at));
+    return Number.isFinite(n) ? n : null;
+  }
+
   // The newest page moved on (new messages came in, or a row changed): the
   // earlier rows the owner loaded stay above it. held: the earlier rows,
-  // was: the newest page they were joined to, page: the newest page now.
+  // was: the newest page they were joined to, page: the newest page now,
+  // seam: that page's native boundary before and now ({was, now}: cursors).
   // Returns the earlier rows that now sit before the page, or null when the
   // page no longer meets them (more than a page arrived in between): the
   // earlier pages are then let go rather than shown with a hole in them.
-  function stitch(held, was, page) {
+  function stitch(held, was, page, seam = {}) {
     held = Array.isArray(held) ? held : [];
     if (!held.length) return [];
+    was = Array.isArray(was) ? was : [];
     page = Array.isArray(page) ? page : [];
+    const joined = [...held, ...was];
     const first = page.map(rowKey).find(Boolean);
-    if (!first) return null;
-    const joined = [...held, ...(Array.isArray(was) ? was : [])];
-    const at = joined.findIndex((m) => rowKey(m) === first);
-    return at < 0 ? null : joined.slice(0, at);
+    if (first) {
+      const at = joined.findIndex((m) => rowKey(m) === first);
+      if (at >= 0) return joined.slice(0, at);
+    }
+    // None of the newest page's rows is among those held. If the page they
+    // were joined to showed rows, they would be: the page has moved past
+    // them. If it showed none (records that project to no rows), there is no
+    // row to join on and the native boundary is the seam: still joined while
+    // it has not moved back.
+    if (was.some((m) => rowKey(m))) return null;
+    const a = order(seam && seam.was), b = order(seam && seam.now);
+    return a != null && b != null && b >= a ? joined : null;
   }
 
   // An earlier page arrived: its rows go above what is held, except rows
@@ -85,5 +104,5 @@
     return cat;
   }
 
-  window.ClowderHistoryRules = Object.freeze({ rowKey, stitch, prepend, pagePath, page, STARTERS, showStarters });
+  window.ClowderHistoryRules = Object.freeze({ rowKey, order, stitch, prepend, pagePath, page, STARTERS, showStarters });
 })();
