@@ -200,31 +200,43 @@
   // it was writing and the engine let the same reply continue) carries that
   // signature in the middle. As the server's withoutOwnSignatureLines does
   // for finished replies (server/native/message-presentation.ts, the same
-  // patterns): a line that is nothing but the speaking cat's own paw
-  // signature is not shown wherever it stands, outside code fences, and one
-  // of the blank lines around it goes with it. Another cat's signature, one
-  // inside a sentence, quoted or indented as code stays. While such a line is
-  // still arriving it is the last line, which display() already holds back.
-  const OWN_LINE = /^ {0,3}\[([^\[\]\r\n/]{1,80})(?:\/[^\[\]\r\n]{0,80})?\s?🐾\][ \t]*$/u;
-  const FENCE = /^[ \t>]*(?:(?:[-+*]|\d+[.)])[ \t]+)?(`{3,}|~{3,})(.*)$/;
+  // patterns): such a signature is a paragraph of its own, a line at the left
+  // margin that is nothing but the speaking cat's own paw signature with a
+  // blank line (or the start, or the end) on either side, outside code
+  // fences. Only that is hidden, with one of the blank lines around it.
+  // Another cat's signature, one inside a sentence, quoted, indented, in a
+  // list item or table cell, or directly above or below other text stays.
+  // While the reply is written, whether a blank line follows is not known
+  // yet: a signature that is still the last paragraph is held back by the
+  // trailing rules of display(), and this keeps it hidden once a blank line
+  // and more words follow it.
+  const OWN_LINE = /^\[([^\[\]\r\n/]{1,80})(?:\/[^\[\]\r\n]{0,80})?\s?🐾\][ \t]*$/u;
+  // A fence opens or closes with at most three spaces before it; inside one,
+  // only a bare marker of the same kind and at least the same length closes it.
+  const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
   function middle(value, name) {
     const text = str(value), cat = str(name);
     if (!cat || !text.includes("🐾]")) return text;
-    const kept = [];
-    let fence = "", closing = false;
-    for (const line of text.split(/\r?\n/)) {
+    const lines = text.split(/\r?\n/), kept = [];
+    let fence = "", opening = false;
+    lines.forEach((line, index) => {
+      // The reply began with the signature: the blank line after it goes with it.
+      if (opening) { opening = false; if (line.trim() === "") return; }
       const mark = FENCE.exec(line);
       if (mark) {
         if (!fence) { if (mark[1][0] !== "`" || !mark[2].includes("`")) fence = mark[1]; }
         else if (mark[1][0] === fence[0] && mark[1].length >= fence.length && !mark[2].trim()) fence = "";
       }
       const own = !fence && !mark ? OWN_LINE.exec(line) : null;
-      if (own && own[1].trim() === cat) { closing = kept.length > 0 && kept[kept.length - 1].trim() === ""; continue; }
-      // The signature stood between two blank lines: one of them is enough.
-      if (closing && line.trim() === "") { closing = false; continue; }
-      closing = false;
+      const alone = (index === 0 || lines[index - 1].trim() === "") && (index === lines.length - 1 || lines[index + 1].trim() === "");
+      if (own && alone && own[1].trim() === cat) {
+        // It stood between two blank lines: one of them is enough.
+        if (!kept.length) opening = true;
+        else if (kept[kept.length - 1].trim() === "" && index < lines.length - 1) kept.pop();
+        return;
+      }
       kept.push(line);
-    }
+    });
     return kept.join("\n").replace(/\s+$/, "");
   }
   // name: the speaking cat's name ("" when not known: nothing leading, and no

@@ -2769,7 +2769,8 @@
   function addTimeDividers(inner) {
     let previous;
     for (const row of inner.querySelectorAll(TIMED_ROWS.map((s) => ":scope > " + s).join(", "))) {
-      const label = row.dataset.timed ? "" : timeDivider(previous, row.dataset.time);
+      const earlier = Date.parse(row.dataset.time) < Date.parse(previous);
+      const label = row.dataset.timed || earlier ? "" : timeDivider(previous, row.dataset.time);
       if (label) row.before(el("div", "tdiv", label));
       previous = laterTime(previous, row.dataset.time);
     }

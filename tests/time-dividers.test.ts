@@ -36,7 +36,7 @@ function page() {
   const context = vm.createContext({ window, document: doc, console, Date, Number, Array, setTimeout: () => 1, clearTimeout: () => {}, setInterval: () => 1, el, out: {} as Any });
   for (const f of ['chat-live-rules.js', 'chat-live.js', 'chat-cards-rules.js', 'chat-cards.js']) vm.runInContext(read('client/public/' + f), context);
   assert.ok(rows, 'app.js names the rows that take part in the dividers');
-  vm.runInContext(['clockTime', 'timeDivider'].map(take).join('') + rows![0] + ['addTimeDivider', 'addTimeDividers'].map(take).join('')
+  vm.runInContext(['clockTime', 'timeDivider'].map(take).join('') + rows![0] + ['laterTime', 'addTimeDivider', 'addTimeDividers'].map(take).join('')
     + 'out.timeDivider = timeDivider; out.addTimeDivider = addTimeDivider; out.addTimeDividers = addTimeDividers;', context);
   const live = window.ClowderLive, cards = window.ClowderCards, out = context.out;
   live.init({ thread, render: () => {}, row: () => h('div', 'msg bot live'), queued: () => false, busy: () => false, unread: () => '', changed: () => {}, gap: () => {} });
