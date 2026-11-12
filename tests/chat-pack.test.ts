@@ -57,8 +57,9 @@ test('the first thing a cat says in a conversation is asked for with the pack in
 });
 
 test('the pack is the engine’s record: asked again after a while, replaced when the sentence changed, put back when it is gone', async t => {
-  const native = new NativeFixture(); let now = 1_000_000;
+  const native = new NativeFixture(); let now = 0;
   const pack = new ChatPack(native, () => now), calls = () => native.calls.map(c => `${c.method} ${c.path}`);
+  // Confirmed at the very start of the clock counts as confirmed.
   assert.equal(await pack.ensure(), true); assert.deepEqual(native.packs, [installed]);
   const first = calls().length;
   now += ChatPack.trust - 1; assert.equal(await pack.ensure(), true); assert.equal(calls().length, first, 'taken for granted for a while');
@@ -95,19 +96,70 @@ test('a pack that cannot be installed never holds a message back, is tried again
   assert.equal(lines.filter(line => /Pack security validation failed/.test(line)).length, 1);
 });
 
-test('the pinned engine applies the first pack it lists: another one is left alone, and that is said rather than assumed away', async t => {
-  const lines = quiet(t), native = new NativeFixture(), pack = new ChatPack(native);
-  const theirs = { name: 'another-pack', version: '2.0.0', description: '别人的', packType: 'domain', behaviors: ['别的默认行为'] };
-  native.packs = [theirs];
+test('an installation that broke off is not taken for installed because the engine lists its name', async t => {
+  quiet(t);
+  // The engine replaces a pack by removing and copying, and lists it by its manifest alone: the manifest can be there without the behaviour.
+  const native = new NativeFixture(), pack = new ChatPack(native), request = native.request.bind(native); let broken = true;
+  native.request = (async (path: string, options?: any) => {
+    if (broken && path === '/api/packs/add') { native.calls.push({ path, method: 'POST', body: options.body }); native.packs = [{ ...installed, behaviors: [] }]; throw new ApiError(500, 'copy failed'); }
+    return request(path, options);
+  }) as typeof native.request;
   assert.equal(await pack.ensure(), false);
-  assert.deepEqual(native.packs, [theirs, installed], 'ours is installed, theirs is neither removed nor reordered');
-  assert.equal(await pack.ensure(), false);
-  assert.equal(native.calls.filter(c => c.path === '/api/packs/add').length, 1, 'not installed over and over');
-  assert.equal(native.calls.some(c => c.method === 'DELETE'), false);
-  assert.deepEqual(lines, ['🐾 chat pack not installed: the engine applies another pack first (another-pack)']);
-  // When ours is the first, it holds.
+  assert.deepEqual(native.packs, [{ ...installed, behaviors: [] }], 'the name and version are listed, the behaviour is not there');
+  assert.equal(await pack.ensure(), false, 'still not believed');
+  broken = false;
+  assert.equal(await pack.ensure(), true);
+  assert.deepEqual(native.packs, [installed], 'installed again, whole');
+  assert.equal(native.calls.filter(c => c.path === '/api/packs/add').length, 3);
+});
+
+test('a slow engine does not hold a message for the pack: the wait is short, the installation finishes by itself', async t => {
+  const r = await setup(t); await r.bridge.createBot({ name: 'Ada' });
+  const request = r.native.request.bind(r.native); let release!: () => void; const gate = new Promise<void>(done => { release = done; });
+  r.native.request = (async (path: string, options?: any) => { if (path === '/api/packs') await gate; return request(path, options); }) as typeof r.native.request;
+  const patience = ChatPack.patience; (ChatPack as any).patience = 40; t.after(() => { (ChatPack as any).patience = patience; });
+  const started = Date.now();
+  assert.equal(await r.say('Ada', '在吗'), 200);
+  assert.ok(Date.now() - started < 1500, 'sent after the short wait, not after the engine answered');
+  assert.deepEqual(r.native.packs, [], 'the pack is not there yet');
+  assert.equal(r.native.calls.filter(c => c.path === '/api/messages').length, 1);
+  // A second message during the same wait joins the same installation instead of starting another.
+  assert.equal(await r.say('Ada', '还在吗'), 200);
+  release();
+  assert.equal(await r.bridge.manner.ensure(), true);
+  assert.deepEqual(r.native.packs, [installed]);
+  const adds = r.native.calls.filter(c => c.path === '/api/packs/add');
+  assert.equal(adds.length, 1); assert.equal(existsSync(adds[0]!.body.source), false);
+  // The wait itself: no timer is left behind, and a pack in place answers at once.
+  assert.equal(await r.bridge.manner.ready(1), true);
+});
+
+test('another pack in the engine is the owner’s: nothing is installed beside it, wherever ours would be listed, and that is said', async t => {
+  const lines = quiet(t);
+  // The pinned engine applies the first pack of a directory listing. Ours would come before `writing-style` and silence it; after `another-pack` it would do nothing.
+  for (const name of ['writing-style', 'another-pack']) {
+    const native = new NativeFixture(), pack = new ChatPack(native);
+    const theirs = { name, version: '2.0.0', description: '别人的', packType: 'domain', behaviors: ['别的默认行为'] };
+    native.packs = [theirs];
+    assert.equal(await pack.ensure(), false); assert.equal(await pack.ensure(), false);
+    assert.deepEqual(native.packs, [theirs], 'theirs is the only pack, as before');
+    assert.equal(native.calls.some(c => c.path === '/api/packs/add' || c.method === 'DELETE'), false);
+    assert.equal(lines.filter(line => line === `🐾 chat pack not in effect: the engine has another pack (${name}), which is left as it is`).length, 1, 'said once');
+  }
+  // Ours already there and first (installed before theirs was): it is in effect and stays; an older wording of ours is not replaced beside theirs.
+  const native = new NativeFixture(), pack = new ChatPack(native), theirs = { name: 'writing-style', version: '2.0.0', description: '别人的', packType: 'style', behaviors: ['别的'] };
   native.packs = [installed, theirs];
   assert.equal(await pack.ensure(), true);
+  const older = { ...installed, version: '1.0.0-00000000' }; native.packs = [older, theirs];
+  assert.equal(await new ChatPack(native).ensure(), false);
+  assert.deepEqual(native.packs, [older, theirs]);
+  // Ours listed after theirs is not the one applied.
+  native.packs = [{ ...theirs, name: 'another-pack' }, installed];
+  assert.equal(await new ChatPack(native).ensure(), false);
+  assert.equal(native.calls.some(c => c.path === '/api/packs/add'), false);
+  // The owner removes theirs: ours goes in with the next message.
+  native.packs = [];
+  assert.equal(await new ChatPack(native).ensure(), true); assert.deepEqual(native.packs, [installed]);
 });
 
 test('there is no switch: a cat’s profile does not say `concise`, and it cannot be set', async t => {

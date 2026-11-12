@@ -62,7 +62,7 @@ export class NativeFixture implements NativeTransport {
   memoryViews: Record<string, any> = { profile: {readStatus:'ready',entries:[]}, taste: {readStatus:'ready',entries:[]} };
   uploads = new Map<string, Buffer>();
   fail?: ApiError;
-  /** Installed engine packs, in the order the engine lists them (F129): the manifest and, for this fixture, the default behaviours read from the source. */
+  /** Installed engine packs in the order the engine lists them (F129) — the first is the one it applies: the manifest and, for this fixture, the default behaviours read from the source. */
   packs: Array<{ name: string; version: string; description: string; packType: string; behaviors: string[] }> = [];
   async request<T>(path: string, options: { method?: string; body?: any } = {}): Promise<T> {
     const method = options.method ?? 'GET', body = options.body;
@@ -77,7 +77,8 @@ export class NativeFixture implements NativeTransport {
     else if (path === '/api/packs' && method === 'GET') result = { packs: this.packs.map(({ behaviors: _behaviors, ...manifest }) => manifest) };
     else if (path === '/api/packs/add' && method === 'POST') {
       const manifest = readPack(body?.source);
-      this.packs = [...this.packs.filter(pack => pack.name !== manifest.name), manifest];
+      // The engine lists its pack directory, not the order of installation: here, by name.
+      this.packs = [...this.packs.filter(pack => pack.name !== manifest.name), manifest].sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
       const { behaviors: _behaviors, ...listed } = manifest;
       result = { ok: true, manifest: listed };
     }

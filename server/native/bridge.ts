@@ -236,7 +236,7 @@ export class BotBridge {
         if (work.activeInvocations.length || work.queue.length) return { status: 'exists' };
       }
       // The first thing a cat says in a conversation is said the way a chat is talked in, too.
-      await this.manner.ensure();
+      await this.manner.ready();
       if (meta.activeThreadId !== threadId) throw new ApiError(409, '对话已切换，请重新打开');
       // Record only that this empty chat requested an opening. An uncertain
       // POST may already have landed. Explicit recovery reuses the same native
@@ -535,7 +535,7 @@ export class BotBridge {
     const attachments = body.attachments?.length ? await this.workspaces.attachments(thread.id, body.attachments) : [];
     const replyTo = body.reply_to ? this.store.messageId(thread.id, body.reply_to) : undefined;
     if (body.reply_to && !replyTo) throw new ApiError(400, '引用的消息不存在，请刷新对话');
-    await this.manner.ensure();
+    await this.manner.ready();
     return this.native.request('/api/messages', { method: 'POST', body: {
       threadId: thread.id, content: body.text, idempotencyKey: body.idempotencyKey ?? randomUUID(),
       // Native admission binds the exact active parent and appends without interrupting.
