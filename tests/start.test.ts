@@ -242,6 +242,10 @@ test('a face is a cat with its own tool: without that tool here the cat cannot b
   r.native.runtimes = [runtime('codex', 'openai', 'login_required'), runtime('claude', 'anthropic', 'configured')];
   assert.deepEqual((await tools())['maine-coon'], { label: 'Codex', state: 'login', usable: false, reason: 'Codex 还没有登录', loginCommand: 'codex login' });
   assert.deepEqual(await post('砚砚', { face: 'maine-coon' }), [422, 'face_unavailable', 'Codex 还没有登录，登录后再试。']);
+  // With no tool usable at all, 自定义 is not offered as a way out: it would need a tool too.
+  r.native.runtimes = [runtime('codex', 'openai', 'not_installed'), runtime('agy-native', 'google', 'configured', { label: 'AGY Native', agyCarrier: 'native' })];
+  assert.deepEqual(await post('砚砚', { face: 'maine-coon' }), [422, 'face_unavailable', '这台电脑上还没有装 Codex，所以这只猫猫现在领不了。装好并登录后再试。']);
+  assert.deepEqual(await post('烁烁', { face: 'siamese' }), [422, 'face_unavailable', '这个应用还接不上 AGY Native，所以这只猫猫现在领不了。']);
   // Kimi installed: 梵花猫's cat can be made, on Kimi.
   r.native.runtimes = [runtime('claude', 'anthropic', 'configured'), runtime('kimi', 'kimi', 'configured', { label: 'Kimi' })];
   assert.deepEqual((await tools())['turkish-van'], { label: 'Kimi', state: 'ready', usable: true, id: 'kimi' });
