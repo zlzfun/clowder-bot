@@ -68,14 +68,16 @@
   });
   // What the switch shows: what the server confirmed, never what was asked
   // for. read: the profile's `concise` (anything but a boolean is not known:
-  // no switch). hold: the PATCH's answer {value, reads} (reads: profile reads
-  // seen since it). The answer stands until a read agrees with it, or until
-  // the second read after it, which was surely asked for after the change
-  // (the first may have been asked for before it, and say what was).
-  function briefShown(read, hold) {
+  // no switch). hold: the latest PATCH's answer {value, after}, where after
+  // numbers the last profile read asked for before that answer came; asked:
+  // the number of the read `read` came from. The answer stands over every
+  // read asked for before it (one may have left before the change and say
+  // what was, even when it happens to agree), and gives way to the first
+  // read asked for after it, whatever that one says.
+  function briefShown(read, hold, asked) {
     const known = typeof read === "boolean" ? read : null;
     if (!hold || typeof hold.value !== "boolean") return { value: known, keep: false };
-    if (known === hold.value || (known !== null && hold.reads >= 2)) return { value: known, keep: false };
+    if (known !== null && Number(asked) > Number(hold.after)) return { value: known, keep: false };
     return { value: hold.value, keep: true };
   }
 

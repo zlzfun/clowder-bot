@@ -260,22 +260,34 @@
     return text;
   }
 
-  // The owner's message a reply answered (native replyTo), when it can simply
-  // be sent again: it is the owner's own words (not an event), and the owner
-  // has not already sent the same words again after the reply.
+  // What a reply was answering, when it can simply be sent again: the owner's
+  // message it answered (native replyTo), and the messages the owner said
+  // after it had begun and the engine let it take in (listed among its
+  // lifecycle.inputMessageIds, and each one's own record saying this reply
+  // accepted it), in the order they were said, those on this page only. Each
+  // is the owner's own words (not an event); nothing is offered when the
+  // owner already sent the first one's words again after the reply. Returns
+  // {id, text, files} of the first, with every one of them in `all`.
   function resend(messages, m, group) {
     const id = m && m.native && typeof m.native.replyTo === "string" ? m.native.replyTo : "";
     if (!id || !Array.isArray(messages)) return null;
     const mine = (x) => !!x && (group ? x.kind === "person" : x.role === "user" && !x.internal);
     const idOf = (x) => String((x && (x.native_message_id || x.id)) || "");
     const textOf = (x) => String((group ? x.text : x.content) || "").trim();
+    const words = (x) => { const t = textOf(x); return !!t && !t.startsWith("<untrusted_event"); };
     const at = messages.findIndex((x) => mine(x) && idOf(x) === id);
-    if (at < 0) return null;
+    if (at < 0 || !words(messages[at])) return null;
     const text = textOf(messages[at]);
-    if (!text || text.startsWith("<untrusted_event")) return null;
     const from = Math.max(at, messages.indexOf(m));
     for (let i = from + 1; i < messages.length; i++) if (mine(messages[i]) && textOf(messages[i]) === text) return null;
-    return { id, text, files: (messages[at].attachments || []).length };
+    const self = m.native && typeof m.native.id === "string" ? m.native.id : idOf(m);
+    const inputs = m.native.lifecycle && Array.isArray(m.native.lifecycle.inputMessageIds) ? m.native.lifecycle.inputMessageIds : [];
+    const taken = (x) => (x.native && x.native.lifecycle && Array.isArray(x.native.lifecycle.dispatchRefs) ? x.native.lifecycle.dispatchRefs : [])
+      .some((r) => !!r && r.appendAcceptance === "accepted" && r.statusMessageId === self);
+    const later = messages.map((x, i) => [x, i]).filter(([x, i]) => i !== at && mine(x) && inputs.includes(idOf(x)) && taken(x) && words(x));
+    const all = [[messages[at], at], ...later].sort((a, b) => a[1] - b[1])
+      .map(([x]) => ({ id: idOf(x), text: textOf(x), files: (x.attachments || []).length }));
+    return { id, text, files: (messages[at].attachments || []).length, all };
   }
 
   window.ClowderCardsRules = Object.freeze({

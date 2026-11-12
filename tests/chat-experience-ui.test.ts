@@ -668,6 +668,58 @@ test('a reply is confirmed read only after it stays in sight on a visible page; 
   void latest;
 });
 
+test('a reply drawn below the newest although it came first (under a follow-up it took in) has to have been in sight before the newest is confirmed read, since the read position covers it (round 10 review item 1)', async () => {
+  // The engine's order is question, A, B, follow-up; A took the follow-up in, so the chat draws question, B, follow-up, A
+  // (chat-live-rules.js order()), and B is the newest reply the activity names. What app.js hands over: displaced() on what it drew.
+  const window: Any = {};
+  vm.runInNewContext(read('client/public/chat-live-rules.js'), { window });
+  const L = window.ClowderLiveRules;
+  const rows = [{ id: 'q', kind: 'person' }, { id: 'A', kind: 'bot', follows: 'f' }, { id: 'B', kind: 'bot' }, { id: 'f', kind: 'person' }];
+  const drawn = { messages: rows, order: L.order(rows, true), group: true };
+  let asked: string[] = [];
+  const route = (path: string, method: string, body: Any) => {
+    if (path.endsWith('/activity')) return activity({ unread: 2, latestMessageId: 'B' });
+    if (path.endsWith('/read') && method === 'POST') return { threadId: body.expectedThreadId, readMessageId: body.messageId };
+    return {};
+  };
+  const p = page(route, { displacedBefore: (id: string) => { asked.push(id); return L.displaced(drawn, id); } });
+  p.cx.select(ada);
+  const b = p.row('B', 100), a = p.row('A', 900);
+  p.cx.observe(ada, 'thread-A', true);
+  await settle();
+  await p.advance(2000);
+  assert.deepEqual(p.posts(), [], 'B is in sight, but A (below the view) is not: confirming B would mark A read');
+  assert.ok(asked.includes('B'));
+  // The owner scrolls down to A (B leaves the view): still nothing, B is not in sight now.
+  a.rect = { top: 300, bottom: 340 }; b.rect = { top: -200, bottom: -160 };
+  p.thread.dispatchEvent(new Ev('scroll'));
+  await p.advance(300); await p.advance(1000);
+  assert.deepEqual(p.posts(), []);
+  // Back up to B: A has been seen, so B is confirmed (and with it A, as the server's position is cumulative).
+  a.rect = { top: 900, bottom: 940 }; b.rect = { top: 100, bottom: 140 };
+  p.thread.dispatchEvent(new Ev('scroll'));
+  await p.advance(300); await p.advance(1000);
+  assert.deepEqual(p.posts(), [{ path: '/xbot-api/bots/Ada/read', method: 'POST', body: { expectedThreadId: 'thread-A', messageId: 'B' } }]);
+
+  // Both in sight at once: confirmed straight away. A displaced reply that is not drawn at all has nothing to be seen and does not hold it up.
+  asked = [];
+  const q = page(route, { displacedBefore: () => ['A', 'not-drawn'] });
+  q.cx.select(ada);
+  q.row('B', 100); q.row('A', 200);
+  q.cx.observe(ada, 'thread-A', true);
+  await settle();
+  await q.advance(2000);
+  assert.deepEqual(q.posts().map((c: Any) => c.body.messageId), ['B']);
+  // Nothing moved (no hook, or nothing displaced): the same as before.
+  const r = page(route);
+  r.cx.select(ada);
+  r.row('B', 100); r.row('A', 900);
+  r.cx.observe(ada, 'thread-A', true);
+  await settle();
+  await r.advance(2000);
+  assert.deepEqual(r.posts().map((c: Any) => c.body.messageId), ['B']);
+});
+
 test('a hidden page, a covered chat, or reading older messages never clears the newest unread; the line offers the new reply instead', async () => {
   const p = reading();
   p.cx.select(ada);

@@ -541,6 +541,15 @@
     });
     out.push(...keep);
     S.glide = swapped(live, out, was);
+    // Moving a row takes it out of the page for a moment, and focus with it
+    // (a message a search jumped to, a button inside a row): it comes back.
+    // A row drawn anew in its place (it changed: a message that now continues
+    // the one above it) hands focus to the row that replaced it.
+    const doc = typeof document !== "undefined" ? document : null;
+    const focused = doc && doc.activeElement && doc.activeElement !== doc.body && live.contains(doc.activeElement) ? doc.activeElement : null;
+    const holder = focused ? kids(live).find((k) => k === focused || k.contains(focused)) || null : null;
+    let successor = null;
+    if (holder) for (const [n, old] of was) if (old === holder) successor = n;
     const wanted = new Set(out);
     for (const n of kids(live)) if (!wanted.has(n)) n.remove();
     const now = kids(live);
@@ -555,6 +564,13 @@
         if (n.classList.contains("msg")) n.classList.add("lv-still");
       }
     }
+    if (focused && doc.activeElement !== focused) {
+      if (focused.isConnected) { if (typeof focused.focus === "function") focused.focus({ preventScroll: true }); }
+      else if (successor && successor.isConnected && typeof successor.focus === "function") {
+        if (successor.tabIndex < 0 && !successor.hasAttribute("tabindex")) successor.tabIndex = -1;
+        successor.focus({ preventScroll: true });
+      }
+    }
     live.className = next.className;
     for (const k of ["chat", "chatThread"]) {
       if (next.dataset[k] != null) live.dataset[k] = next.dataset[k];
@@ -562,11 +578,15 @@
     }
     return added;
   }
+  // A row's glide still running, so that a second reorder within it starts
+  // from where the row is seen, not from where it would be without it.
+  const runs = new WeakMap();
   // The rows a drawing puts out of their old order on screen, from the first
   // that now comes after a row that was below it to the last that now comes
-  // before one that was above it, each with where it was (a changed row:
-  // where its old element was), measured before anything moves. null when
-  // the order stayed, as it nearly always does, or motion is reduced.
+  // before one that was above it, each with where it is seen (a changed row:
+  // its old element), measured before anything moves; a glide still running
+  // on one is then cancelled, so where it lands is measured without it. null
+  // when the order stayed, as it nearly always does, or motion is reduced.
   function swapped(live, out, was) {
     if (reduced()) return null;
     const on = new Map(kids(live).map((n, i) => [n, i]));
@@ -582,7 +602,10 @@
     const list = [];
     for (let k = first; k <= last; k++) {
       const o = was.get(out[k]) || out[k];
-      if (at[k] >= 0 && typeof o.getBoundingClientRect === "function") list.push({ n: out[k], top: o.getBoundingClientRect().top });
+      if (at[k] < 0 || typeof o.getBoundingClientRect !== "function") continue;
+      list.push({ n: out[k], top: o.getBoundingClientRect().top });
+      const run = runs.get(o);
+      if (run) { runs.delete(o); try { run.cancel(); } catch (e) { /* already finished */ } }
     }
     return list.length ? list : null;
   }
@@ -599,7 +622,11 @@
       if (!n.isConnected || typeof n.animate !== "function" || typeof n.getBoundingClientRect !== "function") continue;
       const dy = top - n.getBoundingClientRect().top;
       if (Math.abs(dy) < 1 || (view && Math.abs(dy) > view)) continue;
-      n.animate([{ transform: "translateY(" + Math.round(dy) + "px)" }, { transform: "none" }], { duration: 180, easing: "ease-out" });
+      const run = n.animate([{ transform: "translateY(" + Math.round(dy) + "px)" }, { transform: "none" }], { duration: 180, easing: "ease-out" });
+      if (run) {
+        runs.set(n, run);
+        run.onfinish = () => { if (runs.get(n) === run) runs.delete(n); };
+      }
     }
   }
   // The rows this page holds and the history does not draw: sends, reply

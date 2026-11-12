@@ -212,7 +212,21 @@ test('an unfinished reply says how it ended; the server\'s stand-in words and a 
     { id: 'u1', native_message_id: 'u1', role: 'user', content: '失败了吗' },
     { id: 'r1', role: 'assistant', native: { replyTo: 'u1' }, ended: { how: 'failed' } },
   ];
-  assert.deepEqual(plain(R.resend(messages, messages[1], false)), { id: 'u1', text: '失败了吗', files: 0 });
+  assert.deepEqual(plain(R.resend(messages, messages[1], false)), { id: 'u1', text: '失败了吗', files: 0, all: [{ id: 'u1', text: '失败了吗', files: 0 }] });
+  // A reply that took in what the owner said meanwhile was answering all of it: every one, in the order said, the owner's own words,
+  // those its record lists and that say this reply accepted them (one that stayed pending, or went to another reply, was answered elsewhere).
+  const took = (by: string, how = 'accepted') => ({ kind: 'input', dispatchRefs: [{ targetId: 'c', statusMessageId: by, appendAcceptance: how }] });
+  const went = [
+    { id: 'u1', native_message_id: 'u1', role: 'user', content: '看看这个', attachments: [{ id: 'f' }] },
+    { id: 'a1', native_message_id: 'a1', role: 'assistant', ended: { how: 'failed' }, native: { id: 'a1', replyTo: 'u1', lifecycle: { status: 'failed', inputMessageIds: ['u1', 'u2', 'u3', 'u4', 'u5', 'gone'] } } },
+    { id: 'u2', native_message_id: 'u2', role: 'user', content: '还有导出', native: { lifecycle: took('a1') } },
+    { id: 'u3', native_message_id: 'u3', role: 'user', content: '再加一句', native: { lifecycle: took('a1', 'pending') } },
+    { id: 'u4', native_message_id: 'u4', role: 'user', content: '<untrusted_event source="timer">\n喝水\n</untrusted_event>', native: { lifecycle: took('a1') } },
+    { id: 'u5', native_message_id: 'u5', role: 'user', content: '最后一点', native: { lifecycle: took('a1') } },
+  ];
+  assert.deepEqual(plain(R.resend(went, went[1], false).all), [{ id: 'u1', text: '看看这个', files: 1 }, { id: 'u2', text: '还有导出', files: 0 }, { id: 'u5', text: '最后一点', files: 0 }]);
+  const elsewhere = went.map((m) => (m.id === 'u2' ? { ...m, native: { lifecycle: took('a9') } } : m));
+  assert.deepEqual(plain(R.resend(elsewhere, elsewhere[1], false).all).map((x: Any) => x.id), ['u1', 'u5']);
   const again = [...messages, { id: 'u2', native_message_id: 'u2', role: 'user', content: '失败了吗' }];
   assert.equal(R.resend(again, again[1], false), null, 'already sent again');
   assert.equal(R.resend([{ id: 'u', role: 'user', content: '<untrusted_event source="timer">\n喝水\n</untrusted_event>' }, { id: 'r', role: 'assistant', native: { replyTo: 'u' } }], { id: 'r', native: { replyTo: 'u' } }, false), null, 'an event is not the owner\'s words');
@@ -752,6 +766,40 @@ test('an unfinished reply ends quietly: 详情 shows the engine\'s reason verbat
   assert.match(p.row('r1').textContent, /已再发一次/);
   p.draw([...history, { id: 'u3', role: 'user', content: '帮我查一下' }]);
   assert.doesNotMatch(p.row('r1').textContent, /再发一次/);
+});
+
+test('再发一次 on a reply that took in what was said meanwhile sends all of it again, each as the message it was, one after the other; one not taken stops the rest and the line says how many went', async () => {
+  const took = { kind: 'input', dispatchRefs: [{ targetId: 'c', statusMessageId: 'r1', appendAcceptance: 'accepted' }] };
+  const history = [
+    { id: 'u1', native_message_id: 'u1', role: 'user', content: '帮我查一下' },
+    { id: 'r1', native_message_id: 'r1', role: 'assistant', content: '这次没完成，请查看详情', status: 'failed', ended: { how: 'failed' }, follows: 3,
+      native: { id: 'r1', replyTo: 'u1', lifecycle: { status: 'failed', inputMessageIds: ['u1', 'u2', 'u3'] } } },
+    { id: 'u2', native_message_id: 'u2', role: 'user', content: '顺便看下导出', native: { lifecycle: took } },
+    { id: 'u3', native_message_id: 'u3', role: 'user', content: '还有同步', native: { lifecycle: took } },
+  ];
+  const settle = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
+  const p = page();
+  p.draw(history);
+  const line = p.row('r1').querySelector('.ck-ended')!;
+  assert.equal(button(line, '再发一次').getAttribute('aria-label'), '再发一次：帮我查一下，共 3 句');
+  button(line, '再发一次').click();
+  assert.deepEqual(p.sends.map((s: Any) => s.text), ['帮我查一下'], 'one at a time');
+  p.sends[0].sent(); p.sends[0].done(); await settle();
+  assert.deepEqual(p.sends.map((s: Any) => s.text), ['帮我查一下', '顺便看下导出'], 'the next once the one before was handled, in the order said');
+  assert.match(line.textContent, /正在发送…/, 'not said to be done before the last one went');
+  p.sends[1].sent(); p.sends[1].done(); await settle();
+  p.sends[2].sent();
+  assert.match(line.textContent, /已再发一次（3 句）/);
+  // Not taken: what went is said, the rest is not sent, and nothing offers to send it all twice.
+  const q = page();
+  q.draw(history);
+  const other = q.row('r1').querySelector('.ck-ended')!;
+  button(other, '再发一次').click();
+  q.sends[0].sent(); q.sends[0].done(); await settle();
+  q.sends[1].done(); await settle();
+  assert.equal(q.sends.length, 2);
+  assert.match(other.textContent, /再发了 1 句，第 2 句没有发出去/);
+  assert.doesNotMatch(other.textContent, /再发一次$/);
 });
 
 // ---------------------------------------------------------------- notifications page

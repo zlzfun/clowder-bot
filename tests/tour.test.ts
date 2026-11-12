@@ -543,9 +543,12 @@ test('the guide speaks the app\'s own words, says once that the chats are staged
 
 test('回复是活的 says once that the cats talk as in a chat, that each cat can switch it, and how to see a follow-up join the reply being written', () => {
   const section = /<section[^>]*id="a-live"[\s\S]*?<\/section>/.exec(html)![0];
-  assert.match(section, /<p>平常它们像聊天一样说话：先说结论，几句话说完；你要清单、表格、代码或长文时才照给。每只猫的资料页里都有「说话简短」，可以单独开关。<\/p>/);
-  assert.equal((html.match(/像聊天一样说话|可以单独开关/g) || []).length, 2, 'said once, where it fits');
-  assert.match(section, /同一条回复把你后来说的也一起回答，排在你这句下面/);
+  // Said as what it is: cats made here are asked to talk this way, it can be switched per cat, and a change shows in a new conversation.
+  assert.match(section, /<p>在这里建的猫，会被叮嘱像聊天一样说话：先说结论，几句话说完，要清单、表格、代码或长文时照给。每只猫的资料页里可以开关「说话简短」，改了从新对话开始生效。<\/p>/);
+  assert.equal((html.match(/像聊天一样说话|开关「说话简短」/g) || []).length, 2, 'said once, where it fits');
+  // Taken in only when the cat can take it in; otherwise it answers afterwards, in a reply of its own.
+  assert.match(section, /它接得住，就在同一条回复里一起回答，排在你这句下面；接不住，写完这条再另起一条回答。/);
+  assert.doesNotMatch(section, /同一条回复把你后来说的也一起回答/);
   assert.match(section, /<p class="t-try"><span class="t-try-k">怎么试<\/span>[^<]*；或者趁它还在写再说一句，看它在同一条回复里接着回答<\/p>/);
   // The picture of 资料 shows the switch, and its words say so.
   assert.match(html, /alt="宪宪的资料页：[^"]*「说话简短」/);

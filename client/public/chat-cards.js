@@ -284,27 +284,40 @@
     const again = e.again ? R.resend(messages, m, group) : null;
     if (again) {
       const btn = button("text-btn ck-link", "再发一次", () => resend(again, btn));
-      btn.setAttribute("aria-label", "再发一次：" + R.oneLine(again.text).slice(0, 40));
+      const count = (again.all || []).length;
+      btn.setAttribute("aria-label", "再发一次：" + R.oneLine(again.text).slice(0, 40) + (count > 1 ? "，共 " + count + " 句" : ""));
       line.append(btn);
     }
     body.append(line);
     if (reason) body.append(reason);
   }
-  // Sends the same words again as a new message, through the normal send
-  // path, and says so once the server took it (the new message shows below).
+  // Sends what the reply was answering again, each as the ordinary message
+  // it was, in order, through the normal send path, one after the server
+  // took the one before; says so once the server took them (the new messages
+  // show below). If one is not taken, the ones after it are not sent: the
+  // send path says why under it, and the line says how many went.
   async function resend(again, btn) {
+    const list = again.all && again.all.length ? again.all : [again];
     btn.setAttribute("aria-disabled", "true");
     btn.textContent = "正在发送…";
-    let went = false;
-    const sent = () => {
-      went = true;
-      const said = node("span", "ck-said", "已再发一次" + (again.files ? "（附件没有一起发）" : ""));
+    let went = 0;
+    const tell = () => {
+      const files = list.slice(0, went).some((one) => one.files);
+      const words = went === list.length ? "已再发一次" + (list.length > 1 ? "（" + list.length + " 句）" : "") : "再发了 " + went + " 句，第 " + (went + 1) + " 句没有发出去";
+      const said = node("span", "ck-said", words + (files ? "（附件没有一起发）" : ""));
       said.setAttribute("role", "status");
       if (btn.isConnected) btn.replaceWith(said);
     };
-    try { await H.send(again.text, sent); } catch (e) { /* the send path said why */ }
-    if (went) return;
-    // Not sent: the send path says why under the message; the action is offered again.
+    for (let k = 0; k < list.length; k++) {
+      let took = false;
+      // The last one is told as soon as the server took it; each one before it is sent after the one before was handled.
+      const sending = H.send(list[k].text, () => { took = true; went++; if (went === list.length) tell(); });
+      try { await sending; } catch (e) { /* the send path said why */ }
+      if (!took) break;
+    }
+    if (went === list.length) return;
+    if (went) { tell(); return; }
+    // Nothing was sent: the send path says why under the message; the action is offered again.
     btn.removeAttribute("aria-disabled");
     btn.textContent = "再发一次";
   }
