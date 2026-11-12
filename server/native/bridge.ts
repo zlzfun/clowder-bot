@@ -203,8 +203,12 @@ export class BotBridge {
       const text = refusal ?? messageDisplayText(message, thread.id, presentation.speaker?.name), inProgress = replyInProgress(message);
       const rich = message.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(message, decided), ending = replyEnding(message);
       // At the top of a page that continues further back, what came just before is not known; no quote is guessed there.
+      // …and a reply that answers several of the owner's messages at once (the engine lists them as its inputs) stands under
+      // the last of them: quoting the first, two lines up, says nothing new.
+      const inputs = message.type !== 'user' && Array.isArray(message.lifecycle?.inputMessageIds) ? message.lifecycle.inputMessageIds as unknown[] : [];
+      const answersBoth = lastUser !== undefined && inputs.includes(lastUser) && inputs.includes(message.replyTo);
       const quoted = message.replyTo && message.replyTo !== source
-        && !(message.type !== 'user' && (message.replyTo === lastUser || message.replyTo === previous || (lastUser === undefined && page.hasMore))) ? message.replyTo : undefined;
+        && !(message.type !== 'user' && (message.replyTo === lastUser || message.replyTo === previous || answersBoth || (lastUser === undefined && page.hasMore))) ? message.replyTo : undefined;
       if (message.type === 'user') lastUser = message.id;
       // …and the same for a reply right under any other line it answers (a reminder that came due).
       previous = message.id;

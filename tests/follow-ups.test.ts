@@ -59,6 +59,13 @@ test('a reply that took in what the owner said meanwhile says which message it n
   r.native.messages.set(thread.id, [said('u1', 100, 'x', { by: 'a1' }), reply('a1', 101, cat.id, 'y', ['u1', 'gone', 7 as never, 'a9']), reply('a9', 102, cat.id, 'z', ['u1'])]);
   assert.ok((await r.get('/xbot-api/bots/Ada/transcript')).messages.every((row: any) => !('follows' in row)));
 
+  // Two messages said before the reply began are both its inputs: it stands under the second and does not quote the first.
+  // A reply to an earlier message that is not answering what stands right above it still quotes.
+  r.native.messages.set(thread.id, [said('u1', 100, '画一张启动图。', { by: 'a1' }), said('u2', 101, '再加一只蝴蝶。', { by: 'a1' }), reply('a1', 102, cat.id, '好。', ['u1', 'u2']),
+    said('u3', 200, '另一件事。', { by: 'a3' }), reply('a2', 201, cat.id, '回到启动图：改好了。', ['u1'])]);
+  const quotes = (await r.get('/xbot-api/bots/Ada/transcript')).messages.filter((row: any) => row.role === 'assistant');
+  assert.deepEqual(quotes.map((row: any) => [row.id, row.reply_to > 0]), [['a1', false], ['a2', true]]);
+
   // The engine lists a message among a reply's inputs before the tool has confirmed taking it in, and keeps it there when that
   // stayed uncertain. The reply is only placed after a message whose own record says that this reply, of this cat, accepted it.
   const unsure = async (later: NativeMessage) => {
