@@ -43,6 +43,12 @@ test('a reply that took in what the owner said meanwhile says which message it n
   assert.deepEqual(rows.map((row: any) => row.follows ?? null), [null, seq('u3'), null, null, null, null]);
   // What it wrote reads as one reply: its own signature in the middle is not shown.
   assert.equal(rows[1].content, '因为安全。\n\n狗喜欢开阔的地方。');
+  // In the contact list the conversation's last line is the later of the two as the chat draws them: here the plain last reply…
+  const last = async () => (await r.get('/xbot-api/bots/status')).bots[0].activity.last;
+  assert.deepEqual([(await last()).messageId, (await last()).from], ['a2', 'cat']);
+  // …and, with nothing after the follow-ups, the reply that took them in — not the owner's follow-up — at the follow-up's time.
+  r.native.messages.set(thread.id, r.native.messages.get(thread.id)!.slice(0, 4));
+  assert.deepEqual([(await last()).messageId, (await last()).from, (await last()).text, (await last()).time], ['a1', 'cat', '因为安全。 狗喜欢开阔的地方。', new Date(107).toISOString()]);
 
   // While it is still being written the same holds, so the reply can stay under what it is answering.
   r.native.messages.get(thread.id)!.push(said('u5', 300, '长一点。', { by: 'a3' }), reply('a3', 301, cat.id, '好，', ['u5', 'u6'], 'processing'), said('u6', 303, '不，短一点。', { by: 'a3', appended: true }));

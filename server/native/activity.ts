@@ -94,8 +94,13 @@ export class Activity {
           view.unreadHasMore = data.hasMore && (!cursor || !!oldest && after(oldest, cursor));
           view.latestMessageId = replies.at(-1)?.id ?? null;
           // What the owner said counts too, except the opening invitation the app sent on their behalf.
+          // A reply that took in something the owner said after it had begun is the later of the two, as the chat draws it
+          // (bridge.laterInputs): the conversation's last line is then the cat's answer, not the owner's follow-up.
+          const later = this.bridge.laterInputs(data.messages as NativeMessage[]);
+          const followed = (message: NativeMessage) => (data.messages as NativeMessage[]).find(other => other.id === later.get(message.id));
+          const spoken = (message: NativeMessage) => { const taken = followed(message); return taken ? Math.max(orderTime(message), orderTime(taken) + 0.5) : orderTime(message); };
           const said = [...replies, ...(data.messages as NativeMessage[]).filter(message => message.type === 'user' && !this.bridge.isInvitation(threadId, message))]
-            .sort((a, b) => orderTime(a) - orderTime(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).at(-1);
+            .sort((a, b) => spoken(a) - spoken(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).at(-1);
           if (said) {
             // A reply that is only a card or a list is named after it.
             const rich = said.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(said);
@@ -103,7 +108,7 @@ export class Activity {
             const words = requestLine(said) ?? messageDisplayText(said, threadId, names.find(cat => cat.id === said.catId)?.name);
             // A cat writes Markdown; the list shows its words. What the owner typed stays as typed.
             const text = ((said.type === 'user' ? words : plainLine(words) || words) || blockLine(rich.blocks) || (rich.hidden ? '发来了暂时无法显示的内容' : '')).replace(/\s+/g, ' ').trim();
-            view.last = { messageId: said.id, time: new Date(said.timestamp).toISOString(), from: said.type === 'user' ? 'owner' : 'cat',
+            view.last = { messageId: said.id, time: new Date(Math.max(said.timestamp, followed(said)?.timestamp ?? 0)).toISOString(), from: said.type === 'user' ? 'owner' : 'cat',
               ...(said.type === 'user' ? {} : annotate(said.catId)), text: clip(text, 140),
               files: this.bridge.workspaces.messageFiles(threadId, said).length };
           }
