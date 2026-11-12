@@ -1,6 +1,6 @@
 /* 开箱即用 (quick-create.js): the first-run 「领一只猫猫回家」 stage (faces
    with a short hint of what each cat is like, and 自定义), the no-chat line,
-   and the quick 新建猫猫 / 新建群聊 dialogs. Loaded after every other style. Only existing tokens (--x-*, the app.css aliases, the motion
+   and the 新建 dialog (猫猫 | 群聊). Loaded after every other style. Only existing tokens (--x-*, the app.css aliases, the motion
    durations and the panel's easing curve); no new colors, fonts or keyframes:
    the original .empty, .modal/.modal-card, .field, .primary, .secondary,
    .text-btn and the clay portraits carry the look. */
@@ -233,9 +233,30 @@
 .qc-none .qc-list { margin-top: var(--x-s6); }
 @media (min-width: 768px) { .qc-none .qc-list { display: none; } }
 
-/* ---- the dialogs, on the original modal card ---- */
-.qc-modal .modal-card { width: min(480px, 100%); max-height: min(88vh, 720px); max-height: min(88dvh, 720px); overscroll-behavior: contain; }
+/* ---- the 新建 dialog, on the original modal card ----
+   It hangs from a fixed line (where a usual card would sit centred), so
+   switching 猫猫 | 群聊 or opening 自定义 never moves its top edge; a change
+   of height is eased (quick-create.js) with the card clipped meanwhile. */
+.qc-modal { --qc-top: max(16px, calc((100vh - 480px) / 2)); place-items: start center; padding-top: var(--qc-top); }
+@supports (height: 100dvh) { .qc-modal { --qc-top: max(16px, calc((100dvh - 480px) / 2)); } }
+.qc-modal .modal-card { width: min(480px, 100%); max-height: min(720px, calc(100vh - var(--qc-top) - 16px)); overscroll-behavior: contain; }
+@supports (height: 100dvh) { .qc-modal .modal-card { max-height: min(720px, calc(100dvh - var(--qc-top) - 16px)); } }
 .qc-card:focus { outline: none; }
+.qc-card.qc-easing { overflow: hidden; }
+/* 新建, and beside it the switch: a quiet segmented pill, the side shown filled as a selected row is. */
+.qc-head { display: flex; align-items: center; justify-content: space-between; gap: var(--x-s5); margin-bottom: var(--x-s1); }
+.qc-head h2 { margin: 0; }
+.qc-switch { flex: none; display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--x-r-pill); background: var(--x-fill-1); }
+.qc-tab {
+  min-width: 64px; height: 30px; padding: 0 var(--x-s6); border: 0; border-radius: var(--x-r-pill);
+  background: transparent; color: var(--x-muted); font-size: var(--x-fs-ui); font-weight: 500;
+  transition: background 160ms ease-out, color 160ms ease-out;
+}
+.qc-tab:hover { color: var(--x-text); }
+.qc-tab[aria-selected="true"] { background: var(--selected); color: var(--x-text); }
+.qc-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.qc-tab[aria-disabled="true"] { cursor: default; }
+.qc-tab[aria-disabled="true"]:not([aria-selected="true"]):hover { color: var(--x-muted); }
 .qc-card .qc-flow, .qc-card .qc-fields { align-items: stretch; }
 .qc-card .qc-faces { margin-top: var(--x-s3); }
 /* The dialog reads left to right: the hint under the row, 自定义 at the edge like 更多设置. */
@@ -288,6 +309,7 @@
   .qc-stage .qc-faces { margin-top: var(--x-s7); }
   .qc-faces.compact { width: min(100%, 280px); margin-inline: auto; }
   .qc-modal .modal-card { padding: var(--x-s7); }
+  .qc-tab { height: 38px; }
   /* At most three lines on a phone: the personality may wrap once, which in
      the narrower dialog it usually does, so three lines stay free there. */
   .qc-trait-line:first-child { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; }

@@ -51,11 +51,8 @@
 .sidebar :is(.side-scroll, .pin-row)::-webkit-scrollbar-thumb { background-color: transparent; }
 .sidebar:is(:hover, :focus-within) :is(.side-scroll, .pin-row)::-webkit-scrollbar-thumb { background-color: var(--scroll); }
 
-/* The collapsed rail (wider windows; below 768px it is the drawer): the search
-   lens keeps the rows' own 8px side space, so beside the list's scrollbar it
-   lines up with the rows instead of poking 1px past the list, and without one
-   it stays where it was. The rail's list never scrolls sideways. */
+/* The collapsed rail (wider windows; below 768px it is the drawer): its list
+   never scrolls sideways. (The search lens it once had is gone, item 43.) */
 @media (min-width: 768px) {
-  .sidebar.rail .pal-entry-wrap { padding-left: 8px; padding-right: 8px; }
   .sidebar.rail .side-scroll { overflow-x: hidden; }
 }

@@ -142,6 +142,11 @@ const faces = (root: El) => named(root, 'qc-face');
 const chosen = (root: El) => faces(root).find(f => f.getAttribute('aria-checked') === 'true')?.getAttribute('aria-label') ?? null;
 const face = (root: El, label: string) => { const f = faces(root).find(x => x.getAttribute('aria-label') === label); assert.ok(f, 'no face ' + label); return f!; };
 const visibleText = (root: El): string => root.hidden ? '' : root.kids.map(k => (k instanceof El ? visibleText(k) : k.textContent)).join('');
+// The 新建 dialog's 猫猫 | 群聊 switch (item 43): a tab by its label, the panel shown.
+const tabOf = (root: El, label: string) => { const t = all(root).find(n => n.getAttribute('role') === 'tab' && n.textContent === label); assert.ok(t, 'no tab ' + label); return t!; };
+const shownPanel = (root: El) => all(root).filter(n => n.getAttribute('role') === 'tabpanel' && !n.hidden);
+// Compare elements without letting a failure print a whole DOM (assert.equal would format both trees).
+const same = (a: unknown, b: unknown, message: string) => assert.ok(a === b, message);
 
 // ---------------------------------------------------------------- the page
 // As app.js api() throws: the status, and the answer's `code` when it has one.
@@ -677,11 +682,11 @@ test('新建猫猫: a small dialog starting in a free name; Escape closes back t
   assert.equal(p.doc.activeElement, name);
   assert.equal(name.selected, 1, 'typing replaces the suggestion');
   assert.equal(button(card, '取消').tabIndex, 0);
-  // Tab from the last control wraps to the first.
+  // Tab from the last control wraps to the first: the selected side of the 猫猫 | 群聊 switch (item 43).
   const go = button(card, '创建');
   go.focus();
   go.key('Tab');
-  assert.equal(p.doc.activeElement, faces(card).find(f => f.tabIndex === 0));
+  same(p.doc.activeElement, tabOf(card, '猫猫'), 'Tab wraps to the selected tab');
   type(name, 'TUANZI');
   p.s.cats.push('tuanzi');
   card.dispatch('submit');
@@ -740,15 +745,26 @@ test('新建猫猫 while the tool needs a login shows what is in the way in the 
 });
 
 // ---------------------------------------------------------------- 新建群聊
-test('新建群聊 with fewer than two cats says a group needs two and offers to add a cat', async () => {
+test('新建群聊 with fewer than two cats says a group needs two and offers to add a cat: 新建猫猫 turns the same dialog to its cat side', async () => {
   const p = page({ cats: ['团子'] });
   p.Q.openGroup({ opener: p.opener });
   const card = one(p.layer()!, 'qc-card');
   assert.equal(visibleText(one(card, 'qc-lead')), '群聊至少要两只猫猫，现在只有 1 只。');
+  same(p.doc.activeElement, button(card, '新建猫猫'), 'focus on the way forward');
+  assert.equal(p.calls.length, 0, 'the cat side is not read before it is shown');
   button(card, '新建猫猫').click();
   await settle();
-  assert.equal(one(p.layer()!, 'qc-card').children[0].textContent, '新建猫猫', 'the cat dialog takes its place');
+  same(one(p.layer()!, 'qc-card'), card, 'the same dialog');
   assert.equal(p.doc.body.children.filter(n => has(n, 'qc-modal')).length, 1);
+  assert.equal(tabOf(card, '猫猫').getAttribute('aria-selected'), 'true');
+  assert.equal(tabOf(card, '群聊').getAttribute('aria-selected'), 'false');
+  assert.equal(shownPanel(card).length, 1);
+  assert.ok(named(shownPanel(card)[0], 'qc-faces').length, 'the cat side is shown');
+  same(p.doc.activeElement, control(card, '名字'), 'focus goes into it, to the name once it is read');
+  assert.equal(all(card).find(n => has(n, 'qc-sr') && n.getAttribute('role') === 'status' && n.textContent === '新建猫猫') ? 'said' : '', 'said', 'the change is announced');
+  // Back on 群聊, the way forward is still there.
+  tabOf(card, '群聊').click();
+  assert.equal(visibleText(one(card, 'qc-lead')), '群聊至少要两只猫猫，现在只有 1 只。');
 });
 
 test('新建群聊: two to ten cats as face chips, in the order picked; the name is optional and its placeholder is the name the group gets', async () => {
@@ -829,6 +845,141 @@ test('新建群聊: an unsure answer keeps the dialog and is resent unchanged un
   assert.deepEqual(p.calls[4].body.members, ['栗子', '团子', '年糕']);
   assert.equal(p.layer(), null);
   assert.deepEqual(p.groups, ['thread-G']);
+});
+
+// ---------------------------------------------------------------- one 新建 dialog (item 43)
+test('新建 is one dialog titled 新建 with a 猫猫 | 群聊 tab list: 猫猫 first and selected, each tab controls its panel, one Tab stop', async () => {
+  const p = page({ cats: ['团子', '栗子'] });
+  p.opener.focus();
+  p.Q.openCat({ opener: p.opener });
+  await settle();
+  const card = one(p.layer()!, 'qc-card');
+  const title = all(card).find(n => n.id === card.getAttribute('aria-labelledby'));
+  assert.equal(title?.textContent, '新建', 'the title does not fight the switch');
+  const list = all(card).find(n => n.getAttribute('role') === 'tablist');
+  assert.ok(list && list.getAttribute('aria-label'), 'a named tab list');
+  const tabs = all(list!).filter(n => n.getAttribute('role') === 'tab');
+  assert.deepEqual(tabs.map(t => t.textContent), ['猫猫', '群聊']);
+  assert.deepEqual(tabs.map(t => t.getAttribute('aria-selected')), ['true', 'false']);
+  assert.deepEqual(tabs.map(t => t.tabIndex), [0, -1], 'the selected tab is the one Tab stop');
+  for (const t of tabs) {
+    const panel = all(card).find(n => n.id === t.getAttribute('aria-controls'));
+    assert.equal(panel?.getAttribute('role'), 'tabpanel');
+    assert.equal(panel?.getAttribute('aria-labelledby'), t.id);
+  }
+  assert.equal(shownPanel(card).length, 1);
+  same(p.doc.activeElement, control(card, '名字'), 'the cat side starts in the name, as before');
+  // The group side is not built (nor anything sent for it) until it is shown; ⌘K's 新建群聊 opens on it, with nothing read for the cat side.
+  assert.equal(named(card, 'qc-chip').length, 0);
+  const q = page({ cats: ['团子', '栗子'] });
+  q.Q.openGroup({ opener: q.opener });
+  await settle();
+  const group = one(q.layer()!, 'qc-card');
+  assert.equal(tabOf(group, '群聊').getAttribute('aria-selected'), 'true');
+  assert.equal(q.calls.length, 0, 'no /start read for the side not shown');
+  same(q.doc.activeElement, all(group).find(n => n.type === 'checkbox'), 'the group side starts on its first cat');
+});
+
+test('the switch: a click or ← → Home End turn the dialog to the other side and keep focus on the tab; each side keeps what was typed and picked', async () => {
+  const p = page({ cats: ['团子', '栗子', '年糕'] });
+  p.Q.openCat({ opener: p.opener });
+  await settle();
+  const card = one(p.layer()!, 'qc-card');
+  face(card, '暹罗猫').click();
+  type(control(card, '名字'), '小白');
+  button(card, '自定义').click();
+  type(control(card, '它主要帮你做什么'), '改简历');
+  const cat = tabOf(card, '猫猫'), group = tabOf(card, '群聊');
+  cat.focus();
+  cat.key('ArrowRight');
+  assert.equal(group.getAttribute('aria-selected'), 'true');
+  same(p.doc.activeElement, group, 'focus moves with the selection');
+  assert.deepEqual([cat.tabIndex, group.tabIndex], [-1, 0]);
+  assert.equal(field(card, '名字'), false, 'the cat side is hidden');
+  const boxes = () => all(card).filter(n => n.type === 'checkbox');
+  const pick = (i: number) => { boxes()[i].checked = true; boxes()[i].dispatch('change'); };
+  pick(2); pick(0);
+  type(control(card, '群名'), '晨会');
+  group.key('ArrowLeft');
+  same(p.doc.activeElement, cat, 'back to 猫猫, focus on its tab');
+  assert.equal(chosen(card), '暹罗猫', 'the face picked stays');
+  assert.equal(control(card, '名字').value, '小白', 'the name typed stays');
+  assert.equal(control(card, '它主要帮你做什么').value, '改简历', '自定义 and its line stay');
+  assert.equal(p.calls.filter(c => c.path.startsWith('/xbot-api/start')).length, 1, 'the cat side is read once, not again on return');
+  cat.key('End');
+  assert.equal(group.getAttribute('aria-selected'), 'true');
+  assert.deepEqual(boxes().filter(b => b.checked).map(b => b.value), ['团子', '年糕']);
+  assert.equal(control(card, '群名').value, '晨会');
+  assert.equal(control(card, '群名').placeholder, '年糕、团子', 'still in the order picked');
+  group.key('Home');
+  assert.equal(cat.getAttribute('aria-selected'), 'true');
+  group.click();
+  assert.equal(group.getAttribute('aria-selected'), 'true', 'a click turns it too');
+  // Enter in the group's name sends the group (each side is its own form), never the cat.
+  control(card, '群名').key('Enter');
+  await settle();
+  assert.deepEqual(p.calls.filter(c => c.method === 'POST').map(c => c.path), ['/xbot-api/groups']);
+  assert.deepEqual({ ...p.calls.at(-1)!.body, idempotencyKey: 'k' }, { members: ['年糕', '团子'], name: '晨会', idempotencyKey: 'k' });
+  assert.equal(p.layer(), null);
+  same(p.doc.activeElement, p.opener, 'focus back on the 新建 it was opened from');
+});
+
+test('the switch does not move while a request is on its way, and a cat side read late does not take focus from the switch', async () => {
+  let release: () => void = () => {};
+  const p = page({ cats: ['团子', '栗子'], route: (path, method) => (path === '/xbot-api/groups' && method === 'POST' ? new Promise(done => { release = () => done({ id: 'g-1' }); }) : undefined) });
+  p.Q.openGroup({ opener: p.opener });
+  const card = one(p.layer()!, 'qc-card');
+  const boxes = all(card).filter(n => n.type === 'checkbox');
+  for (const b of boxes) { b.checked = true; b.dispatch('change'); }
+  card.dispatch('submit');
+  await settle();
+  const cat = tabOf(card, '猫猫');
+  assert.equal(cat.getAttribute('aria-disabled'), 'true');
+  cat.click();
+  assert.equal(cat.getAttribute('aria-selected'), 'false', 'not while the group is being made');
+  release();
+  await settle();
+  assert.equal(p.layer(), null);
+  assert.deepEqual(p.groups, ['g-1']);
+  // The cat side's /start answers after the owner went back to the switch: focus stays on the tab.
+  let answer: (v: unknown) => void = () => {};
+  const q = page({ cats: ['团子', '栗子'], route: (path) => (path.startsWith('/xbot-api/start') ? new Promise(done => { answer = done; }) : undefined) });
+  q.Q.openGroup({ opener: q.opener });
+  const qc = one(q.layer()!, 'qc-card');
+  tabOf(qc, '猫猫').click();
+  same(q.doc.activeElement, tabOf(qc, '猫猫'), 'on the tab');
+  answer(START.ready);
+  await settle();
+  assert.ok(field(qc, '名字'), 'the cat side is ready');
+  same(q.doc.activeElement, tabOf(qc, '猫猫'), 'still on the tab: the late answer does not move focus');
+});
+
+test('switching sides eases a change of the card\'s height (its top edge stays) and fades the side in; at once under reduced motion', async () => {
+  const p = page({ cats: ['团子', '栗子'] });
+  p.Q.openCat({ opener: p.opener });
+  await settle();
+  const card = one(p.layer()!, 'qc-card');
+  const eased: Any[] = [], faded: Any[] = [];
+  card.animate = (frames: Any, options: Any) => { eased.push({ frames, options }); return { finished: Promise.resolve() }; };
+  const heights = (...values: number[]) => { card.getBoundingClientRect = () => ({ left: 0, top: 120, width: 480, height: values.shift() ?? 0 }); };
+  for (const panel of all(card).filter(n => n.getAttribute('role') === 'tabpanel')) panel.animate = (frames: Any) => { faded.push(frames); return { finished: Promise.resolve() }; };
+  heights(430, 360);
+  tabOf(card, '群聊').click();
+  assert.deepEqual(plain(eased), [{ frames: [{ height: '430px' }, { height: '360px' }], options: { duration: 180, easing: 'ease-out' } }]);
+  assert.deepEqual(plain(faded), [[{ opacity: 0 }, { opacity: 1 }]]);
+  await settle();
+  assert.equal(has(card, 'qc-easing'), false, 'clipped only while it eases');
+  p.window.matchMedia = (q: string) => ({ matches: q === '(prefers-reduced-motion: reduce)' });
+  heights(360, 430);
+  tabOf(card, '猫猫').click();
+  assert.equal(eased.length, 1, 'no easing under reduced motion');
+  assert.equal(faded.length, 1);
+  assert.equal(tabOf(card, '猫猫').getAttribute('aria-selected'), 'true');
+  // The dialog hangs from a fixed line, so neither side nor 自定义 moves its top edge.
+  const css = read('client/public/quick-create.css');
+  assert.match(css, /\.qc-modal \{ --qc-top: max\(16px, calc\(\(100vh - 480px\) \/ 2\)\); place-items: start center; padding-top: var\(--qc-top\); \}/);
+  assert.match(css, /\.qc-card\.qc-easing \{ overflow: hidden; \}/);
+  assert.match(css, /\.qc-tab\[aria-selected="true"\] \{ background: var\(--selected\); color: var\(--x-text\); \}/);
 });
 
 // ---------------------------------------------------------------- review fixes (2026-11-11)
@@ -1070,21 +1221,27 @@ test('the shell loads the module before app.js and its styles after every earlie
   assert.ok(at('quick-create-rules.js') < at('quick-create.js') && at('quick-create.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
   // After every earlier style; only the search palette, the 找得到 styles, 资料页与群 (profile.css, mention.css) and the live-reply styles (chat-live.css), which stay last, follow.
-  assert.deepEqual(styles.slice(styles.indexOf('chat-experience.css') + 1), ['quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'profile.css', 'mention.css', 'polish.css', 'chat-cards.css', 'chat-presence.css', 'chat-live.css']);
-  assert.match(html, /aria-label="新建猫猫或群聊"/);
+  assert.deepEqual(styles.slice(styles.indexOf('chat-experience.css') + 1), ['quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'profile.css', 'mention.css', 'polish.css', 'chat-cards.css', 'chat-presence.css', 'sidebar.css', 'chat-live.css']);
+  // 新建 is the sidebar's own button, at the top of the full sidebar and at the bottom of the rail (item 43): one dialog, no menu.
+  assert.match(html, /<button id="side-new" class="side-btn" type="button" aria-haspopup="dialog" aria-label="新建" data-tip="新建"><\/button>/);
+  assert.match(html, /<button id="rail-new" class="side-glyph rail-only" type="button" aria-haspopup="dialog" aria-label="新建" data-tip="新建" data-tip-placement="right"><\/button>/);
+  assert.doesNotMatch(html, /新建猫猫或群聊/);
   // Nothing open: the stage with no cats, else the no-chat line; both hide the composer, as does the pre-login hold.
   assert.match(app, /else if \(!state\.sel\) showNoChat\(\);/);
   assert.match(app, /function showNoChat\(\) \{\n\s+const inner = el\("div", "thread-inner no-chat"\);\n\s+inner\.append\(state\.bots\.length \? quick\.noChat\(\) : quick\.stage\(\)\);/);
   assert.match(app, /const hold = el\("div", "thread-inner no-chat"\);/);
   assert.match(app, /else \{ paintPanel\(\); showNoChat\(\); \}/, 'deleting the last cat comes back to the stage');
   assert.doesNotMatch(app, /左边是你的 Bot|选一个对话/);
-  // 新建: 新建猫猫 is the quick dialog (更多设置 → the template creator); 新建群聊 replaces 新建群组.
-  assert.match(app, /item\("users-plus", "新建群聊", \(\) => openNewGroup\(anchor\)\)/);
-  assert.doesNotMatch(app, /新建群组/);
+  // 新建: the dialog on its 猫猫 side (更多设置 → the template creator); ⌘K 新建群聊 opens it on its 群聊 side. The two-row
+  // menu is gone: no 新建群组, no toggleNewMenu / closeNewMenu / .new-menu, no 新建 tile in the pinned row.
+  assert.match(app, /for \(const id of \["side-new", "rail-new"\]\) \{[\s\S]*?btn\.addEventListener\("click", \(\) => openNewBot\(btn\)\);/);
+  assert.doesNotMatch(app, /新建群组|toggleNewMenu|closeNewMenu|new-menu|"pin add"|\.pin\.add/);
+  assert.match(app, /function openNewGroup\(opener\) \{[\s\S]*?quick\.openGroup\(\{ opener:/);
   assert.match(app, /function openNewBot\(opener\) \{[\s\S]*?quick\.openCat\(\{ opener:/);
   assert.match(app, /more: \(opener\) => openTemplateCreate\(opener\)/);
   assert.match(app, /function openTemplateCreate\(opener\) \{[\s\S]*?window\.ClowderCatTemplates\.openCreate\(\{/);
-  assert.match(app, /if \(ev\.key === "Escape"\) \{ ev\.preventDefault\(\); ev\.stopPropagation\(\); closeNewMenu\(\); \}/);
+  // Focus comes back to the 新建 shown now (the top one, or the rail's).
+  assert.match(app, /opener: \(\) => \[\$\("side-new"\), \$\("rail-new"\)\]\.find\(\(b\) => b && b\.getClientRects\(\)\.length\) \|\| null,/);
   // Where the new cat's portrait lands: its own face in the header.
   assert.match(app, /landing: \(name\) => \[\.\.\.document\.querySelectorAll\("#title \.avatar\[data-avatar-bot\]"\)\]/);
   // Only existing tokens; no new colour literal.
@@ -1339,10 +1496,10 @@ test('新建猫猫 has the same faces, hint and 自定义: the hint names the ca
   mode.click();
   assert.deepEqual(hint(card), [p.R.OWN_NOTE]);
   assert.equal(field(card, '它主要帮你做什么') && field(card, '它的性格'), true);
-  // Focus order (what Tab walks through): the row, 自定义, the name, the two lines, the tool, 更多设置, 取消, 创建.
+  // Focus order (what Tab walks through): the selected side of the switch (item 43), the row, 自定义, the name, the two lines, the tool, 更多设置, 取消, 创建.
   const stops = all(card).filter(n => ['BUTTON', 'INPUT', 'SELECT'].includes(n.tagName) && shown(n) && n.tabIndex >= 0 && !n.disabled);
   const name = (n: El) => n.getAttribute('aria-label') || all(card).find(l => l.tagName === 'LABEL' && l.htmlFor === n.id)?.textContent || n.textContent;
-  assert.deepEqual(stops.map(name), ['蓝灰短毛猫', '自定义', '名字', '它主要帮你做什么可不填', '它的性格可不填', '用哪个 Agent 思考', '更多设置', '取消', '创建']);
+  assert.deepEqual(stops.map(name), ['猫猫', '蓝灰短毛猫', '自定义', '名字', '它主要帮你做什么可不填', '它的性格可不填', '用哪个 Agent 思考', '更多设置', '取消', '创建']);
   mode.focus();
   mode.key('Escape');
   assert.equal(p.layer(), null);
@@ -1739,10 +1896,11 @@ test('the dialog says the same: a quieter face, why under its hint, 创建 not a
   const go = all(card).find(n => n.tagName === 'BUTTON' && n.type === 'submit')!;
   assert.equal(go.getAttribute('aria-disabled'), 'true');
   assert.equal(go.getAttribute('aria-describedby'), idOf(card, 'qc-uses-line'));
-  // What Tab walks through: the row, 自定义 (the way forward), the name, 更多设置, 取消, and 创建 — reachable, saying it is not available and why.
+  // What Tab walks through: the switch's selected side (item 43), the row, 自定义 (the way forward), the name, 更多设置, 取消, and 创建 —
+  // reachable, saying it is not available and why.
   const stops = all(card).filter(n => ['BUTTON', 'INPUT', 'SELECT'].includes(n.tagName) && shown(n) && n.tabIndex >= 0 && !n.disabled);
   const name = (n: El) => n.getAttribute('aria-label') || all(card).find(l => l.tagName === 'LABEL' && l.htmlFor === n.id)?.textContent || n.textContent;
-  assert.deepEqual(stops.map(name), ['暹罗猫', '自定义', '名字', '更多设置', '取消', '创建']);
+  assert.deepEqual(stops.map(name), ['猫猫', '暹罗猫', '自定义', '名字', '更多设置', '取消', '创建']);
   control(card, '名字').key('Enter');
   await settle();
   assert.equal(p.posts().length, 0);

@@ -1,36 +1,16 @@
-/* Search and jump: the ⌘K palette and its way in at the top of the sidebar
-   (palette.js). Builds on app.css's sidebar rows, .pop surfaces, .primary /
-   .secondary / .text-btn buttons, .visually-hidden and the rise/fade motion,
-   with the --x-* tokens of tokens.css and the café layer. No new colors,
-   fonts or motion; separation is surface and spacing, never a line. */
+/* Search and jump: the ⌘K palette (palette.js). Its way in is the round 搜索
+   button at the top of the full sidebar (#palette-open, styled with the
+   sidebar's other buttons in sidebar.css; the rail has none, ⌘K still opens
+   it). Builds on app.css's .pop surfaces, .primary / .secondary / .text-btn
+   buttons, .visually-hidden and the rise/fade motion, with the --x-* tokens
+   of tokens.css and the café layer. No new colors, fonts or motion;
+   separation is surface and spacing, never a line. */
 
-/* ---- The way in: a quiet row under the greeting that stays at the top
-   while the list scrolls; the pinned row sticks just under it. */
-.pal-entry-wrap { position: sticky; top: 0; z-index: 2; background: var(--base); padding: 4px 8px 2px; }
-.side-scroll:has(> .pal-entry-wrap) > .pin-row { top: 42px; }
-.pal-entry {
-  width: 100%; height: 36px; display: flex; align-items: center; gap: 8px;
-  padding: 0 8px 0 10px; border: 0; border-radius: 10px; background: transparent;
-  color: var(--x-muted); font-size: var(--x-fs-ui); text-align: left;
-  transition: background 160ms ease-out, color 160ms ease-out;
+.pal-esc, .pal-foot kbd {
+  flex: none; font: inherit; font-size: var(--x-fs-cap); line-height: 18px;
+  padding: 0 5px; border-radius: 5px; font-variant-numeric: tabular-nums;
+  background: var(--x-fill-2); color: var(--x-muted);
 }
-.pal-entry:hover { background: var(--hover); color: var(--x-text); }
-.pal-entry:active { background: var(--selected); }
-.pal-entry:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
-.pal-entry > .icon { width: 16px; height: 16px; }
-.pal-entry-label { flex: 1; min-width: 0; }
-.pal-key, .pal-esc, .pal-foot kbd {
-  flex: none; font: inherit; font-size: var(--x-fs-cap); line-height: 18px; color: var(--x-faint);
-  padding: 0 5px; border-radius: 5px; background: var(--x-fill-1); font-variant-numeric: tabular-nums;
-}
-.pal-esc, .pal-foot kbd { background: var(--x-fill-2); color: var(--x-muted); }
-.pal-entry:hover .pal-key { background: var(--x-fill-3); }
-/* The narrow rail: the lens alone, centred like the rail's other buttons. */
-.sidebar.rail .pal-entry-wrap { padding: 4px 10px 2px; }
-.sidebar.rail .pal-entry { width: 52px; height: 40px; margin: 0 auto; padding: 0; justify-content: center; }
-.sidebar.rail .pal-entry > .icon { width: 18px; height: 18px; }
-.sidebar.rail .pal-entry-label, .sidebar.rail .pal-key { display: none; }
-.sidebar.rail .side-scroll:has(> .pal-entry-wrap) > .pin-row { top: 46px; }
 
 /* ---- The palette: a card near the top of the window over the scrim. */
 .pal {
@@ -142,15 +122,8 @@ html[data-theme="dark"] .pal-ico, html[data-theme="dark"] .pal-quote { backgroun
   .pal-opt { min-height: 48px; }
   .pal-opt > .avatar { width: 32px; height: 32px; }
   .pal-confirm { padding: 8px 18px 20px; }
-  .pal-entry-wrap { padding-top: 8px; }
-  .pal-key { display: none; }
-  .side-scroll:has(> .pal-entry-wrap) > .pin-row { top: 46px; }
 }
-
-/* A touch screen has no ⌘K to press. */
-@media (hover: none) { .pal-key { display: none; } }
 
 @media (prefers-reduced-motion: reduce) {
   .pal, .pal-card { animation: none; }
-  .pal-entry { transition: none; }
 }

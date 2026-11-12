@@ -741,13 +741,13 @@ test('group chats get the same day and time separators as single chats (app.js\'
   assert.deepEqual(inner.children.map((n: El) => (n.classList.contains('tdiv') ? text(n) : 'msg')), ['昨天 10:00', 'msg', 'msg', '今天 09:00', 'msg']);
 });
 
-test('the shell wires 活起来 with thin hooks: scripts before app.js, styles just before chat-live.css, the sidebar, the paw after each keyed commit, group separators, the live speaker\'s name', () => {
+test('the shell wires 活起来 with thin hooks: scripts before app.js, styles just before sidebar.css and chat-live.css, the sidebar, the paw after each keyed commit, group separators, the live speaker\'s name', () => {
   const html = read('client/index.html'), app = read('client/public/app.js'), css = read('client/public/chat-presence.css');
   const scripts = [...html.matchAll(/<script src="\/([^"]+)"/g)].map(m => m[1]);
   const at = (name: string) => scripts.indexOf(name);
   assert.ok(at('chat-live.js') < at('chat-presence-rules.js') && at('chat-presence-rules.js') < at('chat-presence.js') && at('chat-presence.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
-  assert.deepEqual(styles.slice(-2), ['chat-presence.css', 'chat-live.css']);
+  assert.deepEqual(styles.slice(-3), ['chat-presence.css', 'sidebar.css', 'chat-live.css']);
   const sort = /\n {2}function sortStatusRows\(\) \{\n([\s\S]*?)\n {2}\}\n/.exec(app)![1];
   assert.match(sort, /chatList\.paint\(\$\("roster"\)\);\n\s+presence\.rows\(\$\("roster"\)\);/);
   assert.equal((app.match(/cards\.rendered\(\);[^\n]*\n\s+presence\.rendered\(messages\);/g) || []).length, 2, 'both histories, right after the cards are filled');

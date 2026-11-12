@@ -1,0 +1,403 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+
+// The sidebar's controls (docs/xbot-frontend.md item 43; the owner's reference:
+// Grok Bot's sidebar): 搜索 and 新建 at the top of the full sidebar, the
+// owner's own face and 应用 at the bottom; in the 72px rail 新建, 应用 and the
+// face at the bottom and no 搜索; an animated snap between the two. sidebar.js
+// runs here as the classic script it is, in a VM with a small DOM whose
+// elements report where they are laid out in the full sidebar and in the rail,
+// and an animation timeline that only moves when the test says so. app.js,
+// index.html and the stylesheets are checked for their wiring.
+const read = (path: string) => readFileSync(new URL('../' + path, import.meta.url), 'utf8');
+const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
+const settle = async () => { for (let i = 0; i < 6; i++) await new Promise(resolve => setImmediate(resolve)); };
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Any = any;
+type Box = { left: number; top: number; width: number; height: number };
+
+// ---------------------------------------------------------------- small DOM
+class Anim {
+  done = false; cancelled = false; resolve!: () => void; reject!: (e: unknown) => void;
+  finished: Promise<void>;
+  constructor(readonly el: El, readonly frames: Any[], readonly options: Any, readonly end: number) {
+    this.finished = new Promise((res, rej) => { this.resolve = res; this.reject = rej; });
+    this.finished.catch(() => {});
+  }
+  cancel() { if (this.done) return; this.done = true; this.cancelled = true; this.reject(new Error('AbortError')); }
+}
+class El {
+  kids: El[] = []; parent: El | null = null; attrs = new Map<string, string>(); classes = new Set<string>();
+  props = new Map<string, string>(); inert = false;
+  // Where it is laid out: in the full sidebar and in the rail (absent: not shown there).
+  place: { full?: Box; rail?: Box } = {};
+  constructor(readonly doc: Doc, readonly tagName: string) {}
+  get id() { return this.attrs.get('id') ?? ''; }
+  set id(v: string) { this.attrs.set('id', v); }
+  get className() { return [...this.classes].join(' '); }
+  set className(v: string) { this.classes = new Set(String(v).split(/\s+/).filter(Boolean)); }
+  get classList() {
+    return {
+      add: (...n: string[]) => n.forEach(x => this.classes.add(x)),
+      remove: (...n: string[]) => n.forEach(x => this.classes.delete(x)),
+      toggle: (n: string, on?: boolean) => { const want = on ?? !this.classes.has(n); if (want) this.classes.add(n); else this.classes.delete(n); return want; },
+      contains: (n: string) => this.classes.has(n),
+    };
+  }
+  get style() {
+    const self = this;
+    return new Proxy({ setProperty: (k: string, v: string) => self.props.set(k, v), getPropertyValue: (k: string) => self.props.get(k) ?? '' } as Any, {
+      set: (t, k: string, v) => { self.props.set(k, String(v)); return true; },
+      get: (t, k: string) => (k in t ? t[k] : self.props.get(k)),
+    });
+  }
+  setAttribute(k: string, v: string) { this.attrs.set(k, String(v)); }
+  getAttribute(k: string) { return this.attrs.get(k) ?? null; }
+  removeAttribute(k: string) { this.attrs.delete(k); }
+  append(...items: El[]) { for (const n of items) { if (n.parent) n.remove(); n.parent = this; this.kids.push(n); } }
+  remove() { if (this.parent) { this.parent.kids.splice(this.parent.kids.indexOf(this), 1); this.parent = null; } }
+  get isConnected(): boolean { for (let n: El | null = this; n; n = n.parent) if (n === this.doc.body) return true; return false; }
+  all(): El[] { return this.kids.flatMap(k => [k, ...k.all()]); }
+  // ".a", ".a > .b" and comma lists: what sidebar.js asks for.
+  matches(sel: string): boolean {
+    return sel.split(',').map(s => s.trim()).some((one) => {
+      const [outer, inner] = one.split('>').map(s => s.trim());
+      const has = (n: El | null, part: string) => !!n && part.split('.').filter(Boolean).every(c => n.classes.has(c));
+      return inner ? has(this, inner) && has(this.parent, outer!) : has(this, outer!);
+    });
+  }
+  querySelectorAll(sel: string) { return this.all().filter(n => n.matches(sel)); }
+  closest(sel: string): El | null { for (let n: El | null = this; n; n = n.parent) if (n.matches(sel)) return n; return null; }
+  cloneNode() { const c = new El(this.doc, this.tagName); this.attrs.forEach((v, k) => c.attrs.set(k, v)); this.classes.forEach(x => c.classes.add(x)); return c; }
+  getBoundingClientRect(): Box & { right: number; bottom: number } {
+    const side = this.doc.sidebar;
+    if (this === side) { const w = parseFloat(side.props.get('--side-w') || '0'); return { left: 0, top: 0, width: w, height: 900, right: w, bottom: 900 }; }
+    const b = this.place[side.classes.has('rail') ? 'rail' : 'full'] ?? { left: 0, top: 0, width: 0, height: 0 };
+    return { ...b, right: b.left + b.width, bottom: b.top + b.height };
+  }
+  animate(frames: Any[], options: Any) { const a = new Anim(this, frames, options, this.doc.now + (options.duration || 0)); this.doc.anims.push(a); return a; }
+  addEventListener() {}
+  removeEventListener() {}
+}
+class Doc {
+  body: El; documentElement: El; sidebar!: El; now = 0; anims: Anim[] = [];
+  defaultView: Any;
+  constructor() { this.body = new El(this, 'BODY'); this.documentElement = new El(this, 'HTML'); }
+  createElement(tag: string) { return new El(this, tag.toUpperCase()); }
+  createElementNS(_ns: string, tag: string) { return new El(this, tag); }
+  // The timeline: animations whose end has come finish, in order.
+  async advance(ms: number) {
+    const end = this.now + ms;
+    for (;;) {
+      const next = this.anims.filter(a => !a.done && a.end <= end).sort((a, b) => a.end - b.end)[0];
+      if (!next) break;
+      this.now = next.end; next.done = true; next.resolve();
+      await settle();
+    }
+    this.now = end;
+  }
+}
+
+function load(opts: { reduce?: boolean } = {}) {
+  const doc = new Doc();
+  const css: Record<string, string> = { '--side-fade': ' 120ms', '--side-move': ' 220ms', '--side-ease': ' cubic-bezier(0.2, 0.75, 0.3, 1)' };
+  const window: Any = { matchMedia: (q: string) => ({ matches: !!opts.reduce && q === '(prefers-reduced-motion: reduce)' }), getComputedStyle: () => ({ getPropertyValue: (k: string) => css[k] ?? '' }) };
+  doc.defaultView = window;
+  vm.runInContext(read('client/public/sidebar.js'), vm.createContext({ window, document: doc, console }));
+  return { doc, window, S: window.ClowderSidebar };
+}
+// A sidebar as index.html has it, with where things sit in each layout (the
+// full one at 280px, the rail at 72px): a row's face keeps its column but moves
+// up (no greeting above it in the rail), a pinned face moves up and left, 应用's
+// glyph goes from the pill to above the owner's face, which keeps its place.
+function sidebar(opts: { reduce?: boolean; rail?: boolean } = {}) {
+  const { doc, window, S } = load(opts);
+  const h = (tag: string, cls = '', place: El['place'] = {}) => { const e = doc.createElement(tag); cls.split(' ').filter(Boolean).forEach(c => e.classes.add(c)); e.place = place; return e; };
+  const side = h('aside', 'sidebar');
+  doc.sidebar = side;
+  side.style.setProperty('--side-w', opts.rail ? '72px' : '280px');
+  if (opts.rail) side.classes.add('rail');
+  const row = h('button', 'item'), rowFace = h('span', 'avatar', { full: { left: 18, top: 157, width: 36, height: 36 }, rail: { left: 18, top: 78, width: 36, height: 36 } });
+  const far = h('button', 'item'), farFace = h('span', 'avatar', { full: { left: 18, top: 1900, width: 36, height: 36 }, rail: { left: 18, top: 1800, width: 36, height: 36 } });
+  const pin = h('button', 'pin'), pinFace = h('span', 'avatar', { full: { left: 22, top: 73, width: 44, height: 44 }, rail: { left: 14, top: 14, width: 44, height: 44 } });
+  const account = h('button', 'account-trigger', { full: { left: 18, top: 850, width: 36, height: 36 }, rail: { left: 18, top: 850, width: 36, height: 36 } });
+  const apps = h('button', 'side-apps'), glyph = h('svg', 'icon', { full: { left: 132, top: 860, width: 16, height: 16 }, rail: { left: 27, top: 815, width: 18, height: 18 } });
+  const railNew = h('button', 'side-glyph rail-only', { rail: { left: 16, top: 764, width: 40, height: 40 } });
+  railNew.id = 'rail-new';
+  // The list: under the greeting in the full sidebar, from the top in the rail.
+  const list = h('div', 'side-scroll', { full: { left: 0, top: 59, width: 280, height: 780 }, rail: { left: 0, top: 8, width: 72, height: 740 } });
+  row.append(rowFace); far.append(farFace); pin.append(pinFace); apps.append(glyph);
+  list.append(pin, row, far);
+  side.append(list, railNew, account, apps);
+  doc.body.append(side);
+  const calls: string[] = [];
+  const motion = S.motion(side, { start: (rail: boolean) => calls.push('start ' + rail), layout: (rail: boolean) => calls.push('layout ' + rail) });
+  const states = () => [...side.classes].filter(c => c.startsWith('side-')).sort();
+  const glides = () => doc.anims.filter(a => a.frames.length === 2 && 'transform' in a.frames[0]);
+  return { doc, window, side, motion, calls, states, glides, rowFace, farFace, pinFace, account, glyph, railNew };
+}
+
+// ---------------------------------------------------------------- the owner's face
+test('the owner\'s face is a person of ours, drawn inline: never one of the clay cats or their portrait sheet', () => {
+  const { doc, S } = load();
+  const face = S.ownerFace(doc);
+  assert.deepEqual([...face.classes], ['avatar', 'me', 'owner']);
+  const svg: El = face.kids[0];
+  assert.equal(svg.tagName, 'svg');
+  assert.equal(svg.getAttribute('aria-hidden'), 'true');
+  assert.equal(svg.getAttribute('data-owner'), '');
+  assert.equal(svg.getAttribute('data-cat-id'), null, 'not a cat (the cats\' portraits carry data-cat-id)');
+  assert.deepEqual(svg.kids.map(k => [k.tagName, k.getAttribute('class')]), [['circle', 'owner-head'], ['path', 'owner-body'], ['path', 'owner-collar']]);
+  assert.equal(svg.all().some(n => n.tagName === 'image'), false, 'nothing from the clay sheet');
+  // The shell draws it for the owner wherever the owner was a cat before (the footer was the only place).
+  const app = read('client/public/app.js');
+  const renderMe = /\n {2}function renderMe\(\) \{\n[\s\S]*?\n {2}\}\n/.exec(app)![0];
+  assert.match(renderMe, /window\.ClowderSidebar\.ownerFace\(\)/);
+  assert.doesNotMatch(app, /avatar\([^)]*"me"\)/, 'no cat face is made for the owner anywhere');
+  // Café tones from the tokens, in both themes: coffee on the avatar tile.
+  const css = read('client/public/sidebar.css');
+  assert.match(css, /\.avatar\.owner \{ color: var\(--x-primary\); \}/);
+  assert.match(css, /\.avatar\.owner \.owner-collar \{ fill: none; stroke: var\(--x-avatar-bg\);/);
+});
+
+// ---------------------------------------------------------------- the move
+test('a load, a resize or a drag within the full range paints at once: no move, no classes, no animation', () => {
+  const s = sidebar();
+  s.motion.to(false, 300, true);
+  assert.equal(s.side.style.getPropertyValue('--side-w'), '300px', 'the width follows the pointer at once');
+  assert.deepEqual(s.states(), []);
+  s.motion.to(true, 72, false);
+  assert.equal(s.side.classes.has('rail'), true);
+  assert.equal(s.doc.documentElement.classes.has('has-rail'), true);
+  assert.equal(s.side.style.getPropertyValue('--side-w'), '72px');
+  assert.deepEqual(s.states(), []);
+  assert.deepEqual(s.calls, ['layout true'], 'the footer is ordered for the rail, no move started');
+  assert.equal(s.doc.anims.length, 0);
+  s.motion.to(false, 280, false);
+  assert.equal(s.side.classes.has('rail'), false);
+  assert.equal(s.doc.anims.length, 0);
+});
+
+test('into the rail: the words fade first, then the rail takes over while the width narrows and each face glides from where it was', async () => {
+  const s = sidebar();
+  s.motion.to(true, 72, true);
+  assert.deepEqual(s.states(), ['side-fading', 'side-moving']);
+  assert.equal(s.side.classes.has('rail'), false, 'the layout waits for the words to fade');
+  assert.deepEqual(s.calls, ['start true']);
+  assert.equal(s.motion.moving(), true);
+  // Another pointer move in the rail range changes nothing.
+  s.motion.to(true, 72, true);
+  await s.doc.advance(119);
+  assert.equal(s.side.classes.has('rail'), false);
+  await s.doc.advance(1);
+  assert.equal(s.side.classes.has('rail'), true);
+  assert.equal(s.doc.documentElement.classes.has('has-rail'), true);
+  assert.equal(s.side.style.getPropertyValue('--side-w'), '72px', 'the width transition (side-moving) runs to 72px');
+  assert.deepEqual(s.states(), ['side-fading', 'side-landing', 'side-moving']);
+  assert.deepEqual(s.calls, ['start true', 'layout true']);
+  const glides = s.glides();
+  assert.deepEqual(glides.map(a => a.el === s.rowFace ? 'row' : a.el === s.pinFace ? 'pin' : a.el === s.glyph ? 'apps' : '?'), ['pin', 'row', 'apps'],
+    'the owner\'s face keeps its place; a face out of sight on both sides does not move');
+  assert.deepEqual(plain(glides[1].frames), [{ transform: 'translate(0px, 79px)' }, { transform: 'none' }], 'from where it was, eased back to its place');
+  assert.deepEqual(plain(glides[0].frames), [{ transform: 'translate(8px, 59px)' }, { transform: 'none' }]);
+  assert.deepEqual(plain(glides[0].options), { duration: 220, easing: 'cubic-bezier(0.2, 0.75, 0.3, 1)' });
+  await s.doc.advance(220);
+  assert.deepEqual(s.states(), [], 'nothing left over at the end');
+  assert.equal(s.motion.moving(), false);
+});
+
+test('out of the rail: laid out full at once while the words stay hidden, the faces glide back, the rail\'s 新建 fades where it stood, the words fade in last', async () => {
+  const s = sidebar({ rail: true });
+  s.motion.to(false, 280, true);
+  assert.equal(s.side.classes.has('rail'), false);
+  assert.equal(s.doc.documentElement.classes.has('has-rail'), false);
+  assert.equal(s.side.style.getPropertyValue('--side-w'), '280px');
+  assert.deepEqual(s.states(), ['side-arriving', 'side-moving']);
+  assert.deepEqual(s.calls, ['start false', 'layout false']);
+  const ghost = s.side.kids.find(k => k.classes.has('side-ghost'))!;
+  assert.ok(ghost, 'the rail\'s 新建 fades out in place');
+  assert.equal(ghost.id, '', 'without the id of the real button');
+  assert.equal(ghost.getAttribute('aria-hidden'), 'true');
+  assert.equal(ghost.inert, true);
+  assert.deepEqual([ghost.style.left, ghost.style.top, ghost.style.width], ['16px', '764px', '40px']);
+  assert.deepEqual(plain(s.glides().map(a => a.frames[0])), [{ transform: 'translate(0px, -79px)' }, { transform: 'translate(-105px, -45px)' }]);
+  // The pinned face would start above the top of the list (the greeting is back above it) and be cut off: it fades in at its place.
+  const fades = s.doc.anims.filter(a => a.el === s.pinFace);
+  assert.deepEqual(plain(fades.map(a => a.frames)), [[{ opacity: 0 }, { opacity: 1 }]]);
+  assert.equal(fades[0]!.options.duration, 220);
+  const copies = s.side.kids.filter(k => k.classes.has('side-ghost'));
+  assert.equal(copies.length, 2, 'and a still copy of it fades out where it was in the rail');
+  assert.deepEqual([copies[1]!.style.left, copies[1]!.style.top, copies[1]!.getAttribute('aria-hidden')], ['14px', '14px', 'true']);
+  // A drag that goes on widens the target; the width transition follows it.
+  s.motion.to(false, 300, true);
+  assert.equal(s.side.style.getPropertyValue('--side-w'), '300px');
+  await s.doc.advance(147);
+  assert.deepEqual(s.states(), ['side-moving', 'side-revealing'], 'the words come back in the last third');
+  await s.doc.advance(120);
+  assert.deepEqual(s.states(), []);
+  assert.equal(s.side.kids.some(k => k.classes.has('side-ghost')), false, 'the ghost is gone');
+});
+
+test('back out before the rail took over: the words fade back in and the rail never shows; a move reversed later jumps the first to its end', async () => {
+  const s = sidebar();
+  s.motion.to(true, 72, true);
+  await s.doc.advance(60);
+  s.motion.to(false, 260, true);
+  assert.deepEqual(s.states(), ['side-moving', 'side-revealing']);
+  assert.equal(s.side.style.getPropertyValue('--side-w'), '260px');
+  await s.doc.advance(200);
+  assert.deepEqual(s.states(), []);
+  assert.equal(s.calls.includes('layout true'), false, 'the rail layout never painted');
+  // Reversed once the rail has taken over: the first move ends at once, the second runs from there.
+  const t = sidebar();
+  t.motion.to(true, 72, true);
+  await t.doc.advance(150);
+  t.motion.to(false, 280, true);
+  assert.equal(t.side.classes.has('rail'), false);
+  assert.deepEqual(t.states(), ['side-arriving', 'side-moving']);
+  assert.equal(t.doc.anims.filter(a => a.cancelled).length > 0, true, 'the first move\'s glides and clock were stopped');
+  // A resize meanwhile paints the state at once.
+  t.motion.to(true, 72, false);
+  assert.deepEqual(t.states(), []);
+  assert.equal(t.side.classes.has('rail'), true);
+});
+
+test('with reduced motion the snap paints at once: no classes, no animation', () => {
+  const s = sidebar({ reduce: true });
+  s.motion.to(true, 72, true);
+  assert.equal(s.side.classes.has('rail'), true);
+  assert.deepEqual(s.states(), []);
+  assert.equal(s.doc.anims.length, 0);
+  assert.deepEqual(s.calls, ['layout true']);
+  // And the stylesheets agree: nothing of the move transitions or animates when motion is reduced.
+  const css = read('client/public/sidebar.css');
+  const still = /@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?)\n\}/.exec(css)![1]!;
+  assert.match(still, /\.sidebar\.side-moving/);
+  assert.match(still, /\.sidebar\.side-landing \.rail-only \{ animation: none; \}/);
+});
+
+test('the classes the move hangs on: width eased with the panel\'s curve and tokens.css\'s durations, content pinned to the target width and clipped, words faded, rail-only controls faded in', () => {
+  const css = read('client/public/sidebar.css'), bare = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.match(bare, /:root \{ --side-fade: var\(--dur-pop-close\); --side-move: var\(--dur-pop\); --side-ease: cubic-bezier\(0\.2, 0\.75, 0\.3, 1\); \}/);
+  const rail = /@media \(min-width: 768px\) \{([\s\S]*?)\n\}/.exec(bare)![1]!;
+  assert.match(rail, /\.sidebar\.side-moving \{ overflow: hidden; align-items: flex-start; transition: width var\(--side-move\) var\(--side-ease\); \}/);
+  assert.match(rail, /\.sidebar\.side-moving > :is\(\.side-head, \.side-scroll, \.side-foot\) \{ width: var\(--side-w\); \}/);
+  assert.match(rail, /\.sidebar\.side-fading :is\(\.side-head, \.item-body, \.pin-name,[^)]*\) \{\s*opacity: 0; transition: opacity var\(--side-fade\) ease-out;/);
+  assert.match(rail, /\.sidebar\.side-arriving :is\([^)]*\) \{ opacity: 0; transition: none; \}/);
+  assert.match(rail, /\.sidebar\.side-revealing :is\([^)]*\) \{ transition: opacity var\(--side-fade\) ease-out; \}/);
+  // Only the existing fade keyframes; no new colour or font.
+  assert.deepEqual([...bare.matchAll(/animation:\s*([\w-]+)/g)].map(m => m[1]).sort(), ['fade', 'none']);
+  assert.doesNotMatch(bare, /#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(|font-family/i);
+  // The drawer (below 768px) is always full: every rail rule, and every rule of the move, is inside the 768px query.
+  const outside = bare.replace(/@media \(min-width: 768px\) \{[\s\S]*?\n\}/, '').replace(/@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\n\}/, '');
+  assert.doesNotMatch(outside, /\.sidebar\.rail|side-moving|side-fading|side-arriving|side-revealing|side-landing/);
+  // The move only runs when app.js says it is a snap the owner made.
+  const app = read('client/public/app.js');
+  assert.match(app, /const sideMotion = window\.ClowderSidebar\.motion\(sidebar, \{/);
+  assert.match(app, /function syncSidebar\(animate = false\) \{\n\s+const rail = window\.innerWidth >= 768 && side\.rail;\n\s+sideMotion\.to\(rail, rail \? SIDE\.rail : side\.w, animate\);/);
+  assert.match(app, /side = x < SIDE\.snap \? \{ w: side\.w, rail: true \} : \{[^}]*\};\n\s+syncSidebar\(true\);/, 'the grip');
+  assert.match(app, /sideGrip\.addEventListener\("dblclick", \(\) => \{ side = \{ w: SIDE\.def, rail: false \}; syncSidebar\(true\); saveSide\(\); \}\);/);
+  assert.match(app, /window\.addEventListener\("resize", \(\) => \{\n[^\n]*\n\s+syncSidebar\(\);/, 'a resize paints at once');
+  assert.match(app, /\n {2}syncSidebar\(\);\n {2}initTheme\(\);/, 'a load paints the saved state at once');
+});
+
+// ---------------------------------------------------------------- the layout and its controls
+test('the full sidebar: 搜索 and 新建 at the right end of the greeting\'s line; the owner\'s face and 应用 at the bottom; the name and this computer head 我\'s menu', () => {
+  const html = read('client/index.html');
+  const aside = /<aside id="sidebar" class="sidebar">([\s\S]*?)<\/aside>/.exec(html)![1]!;
+  const order = [...aside.matchAll(/id="([\w-]+)"/g)].map(m => m[1]);
+  assert.deepEqual(order, ['side-grip', 'palette-open', 'side-new', 'greeting', 'pin-row', 'roster', 'remote-roster', 'rail-new', 'account', 'me-avatar', 'account-menu', 'me-name', 'me-device', 'account-settings', 'side-apps']);
+  // The face alone in the button; the name and the device line in the menu's head, which is not a control.
+  const trigger = /<button id="account"[^>]*>([\s\S]*?)<\/button>/.exec(aside)![1]!;
+  assert.match(trigger, /^\s*<span id="me-avatar"><\/span>\s*$/);
+  assert.match(aside, /<div id="account-menu" class="pop account-menu" hidden>\n\s+<div class="me-head"><span id="me-name" class="me-name">我<\/span><span id="me-device" class="me-device" hidden><\/span><\/div>\n\s+<button id="account-settings"/);
+  assert.match(read('client/public/devices.js'), /document\.getElementById\("me-device"\)/, 'devices.js still finds the device line');
+  // 应用: a named, focusable button that answers; a tooltip only in the rail, where its label is gone.
+  assert.match(aside, /<button id="side-apps" class="side-apps" type="button" aria-label="应用" data-tip="应用" data-tip-placement="right" data-tip-only="rail"><span class="side-apps-label">应用<\/span><\/button>/);
+  const app = read('client/public/app.js');
+  assert.match(app, /if \(host\.dataset\.tipOnly === "rail" && !host\.closest\("\.sidebar\.rail"\)\) \{ hideTip\(\); return; \}/);
+  // The pinned row holds pinned cats only, and takes no room without one.
+  assert.match(read('client/public/sidebar.css'), /\.pin-row:empty \{ display: none; \}/);
+  // Styles after every earlier one, chat-live.css still last; the script before app.js.
+  const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
+  assert.deepEqual(styles.slice(-2), ['sidebar.css', 'chat-live.css']);
+  const scripts = [...html.matchAll(/<script src="\/([^"]+)"/g)].map(m => m[1]);
+  assert.ok(scripts.indexOf('sidebar.js') >= 0 && scripts.indexOf('sidebar.js') < scripts.indexOf('app.js'));
+});
+
+test('the rail has no 搜索 (⌘K still opens it): 新建, 应用 and the face stacked at the bottom, in that order for Tab too', () => {
+  const css = read('client/public/sidebar.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rail = /@media \(min-width: 768px\) \{([\s\S]*?)\n\}/.exec(css)![1]!;
+  assert.match(rail, /\.sidebar\.rail \.side-head \{ display: none; \}/, '搜索 and the top 新建 live in the head');
+  assert.match(rail, /\.sidebar\.rail \.side-foot \{ width: 100%; flex-direction: column; align-items: center;/);
+  assert.match(rail, /\.sidebar\.rail \.rail-only \{ display: grid; \}/);
+  assert.match(rail, /\.sidebar\.rail \.side-apps-label \{ display: none; \}/);
+  assert.match(css, /\.sidebar \.rail-only \{ display: none; \}/, 'the rail\'s 新建 only there');
+  assert.match(read('client/public/palette.js'), /document\.addEventListener\("keydown", onPageKey\)/, 'the shortcut stays');
+  // app.js puts 应用 before the face in the rail and after it in the full footer, so Tab follows what is seen; focus is kept.
+  const app = read('client/public/app.js');
+  const hook = /layout: \(rail\) => \{[\s\S]*?\n {4}\},/.exec(app)![0];
+  const doc = new Doc();
+  const foot = doc.createElement('div'), railNew = doc.createElement('button'), wrap = doc.createElement('div'), account = doc.createElement('button'), apps = doc.createElement('button');
+  wrap.classes.add('account-wrap'); wrap.append(account); foot.append(railNew, wrap, apps); doc.body.append(foot);
+  let focused: El | null = apps;
+  Object.defineProperties(apps, {
+    nextElementSibling: { get: () => { const k = foot.kids; return k[k.indexOf(apps) + 1] ?? null; } },
+    parentElement: { get: () => foot },
+    focus: { value: () => { focused = apps; } },
+  });
+  Object.defineProperty(account, 'closest', { value: () => wrap });
+  (foot as Any).insertBefore = (n: El, ref: El | null) => { n.remove(); if (n === focused) focused = null; if (!ref) foot.append(n); else { n.parent = foot; foot.kids.splice(foot.kids.indexOf(ref), 0, n); } };
+  const run = vm.runInNewContext('({' + hook + '})', { $: (id: string) => ({ 'side-apps': apps, account }[id]), document: { get activeElement() { return focused; } } });
+  run.layout(true);
+  assert.deepEqual(foot.kids.map(k => k === railNew ? 'new' : k === wrap ? 'face' : 'apps'), ['new', 'apps', 'face']);
+  assert.ok(focused === apps, 'a focused 应用 keeps focus');
+  run.layout(false);
+  assert.deepEqual(foot.kids.map(k => k === railNew ? 'new' : k === wrap ? 'face' : 'apps'), ['new', 'face', 'apps']);
+});
+
+test('我\'s menu opens right above the face (left edges aligned) in the full sidebar and beside it right of the rail (bottom edges aligned); Escape brings focus back to the face', () => {
+  const css = read('client/public/sidebar.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.match(css, /\.account-menu \{ width: 208px; min-width: 0; left: 0; right: auto; bottom: calc\(100% \+ 8px\); \}/);
+  const rail = /@media \(min-width: 768px\) \{([\s\S]*?)\n\}/.exec(css)![1]!;
+  assert.match(rail, /\.sidebar\.rail \.account-menu \{ left: calc\(100% \+ 26px\); right: auto; bottom: 0; \}/);
+  assert.match(css, /\.me-head \{ display: flex; flex-direction: column;/);
+  // closeAccount: hidden, aria-expanded false, and focus that was inside goes back to the face.
+  const app = read('client/public/app.js');
+  const fn = /\n {2}function closeAccount\(\) \{\n[\s\S]*?\n {2}\}\n/.exec(app)![0];
+  const menu: Any = { hidden: false, contains: (n: unknown) => n === inside }, inside = {}, trigger: Any = { attrs: {} as Record<string, string>, setAttribute(k: string, v: string) { this.attrs[k] = v; }, focus() { focusedOn = 'account'; } };
+  let focusedOn = '';
+  const ctx: Any = { $: (id: string) => (id === 'account-menu' ? menu : trigger), document: { activeElement: inside } };
+  vm.runInNewContext(fn + 'closeAccount();', ctx);
+  assert.equal(menu.hidden, true);
+  assert.equal(trigger.attrs['aria-expanded'], 'false');
+  assert.equal(focusedOn, 'account');
+  // Focus elsewhere (a click on a row closed it) stays where it is.
+  menu.hidden = false; focusedOn = ''; ctx.document.activeElement = {};
+  vm.runInNewContext(fn + 'closeAccount();', ctx);
+  assert.equal(focusedOn, '');
+  // The move closes the menu and the tooltip first.
+  assert.match(app, /start: \(\) => \{ closeAccount\(\); hideTip\(\); \},/);
+});
+
+test('应用 is a placeholder the owner asked for: it says plainly it is not available yet, and sends nothing, opens nothing, stores nothing', () => {
+  const app = read('client/public/app.js');
+  assert.match(app, /\$\("side-apps"\)\.prepend\(icon\("grid-plus"\)\);\n\s+\$\("side-apps"\)\.addEventListener\("click", \(\) => showToast\("应用还没有开放，现在还用不了。", "info"\)\);/);
+  // The retained XBot apps store is not wired: neither loaded nor called.
+  const html = read('client/index.html');
+  assert.doesNotMatch(html, /apps\.(js|css)/);
+  assert.doesNotMatch(app, /XBotApps|\/xbot-api\/apps/);
+  // The toast is the app's status line (role="status"), read aloud.
+  assert.match(html, /<div id="toast" class="toast" role="status" hidden><\/div>/);
+  // The rail's tooltip names it; the full sidebar shows its label instead.
+  assert.match(read('client/public/sidebar.css'), /\.sidebar\.rail \.side-apps \{ flex: none; width: 40px; height: 40px;/);
+});
+
+test('every button here can be reached and seen with the keyboard, and is 44px in the drawer', () => {
+  const css = read('client/public/sidebar.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.match(css, /\.side-btn:focus-visible, \.side-glyph:focus-visible, \.side-apps:focus-visible, \.account-trigger:focus-visible \{ outline: 2px solid var\(--accent\); outline-offset: 2px; \}/);
+  const drawer = /@media \(max-width: 767px\) \{([\s\S]*?)\n\}/.exec(css)![1]!;
+  for (const rule of [/\.side-btn \{ width: 44px; height: 44px; \}/, /\.account-trigger \{ width: 44px; height: 44px; \}/, /\.side-apps \{ height: 44px; \}/]) assert.match(drawer, rule);
+});

@@ -667,6 +667,8 @@
     ellipsis: '<circle class="solid" cx="5" cy="12" r="1.5"/><circle class="solid" cx="12" cy="12" r="1.5"/><circle class="solid" cx="19" cy="12" r="1.5"/>',
     wrench: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
     plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+    // 应用 (the sidebar's placeholder, item 43): three tiles and a plus.
+    "grid-plus": '<rect x="3.5" y="3.5" width="7" height="7" rx="1"/><rect x="13.5" y="3.5" width="7" height="7" rx="1"/><rect x="3.5" y="13.5" width="7" height="7" rx="1"/><path d="M17 13.5v7M13.5 17h7"/>',
     pin: '<path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/>',
     pencil: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>',
     "trash-2": '<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6"/>',
@@ -4007,21 +4009,8 @@
       btn.addEventListener("click", () => pickBot(b.name));
       pins.append(btn);
     }
-    // One 新建 for the sidebar: 新建猫猫 or 新建群聊 (the 群组 "+" merged in).
-    const add = el("button", "pin add");
-    add.type = "button";
-    add.setAttribute("aria-label", "新建猫猫或群聊");
-    add.setAttribute("aria-haspopup", "menu");
-    add.setAttribute("aria-expanded", "false");
-    setTip(add, "新建猫猫或群聊", "right");
-    const face = el("span", "plus-face");
-    face.append(icon("plus"));
-    add.append(face, el("span", "pin-name pin-label", "新建"));
-    add.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      toggleNewMenu(add);
-    });
-    pins.append(add);
+    // The row holds pinned cats only (新建 is the sidebar's own button, item
+    // 43); with none it is empty and takes no room (sidebar.css).
 
     const folders = state.folders.length
       ? state.folders
@@ -4040,7 +4029,7 @@
     }
     if (state.others && state.others.length) roster.append(othersFolder());
 
-    // No groups, no header: 新建 already offers 新建群聊.
+    // No groups, no header: 新建's dialog already offers 群聊.
     if (state.groups.length) roster.append(sectionLabel("群聊"));
     for (const g of state.groups) {
       const open = state.sel && state.sel.type === "group" && state.sel.id === g.id;
@@ -4057,59 +4046,15 @@
     paintStatus();
   }
 
+  // The owner at the bottom of the sidebar: their own face (a person of ours,
+  // sidebar.js; never one of the cats), and their name heading 我's menu,
+  // over this computer's name (#me-device, devices.js paintFoot).
   function renderMe() {
-    const slot = $("me-avatar");
     // owner_name, never the raw id: on Windows the id carries the account SID (#210).
     const name = state.ownerName.trim();
-    if (name) slot.replaceChildren(avatar(name, null, "me"));
-    else {
-      const face = el("span", "avatar me blob");
-      face.append(icon("person"));
-      slot.replaceChildren(face);
-    }
+    const slot = $("me-avatar");
+    if (!slot.querySelector(".avatar.owner")) slot.replaceChildren(window.ClowderSidebar.ownerFace());
     $("me-name").textContent = name || "我";
-  }
-
-  // The 新建 menu under the pin row's last button.
-  function closeNewMenu() {
-    const menu = document.querySelector(".new-menu");
-    if (!menu) return;
-    const hadFocus = menu.contains(document.activeElement);
-    menu.remove();
-    const add = document.querySelector(".pin.add");
-    if (add) {
-      add.setAttribute("aria-expanded", "false");
-      if (hadFocus) add.focus(); // Escape returns to 新建, not to the page
-    }
-  }
-
-  function toggleNewMenu(anchor) {
-    const open = !document.querySelector(".new-menu");
-    closePops();
-    if (!open) return;
-    const menu = el("div", "pop folder-menu new-menu");
-    menu.setAttribute("role", "menu");
-    const item = (iconName, label, run) => {
-      const b = el("button", "menu-row");
-      b.type = "button";
-      b.setAttribute("role", "menuitem");
-      b.append(icon(iconName), el("span", "", label));
-      b.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        closeNewMenu();
-        run();
-      });
-      menu.append(b);
-    };
-    item("plus", "新建猫猫", () => openNewBot(anchor));
-    item("users-plus", "新建群聊", () => openNewGroup(anchor));
-    // Escape closes only the menu and returns to 新建 (closeNewMenu).
-    menu.addEventListener("keydown", (ev) => {
-      if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); closeNewMenu(); }
-    });
-    anchor.setAttribute("aria-expanded", "true");
-    placeMenu(anchor, menu, "below");
-    menu.querySelector("button").focus();
   }
 
   async function markNotesRead(notes) {
@@ -6695,9 +6640,11 @@
     }, "下载");
   }
 
-  // 新建猫猫 opens the quick dialog (quick-create.js: a face, a name, 创建); its
-  // 更多设置 hands over to the template creator below. Each module sends its
-  // own create request; the shell only opens the cat it made.
+  // 新建 (the sidebar's button, top or rail) opens one dialog at once, on its
+  // 猫猫 side (quick-create.js: a face, a name, 创建), with a switch to 群聊;
+  // 新建猫猫 / 新建群聊 from ⌘K open it on their side. Its 更多设置 hands over
+  // to the template creator below. Each module sends its own create request;
+  // the shell only opens what it made.
   function openNewBot(opener) {
     closePops();
     if (!modal.hidden) closeModal();
@@ -6727,7 +6674,7 @@
     });
   }
 
-  // 新建群聊 is the quick dialog's (quick-create.js): cats as face chips, an
+  // The same dialog on its 群聊 side (quick-create.js): cats as face chips, an
   // optional name; it sends the create request and hands back the new group.
   function openNewGroup(opener) {
     closePops();
@@ -6764,9 +6711,13 @@
     stopChat();
   });
 
+  // 我's menu closing; focus inside it goes back to the face it opened from.
   function closeAccount() {
-    $("account-menu").hidden = true;
+    const menu = $("account-menu");
+    const inside = !menu.hidden && menu.contains(document.activeElement);
+    menu.hidden = true;
     $("account").setAttribute("aria-expanded", "false");
+    if (inside) $("account").focus({ preventScroll: true });
   }
 
   setInterval(updateWorkTimes, 1000);
@@ -6774,7 +6725,6 @@
   function closePops() {
     closeMessageMenu();
     closeAccount();
-    closeNewMenu();
     closePanelMenu();
     closeFolderMenus();
     closeToolPop();
@@ -6842,11 +6792,25 @@
     } catch (e) { return { w: SIDE.def, rail: false }; }
   }
   let side = readSide();
-  function syncSidebar() {
+  // The full sidebar or the rail (sidebar.js moves between them). The rail
+  // stacks 新建, 应用 and the face at the bottom: 应用 goes before the face
+  // there, after it in the full footer, so Tab follows what is seen.
+  const sideMotion = window.ClowderSidebar.motion(sidebar, {
+    start: () => { closeAccount(); hideTip(); },
+    layout: (rail) => {
+      const apps = $("side-apps"), wrap = $("account").closest(".account-wrap");
+      const next = rail ? wrap : null;
+      if (apps.nextElementSibling === next) return;
+      const focused = document.activeElement === apps;
+      apps.parentElement.insertBefore(apps, next);
+      if (focused) apps.focus({ preventScroll: true });
+    },
+  });
+  // animate: a snap the owner made with the grip (into or out of the rail);
+  // a load, a resize or a drag within the full range paints at once.
+  function syncSidebar(animate = false) {
     const rail = window.innerWidth >= 768 && side.rail;
-    sidebar.classList.toggle("rail", rail);
-    document.documentElement.classList.toggle("has-rail", rail);
-    sidebar.style.setProperty("--side-w", (rail ? SIDE.rail : side.w) + "px");
+    sideMotion.to(rail, rail ? SIDE.rail : side.w, animate);
   }
   function saveSide() { localStorage.setItem("xbot.side", JSON.stringify(side)); }
   const sideGrip = $("side-grip");
@@ -6863,7 +6827,7 @@
     if (sidePointer !== ev.pointerId) return;
     const x = ev.clientX - sidebar.getBoundingClientRect().left;
     side = x < SIDE.snap ? { w: side.w, rail: true } : { w: Math.max(SIDE.min, Math.min(SIDE.max, x)), rail: false };
-    syncSidebar();
+    syncSidebar(true);
   });
   const endSideResize = (ev) => {
     if (sidePointer !== ev.pointerId) return;
@@ -6875,9 +6839,16 @@
   sideGrip.addEventListener("pointerup", endSideResize);
   sideGrip.addEventListener("pointercancel", endSideResize);
   sideGrip.addEventListener("lostpointercapture", endSideResize);
-  sideGrip.addEventListener("dblclick", () => { side = { w: SIDE.def, rail: false }; syncSidebar(); saveSide(); });
-  $("rail-new").append(icon("plus"));
-  $("rail-new").addEventListener("click", (ev) => { ev.stopPropagation(); toggleNewMenu($("rail-new")); });
+  sideGrip.addEventListener("dblclick", () => { side = { w: SIDE.def, rail: false }; syncSidebar(true); saveSide(); });
+  // 新建: the top button of the full sidebar and the rail's; one dialog, 猫猫 first.
+  for (const id of ["side-new", "rail-new"]) {
+    const btn = $(id);
+    btn.append(icon("plus"));
+    btn.addEventListener("click", () => openNewBot(btn));
+  }
+  // 应用 keeps its place for later (the owner, item 43): today it only says so.
+  $("side-apps").prepend(icon("grid-plus"));
+  $("side-apps").addEventListener("click", () => showToast("应用还没有开放，现在还用不了。", "info"));
   $("account").addEventListener("click", () => {
     const open = $("account-menu").hidden;
     closePops();
@@ -6957,8 +6928,8 @@
     if (open) loadPanel().catch(() => {});
   });
 
-  // Search and jump (palette.js): ⌘K / Ctrl+K or 搜索 at the top of the
-  // sidebar opens it, Alt+↑ / Alt+↓ step through the chats in sidebar order.
+  // Search and jump (palette.js): ⌘K / Ctrl+K or the round 搜索 at the top of
+  // the full sidebar opens it, Alt+↑ / Alt+↓ step through the chats in sidebar order.
   // It sees the chats and opens them, switches a cat's conversation and runs
   // its default actions only through these hooks.
   window.ClowderPalette.init({
@@ -7125,6 +7096,8 @@
   function placeTip(host) {
     const text = host.getAttribute("data-tip");
     if (!text || (host.getAttribute("aria-expanded") === "true" && host !== $("head-chip"))) { hideTip(); return; }
+    // A label the full sidebar shows already (应用) is a tooltip only in the rail.
+    if (host.dataset.tipOnly === "rail" && !host.closest(".sidebar.rail")) { hideTip(); return; }
     tipEl.textContent = text;
     tipEl.hidden = false;
     const r = host.getBoundingClientRect();
@@ -7173,7 +7146,6 @@
 
   document.addEventListener("click", (ev) => {
     if (!ev.target.closest(".account-wrap")) closeAccount();
-    if (!ev.target.closest(".new-menu")) closeNewMenu();
     if (!panelMoreAnchor?.contains(ev.target) && !ev.target.closest(".panel-more, .menu-sub")) closePanelMenu();
     if (!ev.target.closest(".folder-head") && !ev.target.closest(".folder-menu")) closeFolderMenus();
     if (!ev.target.closest(".tool-pop") && !ev.target.closest(".card")) closeToolPop();
@@ -7662,8 +7634,8 @@
     more: (opener) => openTemplateCreate(opener),
     showList: () => $("menu").click(),
     error: (e) => setStatus(visibleError(e), true),
-    // The 新建 button as it is now (renderLists redraws the pin row): focus returns there after a dialog.
-    opener: () => [document.querySelector("#pin-row .pin.add"), $("rail-new")].find((b) => b && b.getClientRects().length) || null,
+    // The 新建 button shown now (the top one, or the rail's): focus returns there after a dialog.
+    opener: () => [$("side-new"), $("rail-new")].find((b) => b && b.getClientRects().length) || null,
   });
   // 找得到 (chat-list.js): rows read the status poll's latest lines; drafts
   // move between the composer and the chat they were written in.

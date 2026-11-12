@@ -298,10 +298,10 @@ function page(opts: { mac?: boolean; chats?: Any[]; order?: Any[]; selection?: A
   // palette.css: 取消 only on a phone; esc and the key hints only on a desktop.
   for (const c of opts.phone ? ['pal-esc', 'pal-foot'] : ['pal-cancel']) doc.cssHidden.add(c);
   const h = (tag: string, id = '', cls = '') => { const e = doc.createElement(tag); if (id) e.id = id; if (cls) e.className = cls; return e; };
-  const shell = h('div', 'shell'), side = h('div', '', 'side-scroll'), entryWrap = h('div', '', 'pal-entry-wrap');
-  const entry = h('button', 'palette-open', 'pal-entry'), composer = h('div', 'input'), thread = h('div', 'thread');
-  entry.append(h('span', '', 'pal-entry-label'));
-  entryWrap.append(entry); side.append(entryWrap); shell.append(side, thread, composer);
+  // The sidebar's top as index.html has it (item 43): the round 搜索 beside 新建.
+  const shell = h('div', 'shell'), side = h('div', '', 'side-head'), acts = h('div', '', 'side-acts');
+  const entry = h('button', 'palette-open', 'side-btn'), composer = h('div', 'input'), thread = h('div', 'thread');
+  acts.append(entry, h('button', 'side-new', 'side-btn')); side.append(acts); shell.append(side, thread, composer);
   doc.body.append(shell);
   let now = 0, seq = 0;
   const timers = new Map<number, { fn: () => void; at: number }>();
@@ -394,9 +394,12 @@ test('⌘K opens the palette over an inert shell with the caret in the field; an
   assert.equal(p.root().hidden, true);
   assert.equal(p.shell.inert, false);
   assert.equal(p.doc.activeElement, p.composer, 'focus is back where it was');
-  // 搜索 at the top of the sidebar opens it too, and focus returns to it.
+  // 搜索 at the top of the sidebar opens it too, and focus returns to it. It is a round lens now (item 43):
+  // its name is 搜索, and the shortcut is in its tooltip and aria-keyshortcuts, not a key cap.
   assert.equal(p.entry.getAttribute('aria-keyshortcuts'), 'Meta+K');
-  assert.equal(p.entry.find('pal-key')[0].textContent, '⌘K');
+  assert.equal(p.entry.dataset.tip, '搜索  ⌘K');
+  assert.equal(p.entry.find('pal-key').length, 0);
+  assert.equal(p.entry.find('pal-lens').length, 1);
   p.entry.click();
   assert.equal(p.P.isOpen(), true);
   p.key(p.input(), 'k', { metaKey: true });
@@ -406,7 +409,8 @@ test('⌘K opens the palette over an inert shell with the caret in the field; an
   const w = page({ mac: false });
   w.key(w.composer, 'k', { ctrlKey: true });
   assert.equal(w.P.isOpen(), true);
-  assert.equal(w.entry.find('pal-key')[0].textContent, 'Ctrl K');
+  assert.equal(w.entry.dataset.tip, '搜索  Ctrl K');
+  assert.equal(w.entry.getAttribute('aria-keyshortcuts'), 'Control+K');
 });
 
 test('it does not open over another dialog or a signed-out page, and keys inside it stay inside it', () => {
@@ -927,9 +931,11 @@ test('the page loads the palette after the quick-create scripts and before app.j
   assert.ok(at('workspace.js') < at('palette.js') && at('chat-experience.js') < at('palette.js') && at('palette-rules.js') < at('palette.js') && at('palette.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
   // Only the 找得到 styles (chat-list.css, chat-history.css), 资料页与群 (profile.css, mention.css) and chat-live.css (last) follow.
-  assert.deepEqual(styles.slice(-10), ['quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'profile.css', 'mention.css', 'polish.css', 'chat-cards.css', 'chat-presence.css', 'chat-live.css']);
-  // 搜索 sits under the greeting, above the pinned row.
-  assert.match(html, /<div id="greeting"[^>]*><\/div>\n\s+<!--[^\n]*-->\n\s+<div class="pal-entry-wrap"><button id="palette-open" class="pal-entry" type="button" aria-haspopup="dialog" aria-label="搜索">/);
+  assert.deepEqual(styles.slice(-11), ['quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'profile.css', 'mention.css', 'polish.css', 'chat-cards.css', 'chat-presence.css', 'sidebar.css', 'chat-live.css']);
+  // 搜索 is the first of the two round buttons at the right end of the greeting's line (item 43), before 新建; the rail has none.
+  assert.match(html, /<div class="side-head">\n\s+<div class="side-acts">\n\s+<button id="palette-open" class="side-btn" type="button" aria-haspopup="dialog" aria-label="搜索"><\/button>\n\s+<button id="side-new" class="side-btn"[^>]*aria-label="新建"[^>]*><\/button>\n\s+<\/div>\n\s+<div id="greeting"/);
+  assert.doesNotMatch(html, /pal-entry/);
+  assert.doesNotMatch(css, /pal-entry|pal-key/);
   const init = /window\.ClowderPalette\.init\(\{[\s\S]*?\n {2}\}\);/.exec(app)![0];
   for (const hook of ['newCat: (opener) => openNewBot(opener)', 'newGroup: (opener) => openNewGroup(opener)', 'switchConversation: (threadId) => workspace.switchTo(threadId)',
     'open: (sel) => (sel.type === "group" ? pickGroup(sel.id) : pickBot(sel.id))', 'setTheme: (mode) => applyTheme(mode)', 'note: (text) => showToast(text, "info")']) assert.ok(init.includes(hook), hook);

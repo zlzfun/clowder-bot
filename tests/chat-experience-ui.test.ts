@@ -1079,7 +1079,7 @@ function sidebar() {
     paintOfBot: () => null, primaryMark: () => h('i'), setTip: () => {}, niceName: String, realPreview: (t: unknown) => (t ? String(t) : ''),
     lineForBot: (b: Any) => b.description || '没有消息', lineForGroup: (g: Any) => g.members.join(' · '),
     folderStore: () => ({}), groupFace: (g: Any) => ({ sig: g.id }), sectionLabel: () => h('div'),
-    toggleNewMenu: () => {}, paintRailStatus: () => {}, sortStatusRows: () => {}, setWorking: () => {},
+    paintRailStatus: () => {}, sortStatusRows: () => {}, setWorking: () => {},
     // chat-list.js's line (latest line or draft) is covered by tests/chat-list.test.ts.
     chatList: { preview: () => null },
     selectBot: (name: string) => { picked.push('bot:' + name); }, selectGroup: (id: string) => { picked.push('group:' + id); },
@@ -1144,7 +1144,7 @@ test('the page loads the status-line scripts after workspace.js and before app.j
   assert.ok(at('workspace.js') < at('chat-experience-rules.js') && at('chat-experience-rules.js') < at('chat-experience.js') && at('chat-experience.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
   // Only the 开箱即用 extension (quick-create.css), the search palette (palette.css), 找得到 (chat-list.css, chat-history.css), 资料页与群 (profile.css, mention.css) and the live-reply styles (chat-live.css, last) come after.
-  assert.deepEqual(styles.slice(-11), ['chat-experience.css', 'quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'profile.css', 'mention.css', 'polish.css', 'chat-cards.css', 'chat-presence.css', 'chat-live.css']);
+  assert.deepEqual(styles.slice(-12), ['chat-experience.css', 'quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'profile.css', 'mention.css', 'polish.css', 'chat-cards.css', 'chat-presence.css', 'sidebar.css', 'chat-live.css']);
   // Conversation changes, reads, native events and redraws reach the module.
   assert.match(app, /workspace\.select\(state\.sel\);\n[^\n]*\n\s+experience\.select\(state\.sel\);/);
   assert.equal((app.match(/experience\.observe\(selection, /g) || []).length, 2, 'single chats and groups');

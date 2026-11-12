@@ -1060,15 +1060,15 @@ test('a card\'s own words go out through the real send path without taking the c
 });
 
 // ---------------------------------------------------------------- wiring
-test('the page loads the round\'s scripts before app.js and its styles just before chat-live.css; the shell hands them its own paths and never writes a second title', () => {
+test('the page loads the round\'s scripts before app.js and its styles just before chat-presence.css, sidebar.css and chat-live.css; the shell hands them its own paths and never writes a second title', () => {
   const html = read('client/index.html'), app = read('client/public/app.js');
   const scripts = [...html.matchAll(/<script src="\/([^"]+)"/g)].map(m => m[1]);
   const at = (name: string) => scripts.indexOf(name);
   assert.ok(at('chat-live.js') < at('chat-cards-rules.js') && at('chat-cards-rules.js') < at('chat-cards.js') && at('chat-cards.js') < at('app.js'));
   assert.ok(at('chat-notify-rules.js') < at('chat-notify.js') && at('chat-notify.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
-  // Only 活起来's styles (chat-presence.css) sit between them.
-  assert.deepEqual(styles.slice(-3), ['chat-cards.css', 'chat-presence.css', 'chat-live.css']);
+  // Only 活起来's styles (chat-presence.css) and the sidebar's (sidebar.css, item 43) sit between them.
+  assert.deepEqual(styles.slice(-4), ['chat-cards.css', 'chat-presence.css', 'sidebar.css', 'chat-live.css']);
   // Both histories: words, blocks and the ending through chat-cards.js; frames filled right after each keyed commit.
   assert.equal((app.match(/cards\.words\(m, isSilent\(/g) || []).length, 2);
   assert.equal((app.match(/cards\.blocks\(body, m, messages, (true|false)\);/g) || []).length, 2);
