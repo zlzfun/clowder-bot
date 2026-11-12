@@ -321,7 +321,7 @@ export class BotBridge {
       return this.withStartingArguments(cat);
     }
     if (input.sourceTemplate) throw new ApiError(400, '缺少创建配置');
-    if ((await this.cats()).some(c => c.name.toLowerCase() === input.name.toLowerCase())) throw new ApiError(409, '已经有一只叫这个名字的猫猫了');
+    if ((await this.cats()).some(c => c.name.toLowerCase() === input.name.toLowerCase())) throw new ApiError(409, '已经有一只叫这个名字的猫猫了', undefined, 'name_taken');
     const templates = await this.templates();
     const requestedTemplate = input.templateId ?? (source ? this.store.bot(source.id).templateId : undefined) ?? 'ragdoll';
     const template = templates.templates.find(t => t.id === requestedTemplate);
@@ -397,12 +397,13 @@ export class BotBridge {
   private async createSimple(name: string, simple: NonNullable<CreateBot['simple']>, key: string, timezone?: string): Promise<NativeCat> {
     const catId = `bot-${createHash('sha256').update(`bot-simple-cat:${key}`).digest('hex').slice(0, 24)}`;
     const cats = await this.cats(), existing = cats.find(cat => cat.id === catId);
-    if (cats.some(cat => cat.id !== catId && cat.name.toLowerCase() === name.toLowerCase())) throw new ApiError(409, '已经有一只叫这个名字的猫猫了');
+    if (cats.some(cat => cat.id !== catId && cat.name.toLowerCase() === name.toLowerCase())) throw new ApiError(409, '已经有一只叫这个名字的猫猫了', undefined, 'name_taken');
     const about = simple.about?.trim(), temper = simple.personality?.trim();
     // Custom keeps only the face's looks; otherwise picking a face picks that cat.
     const custom = simple.custom === true || !!about || !!temper;
     const input = createHash('sha256').update(JSON.stringify([name, simple.face ?? null, simple.rev ?? null, custom, about ?? null, temper ?? null, simple.agent ?? null])).digest('hex');
-    const different = (details?: unknown) => new ApiError(409, '这次创建和上一次的内容不一样，或者名字已被占用，请重新创建', details);
+    // Said by code as well, so a page can tell it from a name that is taken.
+    const different = (details?: unknown) => new ApiError(409, '这次创建和上一次的内容不一样，或者名字已被占用，请重新创建', details, 'request_changed');
     const keep = (cat: NativeCat, face: string) => {
       const meta = this.store.bot(cat.id);
       if (meta.templateId !== face || !meta.avatarSeed) { Object.assign(meta, { templateId: face, avatarSeed: `cat:${face}`, ...(timezone ? { timezone } : {}) }); this.store.save(); }

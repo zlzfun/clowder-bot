@@ -169,7 +169,10 @@ test('a cat needs only a name: one unpatched native creation with the Agent’s 
   }
   assert.equal(creations().length, 2);
   const twin = await r.call('/xbot-api/bots', 'POST', { name: '团子', simple: {}, idempotencyKey: randomUUID() });
-  assert.equal(twin.status, 409); assert.match((await twin.json()).error, /已经有一只叫这个名字/);
+  assert.equal(twin.status, 409);
+  // The two refusals are told apart by code: a taken name, and a key that already stands for another request.
+  assert.deepEqual(await twin.json(), { error: '已经有一只叫这个名字的猫猫了', code: 'name_taken' });
+  assert.equal((await (await r.call('/xbot-api/bots', 'POST', { name: '团子', simple: { about: '别的用途' }, idempotencyKey: key })).json()).code, 'request_changed');
   assert.equal(r.native.cats.length, 1);
 
   // A chosen face is that cat: its portrait and its own tool (缅因猫 thinks with Codex), whatever the usual tool here is.
@@ -314,7 +317,7 @@ test('a repeat is answered by what is known: the cat that exists, or the tools a
   // …but a request that describes another cat is not a repeat: another name, face, tool, or words of the owner's own.
   for (const [name, simple] of [['宪宪二', { face: 'ragdoll' }], ['宪宪', { face: 'maine-coon' }], ['宪宪', { face: 'ragdoll', agent: 'codex' }], ['宪宪', { face: 'ragdoll', agent: 'nope' }],
     ['宪宪', { face: 'ragdoll', custom: true }], ['宪宪', { face: 'ragdoll', about: '陪我聊天' }], ['宪宪', { face: 'ragdoll', personality: '话少' }]] as const)
-    assert.deepEqual((await post(name, simple, key)).slice(0, 2), [409, undefined], JSON.stringify([name, simple]));
+    assert.deepEqual((await post(name, simple, key)).slice(0, 2), [409, 'request_changed'], JSON.stringify([name, simple]));
   assert.equal(creations().length, 1); assert.equal(r.native.cats.length, 1);
   r.native.request = request;
   // A custom cat is recognised by the owner's own words.
@@ -322,8 +325,8 @@ test('a repeat is answered by what is known: the cat that exists, or the tools a
   const own = randomUUID(), [, poet] = await post('小诗', { face: 'bengal', custom: true, about: '陪我写诗', agent: 'codex' }, own);
   restart();
   assert.deepEqual((await post('小诗', { face: 'bengal', custom: true, about: '陪我写诗', agent: 'codex' }, own)).slice(0, 2), [201, poet]);
-  assert.deepEqual((await post('小诗', { face: 'bengal', custom: true, about: '陪我画画', agent: 'codex' }, own)).slice(0, 2), [409, undefined]);
-  assert.deepEqual((await post('小诗', { face: 'bengal' }, own)).slice(0, 2), [409, undefined], 'the template cat of that face is another cat (and its tool is not this one)');
+  assert.deepEqual((await post('小诗', { face: 'bengal', custom: true, about: '陪我画画', agent: 'codex' }, own)).slice(0, 2), [409, 'request_changed']);
+  assert.deepEqual((await post('小诗', { face: 'bengal' }, own)).slice(0, 2), [409, 'request_changed'], 'the template cat of that face is another cat (and its tool is not this one)');
 
   // Nothing was made the first time (the creation itself did not get through) and the tool is gone since: the repeat is not sent as it was resolved.
   const unreachable = (down: boolean) => { r.native.request = (async (path: string, options?: any) => {

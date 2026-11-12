@@ -112,7 +112,7 @@ export function createXbotCoreRouter(bridge: BotBridge) {
     const cat = await bot(req.params.name);
     const input = z.object({ ...botBody, name: label.optional(), group: z.string().max(80).optional() }).omit({ runtimeId: true, templateId: true, catConfig: true, sourceTemplate: true, idempotencyKey: true }).strict().parse(req.body);
     if (input.group && !store.state.folders.includes(input.group)) throw new ApiError(400, '分组不存在');
-    if (input.name && (await bridge.cats()).some(c => c.id !== cat.id && c.name.toLowerCase() === input.name!.toLowerCase())) throw new ApiError(409, '已经有一只叫这个名字的猫猫了');
+    if (input.name && (await bridge.cats()).some(c => c.id !== cat.id && c.name.toLowerCase() === input.name!.toLowerCase())) throw new ApiError(409, '已经有一只叫这个名字的猫猫了', undefined, 'name_taken');
     const update: Record<string, unknown> = {};
     if (input.name) Object.assign(update, { name: input.name, displayName: input.name, nickname: input.name, mentionPatterns: [`@${input.name}`, `@${cat.id}`] });
     if (input.persona !== undefined) update.roleDescription = z.string().trim().min(1).parse(input.persona);
