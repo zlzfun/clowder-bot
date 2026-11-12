@@ -106,15 +106,18 @@
    line of its description, not a control. The tool's name is set apart like
    the cat's. A tool that is not usable here: what it needs and why, a shade
    stronger (it decides what can be done), and, for a login, the command and
-   重新检测. Two lines stay free while any face's cat cannot come home as it
-   is, so the form holds still between such a cat and one that can. */
+   重新检测. While any face's cat cannot come home as it is, the tool line,
+   its note and 自定义 (the tail) keep room for a two-line tool line; the room
+   left over sits below 自定义, not between the lines, so a one-line tool line
+   reads as part of the hint and the form still holds still between cats. */
+.qc-tail { width: 100%; display: flex; flex-direction: column; align-items: center; gap: var(--x-s1); }
+.qc-about.mixed .qc-tail { min-height: calc(40px + 28px + var(--x-s1)); }
 .qc-uses { width: 100%; }
 .qc-uses-line { margin: 0; font-size: 13px; line-height: 20px; color: var(--x-muted); }
 .qc-uses-text { animation: fade 180ms ease-out; }
 .qc-uses-line b { font-weight: 560; color: var(--x-text-2); white-space: nowrap; }
 .qc-uses-line.away { color: var(--x-text-2); }
 .qc-uses-line.away b { color: var(--x-text); }
-.qc-about.mixed .qc-uses-line { min-height: 40px; }
 .qc-uses-more {
   margin-top: var(--x-s2); display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--x-s2);
   font-size: var(--x-fs-sm); line-height: 1.6; color: var(--x-muted);
@@ -157,6 +160,13 @@
 .qc-err { margin: 0; font-size: var(--x-fs-sm); line-height: 1.5; color: var(--x-danger); }
 .qc-err:empty { display: none; }
 .qc-go { width: min(320px, 100%); min-height: 44px; margin-top: var(--x-s5); border-radius: var(--x-r-card); font-size: 15px; }
+/* 创建 / 带它回家 for a cat that cannot come home as it is: still focusable
+   (aria-disabled, so its reason is read on it), drawn as the original
+   .primary:disabled. */
+.qc-flow .primary[aria-disabled="true"], .qc-flow .primary[aria-disabled="true"]:hover, .qc-flow .primary[aria-disabled="true"]:active,
+.qc-card .primary[aria-disabled="true"], .qc-card .primary[aria-disabled="true"]:hover, .qc-card .primary[aria-disabled="true"]:active {
+  background: var(--fill); color: var(--muted); opacity: 1; cursor: default;
+}
 .qc-error { max-width: 440px; margin: var(--x-s3) 0 0; font-size: var(--x-fs-sm); line-height: 1.5; color: var(--x-danger); }
 .qc-tool { max-width: 440px; margin-top: var(--x-s6); }
 .qc-tool-line { margin: 0; font-size: 13px; line-height: 1.7; color: var(--x-muted); }
@@ -205,6 +215,8 @@
 /* What is in the way, and 重新检测. */
 .qc-need { width: min(440px, 100%); margin-top: var(--x-s7); display: flex; flex-direction: column; align-items: center; gap: var(--x-s3); }
 .qc-need h3 { margin: 0; font-size: 16px; font-weight: 620; line-height: 1.4; color: var(--x-text); }
+/* Focus lands on the title when the form gives way to this panel (it is not a control). */
+.qc-need h3:focus { outline: none; }
 .qc-need > p { margin: 0; font-size: 14px; line-height: 1.6; color: var(--x-muted); }
 .qc-need .qc-cmds { margin: var(--x-s1) 0; }
 .qc-again { display: inline-flex; align-items: center; justify-content: center; gap: var(--x-s2); margin-top: var(--x-s1); }
@@ -229,6 +241,7 @@
 /* The dialog reads left to right: the hint under the row, 自定义 at the edge like 更多设置. */
 .qc-card .qc-about { width: 100%; margin-top: var(--x-s2); align-items: flex-start; }
 .qc-card .qc-uses-more, .qc-card .qc-modeline { justify-content: flex-start; }
+.qc-card .qc-tail { align-items: flex-start; }
 .qc-card .qc-own { align-items: stretch; }
 .qc-card .field.qc-field { margin: var(--x-s5) 0 0; }
 .qc-opt { margin-left: var(--x-s2); font-size: var(--x-fs-cap); color: var(--x-faint); }

@@ -260,7 +260,9 @@
     // agent: 自定义's tool; toolPicked: the owner chose it. Untouched, it is the
     // usual one, or the tool of the cat on screen when 自定义 was turned on.
     let s = null, agent = null, toolPicked = false, faceTouched = false, picked = null, suggested = "", busy = false, loads = 0, refused = "", refusedFaces = false, kind = "";
-    let offered = R.offer([], presets()), custom = false, modeTouched = false, painted = "", modeShown = null, usesShown = "";
+    // presented: the form has been shown; from then on only the owner changes the mode.
+    // refusal: the error line holds a refusal about the chosen cat's tool (cleared once it no longer holds).
+    let offered = R.offer([], presets()), custom = false, modeTouched = false, presented = false, painted = "", modeShown = null, usesShown = "", refusal = false;
     // The keys of requests whose answer was lost, by request body: the same
     // body again — after switching to 自定义 and back, too — is the same
     // request under its own key; a changed body (another mode or tool is one)
@@ -272,7 +274,7 @@
       root.setAttribute("novalidate", "");
       root.addEventListener("submit", (ev) => { ev.preventDefault(); submit(); });
     }
-    const faces = lineup({ compact: dialog, onPick: (id) => { faceTouched = true; picked = id; follow(id); note(""); paintAbout(); say(custom ? "" : spoken()); } });
+    const faces = lineup({ compact: dialog, onPick: (id) => { faceTouched = true; picked = id; follow(id); note(""); if (refusal) showError(""); paintAbout(); say(custom ? "" : spoken()); } });
     const ids = () => offered.map((f) => f.id);
 
     // What the chosen cat is like and what it thinks with — or, for a cat of
@@ -300,7 +302,11 @@
     ahead.hidden = true;
     const modeLine = node("div", "qc-modeline");
     modeLine.append(mode, ahead);
-    about.append(trait, uses, fresh, modeLine);
+    // The tool line, a note and 自定义 sit together under the hint: while some face's cat cannot come home
+    // as it is, they keep room for the longer line below 自定义, so the form does not jump between cats.
+    const tail = node("div", "qc-tail");
+    tail.append(uses, fresh, modeLine);
+    about.append(trait, tail);
     // Said once, politely, for each choice the owner makes (a face, 自定义 on
     // or off); never for what the form fills in by itself, nor while typing.
     const voice = node("p", "qc-sr");
@@ -370,7 +376,7 @@
       paintAbout();
       onState(kind);
     }
-    function showError(text) { error.textContent = text || ""; error.hidden = !text; }
+    function showError(text, isRefusal = false) { error.textContent = text || ""; error.hidden = !text; refusal = !!text && isRefusal; }
     function say(text) { if (voice.textContent !== (text || "")) voice.textContent = text || ""; }
     function note(text) { fresh.textContent = text || ""; fresh.hidden = !text; }
     const chosenFace = () => offered.find((f) => f.id === faces.get()) || null;
@@ -437,17 +443,27 @@
       mode.disabled = busy;
       paintGo();
       // A login's 重新检测 that went away with what it was about: focus goes on to what can be done now.
-      if (hadFocus && !uses.contains(document.activeElement)) (go.disabled || go.hidden ? mode : go).focus();
+      if (hadFocus && !uses.contains(document.activeElement)) {
+        const again = usesMore.querySelector(".qc-check");
+        (again || (go.disabled || go.hidden || go.getAttribute("aria-disabled") === "true" ? mode : go)).focus();
+      }
     }
     // The tool line of a face's own cat; repainted only when what it says changes (a 复制 or 重新检测 keeps focus).
     function paintUses(face) {
       const t = face ? R.toolOf(face, s) : null, u = R.uses(t);
       uses.hidden = !u;
-      const command = !u ? "" : u.usable ? (t.state === "unknown" ? t.loginCommand || R.loginCommand(s, t.id) : "") : t.state === "login" ? t.loginCommand : "";
+      const help = R.toolHelp(t);
+      const command = !u ? "" : u.usable ? (t.state === "unknown" ? t.loginCommand || R.loginCommand(s, t.id) : "") : help ? help.command : "";
       const sig = u ? [u.text, t.state, command].join("\n") : "";
       if (sig === usesShown) return;
       usesShown = sig;
-      if (u) { const text = node("span", "qc-uses-text"); text.append(u.before, node("b", "", u.label), u.after); usesLine.replaceChildren(text); }
+      if (u) {
+        const text = node("span", "qc-uses-text");
+        text.append(u.before);
+        if (u.label) text.append(node("b", "", u.label));
+        text.append(u.after);
+        usesLine.replaceChildren(text);
+      }
       else usesLine.replaceChildren();
       usesLine.classList.toggle("away", !!u && !u.usable);
       const more = [];
@@ -456,18 +472,19 @@
         more.push(node("span", "qc-uses-say", R.unconfirmed(t.label, command)));
         if (command) more.push(commandChip(command));
       }
-      // Needs a login: the command and 重新检测, as the blocked screen has them.
-      if (u && !u.usable && t.state === "login") {
+      // Needs a login, or is not installed: what to do (with the login command) and 重新检测, as the blocked
+      // screen has them; the face and everything typed stay. A tool the app cannot connect yet has nothing to re-detect.
+      if (u && help) {
         checkNote.textContent = "";
-        more.push(node("span", "qc-uses-say", R.loginHelp(command)));
+        more.push(node("span", "qc-uses-say", help.text));
         if (command) more.push(commandChip(command));
         more.push(checkAgain(), checkNote);
       }
       usesMore.replaceChildren(...more);
       usesMore.hidden = !more.length;
     }
-    // 重新检测 beside a tool that needs a login: inert while checking, not
-    // disabled, so focus stays on it when the answer changes nothing.
+    // 重新检测 beside a tool that needs a login or an install: inert while
+    // checking, not disabled, so focus stays on it when the answer changes nothing.
     function checkAgain() {
       const label = node("span", "", "重新检测"), again = button("text-btn qc-check");
       again.append(h.icon("refresh-cw"), label);
@@ -482,14 +499,16 @@
       });
       return again;
     }
-    // 创建 / 带它回家: not for a face's own cat that cannot come home as it is
-    // (disabled, described by the line that says why).
+    // 创建 / 带它回家: not for a face's own cat that cannot come home as it is.
+    // aria-disabled, not disabled: it stays focusable and described by the line
+    // that says why, and pressing it — or Enter in a field, which presses it —
+    // sends nothing and takes the owner to 自定义 (submit's guard). Disabled
+    // only while a request is on its way.
     function paintGo() {
-      const blocked = kind === "ready" && stuck(), had = document.activeElement === go;
-      go.disabled = busy || blocked;
-      if (blocked) go.setAttribute("aria-describedby", usesLine.id);
-      else go.removeAttribute("aria-describedby");
-      if (had && blocked) mode.focus();
+      const blocked = kind === "ready" && stuck();
+      go.disabled = busy;
+      if (blocked) { go.setAttribute("aria-disabled", "true"); go.setAttribute("aria-describedby", usesLine.id); }
+      else { go.removeAttribute("aria-disabled"); go.removeAttribute("aria-describedby"); }
     }
     // 自定义 on or off, by the owner. Focus stays on the switch; the fields keep what was typed.
     function setMode(next) {
@@ -564,6 +583,8 @@
         else if (how === "refused" || how === "face") said = refused;
         paintNeed(next, said);
         show("blocked");
+        // The form the owner was in is gone: focus goes to what replaced it (its title, then 重新检测).
+        if (wasReady) { const title = needBox.querySelector("h3"); if (title) title.focus(); }
         return;
       }
       // 自定义's tool: still usable, or the usual one again (said when that changed under a custom cat on screen).
@@ -571,13 +592,15 @@
       if (!agent || !R.choiceOf(next, agent)) { agent = next.agent.id; toolPicked = false; }
       tool.render(next, agent);
       // The face chosen for the owner: the first whose cat can come home as it is. With none, only
-      // 自定义 makes a cat, so the form turns it on by itself (never against the owner's own choice).
+      // 自定义 makes a cat, so the form turns it on by itself — only before it is first presented: once
+      // on screen, only the owner changes the mode (a re-read never turns a draft into a template).
       const first = R.firstUsable(offered, next);
-      if (!modeTouched && custom === !!first) setCustom(!first);
+      if (!presented && !modeTouched && custom === !!first) setCustom(!first);
       const face = faceTouched && picked ? picked : first || ids()[0] || null;
       if (!wasReady) {
         // Back from blocked (or first time ready): the owner's own face if they picked one.
         show("ready");
+        presented = true;
         setFace(face);
         if (dialog || how === "refresh") focusName();
       } else {
@@ -592,7 +615,7 @@
       else if (how === "face") {
         // The server's sentence; read again, the hint says how things are now (and 自定义 is the way on).
         const now = !stuck();
-        showError(refused + (now ? "重新检测过，现在能用了，再点一次就好。" : ""));
+        showError(refused + (now ? "重新检测过，现在能用了，再点一次就好。" : ""), !now);
         (now ? go : mode).focus();
       } else if (how === "changed" && wasReady) {
         // The owner was looking at older words: say so beside the new ones, and once aloud. Nothing is sent again by itself.
@@ -601,8 +624,10 @@
         go.focus();
       } else if (how === "refresh" && wasReady) {
         // 重新检测 beside a login: said plainly when nothing changed; a cat that can come home now is said once.
-        checkNote.textContent = R.sameStart(before, next) ? "重新检测过了，还是没检测到登录。" : "检测结果有变化。";
-        if (wasStuck && !stuck()) say(spoken());
+        const help = R.toolHelp(R.toolOf(chosenFace(), next));
+        checkNote.textContent = R.sameStart(before, next) ? (help ? help.unchanged : "重新检测过了，没有变化。") : "检测结果有变化。";
+        // The cat can come home now: a refusal about its tool no longer holds, and the new state is said once.
+        if (wasStuck && !stuck()) { if (refusal) showError(""); say(spoken()); }
       }
     }
     // What blocks: the tools (item 28) first, else the cats' details.
@@ -627,7 +652,9 @@
         again.removeAttribute("aria-disabled");
         label.textContent = "重新检测";
       });
-      needBox.replaceChildren(node("h3", "", copy.title), node("p", "", copy.body), cmds, again, status);
+      const title = node("h3", "", copy.title);
+      title.tabIndex = -1;
+      needBox.replaceChildren(title, node("p", "", copy.body), cmds, again, status);
       if (refocus) again.focus();
     }
 
@@ -692,7 +719,9 @@
         else if (what.kind === "face") { refused = what.text; refusedFaces = false; await load("face"); }
         // The portrait changed: read the faces again and let the owner look; not sent again by itself.
         else if (what.kind === "changed") await load("changed");
-        else { showError(what.text); go.focus(); if (what.kind === "unsure") quietly(h.refresh); }
+        // request_changed: this key stood for another request; the server's sentence, and the list read again (it
+        // may know the name now). Its key is dropped like any refusal's, so the next attempt is a new request.
+        else { showError(what.text); go.focus(); if (what.kind === "unsure" || what.kind === "changedRequest") quietly(h.refresh); }
         return;
       }
       if (!alive()) return;
