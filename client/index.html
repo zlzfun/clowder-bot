@@ -50,6 +50,7 @@ try {
 <link rel="stylesheet" href="/polish.css">
 <link rel="stylesheet" href="/chat-cards.css">
 <link rel="stylesheet" href="/chat-presence.css">
+<link rel="stylesheet" href="/sidebar.css">
 <link rel="stylesheet" href="/chat-live.css">
 </head>
 <body>
@@ -100,27 +101,33 @@ try {
   <aside id="sidebar" class="sidebar">
     <div class="side-drag" aria-hidden="true"></div>
     <div id="side-grip" class="sgrip" aria-hidden="true"></div>
-    <div class="side-scroll">
+    <!-- The top (sidebar.css): the greeting, with 搜索 (the ⌘K palette's way in, palette.js) and 新建 (one dialog for a cat or a group) at its right end. -->
+    <div class="side-head">
+      <div class="side-acts">
+        <button id="palette-open" class="side-btn" type="button" aria-haspopup="dialog" aria-label="搜索"></button>
+        <button id="side-new" class="side-btn" type="button" aria-haspopup="dialog" aria-label="新建" data-tip="新建"></button>
+      </div>
       <div id="greeting" class="greeting" aria-live="polite"></div>
-      <!-- Search and jump (palette.js): the ⌘K palette's way in. -->
-      <div class="pal-entry-wrap"><button id="palette-open" class="pal-entry" type="button" aria-haspopup="dialog" aria-label="搜索"><span class="pal-entry-label">搜索</span></button></div>
+    </div>
+    <div class="side-scroll">
       <div id="pin-row" class="pin-row"></div>
       <nav id="roster" class="list" aria-label="猫猫和群聊"></nav>
       <nav id="remote-roster" class="list g7-remote" aria-label="其他电脑上的猫猫" hidden></nav>
     </div>
+    <!-- The bottom: the owner's own face (its menu: the name, this computer, 设置) and 应用; in the rail 新建 joins them. -->
     <div class="side-foot">
-      <button id="rail-new" class="railnew" type="button" aria-label="新建猫猫或群聊" data-tip="新建" data-tip-placement="right"></button>
-      <!-- Account actions and the unified settings dialog. -->
+      <button id="rail-new" class="side-glyph rail-only" type="button" aria-haspopup="dialog" aria-label="新建" data-tip="新建" data-tip-placement="right"></button>
       <div class="account-wrap">
         <button id="account" class="account-trigger" type="button" aria-label="我" aria-expanded="false" aria-controls="account-menu">
           <span id="me-avatar"></span>
-          <span class="me-text"><span id="me-name" class="me-name">我</span><span id="me-device" class="me-device" hidden></span></span>
-          <svg class="icon me-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
         </button>
         <div id="account-menu" class="pop account-menu" hidden>
+          <div class="me-head"><span id="me-name" class="me-name">我</span><span id="me-device" class="me-device" hidden></span></div>
           <button id="account-settings" type="button" aria-haspopup="dialog">设置</button>
         </div>
       </div>
+      <!-- 应用: a place the owner asked to keep for it (docs/xbot-frontend.md item 43); a click says it is not available yet. -->
+      <button id="side-apps" class="side-apps" type="button" aria-label="应用" data-tip="应用" data-tip-placement="right" data-tip-only="rail"><span class="side-apps-label">应用</span></button>
     </div>
   </aside>
   <div id="backdrop" class="backdrop" hidden></div>
@@ -294,6 +301,7 @@ try {
 <script src="/chat-notify.js"></script>
 <script src="/chat-presence-rules.js"></script>
 <script src="/chat-presence.js"></script>
+<script src="/sidebar.js"></script>
 <script src="/account.js"></script>
 <script src="/app.js"></script>
 <script src="/devices.js"></script>

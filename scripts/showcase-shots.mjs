@@ -157,13 +157,13 @@ try {
   // 联系人列表: the list as it is staged (unread counts, 等你确认, the pinned cat), before any chat is opened.
   if (wanted('list')) await shoot('list', async page => around(page, ['#pin-row', '#roster'], 12, { x0: 0, x1: 280, y0: (await page.locator('#pin-row').boundingBox()).y - 6 }));
 
-  // 打开就能聊: 新建 → 新建猫猫, a cat whose tool is here picked (梵花猫, Kimi), its character and its tool under
-  // the row, a name typed; then, cropped to the row and what is under it, a cat whose tool the app cannot connect
-  // yet (暹罗猫): why it cannot come home as it is, and 自定义 beside it.
+  // 打开就能聊: 新建 (the round ＋ at the top of the sidebar) opens the dialog on its 猫猫 side; a cat whose tool is
+  // here picked (梵花猫, Kimi), its character and its tool under the row, a name typed; then, cropped to the row and
+  // what is under it, a cat whose tool the app cannot connect yet (暹罗猫): why it cannot come home as it is, and
+  // 自定义 beside it.
   if (wanted('new-cat')) {
     await both(async (page) => {
-      await page.locator('.pin.add').click();
-      await page.locator('.new-menu').getByText('新建猫猫', { exact: true }).click();
+      await page.locator('#side-new').click();
       await page.waitForSelector('.qc-card .qc-face');
       await page.locator('.qc-card .qc-face[data-face="turkish-van"]').click();
       await page.locator('.qc-card input').first().fill('年糕');
@@ -264,7 +264,7 @@ try {
     await both(closeDrawer);
   }
 
-  // 通知: 设置 → 通用, the desktop notification switch.
+  // 通知: 设置 → 通用, the desktop notification switch (我's menu opens from the owner's face at the bottom of the sidebar).
   if (wanted('notify')) {
     await both(async (page) => {
       await page.locator('#account').click();

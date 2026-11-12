@@ -260,8 +260,15 @@
     const back = S.opener;
     S.opener = null;
     if (!restore) return;
-    if (back && shown(back) && !back.disabled) back.focus({ preventScroll: true });
-    else if (H.focusComposer) H.focusComposer();
+    if (back && shown(back) && !back.disabled) { back.focus({ preventScroll: true }); return; }
+    if (H.focusComposer) H.focusComposer();
+    // The way in is gone (搜索 has no place in the rail) and the composer took
+    // nothing (no chat open, a phone): a control the app says is on screen now.
+    const here = document.activeElement;
+    if ((!here || here === document.body || !shown(here)) && H.fallback) {
+      const next = H.fallback();
+      if (next && shown(next) && !next.disabled) next.focus({ preventScroll: true });
+    }
   }
 
   // ------------------------------------------------------------------ search
@@ -695,17 +702,14 @@
         hint: () => (dark() ? "现在是深色" : "现在是浅色"), run: () => H.setTheme(dark() ? "light" : "dark"),
       });
     }
-    // 搜索 at the top of the sidebar.
+    // 搜索: the round lens at the top of the full sidebar; its tooltip and
+    // aria-keyshortcuts carry the shortcut. The rail has no 搜索: ⌘K still opens it.
     const entry = document.getElementById("palette-open");
     if (entry && !entry.dataset.palReady) {
       entry.dataset.palReady = "1";
       entry.prepend(lens());
-      const k = node("kbd", "pal-key", keyHint());
-      k.setAttribute("aria-hidden", "true");
-      entry.append(k);
       entry.setAttribute("aria-keyshortcuts", mac ? "Meta+K" : "Control+K");
       entry.dataset.tip = "搜索  " + keyHint();
-      entry.dataset.tipPlacement = "right";
       entry.addEventListener("click", () => openFrom(entry, {}));
     }
     document.addEventListener("keydown", onPageKey);

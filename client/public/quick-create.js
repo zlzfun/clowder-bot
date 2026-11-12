@@ -1,5 +1,5 @@
 // 开箱即用。The rules live in quick-create-rules.js; app.js passes its helpers
-// through init(). Four views:
+// through init(). Three views:
 //   stage()     no cats yet: 「领一只猫猫回家」 — the clay cats in a row, each
 //               a cat with its own character and its own tool (a short hint
 //               says what the chosen one is like and what it thinks with, or
@@ -7,10 +7,11 @@
 //               its name, 带它回家; or 自定义 for a cat of the owner's own,
 //               whose tool is chosen there;
 //   noChat()    cats, but no chat open: one line (and 打开列表 on a phone);
-//   openCat()   新建 → 新建猫猫: the same faces, hint, 自定义 and name, in a
-//               small dialog; 更多设置 hands over to the template creator
-//               (cat-templates.js), unchanged;
-//   openGroup() 新建 → 新建群聊: cats as face chips, an optional name whose
+//   the 新建 dialog (openCat() on its 猫猫 side, openGroup() on its 群聊
+//               side; item 43): one window titled 新建 with a 猫猫 | 群聊
+//               switch. 猫猫: the same faces, hint, 自定义 and name; 更多设置
+//               hands over to the template creator (cat-templates.js),
+//               unchanged. 群聊: cats as face chips, an optional name whose
 //               placeholder is the name the group gets without one.
 // Requests: GET /xbot-api/start (重新检测 adds ?refresh=1; its faces[] says
 // which faces there are, what each one's cat is like and which tool it thinks
@@ -246,8 +247,11 @@
   // instead: the row then picks only its looks, two optional lines say what it
   // is for and what it is like, and the tool is chosen there.
   // hold: where focus waits while a request is on its way (the dialog's card).
-  // centred: the box that re-centres when the form grows (the stage, the card).
-  function catFlow({ dialog, alive, hold, centred, onBusy = () => {}, onState = () => {}, done }) {
+  // centred: the box that re-centres when the form grows (the stage).
+  // resize: instead, how a change of the form's height is eased (the dialog,
+  // whose top edge stays put). mayFocus: whether the dialog may still move
+  // focus to the name once /start answers (not after the owner went elsewhere).
+  function catFlow({ dialog, alive, hold, centred, resize, mayFocus, onBusy = () => {}, onState = () => {}, done }) {
     const h = hooks();
     // picked: the face the owner chose, kept apart from the row, which shows no
     // choice while something blocks creation and gets it back afterwards.
@@ -514,7 +518,8 @@
     function setMode(next) {
       if (busy || kind !== "ready" || next === custom) return;
       modeTouched = true;
-      glide(centred && centred(), () => { setCustom(next); note(""); });
+      const change = () => { setCustom(next); note(""); };
+      if (resize) resize(change); else glide(centred && centred(), change);
       say(custom ? R.OWN_NOTE : spoken());
       showError("");
     }
@@ -602,7 +607,7 @@
         show("ready");
         presented = true;
         setFace(face);
-        if (dialog || how === "refresh") focusName();
+        if ((dialog && (!mayFocus || mayFocus())) || how === "refresh") focusName();
       } else {
         // A choice that is no longer there gives way. The cat on screen otherwise stays, even an untouched
         // one: the owner was looking at it (and may just have tried to bring it home); the hint says how it is now.
@@ -746,6 +751,8 @@
     }
     return {
       element: root, go, start: () => load("first"), submit, later,
+      // Where focus goes when the form is turned to: the name once it is there, else where focus waits.
+      focus: () => { if (kind === "ready") focusName(); else (hold || root).focus(); },
       // For cats arriving from elsewhere (release): a request in flight or a cat
       // already made here; and whether the owner has a draft (their own face,
       // name, 自定义, its tool or its lines) or a request whose answer was lost.
@@ -878,12 +885,15 @@
 
   // One quick dialog at a time, on the original .modal / .modal-card. Escape,
   // Tab and every other key stay inside; focus goes back to the opener, or,
-  // when a list redraw replaced it meanwhile, to the 新建 button there now.
+  // when it is gone or no longer shown (a list redraw, the rail turned into
+  // the drawer), to the 新建 button shown now.
   let layer = null;
+  const showing = (el) => !!el && el.isConnected && (!el.getClientRects || el.getClientRects().length > 0);
   function liveOpener(opener) {
-    if (opener && opener.isConnected) return opener;
+    if (showing(opener)) return opener;
     const now = H && H.opener ? H.opener() : null;
-    return now && now.isConnected ? now : null;
+    if (now && now.isConnected) return now;
+    return opener && opener.isConnected ? opener : null;
   }
   function trapTab(ev, card) {
     const live = [...card.querySelectorAll("button, input, select, textarea")]
@@ -895,23 +905,43 @@
       (ev.shiftKey ? last : first).focus();
     }
   }
+  // A change of the card's height, eased (180 ms, as the stage's glide) from
+  // the old height to the new one; its top edge stays where it is (the
+  // dialog hangs from a fixed line, quick-create.css). At once when motion is
+  // reduced or nothing is laid out.
+  // Switched again mid-way: the newer easing starts from the height on screen, and the clip lasts until it ends.
+  const easing = new WeakMap();
+  function ease(card, change) {
+    const can = card && typeof card.animate === "function" && !media("(prefers-reduced-motion: reduce)");
+    const before = can ? card.getBoundingClientRect().height : 0;
+    change();
+    if (!can) return;
+    const prev = easing.get(card);
+    if (prev) { easing.delete(card); if (typeof prev.cancel === "function") prev.cancel(); }
+    const after = card.getBoundingClientRect().height;
+    if (!before || !after || Math.abs(after - before) < 1) { card.classList.remove("qc-easing"); return; }
+    card.classList.add("qc-easing");
+    const anim = card.animate([{ height: before + "px" }, { height: after + "px" }], { duration: 180, easing: "ease-out" });
+    easing.set(card, anim);
+    const done = () => { if (easing.get(card) === anim) card.classList.remove("qc-easing"); };
+    anim.finished.then(done, done);
+  }
   function dialog(title, opener) {
     if (layer) layer.close(true);
-    const root = node("div", "modal qc-modal"), card = node("form", "modal-card qc-card");
-    card.setAttribute("novalidate", "");
+    const root = node("div", "modal qc-modal"), card = node("div", "modal-card qc-card");
     card.setAttribute("role", "dialog");
     card.setAttribute("aria-modal", "true");
     card.tabIndex = -1;
-    const head = node("h2", "", title);
+    const top = node("div", "qc-head"), head = node("h2", "", title);
     head.id = uid("title");
     card.setAttribute("aria-labelledby", head.id);
-    const body = node("div", "qc-body"), actions = node("div", "modal-actions");
-    card.append(head, body, actions);
+    top.append(head);
+    card.append(top);
     root.append(card);
     document.body.append(root);
     let downOnRoot = false;
     const L = {
-      card, body, actions, alive: true, busy: false,
+      card, top, alive: true, busy: false,
       close(force) {
         if (!L.alive || (L.busy && !force)) return;
         L.alive = false;
@@ -933,133 +963,229 @@
     return L;
   }
 
-  // 新建 → 新建猫猫.
-  function openCat({ opener } = {}) {
+  // 新建: one dialog for a cat or a group (the owner, 2026-11-12: 「点击新建可以
+  // 直接弹出弹窗…弹窗是一个可以合理切换猫猫与群聊初始配置的窗口」). Its title
+  // is 新建; beside it a two-way switch, 猫猫 | 群聊, a tab list: the selected
+  // tab is the one Tab stop, ← → (and Home, End) move to the other side and
+  // focus it. Each side is built the first time it is shown (the cat side reads
+  // /start then; the group side sends nothing until 创建) and kept while the
+  // dialog is open, so switching back finds the face, the name, 自定义, the
+  // picked cats and the group name as they were left. The card keeps its top
+  // edge; a change of height is eased. A side turned to from inside the
+  // dialog (群聊's 新建猫猫) is announced and focus goes into it. While a
+  // request is on its way the switch does not move.
+  const SIDES = [["cat", "猫猫", "新建猫猫"], ["group", "群聊", "新建群聊"]];
+  function open({ side = "cat", opener } = {}) {
     const h = hooks(), from = opener || document.activeElement;
-    const L = dialog("新建猫猫", from);
-    const more = button("text-btn qc-more", "更多设置", () => { if (L.busy) return; L.close(true); h.more(liveOpener(from) || from); });
-    const cancel = button("secondary", "取消", () => L.close());
-    const flow = catFlow({
-      dialog: true,
-      alive: () => L.alive,
-      hold: L.card,
-      centred: () => L.card,
-      onBusy: (on) => { L.busy = on; more.disabled = on; cancel.disabled = on; },
-      done: ({ name, face, picture }) => {
-        const going = arrive(name, face, picture); // takes the portrait's place before the dialog goes
-        L.close(true);
-        going.catch((err) => h.error(err));
-      },
-    });
-    L.actions.append(more, cancel, flow.go);
-    L.body.append(flow.element);
-    L.card.addEventListener("submit", (ev) => { ev.preventDefault(); flow.submit(); });
-    flow.start();
-    return { close: () => L.close(true) };
-  }
-
-  // 新建 → 新建群聊: two to ten cats; the name is optional.
-  function openGroup({ opener } = {}) {
-    const h = hooks(), from = opener || document.activeElement;
-    const L = dialog("新建群聊", from);
-    const cats = h.cats();
-    const cancel = button("secondary", "取消", () => L.close());
-    if (cats.length < 2) {
-      L.body.append(node("p", "qc-lead", cats.length ? "群聊至少要两只猫猫，现在只有 1 只。" : "群聊至少要两只猫猫，现在还一只都没有。"));
-      const add = button("primary", "新建猫猫", () => { L.close(true); openCat({ opener: from }); });
-      L.actions.append(cancel, add);
-      add.focus();
-      return { close: () => L.close(true) };
-    }
-    // Members in the order they were picked: the first sits in front of the group's face.
-    const picked = [];
-    // One key per request body (members in order, name): an unsure answer is
-    // sent again unchanged under it and arrives at the same group.
-    let busy = false, attempt = null;
-    const hint = node("p", "qc-hint");
-    hint.id = uid("hint");
-    hint.setAttribute("aria-live", "polite");
-    const set = node("fieldset", "qc-members-set"), chips = node("div", "qc-members");
-    set.append(node("legend", "qc-legend", "成员"), chips, hint);
-    const boxes = cats.map((name) => {
-      const chip = node("label", "qc-chip"), cb = node("input", "qc-sr");
-      cb.type = "checkbox";
-      cb.value = name;
-      cb.setAttribute("aria-describedby", hint.id);
-      chip.append(cb, h.face(name), node("span", "qc-chip-name", name));
-      cb.addEventListener("change", () => {
-        const at = picked.indexOf(name);
-        if (cb.checked && at < 0) picked.push(name);
-        else if (!cb.checked && at >= 0) picked.splice(at, 1);
-        showError("");
-        sync();
+    const L = dialog("新建", from);
+    const tabs = node("div", "qc-switch");
+    tabs.setAttribute("role", "tablist");
+    tabs.setAttribute("aria-label", "新建什么");
+    const said = node("p", "qc-sr");
+    said.setAttribute("role", "status");
+    const sides = new Map();
+    let current = null;
+    for (const [id, label, title] of SIDES) {
+      const tab = button("qc-tab", label, () => select(id, "tab"));
+      tab.id = uid("tab");
+      tab.dataset.side = id;
+      tab.setAttribute("role", "tab");
+      const panel = node("form", "qc-panel");
+      panel.setAttribute("novalidate", "");
+      panel.setAttribute("role", "tabpanel");
+      panel.id = uid("panel");
+      panel.dataset.side = id;
+      panel.hidden = true;
+      tab.setAttribute("aria-controls", panel.id);
+      tab.setAttribute("aria-selected", "false");
+      panel.setAttribute("aria-labelledby", tab.id);
+      tab.addEventListener("keydown", (ev) => {
+        const at = SIDES.findIndex(([k]) => k === id), last = SIDES.length - 1;
+        const to = { ArrowRight: at + 1, ArrowLeft: at - 1, Home: 0, End: last }[ev.key];
+        if (to === undefined) return;
+        ev.preventDefault();
+        select(SIDES[(to + SIDES.length) % SIDES.length][0], "tab");
       });
-      chips.append(chip);
-      return cb;
+      tabs.append(tab);
+      L.card.append(panel);
+      sides.set(id, { tab, panel, title, view: null });
+    }
+    L.top.append(tabs);
+    L.card.append(said);
+    // A side's own 创建 (or Enter in one of its fields) submits its form; the card answers for the side shown.
+    L.card.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      const view = current && sides.get(current).view;
+      if (view) view.submit();
     });
-    const nameBox = node("div", "field qc-field"), lab = node("label", ""), nameIn = node("input", ""), nameErr = node("p", "qc-err");
-    lab.append("群名", node("span", "qc-opt", "可不填"));
-    nameIn.type = "text"; nameIn.maxLength = R.NAME_INPUT_MAX; nameIn.autocomplete = "off";
-    nameIn.id = uid("group-name"); lab.htmlFor = nameIn.id;
-    nameErr.setAttribute("role", "alert");
-    nameIn.addEventListener("input", () => { nameErr.textContent = ""; nameIn.removeAttribute("aria-invalid"); showError(""); });
-    nameBox.append(lab, nameIn, nameErr);
-    const error = node("p", "qc-error");
-    error.setAttribute("role", "alert");
-    error.hidden = true;
-    const go = node("button", "primary", "创建");
-    go.type = "submit";
-    L.body.append(set, nameBox, error);
-    L.actions.append(cancel, go);
-    function showError(text) { error.textContent = text || ""; error.hidden = !text; }
-    function sync() {
-      const n = picked.length, full = n >= R.MAX_MEMBERS;
-      for (const cb of boxes) cb.disabled = busy || (full && !cb.checked);
-      hint.textContent = n < 2 ? (n ? "已选 1 只，再选 1 只" : "至少选 2 只") : full ? "已选 " + n + " 只，一个群最多 " + R.MAX_MEMBERS + " 只" : "已选 " + n + " 只";
-      nameIn.placeholder = n >= 2 ? R.groupName(picked) : "不填就用成员的名字";
-      go.disabled = busy || n < 2;
-    }
-    function setBusy(on) {
-      busy = on;
-      L.busy = on;
-      // Focus on a control that turns disabled would drop to the page: hold it on the card.
-      if (on && L.card.contains(document.activeElement) && document.activeElement !== nameIn) L.card.focus();
-      cancel.disabled = on;
-      nameIn.readOnly = on;
-      go.textContent = on ? "正在创建…" : "创建";
-      sync();
-    }
-    async function submit() {
-      if (busy || picked.length < 2) return;
-      const problem = R.groupNameProblem(nameIn.value);
-      if (problem) { nameErr.textContent = problem; nameIn.setAttribute("aria-invalid", "true"); nameIn.focus(); return; }
-      const body = R.groupBody(picked, nameIn.value), print = R.fingerprint(body);
-      if (!attempt || attempt.print !== print) attempt = { print, key: requestKey() };
-      showError("");
-      setBusy(true);
-      let group;
-      try { group = await h.api("/xbot-api/groups", { method: "POST", body: { ...body, idempotencyKey: attempt.key } }); }
-      catch (err) {
-        if (!L.alive) return;
-        setBusy(false);
-        const what = R.groupError(err);
-        if (what.kind !== "unsure") attempt = null;
-        showError(what.text);
-        go.focus();
-        if (what.kind === "unsure") quietly(h.refresh);
-        return;
+    const lock = (on) => { for (const s of sides.values()) { if (on) s.tab.setAttribute("aria-disabled", "true"); else s.tab.removeAttribute("aria-disabled"); } };
+    const busy = (on) => { L.busy = on; lock(on); };
+
+    // how: "open" (focus as the side starts: the cat side's name once /start
+    // answers, the group's first cat), "tab" (focus stays on the tab) or
+    // "inside" (a control in the dialog turned to it: said, focus goes in).
+    function select(id, how) {
+      const next = sides.get(id);
+      if (!next || (L.busy && id !== current)) return;
+      if (id !== current) {
+        const change = () => {
+          for (const [k, s] of sides) {
+            const on = k === id;
+            s.panel.hidden = !on;
+            s.tab.setAttribute("aria-selected", String(on));
+            s.tab.tabIndex = on ? 0 : -1;
+          }
+          current = id;
+          if (!next.view) next.view = id === "cat" ? catSide(next.panel) : groupSide(next.panel);
+        };
+        if (how === "open") change(); else ease(L.card, change);
+        if (how !== "open" && typeof next.panel.animate === "function" && !media("(prefers-reduced-motion: reduce)")) {
+          next.panel.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 160, easing: "ease-out" });
+        }
       }
-      if (!L.alive) return;
-      L.busy = false;
-      L.close(true);
-      if (group && group.id) Promise.resolve().then(() => h.openGroup(group.id)).catch((err) => h.error(err));
-      else quietly(h.refresh);
+      if (how === "tab") { next.tab.focus(); said.textContent = ""; }
+      else {
+        next.view.focus();
+        said.textContent = how === "inside" ? next.title : "";
+      }
     }
-    L.card.addEventListener("submit", (ev) => { ev.preventDefault(); submit(); });
-    sync();
-    boxes[0].focus();
-    return { close: () => L.close(true) };
+
+    // 猫猫: the faces, the hint, 自定义 and the name (catFlow); 更多设置 hands
+    // over to the template creator.
+    function catSide(panel) {
+      const more = button("text-btn qc-more", "更多设置", () => { if (L.busy) return; L.close(true); h.more(liveOpener(from) || from); });
+      const cancel = button("secondary", "取消", () => L.close());
+      const flow = catFlow({
+        dialog: true,
+        alive: () => L.alive,
+        hold: L.card,
+        resize: (change) => ease(L.card, change),
+        // The name takes focus when /start answers only if nobody went elsewhere meanwhile (the switch, say).
+        mayFocus: () => current === "cat" && (document.activeElement === L.card || !L.card.contains(document.activeElement)),
+        onBusy: (on) => { busy(on); more.disabled = on; cancel.disabled = on; },
+        done: ({ name, face, picture }) => {
+          const going = arrive(name, face, picture); // takes the portrait's place before the dialog goes
+          L.close(true);
+          going.catch((err) => h.error(err));
+        },
+      });
+      const body = node("div", "qc-body"), actions = node("div", "modal-actions");
+      body.append(flow.element);
+      actions.append(more, cancel, flow.go);
+      panel.append(body, actions);
+      flow.start();
+      return { submit: flow.submit, focus: flow.focus };
+    }
+
+    // 群聊: two to ten cats as face chips, in the order picked; the name is
+    // optional. With fewer than two cats it says so, and 新建猫猫 turns to the
+    // cat side.
+    function groupSide(panel) {
+      const cats = h.cats();
+      const body = node("div", "qc-body"), actions = node("div", "modal-actions");
+      panel.append(body, actions);
+      const cancel = button("secondary", "取消", () => L.close());
+      if (cats.length < 2) {
+        body.append(node("p", "qc-lead", cats.length ? "群聊至少要两只猫猫，现在只有 1 只。" : "群聊至少要两只猫猫，现在还一只都没有。"));
+        const add = button("primary", "新建猫猫", () => select("cat", "inside"));
+        actions.append(cancel, add);
+        return { submit: () => {}, focus: () => add.focus() };
+      }
+      // Members in the order they were picked: the first sits in front of the group's face.
+      const picked = [];
+      // One key per request body (members in order, name): an unsure answer is
+      // sent again unchanged under it and arrives at the same group.
+      let sending = false, attempt = null;
+      const hint = node("p", "qc-hint");
+      hint.id = uid("hint");
+      hint.setAttribute("aria-live", "polite");
+      const set = node("fieldset", "qc-members-set"), chips = node("div", "qc-members");
+      set.append(node("legend", "qc-legend", "成员"), chips, hint);
+      const boxes = cats.map((name) => {
+        const chip = node("label", "qc-chip"), cb = node("input", "qc-sr");
+        cb.type = "checkbox";
+        cb.value = name;
+        cb.setAttribute("aria-describedby", hint.id);
+        chip.append(cb, h.face(name), node("span", "qc-chip-name", name));
+        cb.addEventListener("change", () => {
+          const at = picked.indexOf(name);
+          if (cb.checked && at < 0) picked.push(name);
+          else if (!cb.checked && at >= 0) picked.splice(at, 1);
+          showError("");
+          sync();
+        });
+        chips.append(chip);
+        return cb;
+      });
+      const nameBox = node("div", "field qc-field"), lab = node("label", ""), nameIn = node("input", ""), nameErr = node("p", "qc-err");
+      lab.append("群名", node("span", "qc-opt", "可不填"));
+      nameIn.type = "text"; nameIn.maxLength = R.NAME_INPUT_MAX; nameIn.autocomplete = "off";
+      nameIn.id = uid("group-name"); lab.htmlFor = nameIn.id;
+      nameErr.setAttribute("role", "alert");
+      nameIn.addEventListener("input", () => { nameErr.textContent = ""; nameIn.removeAttribute("aria-invalid"); showError(""); });
+      nameBox.append(lab, nameIn, nameErr);
+      const error = node("p", "qc-error");
+      error.setAttribute("role", "alert");
+      error.hidden = true;
+      const go = node("button", "primary", "创建");
+      go.type = "submit";
+      body.append(set, nameBox, error);
+      actions.append(cancel, go);
+      function showError(text) { error.textContent = text || ""; error.hidden = !text; }
+      function sync() {
+        const n = picked.length, full = n >= R.MAX_MEMBERS;
+        for (const cb of boxes) cb.disabled = sending || (full && !cb.checked);
+        hint.textContent = n < 2 ? (n ? "已选 1 只，再选 1 只" : "至少选 2 只") : full ? "已选 " + n + " 只，一个群最多 " + R.MAX_MEMBERS + " 只" : "已选 " + n + " 只";
+        nameIn.placeholder = n >= 2 ? R.groupName(picked) : "不填就用成员的名字";
+        go.disabled = sending || n < 2;
+      }
+      function setBusy(on) {
+        sending = on;
+        busy(on);
+        // Focus on a control that turns disabled would drop to the page: hold it on the card.
+        if (on && L.card.contains(document.activeElement) && document.activeElement !== nameIn) L.card.focus();
+        cancel.disabled = on;
+        nameIn.readOnly = on;
+        go.textContent = on ? "正在创建…" : "创建";
+        sync();
+      }
+      async function submit() {
+        if (sending || picked.length < 2) return;
+        const problem = R.groupNameProblem(nameIn.value);
+        if (problem) { nameErr.textContent = problem; nameIn.setAttribute("aria-invalid", "true"); nameIn.focus(); return; }
+        const reqBody = R.groupBody(picked, nameIn.value), print = R.fingerprint(reqBody);
+        if (!attempt || attempt.print !== print) attempt = { print, key: requestKey() };
+        showError("");
+        setBusy(true);
+        let group;
+        try { group = await h.api("/xbot-api/groups", { method: "POST", body: { ...reqBody, idempotencyKey: attempt.key } }); }
+        catch (err) {
+          if (!L.alive) return;
+          setBusy(false);
+          const what = R.groupError(err);
+          if (what.kind !== "unsure") attempt = null;
+          showError(what.text);
+          go.focus();
+          if (what.kind === "unsure") quietly(h.refresh);
+          return;
+        }
+        if (!L.alive) return;
+        L.busy = false;
+        L.close(true);
+        if (group && group.id) Promise.resolve().then(() => h.openGroup(group.id)).catch((err) => h.error(err));
+        else quietly(h.refresh);
+      }
+      sync();
+      return { submit, focus: () => (boxes.find((cb) => cb.checked) || boxes[0]).focus() };
+    }
+
+    select(sides.has(side) ? side : "cat", "open");
+    return { close: () => L.close(true), select: (id) => select(id, "tab") };
   }
+  // 新建 → the dialog on its 猫猫 side (the sidebar's 新建, ⌘K 新建猫猫, 更多设置's way back).
+  function openCat({ opener } = {}) { return open({ side: "cat", opener }); }
+  // ⌘K 新建群聊 → the same dialog on its 群聊 side.
+  function openGroup({ opener } = {}) { return open({ side: "group", opener }); }
 
   window.ClowderQuickCreate = Object.freeze({
     init: (value) => { H = value; },

@@ -1,0 +1,141 @@
+/* The sidebar's controls (docs/xbot-frontend.md item 43; the owner's
+   reference: Grok Bot's sidebar). Full: 搜索 and 新建 as two small round
+   buttons at the right end of the greeting's line, the owner's own face and
+   应用 at the bottom. Rail (72px, 768px and wider): no 搜索 (⌘K still opens
+   the palette), 新建, 应用 and the face stacked at the bottom. sidebar.js
+   moves between the two (the state classes are listed there). Builds on
+   app.css's .sidebar / .sidebar.rail / .pop / .tip and the café layer; only
+   the --x-* tokens and app.css's aliases, tokens.css's durations and the
+   panel's easing curve, the existing fade keyframes. Below 768px the sidebar
+   is the drawer and always full: every rail rule here is inside the 768px
+   query, as app.css's 767px block undoes its own. */
+
+:root { --side-fade: var(--dur-pop-close); --side-move: var(--dur-pop); --side-ease: cubic-bezier(0.2, 0.75, 0.3, 1); }
+
+/* ---- the top: the greeting, 搜索 · 新建 at the right end of its first line;
+   a second line (有 N 只猫猫在忙) runs on under the buttons. With the greeting
+   hidden (below 960px) the buttons sit alone at the right. */
+.side-head { flex: none; display: flow-root; }
+.side-acts { float: right; position: relative; z-index: 1; display: flex; gap: var(--x-s2); margin: 8px 12px -4px var(--x-s3); }
+.side-btn {
+  width: 36px; height: 36px; flex: none; display: grid; place-items: center; padding: 0;
+  border: 0; border-radius: 50%; background: var(--x-fill-1); color: var(--x-muted);
+  transition: background 160ms ease-out, color 160ms ease-out;
+}
+.side-btn:hover { background: var(--hover); color: var(--x-text); }
+.side-btn:active { background: var(--selected); }
+.side-btn > .icon { width: 18px; height: 18px; }
+/* The desktop app on macOS: in the strip beside the window buttons, as in the
+   reference (buttons take no part in the strip's window drag, app.css). */
+.in-app.os-mac .side-acts { position: absolute; top: 5px; right: 12px; float: none; margin: 0; z-index: 9; }
+
+/* Pinned cats only now; no pinned cat, no row. */
+.pin-row:empty { display: none; }
+
+/* ---- the bottom: the owner's face on the rows' face column, 应用 beside it ---- */
+.side-foot { flex: none; display: flex; align-items: center; gap: var(--x-s3); padding: 8px 12px 6px 18px; }
+.in-app .side-foot { padding-bottom: 12px; }
+.account-wrap { flex: none; }
+.account-trigger {
+  width: 36px; height: 36px; display: grid; place-items: center; padding: 0; border-radius: 50%;
+  transition: box-shadow 160ms ease-out;
+}
+.account-trigger:hover { background: transparent; box-shadow: 0 0 0 3px var(--hover); }
+.account-trigger[aria-expanded="true"] { background: transparent; box-shadow: 0 0 0 3px var(--selected); }
+#me-avatar { display: contents; }
+.account-trigger .avatar { width: 36px; height: 36px; }
+.side-apps {
+  flex: 1; min-width: 0; height: 36px; display: flex; align-items: center; justify-content: center; gap: var(--x-s2);
+  padding: 0 var(--x-s5); border: 0; border-radius: var(--x-r-pill); background: var(--x-fill-1); color: var(--x-text-2);
+  font-size: var(--x-fs-ui); font-weight: 500; white-space: nowrap;
+  transition: background 160ms ease-out, color 160ms ease-out;
+}
+.side-apps:hover { background: var(--hover); color: var(--x-text); }
+.side-apps:active { background: var(--selected); }
+.side-apps > .icon { width: 16px; height: 16px; color: var(--x-muted); }
+.side-apps-label { overflow: hidden; text-overflow: ellipsis; }
+/* The rail's 新建: a bare glyph, filled under the pointer. */
+.sidebar .rail-only { display: none; }
+.side-glyph {
+  width: 40px; height: 40px; display: grid; place-items: center; padding: 0;
+  border: 0; border-radius: 50%; background: transparent; color: var(--x-muted);
+  transition: background 160ms ease-out, color 160ms ease-out;
+}
+.side-glyph:hover { background: var(--hover); color: var(--x-text); }
+.side-glyph:active { background: var(--selected); }
+.side-glyph > .icon { width: 18px; height: 18px; }
+.side-btn:focus-visible, .side-glyph:focus-visible, .side-apps:focus-visible, .account-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* The owner's face (sidebar.js ownerFace): a person in the café's coffee on
+   the avatar tile (--x-avatar-bg, the café layer's .avatar fill). */
+.avatar.owner { color: var(--x-primary); }
+.avatar.owner .owner-head, .avatar.owner .owner-body { fill: currentColor; }
+.avatar.owner .owner-collar { fill: none; stroke: var(--x-avatar-bg); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+
+/* 我's menu: right above the face, left edges aligned, inside the sidebar's
+   column; the owner's name and this computer head it (not a control). */
+.account-menu { width: 208px; min-width: 0; left: 0; right: auto; bottom: calc(100% + 8px); }
+.me-head { display: flex; flex-direction: column; min-width: 0; padding: 6px 10px 8px; }
+
+/* ---- the rail ---- */
+@media (min-width: 768px) {
+  .sidebar.rail { padding-bottom: 0; }
+  .sidebar.rail .side-head { display: none; }
+  .sidebar.rail .side-foot { width: 100%; flex-direction: column; align-items: center; gap: 0; padding: 8px 0 6px; }
+  .in-app .sidebar.rail .side-foot { padding-bottom: 12px; }
+  .sidebar.rail .rail-only { display: grid; }
+  .sidebar.rail .side-apps { flex: none; width: 40px; height: 40px; padding: 0; gap: 0; border-radius: 50%; background: transparent; color: var(--x-muted); }
+  .sidebar.rail .side-apps:hover { background: var(--hover); color: var(--x-text); }
+  .sidebar.rail .side-apps:active { background: var(--selected); }
+  .sidebar.rail .side-apps > .icon { width: 18px; height: 18px; color: inherit; }
+  .sidebar.rail .side-apps-label { display: none; }
+  .sidebar.rail .account-wrap { width: auto; margin-top: var(--x-s2); }
+  .sidebar.rail .account-trigger { width: 36px; padding: 0; margin: 0; }
+  /* Beside the face, right of the rail, bottom edges aligned. */
+  .sidebar.rail .account-menu { left: calc(100% + 26px); right: auto; bottom: 0; }
+
+  /* ---- the move (sidebar.js) ----
+     The whole move: the width eases (the chat follows), the content is laid
+     out at the target width from the start and the sidebar clips it. */
+  .sidebar.side-moving { overflow: hidden; align-items: flex-start; transition: width var(--side-move) var(--side-ease); }
+  .sidebar.side-moving > :is(.side-head, .side-scroll, .side-foot) { width: var(--side-w); }
+  .shell:has(> .sidebar.side-moving) > .main { transition: margin-left var(--side-move) var(--side-ease); }
+  /* Into the rail: the words, 应用's pill and the open chat's highlight fade
+     before the layout changes; the rail's 新建 fades in after it. */
+  .sidebar.side-fading :is(.side-head, .item-body, .pin-name, .group-label, .folder-head, .side-apps-label, .cl-stale) {
+    opacity: 0; transition: opacity var(--side-fade) ease-out;
+  }
+  .sidebar.side-fading :is(.item.active, .pin.active, .side-apps) { background: transparent; transition: background var(--side-fade) ease-out; }
+  .sidebar.side-landing .rail-only { animation: fade var(--side-move) ease-out; }
+  /* Out of it: held invisible while the sidebar widens, then faded in. */
+  .sidebar.side-arriving :is(.side-head, .item-body, .pin-name, .group-label, .folder-head, .side-apps-label, .cl-stale) { opacity: 0; transition: none; }
+  .sidebar.side-arriving :is(.item.active, .pin.active, .side-apps) { background: transparent; transition: none; }
+  /* The faces glide down from the rail's places: the pinned row (it scrolls
+     sideways and sticks with an opaque fill when full) neither clips nor
+     covers them meanwhile. Its sideways scroll was 0 in the rail anyway. */
+  .sidebar:is(.side-arriving, .side-revealing) .pin-row { overflow: visible; background: transparent; }
+  .sidebar.side-revealing :is(.side-head, .item-body, .pin-name, .group-label, .folder-head, .side-apps-label, .cl-stale) { transition: opacity var(--side-fade) ease-out; }
+  .sidebar.side-revealing :is(.item.active, .pin.active, .side-apps) { transition: background var(--side-fade) ease-out; }
+  /* A row's busy mark in the rail comes in once the faces are in place. */
+  .sidebar .rail-status { transition: opacity var(--side-fade) ease-out; }
+  .sidebar.side-moving .rail-status { opacity: 0; transition: none; }
+  /* Still copies fading where they stood (sidebar.js): the rail's 新建, a pinned face. */
+  .sidebar .side-ghost { position: fixed; margin: 0; z-index: 9; pointer-events: none; }
+  .sidebar .side-ghost.rail-only { display: grid; }
+}
+
+/* ---- the drawer (below 768px): 44px targets ---- */
+@media (max-width: 767px) {
+  .side-acts { margin: 6px 10px -2px var(--x-s3); }
+  .side-btn { width: 44px; height: 44px; }
+  .side-btn > .icon { width: 20px; height: 20px; }
+  .side-foot { padding: 8px 12px calc(10px + env(safe-area-inset-bottom)) 14px; }
+  .account-trigger { width: 44px; height: 44px; }
+  .account-trigger .avatar { width: 40px; height: 40px; }
+  .side-apps { height: 44px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .side-btn, .side-glyph, .side-apps, .account-trigger, .sidebar .rail-status, .sidebar.side-moving, .shell > .main { transition: none; }
+  .sidebar.side-landing .rail-only { animation: none; }
+}
