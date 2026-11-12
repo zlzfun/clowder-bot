@@ -5,18 +5,16 @@
 //   catHead() / groupHead()  the drawer's identity: the portrait (a cat's own
 //                            colour as a quiet wash behind it), the name; a
 //                            group's name is edited in place, with 「N 只猫猫」.
-//   catPage()                资料: 职责, 置顶, 说话简短, 新对话 and 历史对话,
-//                            then one folded 高级 (它用什么思考, 模型与画像,
-//                            任务与执行, 导出对话 / 复制名字 / 运行面板),
-//                            删除猫猫 last.
+//   catPage()                资料: 职责, 置顶, 新对话 and 历史对话, then one
+//                            folded 高级 (它用什么思考, 模型与画像, 任务与执行,
+//                            导出对话 / 复制名字 / 运行面板), 删除猫猫 last.
 //   groupPage()              成员: faces and names, 添加猫猫, 移出, how to talk
 //                            in a group, a folded 高级 with 任务, 删除群聊.
 //   groupMenu()              a sidebar group row's menu: 改名, 删除群聊.
 //
 // Each page is the same element for the same chat across the drawer's
 // frequent repaints (an open fold, a confirm in progress and focus survive);
-// another chat builds its own. Requests: PATCH /xbot-api/bots/:name
-// {concise} (说话简短), PATCH /xbot-api/groups/:id
+// another chat builds its own. Requests: PATCH /xbot-api/groups/:id
 // {name} or {add} / {remove} (what the owner means, applied by the server to
 // the roster as it is now) and DELETE /xbot-api/groups/:id (docs/xbot-api.md); 新对话
 // opens chat-history.js's own dialog, the same one as the header's ⋯ menu. A
@@ -293,9 +291,8 @@
   }
 
   function buildCat(sel, key) {
-    // briefOn: what 说话简短 shows (the server's word, or null when not known);
-    // what the two switches are doing is the cat's (saving(key)), not this page's.
-    const P = { sel, key, data: { name: sel.id }, agentSig: null, configSig: null, exec: null, briefOn: null, briefNoted: false };
+    // What 置顶 is doing is the cat's (saving(key)), not this page's.
+    const P = { sel, key, data: { name: sel.id }, agentSig: null, configSig: null, exec: null };
     const root = node("div", "pf-page pf-cat");
     root.dataset.key = key;
 
@@ -320,26 +317,6 @@
     const pinLine = node("p", "pf-line");
     pinLine.hidden = true;
 
-    // 说话简短: how it talks, the same kind of switch, shown once the profile
-    // says which way it is. A change shows in a new conversation, so after
-    // one the line under it points at 新对话 instead of explaining.
-    const brief = node("div", "pf-row pf-brief");
-    brief.hidden = true;
-    const briefCopy = node("span", "pf-row-copy");
-    const briefTitle = node("span", "pf-row-title", R.BRIEF.title);
-    briefTitle.id = uid("brief");
-    const briefHint = node("span", "pf-row-hint", R.BRIEF.hint);
-    briefHint.id = uid("brief-hint");
-    briefCopy.append(briefTitle, briefHint);
-    const briefSwitch = button("g7-switch pf-switch", null, () => toggleBrief(P));
-    briefSwitch.setAttribute("role", "switch");
-    briefSwitch.setAttribute("aria-labelledby", briefTitle.id);
-    briefSwitch.setAttribute("aria-describedby", briefHint.id);
-    brief.append(briefCopy, briefSwitch);
-    brief.addEventListener("click", (ev) => { if (!briefSwitch.contains(ev.target)) briefSwitch.click(); });
-    const briefLine = node("p", "pf-line");
-    briefLine.hidden = true;
-
     // 对话: start a new one (chat-history.js's 新对话 dialog, which asks the
     // server and says why it cannot while the cat is busy), or open a saved
     // one (workspace.js's 历史对话).
@@ -356,8 +333,8 @@
     const remove = button("text-btn danger pf-remove", "删除猫猫", () => H.deleteCat(P.data.name || sel.id));
     foot.append(remove);
 
-    root.append(duty, pin, pinLine, brief, briefLine, convs, node("div", "pf-rule"), fold.box, foot);
-    Object.assign(P, { root, duty, dutyText, dutyNone, pinSwitch, pinHint, pinLine, brief, briefSwitch, briefHint, briefLine, fresh, slot, fold, remove });
+    root.append(duty, pin, pinLine, convs, node("div", "pf-rule"), fold.box, foot);
+    Object.assign(P, { root, duty, dutyText, dutyNone, pinSwitch, pinHint, pinLine, fresh, slot, fold, remove });
     return P;
   }
 
@@ -391,7 +368,6 @@
     P.dutyNone.hidden = !!persona;
     setText(P.dutyText, persona);
     paintPin(P);
-    paintBrief(P);
     // 历史对话 is workspace.js's node (the same one while the conversation is the same).
     const convs = H.conversations(P.sel);
     if (convs ? P.slot.firstChild !== convs || P.slot.childNodes.length !== 1 : P.slot.firstChild) P.slot.replaceChildren(...(convs ? [convs] : []));
@@ -421,16 +397,15 @@
     if (href && P.runtime.getAttribute("href") !== href) P.runtime.setAttribute("href", href);
   }
 
-  // What a cat's two switches are doing, by cat and apart from the drawer's
-  // page: another cat's 资料 can be opened and this one's opened again (a new
-  // page) while a change is on its way. The answer lands here, and whichever
-  // page shows that cat then says it; a second request waits for the first.
-  //   pin:   { busy, want, said: {text, bad} | null }
-  //   brief: { busy, hold: {value, after} | null, note: {thread} | null, said }
+  // What 置顶 is doing, by cat and apart from the drawer's page: another
+  // cat's 资料 can be opened and this one's opened again (a new page) while a
+  // change is on its way. The answer lands here, and whichever page shows
+  // that cat then says it; a second request waits for the first.
+  //   { busy, want, said: {text, bad} | null }
   const saves = new Map();
   function saving(key) {
     let st = saves.get(key);
-    if (!st) saves.set(key, (st = { pin: { busy: false, want: false, said: null }, brief: { busy: false, hold: null, note: null, said: null } }));
+    if (!st) saves.set(key, (st = { busy: false, want: false, said: null }));
     return st;
   }
   // The page shown for this cat now, if any (the one drawn last for it).
@@ -445,7 +420,7 @@
   // its way it keeps the confirmed state, is busy and inert (not disabled, so
   // focus stays on it) and the line under 置顶 says what is being saved.
   function paintPin(P) {
-    const st = saving(P.key).pin, name = P.data.name || P.sel.id;
+    const st = saving(P.key), name = P.data.name || P.sel.id;
     const bot = H.cats().find((b) => b && b.name === name);
     const on = bot ? !!bot.pinned : !!P.data.pinned;
     P.pinSwitch.setAttribute("aria-checked", String(on));
@@ -455,7 +430,7 @@
     sayAs(P.pinLine, st.said);
   }
   async function togglePin(P) {
-    const key = P.key, st = saving(key).pin;
+    const key = P.key, st = saving(key);
     if (st.busy) return;
     const name = P.data.name || P.sel.id;
     const next = P.pinSwitch.getAttribute("aria-checked") !== "true";
@@ -469,58 +444,6 @@
     st.busy = false;
     const shown = pageOf(key);
     if (shown) paintPin(shown);
-  }
-
-  // 说话简短 says what the server confirmed, the same way: the profile's
-  // `concise`, or after a change the PATCH's own answer until a profile read
-  // asked for after that answer says otherwise (R.briefShown; the shell
-  // numbers its profile reads); while a change is on its way it keeps that
-  // state, busy and inert (focus stays), the hint saying it is saving.
-  function paintBrief(P) {
-    const st = saving(P.key).brief;
-    const read = typeof P.data.concise === "boolean" ? P.data.concise : null;
-    const now = R.briefShown(read, st.hold, H.profileAsked ? H.profileAsked(P.data) : 0);
-    if (!now.keep) st.hold = null;
-    P.briefOn = now.value;
-    P.brief.hidden = now.value === null;
-    if (now.value !== null) P.briefSwitch.setAttribute("aria-checked", String(now.value));
-    if (st.busy) { P.briefSwitch.setAttribute("aria-disabled", "true"); P.briefSwitch.setAttribute("aria-busy", "true"); }
-    else { P.briefSwitch.removeAttribute("aria-disabled"); P.briefSwitch.removeAttribute("aria-busy"); }
-    setText(P.briefHint, st.busy ? R.BRIEF.saving : R.BRIEF.hint);
-    // A new conversation was started since the change: it already talks that way.
-    const thread = P.data.thread_id ? String(P.data.thread_id) : "";
-    if (st.note && thread && st.note.thread && thread !== st.note.thread) st.note = null;
-    if (!st.note) { P.briefNoted = false; sayAs(P.briefLine, st.said); return; }
-    if (P.briefNoted) return;
-    // A change was made: it shows in a new conversation, and 新对话 is one click away.
-    P.briefNoted = true;
-    P.briefLine.replaceChildren(node("span", "", R.BRIEF.applies),
-      button("text-btn pf-link pf-brief-new", R.BRIEF.start, (ev) => H.newConversation(current(P), ev.currentTarget)));
-    P.briefLine.hidden = false;
-    P.briefLine.classList.remove("bad");
-    P.briefLine.setAttribute("role", "status");
-  }
-  async function toggleBrief(P) {
-    const key = P.key, st = saving(key).brief;
-    if (st.busy || P.briefOn === null) return;
-    const name = P.data.name || P.sel.id, was = P.briefOn, next = !was;
-    const thread = P.data.thread_id ? String(P.data.thread_id) : "";
-    Object.assign(st, { busy: true, note: null, said: null });
-    paintBrief(P);
-    try {
-      const answer = await H.api("/xbot-api/bots/" + enc(name), { method: "PATCH", body: { concise: next } });
-      // What the server has now, which may differ from what was asked. Reads
-      // asked for from here on say what the cat has after this change; one
-      // already on its way (or the profile read before) may not.
-      const value = answer && typeof answer.concise === "boolean" ? answer.concise : null;
-      if (value !== null) st.hold = { value, after: H.profileReads ? H.profileReads() : 0 };
-      if (value !== null && value !== was) st.note = { thread };
-    } catch (err) {
-      st.said = { text: R.BRIEF.failed + reason(err), bad: true };
-    }
-    st.busy = false;
-    const shown = pageOf(key);
-    if (shown) paintBrief(shown);
   }
 
   // ------------------------------------------------------------ 成员 (a group)
