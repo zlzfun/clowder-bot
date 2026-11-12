@@ -196,7 +196,39 @@
     const m = LEADING.exec(text);
     return m && m[1].trim() === cat ? text.slice(m[0].length) : text;
   }
-  // name: the speaking cat's name ("" when not known: nothing leading is cut).
+  // A reply that went on after the cat had signed (the owner said more while
+  // it was writing and the engine let the same reply continue) carries that
+  // signature in the middle. As the server's withoutOwnSignatureLines does
+  // for finished replies (server/native/message-presentation.ts, the same
+  // patterns): a line that is nothing but the speaking cat's own paw
+  // signature is not shown wherever it stands, outside code fences, and one
+  // of the blank lines around it goes with it. Another cat's signature, one
+  // inside a sentence, quoted or indented as code stays. While such a line is
+  // still arriving it is the last line, which display() already holds back.
+  const OWN_LINE = /^ {0,3}\[([^\[\]\r\n/]{1,80})(?:\/[^\[\]\r\n]{0,80})?\s?🐾\][ \t]*$/u;
+  const FENCE = /^[ \t>]*(?:(?:[-+*]|\d+[.)])[ \t]+)?(`{3,}|~{3,})(.*)$/;
+  function middle(value, name) {
+    const text = str(value), cat = str(name);
+    if (!cat || !text.includes("🐾]")) return text;
+    const kept = [];
+    let fence = "", closing = false;
+    for (const line of text.split(/\r?\n/)) {
+      const mark = FENCE.exec(line);
+      if (mark) {
+        if (!fence) { if (mark[1][0] !== "`" || !mark[2].includes("`")) fence = mark[1]; }
+        else if (mark[1][0] === fence[0] && mark[1].length >= fence.length && !mark[2].trim()) fence = "";
+      }
+      const own = !fence && !mark ? OWN_LINE.exec(line) : null;
+      if (own && own[1].trim() === cat) { closing = kept.length > 0 && kept[kept.length - 1].trim() === ""; continue; }
+      // The signature stood between two blank lines: one of them is enough.
+      if (closing && line.trim() === "") { closing = false; continue; }
+      closing = false;
+      kept.push(line);
+    }
+    return kept.join("\n").replace(/\s+$/, "");
+  }
+  // name: the speaking cat's name ("" when not known: nothing leading, and no
+  // signature in the middle, is cut).
   function display(value, name) {
     let text = leading(str(value), name).replace(/\r\n/g, "\n");
     const bare = text.trim();
@@ -212,6 +244,7 @@
       text = text.replace(/\s+$/, "");
       if (text === before) break;
     }
+    text = middle(text, name);
     return "SILENT".startsWith(text.trim()) ? "" : text;
   }
   // Words to draw: a code fence still being written is drawn closed (the
@@ -326,13 +359,56 @@
     return { receipt: found || {}, userMessageId: str(found && found.userMessageId), error };
   }
 
+  // ---- Where a reply is drawn ----
+  // A reply that took in what the owner said after it had begun (the engine
+  // let the running reply continue with it) carries `follows`: the last such
+  // message of the owner's, by its seq in a single chat and by its id in a
+  // group (docs/chat-live-api.md 「会话行」). The rows keep the engine's
+  // order, where the reply comes first because it began first; the chat draws
+  // such a reply right after the message `follows` names, so it reads as two
+  // questions and one answer, while it is being written and once it is done.
+  // Only `follows` decides it, never times or words, and only when the row it
+  // names is in what is loaded, is the owner's, and comes after the reply;
+  // otherwise the reply stays where it is. Replies drawn after the same
+  // message keep their order. Returns the rows' indices in drawing order.
+  function order(messages, group) {
+    const list = Array.isArray(messages) ? messages : [];
+    const mine = (m) => !!m && (group ? m.kind === "person" : m.role === "user");
+    const keyOf = (m) => (group ? (typeof m.id === "string" && m.id ? "i:" + m.id : "") : (Number.isSafeInteger(Number(m.seq)) && Number(m.seq) > 0 ? "s:" + Number(m.seq) : ""));
+    const named = (m) => {
+      const f = m.follows;
+      if (group) return typeof f === "string" && f ? "i:" + f : "";
+      return (typeof f === "number" || typeof f === "string") && Number.isSafeInteger(Number(f)) && Number(f) > 0 ? "s:" + Number(f) : "";
+    };
+    const at = new Map();
+    list.forEach((m, i) => { if (mine(m)) { const k = keyOf(m); if (k && !at.has(k)) at.set(k, i); } });
+    const under = new Map(), moved = new Set();
+    list.forEach((m, i) => {
+      if (!m || mine(m) || m.follows == null) return;
+      const k = named(m), t = k ? at.get(k) : undefined;
+      if (t === undefined || t <= i) return;
+      moved.add(i);
+      if (!under.has(t)) under.set(t, []);
+      under.get(t).push(i);
+    });
+    const out = [];
+    list.forEach((_, i) => {
+      if (moved.has(i)) return;
+      out.push(i);
+      for (const j of under.get(i) || []) out.push(j);
+    });
+    return out;
+  }
+
   // ---- Redraw identity ----
   // A row's drawn markup with the per-drawing SVG ids (clip paths of the cat
   // faces, glyph tiles) made neutral, so the same row drawn twice compares equal.
   const signature = (html) => str(html).replace(/\b(xbot-glyph|clowder-cat-crop)-\d+\b/g, "$1-#");
 
   window.ClowderLiveRules = Object.freeze({
-    reply, apply, draft, lost, recover, display, leading, drawable, stepWords, phrase, structural, gap, receipt, signature,
+    reply, apply, draft, lost, recover, display, leading, middle, drawable, stepWords, phrase, structural, gap, receipt, signature,
+    // The order a conversation's rows are drawn in (a reply under the follow-ups it took in).
+    order,
     // A native tool name's everyday kind ("look", "run", … or ""), for the
     // header's shorter words (chat-presence-rules.js).
     verb,
