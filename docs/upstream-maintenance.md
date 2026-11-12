@@ -105,10 +105,11 @@ node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=
 
 「说话简短」是引擎 Pack 机制（上游 F129）里的一条默认行为，不是补丁，也不写进猫的资料：
 
-- 用的是未打补丁的 `GET /api/packs` 和 `POST /api/packs/add`。适配层（`server/native/chat-pack.ts`）在发消息、请猫打招呼之前和 Bot 启动时确认引擎里装着 style 包 `clowder-bot-chat`，没有或版本不同就装；它不删除、不调整别的包。
+- 用的是未打补丁的 `GET /api/packs` 和 `POST /api/packs/add`。适配层（`server/native/chat-pack.ts`）在发消息、请猫打招呼之前和 Bot 启动时确认引擎里装着 style 包 `clowder-bot-chat`，没有或版本不同就装；它不删除、不调整别的包，引擎里已经有别的包时自己的也不装（见下）。
 - 包存在引擎自己的目录里：`<数据目录>/native/workspace/.cat-cafe/packs/clowder-bot-chat/`（构建目录里的 `.cat-cafe` 是指向数据目录的链接，重建运行时不丢）。看装了什么：`curl http://127.0.0.1:<原生端口>/api/packs`。
 - 升级固定提交时：`tests/chat-pack.test.ts` 对照上游源码里的包模式（`packages/shared/src/schemas/pack.ts`）、默认行为编成的那一节（`PackCompiler.ts`）、「只应用列出的第一个包」（`getActivePackBlocks.ts`）和两条路由；上游改了其中任何一处，这项测试会先失败，再到隔离运行时上重新量一遍回复长度。
-- 固定的这版引擎一次只应用一个包（Phase A）。上游做了多包合并之后，「别的包排在前面就不生效」这条限制可以去掉。
+- 固定的这版引擎一次只应用一个包（Phase A）：`PackStore.list()` 读目录得到的第一个，与安装先后无关。所以引擎里有别的包时适配层不安装自己的（按名字排在前面会把使用者的包顶掉），这条默认行为让位。上游做了多包合并或指定生效的包之后，这条限制可以去掉。
+- 需要上游解决、这里不打补丁的两件事：安装是先删后拷、不是原子的（替换的瞬间正好开始的一轮读不到包；拷到一半失败时清单在而行为不在，列表却照样列出）。适配层只做到：一次安装没有好好回来之前不把列表当证据，下次重装；这份记账不跨 Bot 重启。
 
 ## 当前已知限制
 

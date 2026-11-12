@@ -39,39 +39,64 @@ const ours = (pack: Installed) => pack.name === chatPack.name && pack.version ==
 export class ChatPack {
   /** How long a confirmed pack is taken for granted before the engine is asked again. */
   static readonly trust = 10 * 60_000;
-  private confirmed = 0;
+  /** How long a message waits for the pack at most. Installing goes on by itself after that. */
+  static readonly patience = 2500;
+  /** When the engine last confirmed the pack, on a clock that only goes forward; undefined while it has not. */
+  private confirmed?: number;
   private flight?: Promise<boolean>;
+  /** An installation that was asked for and did not come back well: the engine may hold half of it under the right name. */
+  private unfinished = false;
   private said = '';
-  constructor(private readonly native: NativeTransport, private readonly now: () => number = Date.now) {}
+  constructor(private readonly native: NativeTransport, private readonly now: () => number = () => performance.now()) {}
 
   /**
-   * True when the engine has the pack. Never throws and never holds a message back: without the pack a cat
-   * still answers, only at more length, and the next call tries again.
+   * True when the engine has the pack and applies it. Never throws: without the pack a cat still answers,
+   * only at more length, and the next call tries again.
    */
   ensure(): Promise<boolean> {
-    if (this.now() - this.confirmed < ChatPack.trust && this.confirmed) return Promise.resolve(true);
+    if (this.confirmed !== undefined && this.now() - this.confirmed < ChatPack.trust) return Promise.resolve(true);
     return this.flight ??= this.install().then(() => { this.confirmed = this.now(); this.say(''); return true; }, error => {
-      this.confirmed = 0; this.say(`chat pack not installed: ${error instanceof Error ? error.message : String(error)}`); return false;
+      this.confirmed = undefined; this.say(`chat pack not in effect: ${error instanceof Error ? error.message : String(error)}`); return false;
     }).finally(() => { this.flight = undefined; });
   }
 
+  /**
+   * The same, for the moment before a cat is given something to answer: a message is not held back longer
+   * than `patience` by a default manner. What was started is finished (and cleaned up) regardless.
+   */
+  async ready(patience = ChatPack.patience): Promise<boolean> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try { return await Promise.race([this.ensure(), new Promise<boolean>(done => { timer = setTimeout(() => done(false), patience); })]); }
+    finally { clearTimeout(timer); }
+  }
+
   private async install() {
-    const installed = async () => (await this.native.request<{ packs?: Installed[] }>('/api/packs')).packs ?? [];
+    const installed = async () => { const packs = (await this.native.request<{ packs?: Installed[] }>('/api/packs')).packs; return Array.isArray(packs) ? packs : []; };
     let packs = await installed();
-    if (!packs.some(ours)) {
+    // The pinned engine applies one pack: the first of its list, which is the order of a directory and not of
+    // installation. A pack that is not this app's is the owner's: adding or replacing ours beside it could put ours
+    // first and silence theirs. So beside another pack nothing is installed, and theirs stays the one in effect.
+    const theirs = packs.find(pack => pack.name !== chatPack.name);
+    if (theirs) {
+      if (ours(packs[0] ?? {}) && !this.unfinished) return;
+      throw new Error(`the engine has another pack (${String(theirs.name)}), which is left as it is`);
+    }
+    if (!packs.some(ours) || this.unfinished) {
       // The engine installs a pack from a directory it copies: written for this one request and removed again.
       const dir = await mkdtemp(join(tmpdir(), 'clowder-bot-pack-'));
       try {
         // JSON is YAML: the engine reads these with its YAML parser and validates them against its own schemas.
         await writeFile(join(dir, 'pack.yaml'), JSON.stringify(chatPack, null, 2));
         await writeFile(join(dir, 'defaults.yaml'), JSON.stringify(chatPackDefaults, null, 2));
+        // The engine replaces a pack by removing and copying, and lists a pack by its manifest alone. A copy that broke
+        // off can therefore look installed; until an installation has come back well, the list is not taken as proof.
+        this.unfinished = true;
         await this.native.request('/api/packs/add', { method: 'POST', body: { source: dir } });
+        this.unfinished = false;
       } finally { await rm(dir, { recursive: true, force: true }).catch(() => {}); }
       packs = await installed();
-      if (!packs.some(ours)) throw new Error('the engine does not list it after installing');
+      if (!ours(packs[0] ?? {})) throw new Error('the engine does not list it after installing');
     }
-    // The pinned engine applies one pack, the first it lists. Another one is the owner's and stays; it is only said.
-    if (!ours(packs[0] ?? {})) throw new Error(`the engine applies another pack first (${String(packs[0]?.name)})`);
   }
 
   /** One line per change of state, not one per message sent. */
