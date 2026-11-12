@@ -285,6 +285,20 @@ test('legacy signature presentation keeps quoted examples and fenced code, and h
     assert.equal(messageDisplayText({ ...message, type: 'user' }, 'thread'), content);
   }
 });
+test('a reply that went on after the cat had signed shows no signature in the middle', () => {
+  const sign = '[快手/haiku🐾]';
+  const shown = (content: string) => messageDisplayText({ id: 'm', type: 'assistant', catId: 'cat', timestamp: 1, content }, 'thread', '快手');
+  // As recorded on the real engine: the owner said more while the cat was writing, and the same reply continued after its signature.
+  assert.equal(shown('第一段。\n\n第二段。\n\n' + sign + '\n\n狗喜欢的就不一样了。🐶'), '第一段。\n\n第二段。\n\n狗喜欢的就不一样了。🐶');
+  assert.equal(shown('一。\n\n' + sign + '\n\n二。\n\n' + sign + '\n\n三。\n\n' + sign), '一。\n\n二。\n\n三。', 'each time it went on, and the closing one');
+  assert.equal(shown('一。\n' + sign + '\n二。'), '一。\n二。');
+  // Only a line that is nothing but this cat's own signature: another cat's, one in a sentence, quoted, indented as code or inside a fence is text.
+  for (const kept of ['一。\n\n[墨点/codex🐾]\n\n二。', '我的署名是 ' + sign + ' 这样。\n\n完。', '一。\n\n> ' + sign + '\n\n二。', '一。\n\n    ' + sign + '\n\n二。',
+    '看：\n\n```text\n' + sign + '\n```\n\n完。', '看：\n\n~~~\n' + sign + '\n~~~\n\n完。'])
+    assert.equal(shown(kept), kept, kept);
+  // Without knowing who is speaking nothing in the middle is touched.
+  assert.equal(messageDisplayText({ id: 'm', type: 'assistant', catId: 'cat', timestamp: 1, content: '一。\n\n' + sign + '\n\n二。' }, 'thread'), '一。\n\n' + sign + '\n\n二。');
+});
 test('cancel a member never cancels an active sibling; native queue status is exposed', async t => {
   const r = await setup(t), cat = await r.bridge.createBot({ name: 'Ada' }), thread = await r.bridge.direct(cat);
   r.native.queues.set(thread.id, { queue: [], activeInvocations: [{ catId: cat.id, invocationId: 'run-a' }, { catId: 'sibling', invocationId: 'run-b' }] });

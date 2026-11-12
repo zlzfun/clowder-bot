@@ -94,7 +94,7 @@ export function replyEnding(message: NativeMessage): { how: 'stopped' | 'failed'
  * typing indicator instead of placeholder words.
  */
 export function messageDisplayText(message: NativeMessage, threadId: string, catName?: string): string {
-  const text = message.type === 'assistant' ? withoutLeadingSignature(withoutCatSignature(message, threadId), catName) : message.content;
+  const text = message.type === 'assistant' ? withoutOwnSignatureLines(withoutLeadingSignature(withoutCatSignature(message, threadId), catName), catName) : message.content;
   const content = message.type === 'assistant' && text.trim() === 'SILENT' ? '' : text;
   if (content || replyInProgress(message)) return content;
   if (['canceled', 'cancelled'].includes(message.lifecycle?.status ?? '')) return '已停止';
@@ -115,6 +115,35 @@ function withoutLeadingSignature(text: string, catName?: string): string {
   // only the empty lines in between go, so an indented first line (a code block) keeps its indentation.
   const match = /^\[([^\[\]\r\n/]{1,80})(?:\/[^\[\]\r\n]{0,80})?\s?🐾\](?:[ \t]+(?=\S)|(?:[ \t]*\r?\n)+(?=[ \t]*\S))/u.exec(text);
   return match && match[1]!.trim() === catName ? text.slice(match[0].length) : text;
+}
+
+/**
+ * A reply that went on after the cat had signed carries that signature in the middle: the owner said
+ * something more while the cat was writing, the engine let the same reply continue, and the words for the
+ * second message follow the first part's closing signature ("…纸箱。\n\n[快手/haiku🐾]\n\n狗喜欢的…", seen on
+ * the isolated runtime, 2026-11-12). A line that is nothing but the speaking cat's own paw signature is
+ * hidden wherever it stands, outside code fences, and one of the blank lines around it goes with it. Another
+ * cat's signature, or one inside a sentence, is text and stays.
+ */
+function withoutOwnSignatureLines(text: string, catName?: string): string {
+  if (!catName || !text.includes('🐾]')) return text;
+  const kept: string[] = [];
+  let fence = '', closing = false;
+  for (const line of text.split(/\r?\n/)) {
+    const mark = /^[ \t>]*(?:(?:[-+*]|\d+[.)])[ \t]+)?(`{3,}|~{3,})(.*)$/.exec(line);
+    if (mark) {
+      const marker = mark[1]!;
+      if (!fence) { if (marker[0] !== '`' || !mark[2]!.includes('`')) fence = marker; }
+      else if (marker[0] === fence[0] && marker.length >= fence.length && !mark[2]!.trim()) fence = '';
+    }
+    const own = !fence && !mark ? /^ {0,3}\[([^\[\]\r\n/]{1,80})(?:\/[^\[\]\r\n]{0,80})?\s?🐾\][ \t]*$/u.exec(line) : null;
+    if (own && own[1]!.trim() === catName) { closing = kept.length > 0 && kept.at(-1)!.trim() === ''; continue; }
+    // The signature stood between two blank lines: one of them is enough.
+    if (closing && line.trim() === '') { closing = false; continue; }
+    closing = false;
+    kept.push(line);
+  }
+  return kept.join('\n').trimEnd();
 }
 
 function record(value: unknown): Record<string, unknown> {
