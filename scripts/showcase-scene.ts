@@ -231,9 +231,10 @@ export async function seedShowcase({ native, base }: { native: PreviewNative; ba
   const steps = (cat: NativeCat, claude: Script['steps'], codex: Script['steps']) => cat.clientId === 'openai' ? codex : claude;
 
   // ── 宪宪（布偶猫）· 回复是活的：逐字写出、步骤提示、随时停下 ──────────────────────────
+  // (Cats talk briefly unless asked for more, so the long replies with code and a table here are asked for in so many words.)
   {
     const room = chat('ragdoll'), start = ago(27 * MIN);
-    room.say(start, '给「页边」加一个“每周回顾”，最小能做成什么样？');
+    room.say(start, '给「页边」加一个“每周回顾”，最小能做成什么样？写细一点：做法、取数据的代码，再列个表说这一版做什么、先不做什么。');
     room.reply(ragdoll, start + 50_000, weekly);
     room.say(start + 4 * MIN, '把回顾页的结构写出来。');
     room.reply(ragdoll, start + 4 * MIN + 30_000, '回顾页分三块：\n\n1. 顶部是这一周的时间范围和新增笔记数；\n2. 中间按书分组，每本书下面', { status: 'canceled' });
@@ -464,7 +465,7 @@ export async function seedShowcase({ native, base }: { native: PreviewNative; ba
     told.add(threadId);
     return { ...script, reply: script.reply + '\n\n（这里是示例环境，回复是预先写好的。）' };
   };
-  for (const [face, line] of Object.entries({ ragdoll: '把“每周回顾”的提醒文案也想一版。', 'maine-coon': '再帮我看一眼导出的那段。', siamese: '再给我几个方向。',
+  for (const [face, line] of Object.entries({ ragdoll: '把“每周回顾”的提醒文案想三版，用表格比一比，再附一段示例代码。', 'maine-coon': '再帮我看一眼导出的那段。', siamese: '再给我几个方向。',
     'turkish-van': '把上面的决定整理成一页。', dsh: '每天晚上 10 点提醒我记一条读书笔记。', 'dragon-li': '以后给我的建议不要超过三条。',
     bengal: '再画一版启动图。', 'golden-chinchilla': '这周进度怎么样？' })) plays.set(cats[face]!.name, { line, cat: cats[face]!.id });
   return { plays };
