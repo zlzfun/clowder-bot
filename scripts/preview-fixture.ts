@@ -12,7 +12,8 @@
 //   …  -d '{"page":12}'  (read conversations 12 messages at a time, to see earlier pages load)
 //   curl :3230/__preview   → {preview, scene: "plain" | "showcase", staged, zone, plays[], cats[]} (what this is; changes nothing)
 // Typed words steer the canned reply: 长, 文件/查/资料, 慢, 失败, 清单, 选一个, 确认一下, 记住, 提醒/定时;
-// in a group @名字 picks the cat and 大家/@all asks all of them.
+// in a group @名字 picks the cat and 大家/@all asks all of them; a message that names no cat is taken, as in the engine,
+// by the cat last addressed by name, else the one that spoke last, else the first member.
 //
 //   npm run showcase                   → the same preview with a staged contact list: one cat per engine
 //   template and two groups, each chat showing one thing the app can do (scripts/showcase-scene.ts), and
@@ -196,10 +197,10 @@ export class PreviewNative extends NativeFixture {
       const user: NativeMessage = { id: this.id(), type: 'user', catId: null, timestamp: Date.now(), content: body.content, ...(body.replyTo ? { replyTo: body.replyTo } : {}),
         // What the owner attached travels with the message, as native keeps it.
         ...(Array.isArray(body.contextAttachments) && body.contextAttachments.length ? { contentBlocks: body.contextAttachments.map((attachment: unknown) => ({ type: 'context_attachment', attachment })) } : {}) };
-      list.push(user);
       const members = (thread.preferredCats ?? []).map(id => this.cats.find(cat => cat.id === id)).filter((cat): cat is NativeCat => !!cat);
       const named = members.filter(cat => body.content.includes('@' + cat.name));
-      const targets = body.mentions?.length ? members.filter(cat => body.mentions.includes(cat.id)) : /大家|@all|@全体/.test(body.content) ? members : named.length ? named : members.slice(0, 1);
+      const targets = body.mentions?.length ? members.filter(cat => body.mentions.includes(cat.id)) : /大家|@all|@全体/.test(body.content) ? members : named.length ? named : this.taker(list, members);
+      list.push(user);
       const entries = targets.map(cat => ({ entryId: 'queue:' + randomBytes(8).toString('hex'), targetCatId: cat.id }));
       this.emit(thread.id, { type: 'queue_updated', action: 'enqueued' });
       for (const cat of targets) void this.turn(thread.id, cat, user).catch(error => console.error('[preview]', error));
@@ -265,6 +266,16 @@ export class PreviewNative extends NativeFixture {
     rich.blocks.push({ id: 'file-' + key, kind: 'file', v: 1, fileName: file.name, url, mimeType: file.mime, fileSize: file.bytes.length });
     this.uploads.set(url, file.bytes);
     this.artifactRows.set(threadId, [...(this.artifactRows.get(threadId) ?? []), { type: 'file', sourceMessageId: message.id, name: file.name, createdAt: message.timestamp }]);
+  }
+  /**
+   * Who takes a message that names no cat, as the pinned engine decides it (AgentRouter resolveImplicitTargetPreview):
+   * the cat the owner last addressed by name, else the cat that spoke last, else the first member.
+   */
+  taker(earlier: NativeMessage[], members: NativeCat[]): NativeCat[] {
+    const said = [...earlier].reverse();
+    for (const message of said) { const named = message.type === 'user' && members.find(cat => message.content.includes('@' + cat.name)); if (named) return [named]; }
+    for (const message of said) { const spoke = message.type === 'assistant' && members.find(cat => cat.id === message.catId); if (spoke) return [spoke]; }
+    return members.slice(0, 1);
   }
   script(cat: NativeCat, text: string, threadId: string) {
     const staged = this.scene?.(threadId, cat, text);

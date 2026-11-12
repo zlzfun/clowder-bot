@@ -175,6 +175,12 @@ test('the showcase stages one cat per template, and each chat shows what it is t
   const answers = (await until('产品评审', async () => (await get(review)).messages.slice(-3), tail => tail.every((message: any) => message.kind === 'bot' && message.status === 'completed' && Date.parse(message.time) > Date.now() - 20_000)));
   assert.deepEqual(answers.map((message: any) => message.sender).sort(), ['宪宪', '烁烁', '砚砚'].sort());
   assert.equal(answers.filter((message: any) => message.text.endsWith(said)).length, 1);
+  // A message that names no cat is taken the way the engine decides it: by the cat the owner last addressed by name.
+  const say = (text: string) => post(`${review}/messages`, { text });
+  assert.equal((await say('@砚砚 导出那段看过了吗？')).status, 202);
+  await until('砚砚 answers', async () => (await get(review)).messages.at(-1), message => message.kind === 'bot' && message.sender === '砚砚' && message.status === 'completed');
+  assert.equal((await say('那今天能合吗？')).status, 202);
+  await until('砚砚 takes the next one too', async () => (await get(review)).messages.slice(-2), tail => tail[0]?.text === '那今天能合吗？' && tail[1]?.kind === 'bot' && tail[1].sender === '砚砚' && tail[1].status === 'completed');
   assert.equal(await play('读书会'), 200);
   const next = await until('读书会', async () => (await get(club)).messages.at(-1), message => message.kind === 'bot' && message.status === 'completed' && message.text.startsWith('下次是周六晚上 8 点'));
   assert.ok(next.text.endsWith(said));
