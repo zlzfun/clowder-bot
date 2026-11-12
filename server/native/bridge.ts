@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { ApiError } from '../errors.js';
 import { ProductStore } from '../product-store.js';
 import type { NativeCat, NativeMessage, NativeThread, NativeTransport } from './types.js';
-import { defaultRuntime, memberCliArgs, runtimeUnavailable, supportsRuntime, faceTemplates, type FaceTemplate } from './agents.js';
+import { defaultRuntime, faceOfTool, faceTool, memberCliArgs, runtimeUnavailable, supportsRuntime, faceTemplates, type Face, type FaceTemplate } from './agents.js';
 import { approvalReceipt, approvalReceiptText, messageDisplayText, messagePresentation, replyEnding, replyInProgress, rosterRefusals, scheduledReminder } from './message-presentation.js';
 import { avatarBreed, type CatConfig, type SourceTemplate } from './cat-templates.js';
 import { clip } from './text.js';
@@ -397,13 +397,31 @@ export class BotBridge {
     if (sent?.input !== input) {
       // A repeat of a request that already made its cat is answered from that cat: what the tools look like now no longer matters.
       const runtimes = await this.runtimes(!existing);
-      const runtime = existing ? runtimes.find(r => supportsRuntime(r) && r.clientId === existing.clientId)
-        : simple.agent ? runtimes.find(r => r.id === simple.agent) : defaultRuntime(runtimes);
-      if (!runtime) throw new ApiError(422, simple.agent ? '找不到选的这个助手程序，请重新选择。' : '这台电脑上还没有可以用的助手程序，装好并登录 Claude Code 或 Codex 后再试。');
-      // Said with the tool's name: the first screen has no "Agent" vocabulary.
-      if (!existing && runtimeUnavailable(runtime)) throw new ApiError(422, runtime.readiness?.status === 'login_required'
-        ? `${runtime.label} 还没有登录，登录后再试。` : `这台电脑上的 ${runtime.label} 现在用不了，换一个或稍后再试。`);
-      const face = simple.face ?? ({ anthropic: 'ragdoll', openai: 'maine-coon', kimi: 'turkish-van' } as Record<string, string>)[runtime.clientId] ?? 'ragdoll';
+      const usual = defaultRuntime(runtimes), none = '这台电脑上还没有可以用的助手程序，装好并登录 Claude Code 或 Codex 后再试。';
+      let runtime: NativeRuntime | undefined;
+      if (existing) runtime = runtimes.find(r => supportsRuntime(r) && r.clientId === existing.clientId);
+      else if (custom) {
+        // A custom cat only borrows the looks: it thinks with the tool the owner picked, or the usual one.
+        runtime = simple.agent ? runtimes.find(r => r.id === simple.agent) : usual;
+        if (!runtime) throw new ApiError(422, simple.agent ? '找不到选的这个助手程序，请重新选择。' : none);
+        // Said with the tool's name: the first screen has no "Agent" vocabulary.
+        if (runtimeUnavailable(runtime)) throw new ApiError(422, runtime.readiness?.status === 'login_required'
+          ? `${runtime.label} 还没有登录，登录后再试。` : `这台电脑上的 ${runtime.label} 现在用不了，换一个或稍后再试。`);
+      } else {
+        // Picking a face picks that cat, and which tool it thinks with is part of the cat: it is not chosen separately,
+        // and without that tool on this computer the cat cannot be made as it is. No face picked: the cat of the tool
+        // that was asked for, or of the one this computer would use anyway.
+        const asked = simple.agent ? runtimes.find(r => r.id === simple.agent) : usual;
+        const picked: Face | undefined = simple.face as Face | undefined ?? (asked && faceOfTool(asked));
+        if (!picked) throw new ApiError(422, simple.agent ? '找不到选的这个助手程序，请重新选择。' : none);
+        const tool = faceTool(picked, runtimes);
+        if (!tool.runtime) throw new ApiError(422, tool.state === 'login' ? `${tool.reason}，登录后再试。`
+          : `${tool.reason}，所以这只猫猫现在领不了。${tool.state === 'missing' ? '装好并登录后再试，或者' : '可以'}改用「自定义」，只借它的长相。`, undefined, 'face_unavailable');
+        if (simple.agent && simple.agent !== tool.runtime.id) throw new ApiError(422, `这只猫猫用 ${tool.label} 来思考，不能另选；想自己选，请用「自定义」。`, undefined, 'face_tool');
+        runtime = tool.runtime;
+      }
+      if (!runtime) throw new ApiError(422, none);
+      const face = simple.face ?? faceOfTool(runtime) ?? 'ragdoll';
       // Nothing has been asked of native yet: this is a refusal, not an unsure creation, and says so by code.
       const template = (await this.faceTemplates().catch(() => [])).find(known => known.id === face);
       if (!template?.color) throw new ApiError(503, '暂时读不到猫猫的资料，这次没有创建，请稍后再试', undefined, 'faces_unavailable');

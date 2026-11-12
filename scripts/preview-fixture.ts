@@ -52,9 +52,14 @@ const agentSets: Record<string, NativeRuntime[]> = (() => {
   const make = (id: string, label: string, clientId: string, status: 'configured' | 'login_required' | 'unknown' | 'not_installed', loginCommand: string): NativeRuntime =>
     ({ id, label, clientId, installed: status !== 'not_installed', configuredModel: status === 'not_installed' ? undefined : 'preview-model', configuredEffort: 'medium',
       models: [], command: id, readiness: { status, checkedAt: Date.now(), loginCommand } });
-  const set = (codex: any, claude: any) => [make('codex', 'Codex', 'openai', codex, 'codex login'), make('claude', 'Claude Code', 'anthropic', claude, 'claude auth login'),
-    make('kimi', 'Kimi', 'kimi', 'not_installed', 'kimi login')];
-  return { ready: set('configured', 'configured'), unknown: set('unknown', 'not_installed'), login: set('login_required', 'not_installed'), none: set('not_installed', 'not_installed') };
+  const set = (codex: any, claude: any, kimi: any = 'not_installed') => [make('codex', 'Codex', 'openai', codex, 'codex login'), make('claude', 'Claude Code', 'anthropic', claude, 'claude auth login'),
+    make('kimi', 'Kimi', 'kimi', kimi, 'kimi login')];
+  // The other tools the pinned engine's detection lists (read from the isolated runtime, 2026-11-12); the app cannot connect cats to them yet.
+  const others: NativeRuntime[] = [['dsh', 'DSH', 'acp', 'acp'], ['agy-native', 'AGY Native', 'google', undefined], ['agy-acp', 'AGY 官方 ACP', 'google', undefined], ['pi', 'Pi', 'acp', 'acp']]
+    .map(([id, label, clientId, transport]) => ({ id: id!, label: label!, clientId: clientId!, installed: false, models: [], ...(transport ? { transport } : {}), readiness: { status: 'not_installed' as const, checkedAt: Date.now() } }));
+  return { ready: set('configured', 'configured'), unknown: set('unknown', 'not_installed'), login: set('login_required', 'not_installed'), none: set('not_installed', 'not_installed'),
+    // The showcase's computer: the three tools the app can connect, all logged in, and the engine's list of the rest.
+    showcase: [...set('configured', 'configured', 'configured'), ...others] };
 })();
 
 export class PreviewNative extends NativeFixture {
@@ -70,6 +75,8 @@ export class PreviewNative extends NativeFixture {
   /** A staged scene's own reply for a chat (scripts/showcase-scene.ts); undefined keeps the typed-word replies below. */
   scene?: (threadId: string, cat: NativeCat, text: string) => Script | undefined;
   constructor() { super(); this.runtimes = agentSets.ready!; }
+  /** The engine's colour pair for a template. */
+  colour(id: string) { return { primary: templateColours[id]?.[0] ?? '#888888', secondary: templateColours[id]?.[1] ?? '#eeeeee' }; }
   override async subscribe(id: string, listener: (event: NativeEvent) => void) {
     const set = this.listeners.get(id) ?? new Set(); set.add(listener); this.listeners.set(id, set);
     listener({ type: 'resync', threadId: id });
@@ -86,8 +93,8 @@ export class PreviewNative extends NativeFixture {
     const parts = url.pathname.split('/').map(decodeURIComponent);
     const done = (result: unknown) => { this.calls.push({ path, method, body }); if (this.calls.length > 500) this.calls.splice(0, 250); return structuredClone(result) as T; };
     // The eight templates with the colours the engine gives them, so each cat has its own.
-    if (url.pathname === '/api/cat-templates' && method === 'GET') return done({ clientDefaults: {}, templates: catTemplates.map(([id, name, roleDescription, personality, teamStrengths]) =>
-      ({ id, name, roleDescription, personality, teamStrengths, color: { primary: templateColours[id]?.[0] ?? '#888888', secondary: templateColours[id]?.[1] ?? '#eeeeee' } })) });
+    if (url.pathname === '/api/cat-templates' && method === 'GET') return done({ clientDefaults: {}, templates: catTemplates.map(([id, name, roleDescription, personality, teamStrengths, nickname]) =>
+      ({ id, name, nickname, roleDescription, personality, teamStrengths, color: this.colour(id) })) });
     // A conversation's folder really exists here (inside the preview's temporary directory), so files can be sent and kept.
     if (url.pathname === '/api/projects/mkdir' && method === 'POST') {
       const target = resolve(String(body.parentPath), String(body.name));
@@ -355,12 +362,14 @@ const native = new PreviewNative();
 const runtime = createApp({ native, workspace, dataFile: join(dir, 'presentation.json'), staticDir: join(dir, 'no-static'),
   allowedOrigins: [`http://127.0.0.1:${port}`, `http://localhost:${port}`] });
 const showcase = process.env.PREVIEW_SCENE === 'showcase';
+if (showcase) native.runtimes = agentSets.showcase!;
 // The line under 你 names the device; here it says what this is instead of the machine's own name.
 runtime.store.state.deviceName = showcase ? '示例环境' : '预览环境';
-// Seeded cats come from the same quick creation the first screen uses.
-// 团子 answers the way Claude Code does, 栗子 the way Codex does (see turn()).
-if (!showcase) for (const [index, name] of ['团子', '栗子', '年糕'].slice(0, Math.max(0, Math.min(3, Number(process.env.PREVIEW_CATS ?? 2)))).entries())
-  await runtime.bridge.createBot({ name, simple: { face: breeds[[7, 1, 2][index]!]!, agent: ['claude', 'codex', 'claude'][index]! }, idempotencyKey: randomUUID() });
+// Seeded cats come from the same quick creation the first screen uses: 团子 is 布偶猫's cat and answers the way
+// Claude Code does, 栗子 is 缅因猫's and answers the way Codex does (see turn()); 年糕 is a custom cat that only borrows a face.
+const seeds: Array<[string, Record<string, unknown>]> = [['团子', { face: 'ragdoll' }], ['栗子', { face: 'maine-coon' }], ['年糕', { face: 'siamese', custom: true, agent: 'claude' }]];
+if (!showcase) for (const [name, simple] of seeds.slice(0, Math.max(0, Math.min(3, Number(process.env.PREVIEW_CATS ?? 2)))))
+  await runtime.bridge.createBot({ name, simple, idempotencyKey: randomUUID() });
 /** The staged scene's demo line for each chat and where it goes, by the chat's name (see `{"play": …}` below). */
 let plays = new Map<string, { line: string; cat?: string; group?: string }>();
 // What this is, readable without changing anything: a tool that clicks through the staged chats (scripts/showcase-shots.mjs)

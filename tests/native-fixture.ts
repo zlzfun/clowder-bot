@@ -6,15 +6,15 @@ import type { NativeRuntime } from '../server/native/bridge.js';
 
 /** Protocol fixture only; never linked from production. Real contracts run in native-integration.test.ts. */
 // The engine's eight cat templates as the pinned upstream serves them (GET /api/cat-templates, read from the isolated runtime 2026-11-12).
-export const catTemplates: Array<[id: string, name: string, role: string, personality: string, strengths: string]> = [
-  ['ragdoll', '布偶猫', '主架构师和核心开发者，擅长深度思考和系统设计', '温柔但有主见，喜欢深入分析问题，写代码快但注重质量', '架构设计、写代码一把好手'],
-  ['maine-coon', '缅因猫', '代码审查专家，擅长安全分析、测试覆盖和代码质量把控', '严谨认真，注重细节，会直言不讳地指出问题', 'Review、找 bug、coding 落地'],
-  ['siamese', '暹罗猫', '视觉设计师和创意顾问，擅长 UI/UX 设计和视觉表达', '热血奔放，善于用视觉语言表达想法，表达力是全队最强的', '审美、前端设计风格、打破常规'],
-  ['turkish-van', '梵花猫', '共创伙伴，擅长编码、文档与任务验收', '细心务实，保留自己的判断，愿意把事情接住做完', '编码、文档、验收'],
-  ['dsh', '小鲸鱼', '共创与推理伙伴，负责分析问题、编码实现和交叉验证', '细心务实，先理清问题，再用可验证的结果交付', '问题分析、编码、交叉验证'],
-  ['dragon-li', '狸花猫', 'GLM 对话猫；中文实证', '先证后答，机警蓄势', '实证'],
-  ['bengal', '孟加拉猫', '混血多模型agent，擅长图片生成、浏览器自动化和视觉证据链', '精力旺盛、好奇心爆棚，什么都想试，什么都敢碰', '图片生成、截图录屏、browser automation、多模型切换'],
-  ['golden-chinchilla', '金渐层', '开源多模型编码 agent，自带多专家编排 + LSP + 主题生态', '沉稳可靠，什么 provider 都能接，什么任务都能扛', '多专家内部编排、LSP 集成、开源生态、provider-agnostic'],
+export const catTemplates: Array<[id: string, name: string, role: string, personality: string, strengths: string, nickname: string]> = [
+  ['ragdoll', '布偶猫', '主架构师和核心开发者，擅长深度思考和系统设计', '温柔但有主见，喜欢深入分析问题，写代码快但注重质量', '架构设计、写代码一把好手', '宪宪'],
+  ['maine-coon', '缅因猫', '代码审查专家，擅长安全分析、测试覆盖和代码质量把控', '严谨认真，注重细节，会直言不讳地指出问题', 'Review、找 bug、coding 落地', '砚砚'],
+  ['siamese', '暹罗猫', '视觉设计师和创意顾问，擅长 UI/UX 设计和视觉表达', '热血奔放，善于用视觉语言表达想法，表达力是全队最强的', '审美、前端设计风格、打破常规', '烁烁'],
+  ['turkish-van', '梵花猫', '共创伙伴，擅长编码、文档与任务验收', '细心务实，保留自己的判断，愿意把事情接住做完', '编码、文档、验收', '墨墨'],
+  ['dsh', '小鲸鱼', '共创与推理伙伴，负责分析问题、编码实现和交叉验证', '细心务实，先理清问题，再用可验证的结果交付', '问题分析、编码、交叉验证', '鲸鲸'],
+  ['dragon-li', '狸花猫', 'GLM 对话猫；中文实证', '先证后答，机警蓄势', '实证', '小狸花'],
+  ['bengal', '孟加拉猫', '混血多模型agent，擅长图片生成、浏览器自动化和视觉证据链', '精力旺盛、好奇心爆棚，什么都想试，什么都敢碰', '图片生成、截图录屏、browser automation、多模型切换', '斑斑'],
+  ['golden-chinchilla', '金渐层', '开源多模型编码 agent，自带多专家编排 + LSP + 主题生态', '沉稳可靠，什么 provider 都能接，什么任务都能扛', '多专家内部编排、LSP 集成、开源生态、provider-agnostic', '金哥'],
 ];
 
 export class NativeFixture implements NativeTransport {
@@ -44,7 +44,7 @@ export class NativeFixture implements NativeTransport {
     if (path === '/api/health') result = { status: 'ok', callbackAuth: { backend: 'redis', durability: 'durable' } };
     else if (path === '/api/projects/mkdir' && method === 'POST') result = { createdPath: join(body.parentPath, body.name), name: body.name };
     else if (url.pathname === '/api/projects/browse') result = { current: url.searchParams.get('path'), entries: [] };
-    else if (path === '/api/cat-templates') result = { templates: catTemplates.map(([id, name, roleDescription, personality, teamStrengths]) => ({ id, name, roleDescription, personality, teamStrengths, color: { primary: '#888888', secondary: '#eeeeee' } })), clientDefaults: {} };
+    else if (path === '/api/cat-templates') result = { templates: catTemplates.map(([id, name, roleDescription, personality, teamStrengths, nickname]) => ({ id, name, nickname, roleDescription, personality, teamStrengths, color: { primary: '#888888', secondary: '#eeeeee' } })), clientDefaults: {} };
     else if (url.pathname === '/api/cats/native-runtimes') result = { runtimes: this.runtimes };
     else if (path === '/api/accounts') result = { providers: [] };
     else if (path === '/api/cats' && method === 'GET') result = { cats: this.cats };

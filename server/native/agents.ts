@@ -93,8 +93,55 @@ export async function agentInventory(bridge: BotBridge, refresh = false) {
 /** The portraits of client/public/cat-avatars.js: the faces a cat can be created with. Each is one of the engine's cat templates. */
 export const catFaces = ['ragdoll', 'maine-coon', 'siamese', 'turkish-van', 'dsh', 'dragon-li', 'bengal', 'golden-chinchilla'] as const;
 
+export type Face = typeof catFaces[number];
+/**
+ * Which tool each face's cat thinks with. A face is one of the engine's cats, and in the engine a cat's
+ * breed says which tool it runs on (the pinned upstream cat-template.json, `breeds[].variants`: 布偶猫 on
+ * Claude, 缅因猫 on Codex, 暹罗猫 on Gemini through AGY, 梵花猫 on Kimi, 狸花猫 and 金渐层 on OpenCode,
+ * 孟加拉猫 on Antigravity; 小鲸鱼 is the cat of the DSH runtime). Upstream's GET /api/cat-templates is, in
+ * its own words, the soul layer without the client binding, so the pairing is kept here beside the faces
+ * (tests/face-tools.test.ts holds it against the pinned upstream file). `runtimes` are the ids the
+ * engine's tool detection uses (GET /api/cats/native-runtimes), most preferred first; `label` names the
+ * tool where that detection does not list it at all.
+ */
+export const faceTools: Record<Face, { runtimes: string[]; label: string }> = {
+  ragdoll: { runtimes: ['claude'], label: 'Claude Code' }, 'maine-coon': { runtimes: ['codex'], label: 'Codex' },
+  siamese: { runtimes: ['agy-native', 'agy-acp'], label: 'Gemini' }, 'turkish-van': { runtimes: ['kimi'], label: 'Kimi' },
+  dsh: { runtimes: ['dsh'], label: 'DSH' }, 'dragon-li': { runtimes: ['opencode'], label: 'OpenCode' },
+  bengal: { runtimes: ['antigravity'], label: 'Antigravity' }, 'golden-chinchilla': { runtimes: ['opencode'], label: 'OpenCode' },
+};
+/** The face whose cat thinks with this tool, for a cat made without picking one. */
+export function faceOfTool(runtime: NativeRuntime): Face | undefined {
+  return catFaces.find(face => faceTools[face].runtimes.includes(runtime.id));
+}
+export interface FaceTool {
+  /** The tool's name: the engine's own label when its detection lists the tool. */
+  label: string;
+  /** `ready`: can be used. `unknown`: installed, login not confirmed (worth trying). `login`: needs a login. `missing`: not on this computer. `unsupported`: the app cannot connect cats to this kind of tool yet. */
+  state: 'ready' | 'unknown' | 'login' | 'missing' | 'unsupported';
+  /** Why a cat cannot be made from this face as it is, in everyday words; absent when it can. */
+  reason?: string;
+  /** The local tool the cat would be bound to, when there is a usable one. */
+  runtime?: NativeRuntime;
+  loginCommand?: string;
+}
+/**
+ * The tool a face's cat would think with on this computer, and whether a cat can be made from the face as
+ * it is. A tool the app cannot connect yet is said first: installing it would not change that.
+ */
+export function faceTool(face: Face, runtimes: NativeRuntime[]): FaceTool {
+  const wanted = faceTools[face], listed = wanted.runtimes.flatMap(id => runtimes.filter(runtime => runtime.id === id));
+  const usable = listed.find(runtime => !runtimeUnavailable(runtime));
+  if (usable) return { label: usable.label, state: usable.readiness?.status === 'configured' ? 'ready' : 'unknown', runtime: usable };
+  const adapted = listed.filter(supportsRuntime), label = (adapted[0] ?? listed.find(runtime => runtime.installed) ?? listed[0])?.label ?? wanted.label;
+  if (!adapted.length) return { label, state: 'unsupported', reason: `这个应用还接不上 ${label}` };
+  const waiting = adapted.find(runtime => runtime.installed && runtime.readiness?.status === 'login_required');
+  if (waiting) return { label, state: 'login', reason: `${label} 还没有登录`, ...(waiting.readiness?.loginCommand ? { loginCommand: waiting.readiness.loginCommand } : {}) };
+  return { label, state: 'missing', reason: `这台电脑上还没有装 ${label}` };
+}
+
 /** One of the engine's cat templates as a face is made from it: only well-formed fields are kept. */
-export interface FaceTemplate { id: string; name?: string; roleDescription?: string; personality?: string; teamStrengths?: string; color?: { primary: string; secondary: string };
+export interface FaceTemplate { id: string; name?: string; nickname?: string; roleDescription?: string; personality?: string; teamStrengths?: string; color?: { primary: string; secondary: string };
   /** Changes when the portrait does: what a creation screen showed and what a creation uses can be compared. */
   rev: string }
 /**
@@ -110,8 +157,8 @@ export function faceTemplates(raw: unknown): FaceTemplate[] {
     const item = entry as Record<string, unknown>, id = words(item.id);
     if (!id) return [];
     const colour = item.color && typeof item.color === 'object' ? item.color as Record<string, unknown> : {};
-    const [name, roleDescription, personality, teamStrengths] = [words(item.name), words(item.roleDescription), words(item.personality), words(item.teamStrengths)];
-    return [{ id, ...(name ? { name } : {}), ...(roleDescription ? { roleDescription } : {}), ...(personality ? { personality } : {}), ...(teamStrengths ? { teamStrengths } : {}),
+    const [name, nickname, roleDescription, personality, teamStrengths] = [words(item.name), words(item.nickname), words(item.roleDescription), words(item.personality), words(item.teamStrengths)];
+    return [{ id, ...(name ? { name } : {}), ...(nickname ? { nickname } : {}), ...(roleDescription ? { roleDescription } : {}), ...(personality ? { personality } : {}), ...(teamStrengths ? { teamStrengths } : {}),
       ...(typeof colour.primary === 'string' && typeof colour.secondary === 'string' ? { color: { primary: colour.primary, secondary: colour.secondary } } : {}),
       rev: createHash('sha256').update(JSON.stringify([roleDescription ?? null, personality ?? null, teamStrengths ?? null])).digest('hex').slice(0, 16) }];
   });
@@ -120,14 +167,18 @@ export function faceTemplates(raw: unknown): FaceTemplate[] {
 export async function startSummary(bridge: BotBridge, refresh = false) {
   // The templates only add what each face is like; a first screen must not fail because they could not be read.
   const [runtimes, cats, templates] = await Promise.all([bridge.runtimes(refresh), bridge.cats(), bridge.faceTemplates().catch(() => [])]);
-  // What each face is like, from the engine's template of the same id: a cat made by picking a face starts with this portrait.
-  // `rev` goes back with the creation, so the cat that is made is the one that was described.
+  // What each face is like, from the engine's template of the same id: a cat made by picking a face starts with this portrait
+  // and thinks with that cat's own tool. `rev` goes back with the creation, so the cat that is made is the one that was described.
   const line = (value: string | undefined, max: number) => value ? clip(value.replace(/\s+/g, ' '), max) : undefined;
   const faces = catFaces.flatMap(id => {
     const template = templates.find(known => known.id === id);
     if (!template) return [];
-    const [name, role, personality, strengths] = [line(template.name, 40), line(template.roleDescription, 120), line(template.personality, 120), line(template.teamStrengths, 80)];
-    return [{ id, rev: template.rev, ...(name ? { name } : {}), ...(role ? { role } : {}), ...(personality ? { personality } : {}), ...(strengths ? { strengths } : {}) }];
+    const [name, nickname, role, personality, strengths] = [line(template.name, 40), line(template.nickname, 40), line(template.roleDescription, 120), line(template.personality, 120), line(template.teamStrengths, 80)];
+    // Its tool here: which one, and whether a cat can be made from this face as it is (`usable`); `reason` says why not.
+    const tool = faceTool(id, runtimes);
+    return [{ id, rev: template.rev, ...(name ? { name } : {}), ...(nickname ? { nickname } : {}), ...(role ? { role } : {}), ...(personality ? { personality } : {}), ...(strengths ? { strengths } : {}),
+      tool: { label: tool.label, state: tool.state, usable: !!tool.runtime, ...(tool.runtime ? { id: tool.runtime.id } : {}), ...(tool.reason ? { reason: tool.reason } : {}),
+        ...(tool.loginCommand ? { loginCommand: tool.loginCommand } : {}) } }];
   });
   const adapted = runtimes.filter(supportsRuntime), chosen = defaultRuntime(runtimes);
   const state = (runtime: NativeRuntime) => {

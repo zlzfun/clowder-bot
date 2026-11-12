@@ -91,7 +91,8 @@ test('the first screen says what each face is like, from the engine’s own temp
   const { faces } = await (await r.call('/xbot-api/start')).json();
   assert.deepEqual(faces.map((face: any) => face.id), ['ragdoll', 'maine-coon', 'siamese', 'turkish-van', 'dsh', 'dragon-li', 'bengal', 'golden-chinchilla']);
   const { rev, ...coon } = faces[1];
-  assert.deepEqual(coon, { id: 'maine-coon', name: '缅因猫', role: '代码审查专家，擅长安全分析、测试覆盖和代码质量把控', personality: '严谨认真，注重细节，会直言不讳地指出问题', strengths: 'Review、找 bug、coding 落地' });
+  assert.deepEqual(coon, { id: 'maine-coon', name: '缅因猫', nickname: '砚砚', role: '代码审查专家，擅长安全分析、测试覆盖和代码质量把控', personality: '严谨认真，注重细节，会直言不讳地指出问题', strengths: 'Review、找 bug、coding 落地',
+    tool: { label: 'Codex', state: 'ready', usable: true, id: 'codex' } });
   assert.match(rev, /^[0-9a-f]{16}$/); assert.equal(new Set(faces.map((face: any) => face.rev)).size, 8, 'each portrait has its own');
   // A template the engine does not have is not offered a description; long or multi-line text is one clipped line.
   const request = r.native.request.bind(r.native);
@@ -102,14 +103,14 @@ test('the first screen says what each face is like, from the engine’s own temp
   assert.equal(some[0].role.length, 120); assert.ok(some[0].role.startsWith('第一行 第二行')); assert.equal('personality' in some[0], false);
   // Upstream serves its template file unchecked: an entry that is not an object, has no id or a field of the wrong type is left out or read without that field.
   r.native.request = (async (path: string, options?: any) => path !== '/api/cat-templates' ? request(path, options)
-    : { templates: [null, 'junk', { name: 'no id' }, { id: 'siamese', name: '暹罗猫', roleDescription: '设计师', personality: 7, teamStrengths: ['x'], color: { primary: '#111111', secondary: '#222222' } }] }) as typeof r.native.request;
+    : { templates: [null, 'junk', { name: 'no id' }, { id: 'maine-coon', name: '缅因猫', nickname: 9, roleDescription: '审查', personality: 7, teamStrengths: ['x'], color: { primary: '#111111', secondary: '#222222' } }] }) as typeof r.native.request;
   const odd = (await (await r.call('/xbot-api/start')).json()).faces;
-  assert.deepEqual(odd.map(({ rev, ...face }: any) => face), [{ id: 'siamese', name: '暹罗猫', role: '设计师' }]);
+  assert.deepEqual(odd.map(({ rev, tool, ...face }: any) => face), [{ id: 'maine-coon', name: '缅因猫', role: '审查' }]);
   // …and a cat can still be made from it: the missing words are the plain helper's.
-  const made = await r.call('/xbot-api/bots', 'POST', { name: '小暹', simple: { face: 'siamese', rev: odd[0].rev }, idempotencyKey: randomUUID() });
+  const made = await r.call('/xbot-api/bots', 'POST', { name: '小审', simple: { face: 'maine-coon', rev: odd[0].rev }, idempotencyKey: randomUUID() });
   assert.equal(made.status, 201);
   const body = r.native.calls.findLast(c => c.path === '/api/cats' && c.method === 'POST')!.body;
-  assert.equal(body.roleDescription, '设计师'); assert.match(body.personality, /亲切耐心/);
+  assert.equal(body.roleDescription, '审查'); assert.match(body.personality, /亲切耐心/);
   for (const shape of [null, {}, { templates: 'nope' }]) {
     r.native.request = (async (path: string, options?: any) => path !== '/api/cat-templates' ? request(path, options) : shape) as typeof r.native.request;
     assert.deepEqual((await (await r.call('/xbot-api/start')).json()).faces, [], JSON.stringify(shape));
@@ -167,9 +168,10 @@ test('a cat needs only a name: one unpatched native creation with the Agent’s 
   assert.equal(twin.status, 409); assert.match((await twin.json()).error, /已经有一只叫这个名字/);
   assert.equal(r.native.cats.length, 1);
 
-  // A chosen face is that template's portrait, whichever tool runs it.
-  assert.equal((await r.call('/xbot-api/bots', 'POST', { name: '花花', simple: { face: 'siamese', agent: 'codex' }, idempotencyKey: randomUUID() })).status, 201);
-  assert.deepEqual([creations().at(-1)!.body.roleDescription, creations().at(-1)!.body.personality], ['视觉设计师和创意顾问，擅长 UI/UX 设计和视觉表达', '热血奔放，善于用视觉语言表达想法，表达力是全队最强的']);
+  // A chosen face is that cat: its portrait and its own tool (缅因猫 thinks with Codex), whatever the usual tool here is.
+  assert.equal((await r.call('/xbot-api/bots', 'POST', { name: '花花', simple: { face: 'maine-coon' }, idempotencyKey: randomUUID() })).status, 201);
+  assert.deepEqual([creations().at(-1)!.body.clientId, creations().at(-1)!.body.roleDescription, creations().at(-1)!.body.personality],
+    ['openai', '代码审查专家，擅长安全分析、测试覆盖和代码质量把控', '严谨认真，注重细节，会直言不讳地指出问题']);
   // Custom: the face only gives the looks. Without words of the owner's own it is a plain helper; with them, theirs.
   assert.equal((await r.call('/xbot-api/bots', 'POST', { name: '白板', simple: { face: 'maine-coon', custom: true, agent: 'codex' }, idempotencyKey: randomUUID() })).status, 201);
   const plain = creations().at(-1)!.body;
@@ -189,9 +191,55 @@ test('a cat needs only a name: one unpatched native creation with the Agent’s 
   assert.match(second.personality, /亲切耐心/, 'not the template’s personality');
   const chestnut = (await (await r.call('/xbot-api/bots')).json()).bots.find((b: any) => b.name === '栗子');
   assert.deepEqual([chestnut.avatar_seed, chestnut.templateId], ['cat:golden-chinchilla', 'golden-chinchilla']);
-  // Without a chosen face a Codex cat gets the face that goes with it.
+  // Without a chosen face, asking for Codex gets the cat that thinks with Codex.
   await r.call('/xbot-api/bots', 'POST', { name: '年糕', simple: { agent: 'codex' }, idempotencyKey: randomUUID() });
   assert.equal((await (await r.call('/xbot-api/bots')).json()).bots.find((b: any) => b.name === '年糕').avatar_seed, 'cat:maine-coon');
+  assert.equal(creations().at(-1)!.body.roleDescription, '代码审查专家，擅长安全分析、测试覆盖和代码质量把控');
+});
+
+test('a face is a cat with its own tool: without that tool here the cat cannot be made as it is', async t => {
+  const r = await setup(t);
+  const creations = () => r.native.calls.filter(c => c.path === '/api/cats' && c.method === 'POST');
+  const tools = async () => Object.fromEntries((await (await r.call('/xbot-api/start')).json()).faces.map((face: any) => [face.id, face.tool]));
+  const post = async (name: string, simple: unknown) => { const res = await r.call('/xbot-api/bots', 'POST', { name, simple, idempotencyKey: randomUUID() }); const said = await res.json(); return [res.status, said.code, said.error] as const; };
+  // What the engine's detection lists on a machine with Claude Code and Codex (ids and labels as the pinned engine gives them).
+  r.native.runtimes = [runtime('codex', 'openai', 'configured'), runtime('claude', 'anthropic', 'unknown'), runtime('kimi', 'kimi', 'not_installed', { label: 'Kimi' }),
+    runtime('dsh', 'acp', 'not_installed', { label: 'DSH', acp: {} }), runtime('agy-native', 'google', 'configured', { label: 'AGY Native', agyCarrier: 'native' }), runtime('agy-acp', 'google', 'not_installed', { label: 'AGY 官方 ACP' })];
+  assert.deepEqual(await tools(), {
+    ragdoll: { label: 'Claude Code', state: 'unknown', usable: true, id: 'claude' },            // installed, login not confirmed: worth trying
+    'maine-coon': { label: 'Codex', state: 'ready', usable: true, id: 'codex' },
+    siamese: { label: 'AGY Native', state: 'unsupported', usable: false, reason: '这个应用还接不上 AGY Native' },   // installed and logged in, but not a kind the app can connect
+    'turkish-van': { label: 'Kimi', state: 'missing', usable: false, reason: '这台电脑上还没有装 Kimi' },
+    dsh: { label: 'DSH', state: 'unsupported', usable: false, reason: '这个应用还接不上 DSH' },                    // said before "not installed": installing would not help
+    'dragon-li': { label: 'OpenCode', state: 'unsupported', usable: false, reason: '这个应用还接不上 OpenCode' },    // the engine's detection does not list it at all
+    bengal: { label: 'Antigravity', state: 'unsupported', usable: false, reason: '这个应用还接不上 Antigravity' },
+    'golden-chinchilla': { label: 'OpenCode', state: 'unsupported', usable: false, reason: '这个应用还接不上 OpenCode' },
+  });
+  // The cat is made with its own tool, not the usual one (Codex here), and no other tool can be picked for it.
+  assert.deepEqual((await post('宪宪', { face: 'ragdoll' })).slice(0, 2), [201, undefined]);
+  assert.equal(creations().at(-1)!.body.clientId, 'anthropic');
+  assert.deepEqual(await post('宪宪二', { face: 'ragdoll', agent: 'codex' }), [422, 'face_tool', '这只猫猫用 Claude Code 来思考，不能另选；想自己选，请用「自定义」。']);
+  assert.deepEqual((await post('宪宪三', { face: 'ragdoll', agent: 'claude' })).slice(0, 2), [201, undefined], 'naming its own tool is not a different request');
+  // Its tool is not here, or cannot be connected: refused before the engine is asked, with what would help.
+  const before = creations().length;
+  assert.deepEqual(await post('墨墨', { face: 'turkish-van' }), [422, 'face_unavailable', '这台电脑上还没有装 Kimi，所以这只猫猫现在领不了。装好并登录后再试，或者改用「自定义」，只借它的长相。']);
+  assert.deepEqual(await post('烁烁', { face: 'siamese' }), [422, 'face_unavailable', '这个应用还接不上 AGY Native，所以这只猫猫现在领不了。可以改用「自定义」，只借它的长相。']);
+  assert.deepEqual(await post('金哥', { face: 'golden-chinchilla' }), [422, 'face_unavailable', '这个应用还接不上 OpenCode，所以这只猫猫现在领不了。可以改用「自定义」，只借它的长相。']);
+  assert.equal(creations().length, before);
+  // Custom borrows only the looks, so any face goes with a tool that is here: the one picked, or the usual one.
+  assert.deepEqual((await post('小暹', { face: 'siamese', custom: true })).slice(0, 2), [201, undefined]);
+  assert.match(creations().at(-1)!.body.roleDescription, /随叫随到/); assert.equal(creations().at(-1)!.body.clientId, 'openai');
+  assert.deepEqual((await post('小金', { face: 'golden-chinchilla', custom: true, agent: 'claude' })).slice(0, 2), [201, undefined]);
+  assert.equal(creations().at(-1)!.body.clientId, 'anthropic');
+  // Needs a login: says so, and nothing about custom (the same tool would be needed).
+  r.native.runtimes = [runtime('codex', 'openai', 'login_required'), runtime('claude', 'anthropic', 'configured')];
+  assert.deepEqual((await tools())['maine-coon'], { label: 'Codex', state: 'login', usable: false, reason: 'Codex 还没有登录', loginCommand: 'codex login' });
+  assert.deepEqual(await post('砚砚', { face: 'maine-coon' }), [422, 'face_unavailable', 'Codex 还没有登录，登录后再试。']);
+  // Kimi installed: 梵花猫's cat can be made, on Kimi.
+  r.native.runtimes = [runtime('claude', 'anthropic', 'configured'), runtime('kimi', 'kimi', 'configured', { label: 'Kimi' })];
+  assert.deepEqual((await tools())['turkish-van'], { label: 'Kimi', state: 'ready', usable: true, id: 'kimi' });
+  assert.deepEqual((await post('墨墨', { face: 'turkish-van' })).slice(0, 2), [201, undefined]);
+  assert.equal(creations().at(-1)!.body.clientId, 'kimi');
 });
 
 test('the cat that is made is the one that was described, and a repeat reaches native exactly as the first time', async t => {
@@ -231,7 +279,7 @@ test('the cat that is made is the one that was described, and a repeat reaches n
   // The templates cannot be read: nothing is asked of native, and the refusal says by code that nothing was created — custom or not.
   r.native.request = (async (path: string, options?: any) => { if (path === '/api/cat-templates') throw new ApiError(503, 'down'); return request(path, options); }) as typeof r.native.request;
   const before = creations().length;
-  for (const simple of [{ face: 'ragdoll' }, { face: 'ragdoll', custom: true, about: '陪我聊天' }]) {
+  for (const simple of [{ face: 'maine-coon' }, { face: 'ragdoll', custom: true, about: '陪我聊天' }]) {
     const down = await r.call('/xbot-api/bots', 'POST', { name: '等等', simple, idempotencyKey: randomUUID() });
     assert.equal(down.status, 503);
     const said = await down.json();

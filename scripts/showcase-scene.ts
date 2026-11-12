@@ -1,14 +1,20 @@
 // The staged contact list of `npm run showcase`: one cat for each of the engine's
-// eight templates (named after it, with its face and colour) and two groups, each
-// chat arranged to show one thing the app can do. The conversations are written
-// here, in the shapes the pinned engine stores them, and read by the real adapter
-// and the real interface; nothing in the product knows about this file.
+// eight templates (called what the template calls its cat — 宪宪, 砚砚, 烁烁… — with
+// its face, its colour and its own tool) and two groups, each chat arranged to
+// show one thing the app can do. The conversations are written here, in the
+// shapes the pinned engine stores them, and read by the real adapter and the
+// real interface; nothing in the product knows about this file.
 //
-// Cats, groups, read positions, the pin and the uploaded file are made through
-// the adapter's own routes, as an owner would make them. What is typed into a
-// staged chat gets that chat's own canned reply (see `live` below), so the ability
-// it shows can be tried, not only looked at. The illustrated guide in showcase/
-// points at these chats by name.
+// A cat thinks with its template's tool. The three whose tool the app can connect
+// (Claude Code, Codex, Kimi — the showcase's computer has all three) are made
+// through the adapter's own creation, as an owner would make them; the other
+// five are the engine's own members for their breed, as an engine that has them
+// lists them: the app shows and talks to any cat the engine has, it only cannot
+// make new ones on those tools. Groups, read positions, the pin and the uploaded
+// file go through the adapter's routes. What is typed into a staged chat gets
+// that chat's own canned reply (see `live` below), so the ability it shows can be
+// tried, not only looked at. The illustrated guide in showcase/ points at these
+// chats by name.
 import { randomUUID } from 'node:crypto';
 import { crc32, deflateSync } from 'node:zlib';
 import type { NativeCat, NativeMessage } from '../server/native/types.js';
@@ -38,7 +44,7 @@ function png(width: number, height: number, paint: (x: number, y: number) => num
   const head = Buffer.alloc(13); head.writeUInt32BE(width, 0); head.writeUInt32BE(height, 4); head[8] = 8; head[9] = 2;
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', head), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
-/** 暹罗猫's colour draft for the "paper" home page: a page with a title, lines and a red bookmark, and the palette beside it. */
+/** 烁烁's colour draft for the "paper" home page: a page with a title, lines and a red bookmark, and the palette beside it. */
 function moodboard(): Buffer {
   const swatches = [0xfffbf2, 0xe9dfc9, 0xc9b79c, 0x8a6f52, 0x3e3229];
   return png(960, 540, (x, y) => {
@@ -57,10 +63,10 @@ function moodboard(): Buffer {
 
 const minutes = `页边 · 周会记录（随手记的）
 
-- 首页改版：大家同意走“纸页感”，暹罗猫周三前出配色稿
-- 导出：先做 Markdown，PDF 放第二版（金渐层的建议）
-- 保存接口上线前要改两处，缅因猫列了清单，周四前改完
-- 每周回顾：布偶猫给了最小方案，下周开始做
+- 首页改版：大家同意走“纸页感”，烁烁周三前出配色稿
+- 导出：先做 Markdown，PDF 放第二版（金哥的建议）
+- 保存接口上线前要改两处，砚砚列了清单，周四前改完
+- 每周回顾：宪宪给了最小方案，下周开始做
 - 读书会这个月读《清单革命》，周六晚 8 点
 - 好像还有：备份文件的格式没定；深色模式要单独调一套颜色
 `;
@@ -76,10 +82,10 @@ const summary = `# 页边 · 周会纪要
 
 | 事项 | 负责 | 时间 |
 | --- | --- | --- |
-| 首页配色稿 | 暹罗猫 | 周三 |
+| 首页配色稿 | 烁烁 | 周三 |
 | 保存接口的两处修改 | 你 | 周四 |
-| 深色模式配色 | 暹罗猫 | 下周一 |
-| 备份文件格式 | 金渐层 | 下周三 |
+| 深色模式配色 | 烁烁 | 下周一 |
+| 备份文件格式 | 金哥 | 下周三 |
 | 读书会《清单革命》 | 大家 | 周六 20:00 |
 
 ## 没定的
@@ -88,10 +94,10 @@ const summary = `# 页边 · 周会纪要
 `;
 const todos = `# 待办
 
-- [ ] 首页配色稿（暹罗猫，周三）
+- [ ] 首页配色稿（烁烁，周三）
 - [ ] 保存接口的两处修改（你，周四）
-- [ ] 深色模式配色（暹罗猫，下周一）
-- [ ] 备份文件格式（金渐层，下周三）
+- [ ] 深色模式配色（烁烁，下周一）
+- [ ] 备份文件格式（金哥，下周三）
 - [ ] 读书会《清单革命》（大家，周六 20:00）
 `;
 
@@ -194,11 +200,20 @@ export async function seedShowcase({ native, base }: { native: PreviewNative; ba
     return on(time, -days, hour, minute);
   };
 
-  // One cat per template, called what the template is called; the tools alternate so both ways of writing a reply are on show.
-  const tools: Record<string, string> = { ragdoll: 'claude', 'maine-coon': 'codex', siamese: 'claude', 'turkish-van': 'codex', dsh: 'claude', 'dragon-li': 'claude', bengal: 'codex', 'golden-chinchilla': 'claude' };
+  // One cat per template, called what the template calls its cat, thinking with the template's own tool.
+  // The engine's member for a breed whose tool the app cannot connect cats to (id, client and model as the pinned
+  // upstream's breed has them): such a cat is made in the engine, and the app lists it and talks to it like any other.
+  const engineMade: Record<string, { id: string; clientId: string; defaultModel: string }> = {
+    siamese: { id: 'gemini', clientId: 'google', defaultModel: 'Gemini 3.1 Pro (High)' }, dsh: { id: 'dsh', clientId: 'acp', defaultModel: '' },
+    'dragon-li': { id: 'glm52', clientId: 'opencode', defaultModel: 'zhipu/glm-5.2' }, bengal: { id: 'antigravity', clientId: 'antigravity', defaultModel: 'gemini-3.1-pro' },
+    'golden-chinchilla': { id: 'opencode', clientId: 'opencode', defaultModel: 'claude-opus-4-6' } };
   const cats: Record<string, NativeCat> = {}, threads: Record<string, string> = {};
-  for (const [face, name] of catTemplates) {
-    await call('POST', '/bots', { name, simple: { face, agent: tools[face] }, idempotencyKey: randomUUID() });
+  for (const [face, breed, roleDescription, personality, teamStrengths, name] of catTemplates) {
+    const member = engineMade[face];
+    if (member) native.cats.push({ ...member, name, displayName: name, nickname: name, breedId: face, breedDisplayName: breed, isDefaultVariant: true, roleDescription, personality, teamStrengths,
+      mentionPatterns: ['@' + name, '@' + member.id], color: native.colour(face), configurationRevision: 'r1', isDefaultResponder: false });
+    // Picking the face is all it takes: the cat comes with its own tool (see server/native/agents.ts faceTools).
+    else await call('POST', '/bots', { name, simple: { face }, idempotencyKey: randomUUID() });
     cats[face] = native.cats.find(cat => cat.name === name)!;
     threads[face] = (await call('GET', `/bots/${enc(name)}/transcript`)).thread_id;
   }
@@ -209,7 +224,7 @@ export async function seedShowcase({ native, base }: { native: PreviewNative; ba
   const live = new Map<string, (cat: NativeCat, said: string, turn: number) => Script>();
   const steps = (cat: NativeCat, claude: Script['steps'], codex: Script['steps']) => cat.clientId === 'openai' ? codex : claude;
 
-  // ── 布偶猫 · 回复是活的：逐字写出、步骤提示、随时停下 ──────────────────────────
+  // ── 宪宪（布偶猫）· 回复是活的：逐字写出、步骤提示、随时停下 ──────────────────────────
   {
     const room = chat('ragdoll'), start = ago(27 * MIN);
     room.say(start, '给「页边」加一个“每周回顾”，最小能做成什么样？');
@@ -230,7 +245,7 @@ export async function seedShowcase({ native, base }: { native: PreviewNative; ba
         '文案我已经写进 `回顾提醒.md`，你改完告诉我一声。'].join('\n') }));
   }
 
-  // ── 缅因猫 · 卡片、清单和代码差异，都画在对话里 ────────────────────────────────
+  // ── 砚砚（缅因猫）· 卡片、清单和代码差异，都画在对话里 ────────────────────────────────
   {
     const room = chat('maine-coon'), start = clock(1, 21, 14);
     room.say(start, '上线前帮我看一眼这段：\n\n```js\n' + reviewed + '\n```');
@@ -253,7 +268,7 @@ export async function seedShowcase({ native, base }: { native: PreviewNative; ba
         { id: 'fixes-' + randomUUID().slice(0, 6), kind: 'checklist', v: 1, title: '合并前', items: [{ id: 'a', text: '一本书没有笔记时，不要生成空文件' }, { id: 'b', text: '文件名里的斜杠已转义', checked: true }] }] }));
   }
 
-  // ── 暹罗猫 · 选项直接点；交来的图片就在对话里 ──────────────────────────────────
+  // ── 烁烁（暹罗猫）· 选项直接点；交来的图片就在对话里 ──────────────────────────────────
   {
     const room = chat('siamese'), start = ago(2 * HOUR + 12 * MIN);
     room.say(start, '「页边」的首页想换个感觉，给我几个方向。');
@@ -274,7 +289,7 @@ export async function seedShowcase({ native, base }: { native: PreviewNative; ba
           { id: 'window', label: '窗边', emoji: '🪟', description: '大留白，一行字一束光' }, { id: 'own', label: '我自己说', customInput: true }], { messageTemplate: '我选{selection}' })] });
   }
 
-  // ── 梵花猫 · 发资料，收文件 ──────────────────────────────────────────────────
+  // ── 墨墨（梵花猫）· 发资料，收文件 ──────────────────────────────────────────────────
   {
     const room = chat('turkish-van'), start = ago(4 * HOUR + 5 * MIN);
     const sent = (await call('POST', `/bots/${enc(van.name)}/files?name=${enc('周会记录.txt')}&expectedThreadId=${enc(room.threadId)}`, undefined, text(minutes))).file;
@@ -290,7 +305,7 @@ export async function seedShowcase({ native, base }: { native: PreviewNative; ba
       files: [{ name: '一页纸.md', mime: 'text/markdown', bytes: text(`# 一页纸\n\n你说的是：${said.slice(0, 200)}\n\n## 三项决定\n\n1. 首页改为“纸页感”。\n2. 导出先做 Markdown。\n3. “每周回顾”下周开始做。\n\n（示例环境里的固定内容。）\n`) }] }));
   }
 
-  // ── 小鲸鱼 · 说一句就设提醒；到点它在这里叫你 ──────────────────────────────────
+  // ── 鲸鲸（小鲸鱼）· 说一句就设提醒；到点它在这里叫你 ──────────────────────────────────
   {
     const room = chat('dsh'), nine = clock(0, 9, 0), start = on(nine, -3, 21, 0);
     room.say(start, '以后每天早上 9 点，提醒我看一眼当天的日程。');
@@ -298,7 +313,7 @@ export async function seedShowcase({ native, base }: { native: PreviewNative; ba
     const daily = room.answer(room.ask(whale, start + 40_000, schedule('看当天的日程', '0 9 * * *', '看一眼当天的日程')), true, start + 2 * MIN)!;
     const fired = [on(nine, -1, 9, 0), nine].map((at, index) => {
       const due = room.engine(at, 'connector', '[定时任务] 看一眼当天的日程', { connector: 'scheduler', label: '定时任务' });
-      return room.reply(whale, at + 25_000, index ? '早。今天只有一件：14:00 读书会选书。上午是空的。' : '早。今天有两件事：10:30 周会；15:00 和暹罗猫对首页的配色。', { to: due.id });
+      return room.reply(whale, at + 25_000, index ? '早。今天只有一件：14:00 读书会选书。上午是空的。' : '早。今天有两件事：10:30 周会；15:00 和烁烁对首页的配色。', { to: due.id });
     });
     Object.assign(daily, { runStats: { total: 2, delivered: 2, failed: 0, skipped: 0 },
       runs: [nine, on(nine, -1, 9, 0)].map(at => ({ outcome: 'RUN_DELIVERED', scheduled_at: new Date(at).toISOString(), fired_at: new Date(at).toISOString(), started_at: new Date(at).toISOString(), error_summary: null })) });
@@ -312,7 +327,7 @@ export async function seedShowcase({ native, base }: { native: PreviewNative; ba
       proposal: schedule(said.replace(/\s+/g, ' ').slice(0, 16), '0 22 * * *', said.replace(/\s+/g, ' ').slice(0, 60)) }));
   }
 
-  // ── 狸花猫 · 要记住的事先问你；记住了什么，资料页里看得到 ────────────────────────
+  // ── 小狸花（狸花猫）· 要记住的事先问你；记住了什么，资料页里看得到 ────────────────────────
   {
     const room = chat('dragon-li'), start = clock(2, 20, 30), later = clock(1, 22, 5);
     const first = room.say(start, '以后回答我，先说结论，再给依据。');
@@ -330,7 +345,7 @@ export async function seedShowcase({ native, base }: { native: PreviewNative; ba
       : { reply: '**结论：先小范围试，再决定要不要做大。**\n\n依据：\n\n1. 试一次的成本低，一周就能看到有没有人用；\n2. 做大之后再改方向，代价是现在的好几倍。\n\n出处：这是示例环境里的固定回答，没有引用外部资料。' });
   }
 
-  // ── 孟加拉猫 · 没做完的，如实说：没完成、被打断、暂时显示不了 ──────────────────────
+  // ── 斑斑（孟加拉猫）· 没做完的，如实说：没完成、被打断、暂时显示不了 ──────────────────────
   {
     const room = chat('bengal'), start = clock(2, 16, 40);
     room.say(start, '给「页边」画一张启动图，再录一段 10 秒的操作演示。');
@@ -349,7 +364,7 @@ export async function seedShowcase({ native, base }: { native: PreviewNative; ba
           bodyMarkdown: '猫在右下角，书页占满全屏，名字压在左上。', fields: [{ label: '尺寸', value: '1290 × 2796' }, { label: '格式', value: 'PNG' }] }] });
   }
 
-  // ── 金渐层 · 找得到：往上翻更早的消息、引用、搜索；还有一段之前的对话 ─────────────────
+  // ── 金哥（金渐层）· 找得到：往上翻更早的消息、引用、搜索；还有一段之前的对话 ─────────────────
   {
     // An earlier conversation, kept under 历史对话.
     const old = chat('golden-chinchilla'), before = clock(16, 20, 10);
