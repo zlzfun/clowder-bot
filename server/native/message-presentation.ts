@@ -121,26 +121,34 @@ function withoutLeadingSignature(text: string, catName?: string): string {
  * A reply that went on after the cat had signed carries that signature in the middle: the owner said
  * something more while the cat was writing, the engine let the same reply continue, and the words for the
  * second message follow the first part's closing signature ("…纸箱。\n\n[快手/haiku🐾]\n\n狗喜欢的…", seen on
- * the isolated runtime, 2026-11-12). A line that is nothing but the speaking cat's own paw signature is
- * hidden wherever it stands, outside code fences, and one of the blank lines around it goes with it. Another
- * cat's signature, or one inside a sentence, is text and stays.
+ * the isolated runtime, 2026-11-12). Such a signature is a paragraph of its own: a line at the left margin
+ * that is nothing but the speaking cat's own paw signature, with a blank line (or the start, or the end)
+ * on either side, outside code fences. Only that is hidden, with one of the blank lines around it.
+ * Anything else stays as written: another cat's signature, one inside a sentence, a quoted or indented
+ * one, one that continues a list item or stands directly above or below other text.
  */
 function withoutOwnSignatureLines(text: string, catName?: string): string {
   if (!catName || !text.includes('🐾]')) return text;
-  const kept: string[] = [];
-  let fence = '', closing = false;
-  for (const line of text.split(/\r?\n/)) {
-    const mark = /^[ \t>]*(?:(?:[-+*]|\d+[.)])[ \t]+)?(`{3,}|~{3,})(.*)$/.exec(line);
+  const lines = text.split(/\r?\n/), kept: string[] = [];
+  let fence = '', opening = false;
+  for (const [index, line] of lines.entries()) {
+    // The reply began with the signature: the blank line after it goes with it.
+    if (opening) { opening = false; if (line.trim() === '') continue; }
+    // A fence opens or closes with at most three spaces before it; more is code, and inside a fence only a bare marker closes it.
+    const mark = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
     if (mark) {
       const marker = mark[1]!;
       if (!fence) { if (marker[0] !== '`' || !mark[2]!.includes('`')) fence = marker; }
       else if (marker[0] === fence[0] && marker.length >= fence.length && !mark[2]!.trim()) fence = '';
     }
-    const own = !fence && !mark ? /^ {0,3}\[([^\[\]\r\n/]{1,80})(?:\/[^\[\]\r\n]{0,80})?\s?🐾\][ \t]*$/u.exec(line) : null;
-    if (own && own[1]!.trim() === catName) { closing = kept.length > 0 && kept.at(-1)!.trim() === ''; continue; }
-    // The signature stood between two blank lines: one of them is enough.
-    if (closing && line.trim() === '') { closing = false; continue; }
-    closing = false;
+    const own = !fence && !mark ? /^\[([^\[\]\r\n/]{1,80})(?:\/[^\[\]\r\n]{0,80})?\s?🐾\][ \t]*$/u.exec(line) : null;
+    const alone = (index === 0 || lines[index - 1]!.trim() === '') && (index === lines.length - 1 || lines[index + 1]!.trim() === '');
+    if (own && alone && own[1]!.trim() === catName) {
+      // It stood between two blank lines: one of them is enough.
+      if (!kept.length) opening = true;
+      else if (kept.at(-1)!.trim() === '' && index < lines.length - 1) kept.pop();
+      continue;
+    }
     kept.push(line);
   }
   return kept.join('\n').trimEnd();
