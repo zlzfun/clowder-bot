@@ -269,6 +269,9 @@ test('a refused group change: a 409 is the server\'s own sentence (nothing is st
   assert.equal(R.groupError(fail(503), 'delete').text, '没能确认群聊删掉没有。刷新列表看看。');
   assert.equal(R.groupError(fail(400, '名字包含不支持的字符'), 'rename').text, '名字包含不支持的字符');
   assert.equal(R.groupError(fail(400, 'Bad thread id'), 'delete').text, '没能删掉群聊，请稍后再试。');
+  // Agent alone hides nothing since 2026-11-12 (docs/xbot-frontend.md item 42); the engine's words still do.
+  assert.equal(R.groupError(fail(400, '这只猫猫的 Agent 还没有登录'), 'members').text, '这只猫猫的 Agent 还没有登录');
+  for (const said of ['这个 Bot 不在群里', '原生会话已变化', '这个 thread 已删除', '模型不可用']) assert.equal(R.groupError(fail(400, said), 'members').text, '没能改好，请稍后再试。', said);
 });
 
 test('how to talk in a group is the engine\'s routing in one line: 全体 means @ each member, never the engine\'s own @全体', () => {

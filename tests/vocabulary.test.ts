@@ -3,11 +3,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 // One everyday vocabulary across what the owner reads in the main app
-// (docs/xbot-frontend.md item 34): 猫猫, 群聊, 分组 for sidebar folders, 对话.
-// The engine's words (Bot, Agent, 会话, Thread, 原生, 调用, XBot, 群组…) stay
-// out of everything shown or read aloud; technical nouns (模型, 推理强度,
-// Clowder AI) appear only in the technical places listed below. The runtime
-// panel (runtime.html) keeps its own language and is not scanned.
+// (docs/xbot-frontend.md item 34): 猫猫, 群聊, 分组 for sidebar folders, 对话,
+// and, since 2026-11-12 (item 42), Agent for the programs on this computer a
+// cat thinks with (Claude Code, Codex…; 设置 → Agents). The engine's words
+// (Bot, 会话, Thread, 原生, 调用, XBot, 群组…) stay out of everything shown or
+// read aloud; technical nouns (模型, 推理强度, Clowder AI) appear only in the
+// technical places listed below. The runtime panel (runtime.html) keeps its
+// own language and is not scanned.
 //
 // What counts as displayed, and how identifiers are left alone:
 // - index.html: text between tags and the attributes that are shown or read
@@ -22,15 +24,17 @@ import { readFileSync } from 'node:fs';
 //   into one ("会" + "话" is 会话). Only literals that read as words are
 //   checked: any literal with a Han character (everything this app says is
 //   Chinese), and an ASCII literal holding a capitalised retired word standing
-//   alone (「Bot」, 「Agent ID」) or Clowder AI. Identifiers, API paths, storage
+//   alone (「Bot」, 「Bot ID」) or Clowder AI. Identifiers, API paths, storage
 //   keys, CSS classes and event names are ASCII in lower or camel case ("bot",
 //   "/xbot-api/bots/", "xbot-theme", "data-bot"), so they never match; the
 //   product's own name, clowder-bot, is removed first.
 const read = (path: string) => readFileSync(new URL('../' + path, import.meta.url), 'utf8');
 
-// Words never shown anywhere in the main app.
+// Words never shown anywhere in the main app. Agent is not one of them since
+// 2026-11-12 (the owner: Claude Code, Codex and the like are better called
+// Agents than 工具, which reads like Grok Bot's 插件 and 应用).
 const NEVER: Array<[string, RegExp]> = [
-  ['Bot', /(?<![\w-])bots?\b/i], ['XBot', /xbot/i], ['Agent', /(?<![\w-])agents?\b/i],
+  ['Bot', /(?<![\w-])bots?\b/i], ['XBot', /xbot/i],
   ['Thread', /(?<![\w-])threads?\b/i], ['session', /(?<![\w-])sessions?\b/i],
   ['会话', /会话/], ['线程', /线程/], ['原生', /原生/], ['调用', /调用/], ['群组', /群组/],
 ];
@@ -39,8 +43,8 @@ const TECHNICAL: Array<[string, RegExp]> = [['模型', /模型/], ['推理强度
 
 // The technical places, kept short and tied to what they are, not to markers
 // that could be moved:
-// - whole modules whose every surface is technical: 设置 → 本机工具 and the
-//   更换工具 dialog reached from 资料 › 高级 (agents.js); 设置 → 模板 and the
+// - whole modules whose every surface is technical: 设置 → Agents and the
+//   更换 Agent dialog reached from 资料 › 高级 (agents.js); 设置 → 模板 and the
 //   template creator behind 新建猫猫 › 更多设置 (cat-templates.js and its rules);
 // - named functions of app.js: 资料 › 高级's 它用什么思考 and 模型与画像;
 // - one DOM container of index.html: 设置 → 关于 (div.setpane[data-spane="about"]).
@@ -191,7 +195,7 @@ const scriptsOf = (page: string) => [...page.matchAll(/<script\b[^>]*>/gi)]
   .map((m) => attributes(m[0]).find((a) => a.name === 'src')?.value ?? null)
   .filter((src): src is string => !!src).map((src) => src.replace(/^\//, ''));
 
-const reads = (s: string) => /\p{Script=Han}/u.test(s) || /clowder ai/i.test(s) || /(^|[\s(])(Bots?|Agents?|Threads?|Sessions?|XBot)(?=$|[\s:·,.)])/.test(s);
+const reads = (s: string) => /\p{Script=Han}/u.test(s) || /clowder ai/i.test(s) || /(^|[\s(])(Bots?|Threads?|Sessions?|XBot)(?=$|[\s:·,.)])/.test(s);
 
 function offenders(file: string, words: Literal[], technical: (line: number) => boolean) {
   const found: string[] = [];
@@ -250,9 +254,9 @@ test('the scanner decodes, folds and parses what a display string can hide behin
     'const d = /会话/.test(x) ? 1 : 2;',
     'const e = x / 2 / y;',
     '/* 原生 */ const f = "data-bot";',
-    'const g = `${`内层 Agent`}`;',
-    'const h = "Agent ID";',
-  ].join('\n')), [[2, '团子的 Bot'], [3, '会话'], [4, '你好 '], [4, ' 原生'], [8, '内层 Agent'], [9, 'Agent ID']]);
+    'const g = `${`内层 Bot`}`;',
+    'const h = "Bot ID";',
+  ].join('\n')), [[2, '团子的 Bot'], [3, '会话'], [4, '你好 '], [4, ' 原生'], [8, '内层 Bot'], [9, 'Bot ID']]);
   // Each way of hiding a word is still caught.
   const caught = (src: string) => offenders('x.js', literals(src), () => false);
   assert.ok(caught('const a = "会" + "话";').some(f => /会话/.test(f)), 'a constant concatenation');
@@ -272,6 +276,22 @@ test('the scanner decodes, folds and parses what a display string can hide behin
   const withDefer = '<script src="/a.js"></script>\n<script defer src="/new-feature.js"></script>\n<script>var t = 1;</script>';
   assert.deepEqual(scriptsOf(withDefer), ['a.js', 'new-feature.js']);
   assert.deepEqual(scan(withDefer, (f) => (f === 'new-feature.js' ? 'el.textContent = "原生会话";' : ''), []).length, 2);
+});
+
+test('Agent may be shown since 2026-11-12; every other retired word is still caught', () => {
+  // The owner's decision (docs/xbot-frontend.md item 42): the programs on this
+  // computer a cat thinks with are called Agents. Only Agent left the list.
+  assert.deepEqual(NEVER.map(([word]) => word), ['Bot', 'XBot', 'Thread', 'session', '会话', '线程', '原生', '调用', '群组']);
+  assert.deepEqual(TECHNICAL.map(([word]) => word), ['模型', '推理强度', 'Clowder AI']);
+  const caught = (src: string) => offenders('x.js', literals(src), () => false);
+  assert.deepEqual(caught('const a = "Agents";\nconst b = "Agent ID";\nconst c = "搜索 Agent";\nconst d = `思考用的 Agent：${x}`;'), [], 'Agent, alone or in a sentence');
+  assert.deepEqual(offenders('p.html', htmlWords('<span>Agents</span><b title="没有检测到 Agent">x</b>'), () => false), []);
+  for (const word of ['Bot', 'XBot', 'Thread', 'session', '会话', '线程', '原生', '调用', '群组']) {
+    assert.equal(caught(`const a = "这个 ${word} 用不了";`).length, 1, word + ' in a sentence');
+  }
+  assert.equal(caught('const a = "Bot ID";').length, 1, 'a capitalised retired word standing alone');
+  // The page says it: 设置 → Agents.
+  assert.match(html, /<button type="button" data-set="agents">[^\n]*<span>Agents<\/span><\/button>/);
 });
 
 test('a technical place cannot grow: a technical noun just outside the named functions or container is reported', () => {

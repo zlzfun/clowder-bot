@@ -3107,6 +3107,7 @@
 
   // read: the transcript read these rows came from (loadThread's state.chatRead).
   function renderMessages(messages, who, read) {
+    stopSkeleton(); // the history is here: no loading skeleton after it
     const inner = el("div", "thread-inner");
     inner.dataset.chat = chatKey(state.sel);
     const prevTop = thread.scrollTop;
@@ -3247,8 +3248,6 @@
     // Rows that are all hidden (internal notes, background turns, a bare
     // SILENT) are still a conversation with a record: no greeting line,
     // unless the invitation is unconfirmed (placeGreeting).
-    // A chat its cat was invited to open keeps reading from the top.
-    if (greetingAccepted(read)) inner.classList.add("greeted");
     const keep = sendFeedback(inner, messages);
     if (read) placeGreeting(inner, read);
     addTimeDividers(inner);
@@ -3265,11 +3264,6 @@
     updateWorkTimes();
     live.rendered(shown);
     experience.rendered();
-  }
-
-  // The transcript itself says this chat was opened by a greeting invitation.
-  function greetingAccepted(read) {
-    return !!(read && read.greeting && read.greeting.status === "accepted");
   }
 
   // The reason a greeting request failed, in the existing API error words.
@@ -3295,9 +3289,7 @@
     const name = read.selection.id;
     const view = greetings.view(name, read);
     const rows = read.messages.length > 0;
-    const invited = greetingAccepted(read) || !!view && (view.state === "sending" || view.state === "invited");
     const shown = !!view && (rows || !state.pendingSends.length && !state.replyErrors.length);
-    if (!rows) inner.classList.toggle("greeted", invited || shown);
     if (!shown) return;
     const line = presentation.greetingLine(view, {
       name: niceName(name),
@@ -3311,7 +3303,6 @@
       },
     });
     if (!line) return;
-    if (invited) line.dataset.invited = "true";
     inner.prepend(line);
   }
 
@@ -3326,13 +3317,9 @@
     state.sig = transcriptSig(read);
   }
 
-  // The owner's send (or a live reply) takes the greeting line's place; a chat
-  // its cat was invited into keeps reading from the top.
+  // The owner's send (or a live reply) takes the greeting line's place.
   function dropGreeting(inner) {
-    const line = inner.querySelector(":scope > .chat-greeting");
-    if (!line) return;
-    line.remove();
-    if (!line.dataset.invited) inner.classList.remove("greeted");
+    inner.querySelector(":scope > .chat-greeting")?.remove();
   }
 
   // A redraw keeps the row the owner is reading where it was, even when an
@@ -3364,6 +3351,7 @@
 
   // group: the record GET /xbot-api/groups/:id returned with these messages.
   function renderGroup(messages, group) {
+    stopSkeleton();
     const inner = el("div", "thread-inner grpchat");
     inner.dataset.chat = chatKey(state.sel);
     const prevTop = thread.scrollTop;
@@ -4423,6 +4411,7 @@
   async function openPeer(a, b, at) {
     if (!a || !b || a === b || state.streaming) return;
     clearQuote();
+    stopSkeleton(); // the exchange takes the view, not the chat's loading skeleton
     state.peer = { a: a, b: b, at: at || "", remote: !!splitPeer(b).device, list: [], more: false, cursor: null, mock: false };
     paintPeerHeader(a, b);
     await loadPeer(null);
@@ -4491,15 +4480,34 @@
     ++state.threadLoad;
     ++state.panelLoad;
     thread.replaceChildren();
-    const skeleton = el("div", "thread-inner thread-skeleton");
-    skeleton.setAttribute("aria-label", "正在加载对话");
-    for (let i = 0; i < 3; i++) skeleton.append(el("div", "skeleton-bubble"));
-    thread.append(skeleton);
+    skeletonLater(state.sel);
     panelBody.replaceChildren(el("div", "muted", "正在加载"));
     closePanelMenu();
   }
 
+  // A read that is really slow shows the loading skeleton; at the usual speed
+  // the history takes the empty view directly. It is drawn only into the same
+  // conversation's still-empty view: anything else on screen (its history, a
+  // send, 连不上, an exchange between two cats) has replaced the wait.
+  let skeletonTimer = 0;
+  function stopSkeleton() {
+    clearTimeout(skeletonTimer);
+    skeletonTimer = 0;
+  }
+  function skeletonLater(selection) {
+    stopSkeleton();
+    skeletonTimer = setTimeout(() => {
+      skeletonTimer = 0;
+      if (state.sel !== selection || state.peer || thread.firstElementChild) return;
+      const skeleton = el("div", "thread-inner thread-skeleton");
+      skeleton.setAttribute("aria-label", "正在加载对话");
+      for (let i = 0; i < 3; i++) skeleton.append(el("div", "skeleton-bubble"));
+      thread.append(skeleton);
+    }, 400);
+  }
+
   function threadUnavailable() {
+    stopSkeleton();
     state.sig = "";
     const box = el("div", "thread-unavailable");
     box.setAttribute("role", "status");
@@ -5328,7 +5336,7 @@
       return list;
     };
     const sec = el("div", "psec cat-config");
-    sec.append(el("h4", "", "模型与画像"), facts(templates.describe(config, ctx).filter(([label]) => label !== "工具")));
+    sec.append(el("h4", "", "模型与画像"), facts(templates.describe(config, ctx).filter(([label]) => label !== "Agent")));
     const portrait = config.portrait || {};
     const more = [["性格", portrait.personality], ["擅长", portrait.teamStrengths], ["提醒", portrait.caution]]
       .filter(([, value]) => typeof value === "string" && value.trim())

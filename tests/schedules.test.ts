@@ -459,10 +459,10 @@ test('a form keeps the input on errors, blocks duplicate saves, reuses its key o
   type(control(form, '间隔（分钟）'), '30');
   assert.equal(described().length, 1, 'a fixed field keeps only its note');
 
-  replies.push(() => { throw fail(422, '请先给这只猫猫选一个能用的本机工具'); });
+  replies.push(() => { throw fail(422, '请先给这只猫猫选一个能用的本机 Agent'); });
   ok.click();
   await settle();
-  assert.equal(one(form, 'error').textContent, '没能创建：请先给这只猫猫选一个能用的本机工具。');
+  assert.equal(one(form, 'error').textContent, '没能创建：请先给这只猫猫选一个能用的本机 Agent。');
   assert.equal(control(form, '名称').value, '晨会', 'input survives a refusal');
   assert.equal(formOf(t.section), form);
   const firstKey = t.calls.filter(c => c.method === 'POST')[0].body.idempotencyKey;

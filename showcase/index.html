@@ -51,7 +51,7 @@
       <p class="t-eyebrow">clowder-bot 能做什么</p>
       <h1 id="hero-h"><span class="t-nowrap">挑一只猫，</span><span class="t-nowrap">说句话，</span><span class="t-nowrap">收结果。</span></h1>
       <p class="t-lead">clowder-bot 是在你自己电脑上运行的聊天软件。联系人是猫猫，可以单聊，也可以拉几只进一个群；回复由这台电脑上的 Claude Code、Codex 或其它模型写出，每只猫用哪一个，跟它的性格一样，是它自己带着的。</p>
-      <p class="t-honest"><span class="t-honest-k">关于示例</span>示例联系人里的对话是事先写好的，由一个脚本代替引擎回放；界面和适配层都是真的。装好的 clowder-bot 里，回复来自每只猫自己用的那个工具。示例假定这台电脑装着这个应用能接的三种工具（Claude Code、Codex、Kimi）；另外五只猫是照引擎里已有的猫摆进列表的，只为列表完整，不表示它们的工具在这里跑过。</p>
+      <p class="t-honest"><span class="t-honest-k">关于示例</span>示例联系人里的对话是事先写好的，由一个脚本代替引擎回放；界面和适配层都是真的。装好的 clowder-bot 里，回复来自每只猫自己用的那个 Agent。示例假定这台电脑装着这个应用能接的三种 Agent（Claude Code、Codex、Kimi）；另外五只猫是照引擎里已有的猫摆进列表的，只为列表完整，不表示它们的 Agent 在这里跑过。</p>
       <p class="t-off" id="off">示例对话现在没在运行，下面的图照样能看。想点进对话里试：在项目目录运行 <code>npm run showcase</code>，打开它给出的 <code>/tour/</code> 地址。</p>
     </div>
 
@@ -82,14 +82,14 @@
     <div class="t-copy">
       <p class="t-host"><span class="t-host-k">第一次打开</span></p>
       <h2 id="a-start-h">打开就能聊</h2>
-      <p>第一次打开，它请你领一只猫猫回家：挑一张脸，起个名字。每张脸是一只有自己性格的猫，选中时下面几行字说它的特点，和它用这台电脑上的哪个工具思考：宪宪用 Claude Code，砚砚用 Codex，墨墨用 Kimi，别的猫用其它模型。这是猫自己带着的，不用另外选。</p>
-      <p>它要用的工具不在这台电脑上，或者这个应用还接不上，这只猫就按原样领不了，界面会直说为什么；点「自定义」可以只借它的长相，用这台电脑上的工具来思考。选几只猫猫就是一个群聊，群名可以不填。</p>
+      <p>第一次打开，它请你领一只猫猫回家：挑一张脸，起个名字。每张脸是一只有自己性格的猫，选中时下面几行字说它的特点，和它用这台电脑上的哪个 Agent 思考：宪宪用 Claude Code，砚砚用 Codex，墨墨用 Kimi，别的猫用其它模型。这是猫自己带着的，不用另外选。</p>
+      <p>它要用的 Agent 不在这台电脑上，或者这个应用还接不上，这只猫就按原样领不了，界面会直说为什么；点「自定义」可以只借它的长相，用这台电脑上的 Agent 来思考。选几只猫猫就是一个群聊，群名可以不填。</p>
       <p class="t-try"><span class="t-try-k">怎么试</span>左上角「新建」→ 新建猫猫，或新建群聊</p>
       <div class="t-actions" hidden><a class="t-btn" href="/" data-app>打开 clowder-bot</a></div>
     </div>
     <figure class="t-fig t-pair t-pair-wide">
-      <picture class="t-main t-float" style="--t-r: 20px"><source srcset="shots/new-cat-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/new-cat-light.png" width="480" height="408" decoding="async" alt="「新建猫猫」弹层：一排八张猫脸，选中的梵花猫下面写着它的性格、擅长，和「它用这台电脑上的 Kimi 来思考」；另外几张退得更远、颜色更淡，它们的工具这里用不了。下面是「自定义」、名字「年糕」和「创建」按钮。"></picture>
-      <picture class="t-inset t-float" style="--t-r: 14px"><source srcset="shots/new-cat-away-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/new-cat-away-light.png" width="472" height="211" decoding="async" alt="选中暹罗猫时：它坐在一圈虚线上，下面写着「它要用 AGY Native 来思考。这个应用还接不上 AGY Native，所以它现在按原样领不了。」；旁边的「自定义」写着「只借它的长相，用这台电脑上的工具来思考」。"></picture>
+      <picture class="t-main t-float" style="--t-r: 20px"><source srcset="shots/new-cat-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/new-cat-light.png" width="480" height="408" decoding="async" alt="「新建猫猫」弹层：一排八张猫脸，选中的梵花猫下面写着它的性格、擅长，和「它用这台电脑上的 Kimi 来思考」；另外几张退得更远、颜色更淡，它们的 Agent 这里用不了。下面是「自定义」、名字「年糕」和「创建」按钮。"></picture>
+      <picture class="t-inset t-float" style="--t-r: 14px"><source srcset="shots/new-cat-away-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/new-cat-away-light.png" width="472" height="211" decoding="async" alt="选中暹罗猫时：它坐在一圈虚线上，下面写着「它要用 AGY Native 来思考。这个应用还接不上 AGY Native，所以它现在按原样领不了。」；旁边的「自定义」写着「只借它的长相，用这台电脑上的 Agent 来思考」。"></picture>
     </figure>
   </section>
 
@@ -239,7 +239,7 @@
       </article>
       <article class="t-tile" aria-labelledby="t-profile-h">
         <h3 id="t-profile-h">资料页</h3>
-        <p>点顶栏的名字：资料、文件、记忆、定时。用哪个工具、哪个模型，收在「高级」里，平时用不到。</p>
+        <p>点顶栏的名字：资料、文件、记忆、定时。用哪个 Agent、哪个模型，收在「高级」里，平时用不到。</p>
         <picture class="t-tile-pic t-float"><source srcset="shots/profile-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/profile-light.png" width="384" height="540" decoding="async" alt="宪宪的资料页：职责，开着的「置顶」，新对话和历史对话，收起的「高级」，最下面是「删除猫猫」。"></picture>
       </article>
       <article class="t-tile t-tile-wide" aria-labelledby="t-notify-h">
@@ -255,7 +255,7 @@
   <section class="t-under t-wrap t-reveal" id="a-under" aria-labelledby="a-under-h">
     <h2 id="a-under-h">底下是什么</h2>
     <p>引擎是 Clowder AI：规划、工具、记忆、定时和存储都由它负责。clowder-bot 是它上面的聊天界面和一层适配，不另做一套。回复由这台电脑上的 Claude Code、Codex 或其它模型写出，每只猫用它自己的那个。</p>
-    <ol class="t-stack" aria-label="从你到写回复的工具，一层一层">
+    <ol class="t-stack" aria-label="从你到写回复的 Agent，一层一层">
       <li class="t-layer"><span class="t-layer-name">你</span><span class="t-layer-what">挑猫、说话、收结果</span></li>
       <li class="t-layer t-layer-us"><span class="t-layer-name">clowder-bot</span><span class="t-layer-what">聊天界面 · 适配层</span></li>
       <li class="t-layer"><span class="t-layer-name">Clowder AI</span><span class="t-layer-what">规划 · 工具 · 记忆 · 定时 · 存储</span></li>

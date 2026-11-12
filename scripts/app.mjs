@@ -148,6 +148,6 @@ if (plan.steps.includes('bot')) await service('· 启动应用…', join(logs, '
 if (!stopping) {
   const start = await json(`${url}/xbot-api/start`);
   say(`\n✓ 好了：${url}    按 Ctrl+C 停止`);
-  if (start && !start.ready) say(start.blocked === 'login_required' ? '  提示：本机的 AI 工具还没有登录，页面里会告诉你怎么登录。' : '  提示：还没有检测到可用的本机 AI 工具（Claude Code 或 Codex），页面里会告诉你怎么装。');
+  if (start && !start.ready) say(start.blocked === 'login_required' ? '  提示：本机的 Agent 还没有登录，页面里会告诉你怎么登录。' : '  提示：还没有检测到可用的本机 Agent（Claude Code 或 Codex），页面里会告诉你怎么装。');
   open();
 }

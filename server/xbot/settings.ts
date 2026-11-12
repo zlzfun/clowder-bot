@@ -30,7 +30,7 @@ export function createXbotSettingsRouter(bridge: BotBridge) {
     const { runtimeId } = z.object({ runtimeId: z.string().min(1).max(100) }).strict().parse(req.body);
     res.json(await bindAgent(bridge, await bridge.cat(req.params.name), runtimeId));
   });
-  const retired = () => { throw new ApiError(410, '模型商店已退出。请在「本机工具」里选择。'); };
+  const retired = () => { throw new ApiError(410, '模型商店已退出。请在「Agents」里选择。'); };
   for (const path of ['/models', '/providers', '/providers/{*path}', '/setup/key', '/bots/:name/binding']) router.all(path, retired);
   router.get('/persona-cards', async (req, res) => {
     const q = String(req.query.q ?? '').toLowerCase();
@@ -60,7 +60,7 @@ export function createXbotSettingsRouter(bridge: BotBridge) {
   router.get('/push', (_req, res) => res.json({ public_key: '', subscribed: false, supported: false }));
   router.get('/update', (_req, res) => res.json({ state: 'disabled', current: '0.2.0', latest: '', supported: false, reason: '上游版本按 upstream.lock.json 显式升级' }));
   for (const path of ['/web-search', '/image-gen', '/apps', '/skills']) {
-    router.get(path, (_req, res) => res.json({ enabled: false, mode: 'native', apps: [], skills: [], connected: 0, supported: false, reason: '由 Clowder AI 和本机工具管理。' }));
+    router.get(path, (_req, res) => res.json({ enabled: false, mode: 'native', apps: [], skills: [], connected: 0, supported: false, reason: '由 Clowder AI 和本机 Agent 管理。' }));
     router.all(path, () => unsupported('请在 Clowder AI 的配置里设置'));
     router.all(`${path}/{*tail}`, () => unsupported('请在 Clowder AI 的配置里设置'));
   }

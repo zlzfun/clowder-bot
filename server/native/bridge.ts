@@ -362,7 +362,7 @@ export class BotBridge {
     const runtimes = await this.runtimes();
     const installed = runtimes.filter(r => r.installed && supportsRuntime(r) && !runtimeUnavailable(r));
     const runtime = input.runtimeId ? runtimes.find(r => r.id === input.runtimeId) : source ? installed.find(r => r.clientId === source.clientId) : defaultRuntime(runtimes);
-    if (!runtime) throw new ApiError(422, '请先装好并登录一个本机工具（Claude Code 或 Codex），再来选择。');
+    if (!runtime) throw new ApiError(422, '请先装好并登录一个本机 Agent（Claude Code 或 Codex），再来选择。');
     const unavailable = runtimeUnavailable(runtime);
     if (unavailable) throw new ApiError(422, unavailable);
     const catId = `bot-${randomUUID().slice(0, 12)}`;
@@ -491,13 +491,13 @@ export class BotBridge {
   /** What a creation request comes to right now: which cat, which tool, which words. Refuses, before native is asked, what cannot be made. */
   private async resolveSimple(name: string, simple: NonNullable<CreateBot['simple']>, catId: string, custom: boolean, about: string | undefined, temper: string | undefined, input: string) {
     const runtimes = await this.runtimes(true);
-    const usual = defaultRuntime(runtimes), none = '这台电脑上还没有可以用的助手程序，装好并登录 Claude Code 或 Codex 后再试。';
+    const usual = defaultRuntime(runtimes), none = '这台电脑上还没有可以用的 Agent，装好并登录 Claude Code 或 Codex 后再试。';
     let runtime: NativeRuntime | undefined;
     if (custom) {
       // A custom cat only borrows the looks: it thinks with the tool the owner picked, or the usual one.
       runtime = simple.agent ? runtimes.find(r => r.id === simple.agent) : usual;
-      if (!runtime) throw new ApiError(422, simple.agent ? '找不到选的这个助手程序，请重新选择。' : none);
-      // Said with the tool's name: the first screen has no "Agent" vocabulary.
+      if (!runtime) throw new ApiError(422, simple.agent ? '找不到选的这个 Agent，请重新选择。' : none);
+      // Said with the Agent's own name.
       if (runtimeUnavailable(runtime)) throw new ApiError(422, runtime.readiness?.status === 'login_required'
         ? `${runtime.label} 还没有登录，登录后再试。` : `这台电脑上的 ${runtime.label} 现在用不了，换一个或稍后再试。`);
     } else {
@@ -506,7 +506,7 @@ export class BotBridge {
       // that was asked for, or of the one this computer would use anyway.
       const asked = simple.agent ? runtimes.find(r => r.id === simple.agent) : usual;
       const picked: Face | undefined = simple.face as Face | undefined ?? (asked && faceOfTool(asked));
-      if (!picked) throw new ApiError(422, simple.agent ? '找不到选的这个助手程序，请重新选择。' : none);
+      if (!picked) throw new ApiError(422, simple.agent ? '找不到选的这个 Agent，请重新选择。' : none);
       const tool = faceTool(picked, runtimes);
       // 自定义 is only a way forward when some tool here can be used.
       if (!tool.runtime) throw new ApiError(422, tool.state === 'login' ? `${tool.reason}，登录后再试。`

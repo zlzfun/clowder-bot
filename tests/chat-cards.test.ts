@@ -526,10 +526,12 @@ test('a request card is drawn at its message, answered in place, and settles onl
   assert.match(card.textContent, /团子想记住你的一个偏好回答简短一点，先说结论记住我喜欢简短/);
   // The same history again: the very same elements, nothing rises in again.
   const before = p.rows().slice();
+  // The first drawing's rows are already still (not news); the redraw marks none of them again.
+  const still = before.map(r => r.classList.contains('lv-still'));
   p.draw(history);
   assert.deepEqual(p.rows(), before, 'every row kept');
   assert.equal(p.row('m-card').querySelector('.approval'), card, 'the card itself kept');
-  assert.ok(p.rows().every(r => !r.classList.contains('lv-still')), 'nothing redrawn');
+  assert.deepEqual(p.rows().map(r => r.classList.contains('lv-still')), still, 'nothing redrawn');
   // 记住: sent, in flight, then what the server said.
   button(card, '记住').focus();
   button(card, '记住').click();

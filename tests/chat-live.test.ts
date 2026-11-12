@@ -510,6 +510,28 @@ test('a redraw keeps the element of every row that did not change: only new rows
   assert.notEqual(p.onScreen(), before);
 });
 
+test('a conversation opens with its history already there: no row of its first drawing rises in, a redraw still keeps those rows, and only rows that arrive later rise and count as new (single chats and groups)', () => {
+  for (const key of ['bot:Ada', 'group:g']) {
+    const p = page();
+    p.live.select(key);
+    const divider = p.h('div', 'tdiv');
+    divider.textContent = '今天 09:00';
+    const a = p.msg('a', '早', 'msg user'), b = p.msg('b', '早呀');
+    const opened = p.live.commit(p.inner(key, divider, a, b), []);
+    assert.deepEqual(plain(opened), { added: 0, first: true }, key);
+    assert.ok(a.classList.contains('lv-still') && b.classList.contains('lv-still'), key + ': the history is there at once, nothing rises in');
+    assert.ok(!divider.classList.contains('lv-still'), key + ': only message rows are marked');
+    p.live.rendered(opened);
+    // The next read draws the same rows and one more: the old rows keep their element, the new one rises.
+    const next = p.live.commit(p.inner(key, (() => { const d = p.h('div', 'tdiv'); d.textContent = '今天 09:00'; return d; })(), p.msg('a', '早', 'msg user'), p.msg('b', '早呀'), p.msg('c', '新的')), []);
+    const rows = p.onScreen().children;
+    assert.deepEqual(rows.slice(0, 3), [divider, a, b], key + ': the first drawing\'s rows still match the next drawing');
+    assert.equal(text(rows[3]), '新的');
+    assert.ok(!rows[3].classList.contains('lv-still'), key + ': a row that arrives later still rises in');
+    assert.deepEqual(plain(next), { added: 1, first: false }, key + ': and counts as new (回到最新)');
+  }
+});
+
 // ---------------------------------------------------------------- live rows
 test('a send shows the cat\'s typing bubble at once; the reply\'s start takes that same bubble, steps read as a quiet line, words appear with a caret, and the finished transcript row takes its place without rising', () => {
   const p = page();
@@ -955,6 +977,85 @@ test('the shell hands chat-live.js the raw native draft of in-progress replies a
   const groupRecord = (text: string) => out.sigRows([{ id: 'y', kind: 'bot', presentation_kind: 'activity', in_progress: true, text }]);
   assert.notEqual(JSON.stringify(groupRecord('a')), JSON.stringify(groupRecord('ab')));
   assert.doesNotMatch(read('client/public/app.js'), /function endedNote\(/, 'the ending is drawn in one place (chat-cards.js)');
+});
+
+test('switching chats shows no loading skeleton at the usual speed: only a read still out after 400 ms draws it, and only into the same chat\'s still-empty view', () => {
+  let now = 0, seq = 0;
+  const timers = new Map<number, { fn: () => void; at: number }>();
+  const advance = (ms: number) => {
+    const end = now + ms;
+    for (;;) {
+      const next = [...timers].filter(([, t]) => t.at <= end).sort((x, y) => x[1].at - y[1].at)[0];
+      if (!next) break;
+      timers.delete(next[0]);
+      now = next[1].at;
+      next[1].fn();
+    }
+    now = end;
+  };
+  const node = (tag: string, cls = '') => ({ tag, cls, attrs: {} as Record<string, string>, kids: [] as Any[],
+    setAttribute(k: string, v: string) { this.attrs[k] = v; }, append(...n: Any[]) { this.kids.push(...n); } });
+  const thread: Any = node('div', 'thread');
+  Object.defineProperty(thread, 'firstElementChild', { get: () => thread.kids[0] || null });
+  const state: Any = { sel: { type: 'bot', id: '宪宪' }, peer: null };
+  const out: Any = {};
+  vm.runInNewContext('let skeletonTimer = 0;\n' + appParts(['stopSkeleton', 'skeletonLater']) + 'out.later = skeletonLater; out.stop = stopSkeleton;', {
+    out, state, thread, el: node,
+    setTimeout: (fn: () => void, ms: number) => { const id = ++seq; timers.set(id, { fn, at: now + ms }); return id; },
+    clearTimeout: (id: number) => { timers.delete(id); },
+  });
+  const skeleton = () => thread.kids.find((k: Any) => /\bthread-skeleton\b/.test(k.cls)) || null;
+  // A slow read: nothing for 400 ms, then the skeleton, named for what it is.
+  out.later(state.sel);
+  advance(399);
+  assert.equal(thread.kids.length, 0, 'the view waits empty');
+  advance(1);
+  assert.ok(skeleton(), 'a read still out after 400 ms shows the skeleton');
+  assert.equal(skeleton().attrs['aria-label'], '正在加载对话');
+  assert.equal(skeleton().kids.filter((k: Any) => k.cls === 'skeleton-bubble').length, 3);
+  // The usual speed: the history is drawn first, and the late timer never covers it.
+  thread.kids = [];
+  out.later(state.sel);
+  advance(150);
+  const history = node('div', 'thread-inner');
+  thread.kids = [history];
+  advance(1000);
+  assert.deepEqual(thread.kids, [history], 'drawn history is never covered by a late skeleton');
+  // Drawing (renderMessages, renderGroup), 连不上 and the exchange view stop it outright.
+  thread.kids = [];
+  out.later(state.sel);
+  advance(100);
+  out.stop();
+  assert.equal(timers.size, 0);
+  advance(1000);
+  assert.equal(thread.kids.length, 0);
+  // Another chat opened meanwhile: the old one's wait is gone, the new one has its own.
+  out.later(state.sel);
+  advance(300);
+  state.sel = { type: 'bot', id: '砚砚' };
+  out.later(state.sel);
+  assert.equal(timers.size, 1, 'one wait at a time');
+  advance(399);
+  assert.equal(thread.kids.length, 0, 'the first chat\'s 400 ms passed without a skeleton');
+  advance(1);
+  assert.ok(skeleton(), 'the open chat\'s own wait');
+  // A wait whose chat is no longer open, or under the exchange view, draws nothing.
+  thread.kids = [];
+  out.later(state.sel);
+  state.sel = { type: 'group', id: 'g1' };
+  advance(1000);
+  assert.equal(thread.kids.length, 0, 'not into another chat');
+  out.later(state.sel);
+  state.peer = { a: '宪宪', b: '砚砚' };
+  advance(1000);
+  assert.equal(thread.kids.length, 0, 'not into the exchange between two cats');
+  // The wiring: a switch empties the view and starts the wait; every path that fills the view ends it.
+  const app = read('client/public/app.js');
+  const body = (name: string) => appParts([name]);
+  assert.match(body('resetConversation'), /thread\.replaceChildren\(\);\n\s+skeletonLater\(state\.sel\);/);
+  assert.doesNotMatch(body('resetConversation'), /thread-skeleton/, 'no skeleton drawn at once');
+  for (const name of ['renderMessages', 'renderGroup', 'threadUnavailable']) assert.match(body(name), /\n {4}stopSkeleton\(\);/, name);
+  assert.match(/\n {2}async function openPeer\([^)]*\) \{[\s\S]*?\n {2}\}\n/.exec(app)![0], /stopSkeleton\(\);[\s\S]*state\.peer = \{/);
 });
 
 test('the page loads the live-reply scripts after chat-experience.js and before app.js, its styles last; the shell reads the transcript only for events that change the record and keeps no dead streaming paths', () => {

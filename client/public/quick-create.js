@@ -209,7 +209,7 @@
       if (list.length > 1) {
         const pick = node("span", "qc-pick");
         select = node("select", "");
-        select.setAttribute("aria-label", "用哪个工具思考");
+        select.setAttribute("aria-label", "用哪个 Agent 思考");
         for (const c of list) {
           const o = node("option", "", c.label + (c.confirmed ? "" : "（未确认登录）"));
           o.value = c.id;

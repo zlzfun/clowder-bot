@@ -36,10 +36,16 @@
   flex-direction: row; flex-wrap: wrap; gap: var(--x-s3);
   width: auto; margin: var(--x-s4) 0 0 32px; animation: rise 180ms ease-out;
 }
+/* Options to tap, not words of the cat: no fill like the bubble above them,
+   a hairline outline on the page instead; filled only under the pointer. */
 .ch-starters .starter {
   width: auto; padding: 7px 14px; border-radius: var(--x-r-pill);
   font-size: var(--x-fs-ui); line-height: 20px;
+  background: transparent; color: var(--x-text-2); box-shadow: inset 0 0 0 1px var(--x-fill-3);
+  transition: background 160ms ease-out, color 160ms ease-out;
 }
+.ch-starters .starter:hover { background: var(--hover); color: var(--x-text); }
+.ch-starters .starter:active { background: var(--selected); color: var(--x-text); }
 
 /* 开始新对话 */
 .ch-modal .modal-card { width: min(420px, 100%); }

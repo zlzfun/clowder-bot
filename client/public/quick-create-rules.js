@@ -4,7 +4,8 @@
 // and POST /xbot-api/groups {members, name?} (docs/xbot-api.md「开箱即用」).
 // The name rules mirror the server's own (server/xbot/core.ts `label` and
 // `groupTitle`, server/native/text.ts `clip`), so what the form accepts is
-// what the adapter accepts. Words shown here never name Agents or models;
+// what the adapter accepts. Words shown here never name models (an Agent is
+// named by its own name, or called an Agent since 2026-11-12);
 // what a face's cat is like is the engine's own template words, shown as
 // they are (they may say Review or provider: that is the template, not us).
 (function (root) {
@@ -13,9 +14,10 @@
   const trim = (value) => String(value == null ? "" : value).trim();
   const han = (text) => /\p{Script=Han}/u.test(String(text || ""));
   // A server sentence is shown only when it is everyday Chinese: some adapter
-  // messages name the Bot or the Agent, which this flow never does (the
-  // product name clowder-bot is fine).
-  const plain = (text) => han(text) && !/\bagent\b|(?<![\w-])bot\b|\bmodel\b|模型/i.test(String(text));
+  // messages name the Bot or the model, which this flow never does (the
+  // product name clowder-bot is fine). Agent is what these programs are
+  // called (since 2026-11-12), so it alone does not hide a sentence.
+  const plain = (text) => han(text) && !/(?<![\w-])bot\b|\bmodel\b|模型/i.test(String(text));
   // zod counts a string's length in characters (code points), not UTF-16 units.
   const length = (text) => [...text].length;
 
@@ -161,7 +163,7 @@
   // only its looks, with a tool that is here (named when there is one).
   function forward(s) {
     const list = choices(s);
-    return "只借它的长相，用这台电脑上的" + (list.length === 1 ? " " + list[0].label + " " : "工具") + "来思考";
+    return "只借它的长相，用这台电脑上的 " + (list.length === 1 ? list[0].label : "Agent") + " 来思考";
   }
   // Sentences said as one, a stop between them unless one is already there.
   const joinSaid = (parts) => parts.filter(Boolean).reduce((all, part) => (!all ? part : all + (/[。！？.!?…]$/u.test(all) ? "" : "。") + part), "");
@@ -371,7 +373,7 @@
     if (code === "face_changed") return { kind: "changed", text: FACE_CHANGED };
     if (code === "faces_unavailable") return { kind: "unavailable", text: "刚才没能读到猫猫的资料，这次没有建。" };
     const said = message.replace(/\s+/g, " ").trim(), sentence = plain(said) ? said + (/[。！？]$/u.test(said) ? "" : "。") : "";
-    if (code === "face_unavailable" || code === "face_tool") return { kind: "face", text: sentence || "刚才没能建好：" + (trim(tool) || "这个工具") + " 现在用不了。" };
+    if (code === "face_unavailable" || code === "face_tool") return { kind: "face", text: sentence || "刚才没能建好：" + (trim(tool) || "这个 Agent") + " 现在用不了。" };
     // The two 409s, told apart by code: the name is taken (said on the name),
     // or this key already stood for another request (the server's sentence,
     // not blamed on the name; the next attempt is a new request). A 409 with
@@ -379,7 +381,7 @@
     if (code === "name_taken") return { kind: "name", text: trim(name) ? "已经有一只叫「" + trim(name) + "」的猫猫了，换个名字吧" : "已经有一只叫这个名字的猫猫了，换个名字吧" };
     if (code === "request_changed") return { kind: "changedRequest", text: sentence || "这次创建和上一次的内容不一样，没有建，请重新创建。" };
     if (status === 409) return { kind: "form", text: sentence || "没能建好，请稍后再试。" };
-    if (status === 422) return { kind: "blocked", text: "刚才没能建好：" + (trim(tool) || "这个工具") + " 现在用不了。" };
+    if (status === 422) return { kind: "blocked", text: "刚才没能建好：" + (trim(tool) || "这个 Agent") + " 现在用不了。" };
     if (!status || status >= 500) return { kind: "unsure", text: "没能确认猫猫建好没有。不改内容再点一次就好，不会多出一只。" };
     return { kind: "form", text: plain(message) ? message : "没能建好，请检查名字后再试。" };
   }

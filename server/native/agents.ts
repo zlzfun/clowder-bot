@@ -11,10 +11,10 @@ export function supportsRuntime(runtime: NativeRuntime): boolean {
     && !runtime.acp && !runtime.agyCarrier;
 }
 export function runtimeUnavailable(runtime: NativeRuntime): string | null {
-  if (!runtime.installed) return '这台电脑上还没有装这个工具';
-  if (!supportsRuntime(runtime)) return '这个工具的接入方式还不支持';
-  if (runtime.readiness?.status === 'login_required') return '这个工具还没有登录，请先登录';
-  if (runtime.readiness?.status === 'not_installed') return '这台电脑上还没有装这个工具';
+  if (!runtime.installed) return '这台电脑上还没有装这个 Agent';
+  if (!supportsRuntime(runtime)) return '这个 Agent 的接入方式还不支持';
+  if (runtime.readiness?.status === 'login_required') return '这个 Agent 还没有登录，请先登录';
+  if (runtime.readiness?.status === 'not_installed') return '这台电脑上还没有装这个 Agent';
   return null;
 }
 /**
@@ -206,12 +206,12 @@ export async function startSummary(bridge: BotBridge, refresh = false) {
 export async function bindAgent(bridge: BotBridge, cat: NativeCat, runtimeId: string) {
   const runtimes = await bridge.runtimes(true);
   const runtime = runtimes.find(r => r.id === runtimeId);
-  if (!runtime) throw new ApiError(404, '找不到这个本机工具');
+  if (!runtime) throw new ApiError(404, '找不到这个本机 Agent');
   const unavailable = runtimeUnavailable(runtime);
   if (unavailable) throw new ApiError(422, unavailable);
   const status = (await bridge.statuses()).bots.find(b => b.native_id === cat.id);
-  if (status?.executionReadStatus !== 'ready') throw new ApiError(503, '暂时无法确认它是不是还在忙，请稍后再换工具');
-  if (status?.active.length || status?.queued.length) throw new ApiError(409, '这只猫猫还在忙，等它做完或先停止，再换工具');
+  if (status?.executionReadStatus !== 'ready') throw new ApiError(503, '暂时无法确认它是不是还在忙，请稍后再换 Agent');
+  if (status?.active.length || status?.queued.length) throw new ApiError(409, '这只猫猫还在忙，等它做完或先停止，再换 Agent');
   const { cat: updated } = await bridge.native.request<{ cat: NativeCat }>(`/api/cats/${encodeURIComponent(cat.id)}`, {
     method: 'PATCH', body: {
       expectedRevision: cat.configurationRevision,

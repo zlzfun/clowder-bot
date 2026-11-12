@@ -687,7 +687,8 @@
     // With no cat yet (the first-run stage) a group has nobody to hold: only 新建猫猫 is offered.
     if (H.newGroup) actions.add({ id: "new-group", label: "新建群聊", icon: "users-plus", keywords: ["群聊", "群组", "新建", "创建"],
       when: () => chatList().some((c) => c.type === "bot"), run: (c) => H.newGroup(c.opener) });
-    if (H.settings) actions.add({ id: "settings", label: "设置", icon: "settings", keywords: ["偏好", "选项", "模板", "关于", "版本"], run: () => H.settings() });
+    // Its panes are words too: Agents is also found by its old name, 本机工具.
+    if (H.settings) actions.add({ id: "settings", label: "设置", icon: "settings", keywords: ["偏好", "选项", "模板", "Agents", "本机工具", "关于", "版本"], run: () => H.settings() });
     if (H.setTheme) {
       actions.add({
         id: "theme", label: "切换深浅色", icon: () => (dark() ? "sun" : "moon"), keywords: ["主题", "外观", "深色", "浅色", "夜间", "暗色"],

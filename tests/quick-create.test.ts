@@ -319,11 +319,12 @@ test('which tool a face\'s cat thinks with is read from faces[].tool as the serv
   // A server that names no tools: the usual one, as such a server made every cat.
   const old = R.start(bare(START.unknown));
   assert.deepEqual(plain(R.toolOf(R.offer(old.faces, [{ id: 'dsh', label: '蓝灰短毛猫' }])[0], old)), { label: 'Codex', state: 'unknown', usable: true, id: 'codex', reason: '', loginCommand: 'codex login' });
-  // The way forward names the one tool 自定义 would use, or says this computer's tools.
+  // The way forward names the one tool 自定义 would use, or says this computer's Agents.
   assert.equal(R.forward(R.start(START.unknown)), '只借它的长相，用这台电脑上的 Codex 来思考');
-  assert.equal(R.forward(R.start(START.ready)), '只借它的长相，用这台电脑上的工具来思考');
+  assert.equal(R.forward(R.start(START.ready)), '只借它的长相，用这台电脑上的 Agent 来思考');
   assert.equal(R.loginHelp('codex login'), '在终端里运行下面这行，登录好再点「重新检测」：');
-  for (const words of [R.uses(maine).text, R.forward(R.start(START.ready)), R.loginHelp('')]) assert.doesNotMatch(words, /Agent|Bot|模型|模板/);
+  // Agent is what these programs are called since 2026-11-12 (docs/xbot-frontend.md item 42); the engine's words are not.
+  for (const words of [R.uses(maine).text, R.forward(R.start(START.ready)), R.loginHelp('')]) assert.doesNotMatch(words, /Bot|模型|模板/);
   // 重新检测 notices a face's tool changing, even when the tools the app can connect did not.
   const loggedOut = { ...START.ready, faces: START.ready.faces.map((f: Any) => (f.id === 'ragdoll' ? { ...f, tool: { label: 'Claude Code', state: 'login', usable: false, reason: 'Claude Code 还没有登录' } } : f)) };
   assert.equal(R.sameStart(R.start(START.ready), R.start(plain(START.ready))), true);
@@ -364,7 +365,13 @@ test('a face\'s own cat sends no tool (it has its own), 自定义 sends the tool
   assert.equal(R.fingerprint(custom), R.fingerprint({ simple: { agent: 'claude', custom: true, face: 'bengal' }, name: '小白' }), 'key order does not make a new request');
   assert.notEqual(R.fingerprint(custom), R.fingerprint(R.catBody({ name: '小白', face: 'bengal', agent: 'codex', custom: true })), 'another tool is another request');
   assert.deepEqual(plain(R.catError(fail(409, '已经有一只叫这个名字的猫猫了', 'name_taken'), '小白')), { kind: 'name', text: '已经有一只叫「小白」的猫猫了，换个名字吧' });
-  assert.equal(R.catError(fail(422, '请先在本机 Agent 中完成登录'), '小白', 'Codex').text, '刚才没能建好：Codex 现在用不了。', 'the adapter\'s word "Agent" is not shown');
+  assert.equal(R.catError(fail(422, '请先在本机 Agent 中完成登录'), '小白', 'Codex').text, '刚才没能建好：Codex 现在用不了。', 'a 422 without a code blocks every tool and says which one');
+  assert.equal(R.catError(fail(422, '请先在本机 Agent 中完成登录')).text, '刚才没能建好：这个 Agent 现在用不了。', 'no tool named: the Agent');
+  // A server sentence naming an Agent is said as it is (since 2026-11-12); one naming a Bot or a model is not.
+  assert.equal(R.catError(fail(409, '这个 Agent 刚被换掉了，请重新选择。')).text, '这个 Agent 刚被换掉了，请重新选择。');
+  assert.equal(R.catError(fail(409, '这个 Bot 的模型刚被换掉了')).text, '没能建好，请稍后再试。');
+  assert.equal(R.startError(fail(503, '暂时读不到这台电脑上的 Agent')), '暂时读不到这台电脑上的 Agent');
+  assert.equal(R.startError(fail(503, '原生 Bot 列表读不到')), '没能读取这台电脑的情况');
   for (const err of [fail(undefined, '连不上 clowder-bot'), fail(502, '服务出了点问题，请稍后再试。')]) assert.equal(R.catError(err, 'x').kind, 'unsure');
   assert.equal(R.catError(fail(400, 'name: 找不到这个 Bot')).text, '没能建好，请检查名字后再试。');
   assert.equal(R.groupError(fail(undefined)).kind, 'unsure');
@@ -1082,11 +1089,11 @@ test('the shell loads the module before app.js and its styles after every earlie
   assert.match(app, /landing: \(name\) => \[\.\.\.document\.querySelectorAll\("#title \.avatar\[data-avatar-bot\]"\)\]/);
   // Only existing tokens; no new colour literal.
   assert.doesNotMatch(css.replace(/\/\*[\s\S]*?\*\//g, ''), /#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i);
-  // The words shown never name a Bot, an Agent or a model.
+  // The words shown never name a Bot or a model (an Agent may be named since 2026-11-12, item 42).
   for (const file of ['client/public/quick-create.js', 'client/public/quick-create-rules.js']) {
     const shownWords = [...read(file).matchAll(/"([^"\n]*\p{Script=Han}[^"\n]*)"/gu)].map(m => m[1]);
     assert.ok(shownWords.length > 20, file);
-    for (const words of shownWords) assert.doesNotMatch(words, /Bot|Agent|模型/i, words);
+    for (const words of shownWords) assert.doesNotMatch(words, /Bot|模型/i, words);
   }
 });
 
@@ -1256,7 +1263,7 @@ test('自定义: a quiet switch makes a cat of the owner\'s own; the row then pi
   mode.click();
   assert.equal(mode.getAttribute('aria-pressed'), 'false');
   assert.deepEqual(hint(stage), ['热血奔放，善于用视觉语言表达想法，表达力是全队最强的', '擅长审美、前端设计风格、打破常规']);
-  assert.equal(voice(stage).textContent, '热血奔放，善于用视觉语言表达想法，表达力是全队最强的。擅长审美、前端设计风格、打破常规。它要用 Gemini 来思考。这个应用还接不上 Gemini，所以它现在按原样领不了。点「自定义」可以只借它的长相，用这台电脑上的工具来思考', 'back: what this cat is like, what it needs and the way on, said again');
+  assert.equal(voice(stage).textContent, '热血奔放，善于用视觉语言表达想法，表达力是全队最强的。擅长审美、前端设计风格、打破常规。它要用 Gemini 来思考。这个应用还接不上 Gemini，所以它现在按原样领不了。点「自定义」可以只借它的长相，用这台电脑上的 Agent 来思考', 'back: what this cat is like, what it needs and the way on, said again');
   assert.equal(one(stage, 'qc-faces').getAttribute('aria-label'), '选一只猫猫');
   assert.equal(shown(about), false);
   assert.equal(chosen(stage), '暹罗猫');
@@ -1335,7 +1342,7 @@ test('新建猫猫 has the same faces, hint and 自定义: the hint names the ca
   // Focus order (what Tab walks through): the row, 自定义, the name, the two lines, the tool, 更多设置, 取消, 创建.
   const stops = all(card).filter(n => ['BUTTON', 'INPUT', 'SELECT'].includes(n.tagName) && shown(n) && n.tabIndex >= 0 && !n.disabled);
   const name = (n: El) => n.getAttribute('aria-label') || all(card).find(l => l.tagName === 'LABEL' && l.htmlFor === n.id)?.textContent || n.textContent;
-  assert.deepEqual(stops.map(name), ['蓝灰短毛猫', '自定义', '名字', '它主要帮你做什么可不填', '它的性格可不填', '用哪个工具思考', '更多设置', '取消', '创建']);
+  assert.deepEqual(stops.map(name), ['蓝灰短毛猫', '自定义', '名字', '它主要帮你做什么可不填', '它的性格可不填', '用哪个 Agent 思考', '更多设置', '取消', '创建']);
   mode.focus();
   mode.key('Escape');
   assert.equal(p.layer(), null);
@@ -1683,9 +1690,9 @@ test('a face whose cat cannot come home as it is is still offered, quieter, and 
   assert.equal(go.getAttribute('aria-describedby'), line.id, 'a screen reader finds why on the button itself');
   const mode = button(stage, '自定义');
   assert.equal(mode.classList.contains('ahead'), true, 'the quiet switch steps up: it is the way forward now');
-  assert.equal(visibleText(one(stage, 'qc-ahead')), '只借它的长相，用这台电脑上的工具来思考');
+  assert.equal(visibleText(one(stage, 'qc-ahead')), '只借它的长相，用这台电脑上的 Agent 来思考');
   assert.equal(mode.getAttribute('aria-describedby'), idOf(stage, 'qc-ahead'));
-  assert.equal(voice(stage).textContent, '细心务实，保留自己的判断，愿意把事情接住做完。擅长编码、文档、验收。它要用 Kimi 来思考。这台电脑上还没有装 Kimi，所以它现在按原样领不了。点「自定义」可以只借它的长相，用这台电脑上的工具来思考');
+  assert.equal(voice(stage).textContent, '细心务实，保留自己的判断，愿意把事情接住做完。擅长编码、文档、验收。它要用 Kimi 来思考。这台电脑上还没有装 Kimi，所以它现在按原样领不了。点「自定义」可以只借它的长相，用这台电脑上的 Agent 来思考');
   // Enter in the name field presses 带它回家: nothing is sent, and focus goes to the way forward.
   const name = control(stage, '名字');
   name.focus();

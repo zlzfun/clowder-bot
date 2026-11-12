@@ -11,11 +11,6 @@
 .activity-line .prose + .activity-tools { margin-top: 12px; }
 .activity-tools :is(.trace-args, .trace-out) { max-height: 240px; overflow: auto; }
 .activity-tools .tool-state.failed { color: var(--err); }
-/* A chat its cat was invited to open (the transcript's greeting accepted, or
-   this page's invitation on its way) reads from the top, where the cat's first
-   real message lands; every other history keeps XBot's bottom alignment. */
-.thread-inner.greeted { justify-content: flex-start; }
-.thread-inner.greeted > :first-child { margin-top: 20px; }
 /* The greeting's status line (greetingLine): the event sysline with the cat's
    xs face; its 重试 reads as a button, in the line's own size. */
 .chat-greeting .avatar { flex: none; }

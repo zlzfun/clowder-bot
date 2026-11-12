@@ -119,12 +119,14 @@ test('the rows stay keyed: drawing the same history again keeps every element, n
   const messages = whale();
   p.draw(messages);
   const before = (p.thread.children[0] as El).children.slice();
+  // The first drawing's rows are already still (not news); the redraw marks none of them again.
+  const still = before.map((n: El) => n.classList.contains('lv-still'));
   const again = p.draw(messages);
   const after = (p.thread.children[0] as El).children;
   assert.equal(after.length, before.length);
   after.forEach((n: El, i: number) => assert.equal(n, before[i], 'row ' + i + ' is the same element'));
   assert.equal(again.shown.added, 0);
-  assert.ok(after.every((n: El) => !n.classList.contains('lv-still')), 'no row was replaced');
+  assert.deepEqual(after.map((n: El) => n.classList.contains('lv-still')), still, 'no row was replaced');
   // Today 09:00 the reminder comes due, the cat follows: one divider before the reminder, none before the reply.
   const today = new Date(); today.setHours(9, 0, 0, 0);
   const due = new Date(Math.min(today.getTime(), Date.now() - 10 * MIN)).toISOString();

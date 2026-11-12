@@ -80,7 +80,7 @@ export class BotSchedules {
     const thread = await this.bridge.thread(threadId);
     if (thread.deletedAt || !thread.preferredCats?.includes(cat.id)) throw new ApiError(409, '投递聊天已不可用或不再包含这只猫，请新建定时任务');
     const runtime = runtimeForCat(cat, await this.bridge.runtimes());
-    if (!runtime) throw new ApiError(422, '请先给这只猫猫选一个能用的本机工具');
+    if (!runtime) throw new ApiError(422, '请先给这只猫猫选一个能用的本机 Agent');
     const reason = runtimeUnavailable(runtime);
     if (reason) throw new ApiError(422, reason);
   }

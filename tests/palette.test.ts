@@ -709,6 +709,21 @@ test('actions run the app\'s own functions after the palette closed; the registr
   assert.deepEqual(empty.rowText(), ['新建猫猫', '设置', '切换深浅色现在是浅色']);
 });
 
+test('设置 is also found by the name of its Agents pane, and by that pane\'s old name 本机工具', async () => {
+  for (const words of ['Agents', 'agent', '本机工具', '工具']) {
+    const p = page();
+    p.P.open();
+    p.type(words);
+    assert.deepEqual(p.rowText(), ['设置'], words);
+  }
+  const p = page();
+  p.P.open();
+  p.type('本机工具');
+  p.key(p.input(), 'Enter');
+  await p.flush();
+  assert.deepEqual(p.log.at(-1), ['settings']);
+});
+
 test('Alt+↑ / Alt+↓ open the previous / next chat in the sidebar\'s order, stop at either end, and leave other fields and dialogs alone', () => {
   const p = page({ order: [{ type: 'bot', id: '团子' }, { type: 'group', id: 'g-1' }, { type: 'bot', id: '大团子' }] });
   p.composer.focus();
@@ -923,10 +938,10 @@ test('the page loads the palette after the quick-create scripts and before app.j
   // Motion only from the existing keyframes, and none when reduced.
   assert.deepEqual([...css.matchAll(/animation:\s*([\w-]+)/g)].map(m => m[1]).sort(), ['fade', 'none', 'rise']);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
-  // What is said uses the everyday words: 猫猫, the cat's name, 群聊, 对话.
+  // What is said uses the everyday words: 猫猫, the cat's name, 群聊, 对话 (and Agents, since 2026-11-12).
   for (const file of ['client/public/palette.js', 'client/public/palette-rules.js']) {
     const literals = read(file).replace(/^\s*\/\/[^\n]*$/gm, '').match(/"(?:[^"\\\n]|\\.)*"/g) ?? [];
     assert.ok(literals.length > 10, file);
-    for (const s of literals) assert.doesNotMatch(s, /Bot|Agent|session|thread|原生|会话/, file + ': ' + s);
+    for (const s of literals) assert.doesNotMatch(s, /Bot|session|thread|原生|会话/, file + ': ' + s);
   }
 });

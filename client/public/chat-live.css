@@ -5,8 +5,9 @@
    every motion is 180 ms ease-out or the token spring, and the global
    prefers-reduced-motion rule of app.css stills all of it. */
 
-/* A row the history drew again (the same message, changed) or a reply the
-   finished transcript took over: it is already on screen, so it does not rise. */
+/* A row the history drew again (the same message, changed), a reply the
+   finished transcript took over, or the history a conversation opens with:
+   it is not news, so it does not rise. */
 .msg.lv-still { animation: none; }
 
 /* The typing bubble: the reply's own bubble with three calm dots. */

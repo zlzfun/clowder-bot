@@ -642,13 +642,15 @@
   }
   // next: the history as just drawn (its dataset.chat names the conversation);
   // keep: the sends and reply errors app.js holds. The first drawing of a
-  // conversation replaces whatever was there.
+  // conversation replaces whatever was there, and its history is not news:
+  // it is there at once, none of its rows rises in (later rows still do).
   function commit(next, keep) {
     const live = innerEl(), rows = held(keep), pin = following();
     let added = 0, first = false;
     if (!live || !next.dataset.chat || live.dataset.chat !== next.dataset.chat) {
       S.glide = null;
-      for (const n of kids(next)) sig(n);
+      // Marked after its signature is taken, so the next redraw still matches it.
+      for (const n of kids(next)) { sig(n); if (n.classList.contains("msg")) n.classList.add("lv-still"); }
       next.append(...rows);
       H.thread.replaceChildren(next);
       first = true;

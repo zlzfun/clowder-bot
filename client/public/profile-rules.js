@@ -10,8 +10,9 @@
 
   const trim = (value) => String(value == null ? "" : value).trim();
   const han = (text) => /\p{Script=Han}/u.test(String(text || ""));
-  // A server sentence is shown as it is only when it is everyday Chinese.
-  const plain = (text) => han(text) && !/\bagent\b|(?<![\w-])bot\b|\bmodel\b|\bsession\b|\bthread\b|模型|原生|会话|线程/i.test(String(text));
+  // A server sentence is shown as it is only when it is everyday Chinese
+  // (Agent is an everyday name since 2026-11-12; the engine's words are not).
+  const plain = (text) => han(text) && !/(?<![\w-])bot\b|\bmodel\b|\bsession\b|\bthread\b|模型|原生|会话|线程/i.test(String(text));
   const key = (sel) => (sel && sel.id ? (sel.type === "group" ? "group:" : "bot:") + sel.id : "");
 
   // ---- tabs ----

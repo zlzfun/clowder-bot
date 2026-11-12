@@ -45,9 +45,20 @@ html[data-theme="dark"] .ck-blocks { --cardx: var(--x-bot-bubble); }
 .approval-line.ck-neutral .st { color: var(--x-muted); }
 .approval-line.ck-neutral .what { color: var(--x-text-2); }
 .approval-line.ck-line .ck-runtime { flex: none; font-size: 12px; }
+/* A request's outcome reads as a quiet receipt, not one more bubble: no fill,
+   a hairline outline, the words in the second text colour; the tick, cross or
+   clock keeps its colour. The same for every outcome (an ended one stays fainter
+   by its words, without dimming the whole line) and for the shell's older
+   one-line cards drawn straight into the history (app.js approvalLine). */
+:is(.approval-line.ck-line, .thread-inner > .approval-line) {
+  background: transparent; box-shadow: inset 0 0 0 1px var(--x-fill-3); color: var(--x-text-2);
+}
+:is(.approval-line.ck-line, .thread-inner > .approval-line).exp { background: transparent; opacity: 1; }
 
 /* 去确认 and a clicked notification find the card: it flashes like a found message. */
 .ck-live .approval.ck-hit, .ck-live .approval-line.ck-hit { --bubble-fill: var(--cardx); animation: quote-flash 1.5s linear; }
+/* A receipt has no fill to return to: the flash fades out to the page. */
+.ck-live .approval-line.ck-line.ck-hit { --bubble-fill: transparent; }
 
 /* ---- Choices (XBot's option card .ask; each option is a button). */
 .ask.ck-ask-choice { padding: 14px 8px 8px; }

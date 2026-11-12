@@ -98,8 +98,8 @@ test('the cats are called by their names wherever the page shows or says one; on
   assert.ok(prose.length > 0);
   // 关于示例: the showcase's computer has the three tools the app can connect; the other five are placed for the list, not seen running.
   const honest = /<p class="t-honest">([\s\S]*?)<\/p>/.exec(html)![1];
-  assert.match(honest, /三种工具（Claude Code、Codex、Kimi）/);
-  assert.match(honest, /另外五只猫是照引擎里已有的猫摆进列表的，只为列表完整，不表示它们的工具在这里跑过/);
+  assert.match(honest, /三种 Agent（Claude Code、Codex、Kimi）/);
+  assert.match(honest, /另外五只猫是照引擎里已有的猫摆进列表的，只为列表完整，不表示它们的 Agent 在这里跑过/);
 });
 
 // ---------------------------------------------------------------- rules
@@ -518,7 +518,8 @@ test('the guide speaks the app\'s own words, says once that the chats are staged
   const literals = [js, rulesJs].map(src => [...src.replace(/^\s*\/\/.*$/gm, '').matchAll(/"([^"\\]*(?:\\.[^"\\]*)*)"/g)].map(m => m[1]).filter(s => /\p{Script=Han}/u.test(s!)).join(' ')).join(' ');
   for (const [where, said] of [['page', words], ['scripts', literals]] as const) {
     const plainWords = said!.replace(/clowder-bot/g, '');
-    assert.doesNotMatch(plainWords, /\bBot\b|\bAgent\b|session|thread|会话|原生|群组/i, where + ' says 猫猫、对话、群聊');
+    // Agent is the app's own word for Claude Code, Codex… since 2026-11-12; the engine's words are not.
+    assert.doesNotMatch(plainWords, /\bBot\b|session|thread|会话|原生|群组/i, where + ' says 猫猫、对话、群聊');
   }
   assert.equal((words.match(/事先写好/g) || []).length, 1, 'staged, said once');
   assert.match(words, /npm run showcase/);

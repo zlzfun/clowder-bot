@@ -143,7 +143,7 @@ test('a dialog holding the owner\'s input or a pending decision is never thrown 
   const kinds: Array<[string, (doc: Doc) => El]> = [
     ['新建猫猫 with a name typed (quick-create)', (doc) => { const root = doc.createElement('div'); root.className = 'modal qc-modal'; const card = doc.createElement('form'); card.className = 'modal-card qc-card'; card.setAttribute('aria-modal', 'true'); root.append(card); doc.body.append(root); return root; }],
     ['a confirmation in the shell\'s #modal', (doc) => { const root = doc.createElement('div'); root.id = 'modal'; root.className = 'modal'; const form = doc.createElement('form'); form.setAttribute('aria-modal', 'true'); root.append(form); doc.body.append(root); return root; }],
-    ['a native <dialog> (更换工具)', (doc) => { const d = doc.createElement('dialog'); d.setAttribute('open', ''); doc.body.append(d); return d; }],
+    ['a native <dialog> (更换 Agent)', (doc) => { const d = doc.createElement('dialog'); d.setAttribute('open', ''); doc.body.append(d); return d; }],
   ];
   for (const [what, make] of kinds) {
     let dialog: El | null = null;

@@ -30,6 +30,10 @@
 .wsf-cards { display: flex; flex-direction: column; gap: var(--x-s2); width: min(300px, 100%); min-width: 0; }
 .wsf-cards.wide { width: 100%; }
 .msg.user .wsf-cards { align-self: flex-end; }
+/* In a cat's message the cards keep the message's own 6px rhythm below its
+   words, the cards under them or pictures (chat-cards.css spaces those blocks
+   the same way); with no words (an empty bubble is not shown) nothing is added. */
+.msg.bot .body > :is(.bot-bubble:not(:empty), .ck-blocks, .gallery) + .wsf-cards { margin-top: var(--x-s2); }
 .wsf-card {
   display: flex; align-items: center; gap: var(--x-s4); min-width: 0;
   padding: var(--x-s3) var(--x-s2) var(--x-s3) var(--x-s3); border-radius: var(--x-r-card); background: var(--x-fill-1);
