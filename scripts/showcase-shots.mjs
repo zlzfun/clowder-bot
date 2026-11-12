@@ -157,24 +157,21 @@ try {
   // 联系人列表: the list as it is staged (unread counts, 等你确认, the pinned cat), before any chat is opened.
   if (wanted('list')) await shoot('list', async page => around(page, ['#pin-row', '#roster'], 12, { x0: 0, x1: 280, y0: (await page.locator('#pin-row').boundingBox()).y - 6 }));
 
-  // 打开就能聊: 新建 (the round ＋ at the top of the sidebar) opens the dialog on its 猫猫 side; a cat whose tool is
-  // here picked (梵花猫, Kimi), its character and its tool under the row, a name typed; then, cropped to the row and
-  // what is under it, a cat whose tool the app cannot connect yet (暹罗猫): why it cannot come home as it is, and
-  // 自定义 beside it.
+  // 打开就能聊: 新建 (the round ＋ at the top of the sidebar) opens the dialog on its 猫猫 side: the cats at the left
+  // (those that can come home, 自定义, then those that cannot, each with its word), a cat whose Agent is here picked
+  // (梵花猫, Kimi) with its card at the right, a name typed; then, cropped to that card, a cat whose Agent the app
+  // cannot connect yet (暹罗猫): why it cannot come home as it is, and 「只借它的长相」.
   if (wanted('new-cat')) {
     await both(async (page) => {
       await page.locator('#side-new').click();
       await page.waitForSelector('.qc-card .qc-face');
       await page.locator('.qc-card .qc-face[data-face="turkish-van"]').click();
-      await page.locator('.qc-card input').first().fill('年糕');
+      await page.locator('.qc-card').getByLabel('名字', { exact: true }).fill('年糕');
       await page.waitForTimeout(400);
     });
     await shoot('new-cat', page => around(page, ['.qc-card'], 0));
     await both(async (page) => { await page.locator('.qc-card .qc-face[data-face="siamese"]').click(); await page.waitForTimeout(400); });
-    await shoot('new-cat-away', async page => {
-      const card = await page.locator('.qc-card').boundingBox(), about = await page.locator('.qc-card .qc-about').boundingBox();
-      return around(page, ['.qc-card .qc-faces', '.qc-card .qc-about'], 20, { x0: card.x, x1: card.x + card.width, y1: about.y + about.height + 14 });
-    });
+    await shoot('new-cat-away', page => around(page, ['.qc-card .qc-about'], 16));
     await both(page => page.locator('.qc-card').getByRole('button', { name: '取消', exact: true }).click());
   }
 

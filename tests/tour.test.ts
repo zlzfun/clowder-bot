@@ -91,10 +91,12 @@ test('the cats are called by their names wherever the page shows or says one; on
     assert.match(said, /其它模型/, where);
   }
   assert.match(start, /宪宪用 Claude Code，砚砚用 Codex，墨墨用 Kimi，别的猫用其它模型/);
-  // A cat whose tool is not here cannot come home as it is; 自定义 borrows its looks — said once, in 打开就能聊.
+  // A cat whose tool is not here cannot come home as it is; 「只借它的长相」 is the way on, and 自定义 is one of the
+  // options beside the cats (docs/xbot-frontend.md item 44) — said once, in 打开就能聊.
   const prose = words.replace(/\salt="[^"]*"/g, '');
   assert.equal((html.replace(/\salt="[^"]*"/g, '').match(/按原样领不了/g) || []).length, 1);
-  assert.match(start.replace(/\salt="[^"]*"/g, ''), /按原样领不了[^<]*「自定义」可以只借它的长相/);
+  assert.match(start.replace(/\salt="[^"]*"/g, ''), /按原样领不了[^<]*「只借它的长相」[^<]*「自定义」也是其中一个选项/);
+  assert.doesNotMatch(start.replace(/\salt="[^"]*"/g, ''), /点「自定义」/, '自定义 is not a switch to press');
   assert.ok(prose.length > 0);
   // 关于示例: the showcase's computer has the three tools the app can connect; the other five are placed for the list, not seen running.
   const honest = /<p class="t-honest">([\s\S]*?)<\/p>/.exec(html)![1];
