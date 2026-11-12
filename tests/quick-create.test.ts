@@ -969,11 +969,31 @@ test('switching sides eases a change of the card\'s height (its top edge stays) 
   assert.deepEqual(plain(faded), [[{ opacity: 0 }, { opacity: 1 }]]);
   await settle();
   assert.equal(has(card, 'qc-easing'), false, 'clipped only while it eases');
+  // Switched again mid-way: the running easing stops, the next starts from the height on screen, and the clip stays until the last one ends.
+  const running: Any[] = [];
+  card.animate = (frames: Any) => {
+    let end: () => void = () => {};
+    const a: Any = { frames, cancelled: false, finished: new Promise<void>((done) => { end = done; }) };
+    a.end = end; a.cancel = () => { a.cancelled = true; end(); };
+    running.push(a);
+    return a;
+  };
+  heights(365, 430);
+  tabOf(card, '猫猫').click();
+  heights(400, 365);
+  tabOf(card, '群聊').click();
+  assert.deepEqual(plain(running.map(a => a.frames)), [[{ height: '365px' }, { height: '430px' }], [{ height: '400px' }, { height: '365px' }]]);
+  assert.equal(running[0].cancelled, true);
+  await settle();
+  assert.equal(has(card, 'qc-easing'), true, 'the first one\'s end does not lift the clip of the second');
+  running[1].end();
+  await settle();
+  assert.equal(has(card, 'qc-easing'), false);
   p.window.matchMedia = (q: string) => ({ matches: q === '(prefers-reduced-motion: reduce)' });
+  const counts = [eased.length + running.length, faded.length];
   heights(360, 430);
   tabOf(card, '猫猫').click();
-  assert.equal(eased.length, 1, 'no easing under reduced motion');
-  assert.equal(faded.length, 1);
+  assert.deepEqual([eased.length + running.length, faded.length], counts, 'no easing and no fade under reduced motion');
   assert.equal(tabOf(card, '猫猫').getAttribute('aria-selected'), 'true');
   // The dialog hangs from a fixed line, so neither side nor 自定义 moves its top edge.
   const css = read('client/public/quick-create.css');

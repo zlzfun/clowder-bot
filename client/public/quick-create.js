@@ -909,16 +909,22 @@
   // the old height to the new one; its top edge stays where it is (the
   // dialog hangs from a fixed line, quick-create.css). At once when motion is
   // reduced or nothing is laid out.
+  // Switched again mid-way: the newer easing starts from the height on screen, and the clip lasts until it ends.
+  const easing = new WeakMap();
   function ease(card, change) {
     const can = card && typeof card.animate === "function" && !media("(prefers-reduced-motion: reduce)");
     const before = can ? card.getBoundingClientRect().height : 0;
     change();
     if (!can) return;
+    const prev = easing.get(card);
+    if (prev) { easing.delete(card); if (typeof prev.cancel === "function") prev.cancel(); }
     const after = card.getBoundingClientRect().height;
-    if (!before || !after || Math.abs(after - before) < 1) return;
+    if (!before || !after || Math.abs(after - before) < 1) { card.classList.remove("qc-easing"); return; }
     card.classList.add("qc-easing");
-    const done = () => card.classList.remove("qc-easing");
-    card.animate([{ height: before + "px" }, { height: after + "px" }], { duration: 180, easing: "ease-out" }).finished.then(done, done);
+    const anim = card.animate([{ height: before + "px" }, { height: after + "px" }], { duration: 180, easing: "ease-out" });
+    easing.set(card, anim);
+    const done = () => { if (easing.get(card) === anim) card.classList.remove("qc-easing"); };
+    anim.finished.then(done, done);
   }
   function dialog(title, opener) {
     if (layer) layer.close(true);
