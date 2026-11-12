@@ -2193,17 +2193,11 @@
   // request still in flight instead of fetching the same profile twice.
   // A Map, so names like "constructor" are not mistaken for entries.
   const profileRequests = new Map();
-  // Each profile read is numbered when it is asked for: a switch on 资料
-  // (profile.js 说话简短) trusts only reads asked for after its change was answered.
-  let profileAsks = 0;
-  const profileAsked = new WeakMap();
   function fetchBotProfile(name) {
     const live = profileRequests.get(name);
     if (live && !live.done) return live.request;
-    const entry = { done: false }, asked = ++profileAsks;
-    entry.request = api("/xbot-api/bots/" + encodeURIComponent(name))
-      .then((data) => { if (data && typeof data === "object") profileAsked.set(data, asked); return data; })
-      .finally(() => { entry.done = true; });
+    const entry = { done: false };
+    entry.request = api("/xbot-api/bots/" + encodeURIComponent(name)).finally(() => { entry.done = true; });
     profileRequests.set(name, entry);
     return entry.request;
   }
@@ -7741,9 +7735,6 @@
     // 新对话 is the header ⋯ menu's own dialog (chat-history.js), opened from 资料.
     newConversation: (sel, opener) => chatHistory.newConversation(sel, opener),
     editProfile: (data) => openProfile(data && data.name ? data : state.panelData || {}),
-    // Profile reads by number (fetchBotProfile): how many were asked for so far, and which one a profile came from.
-    profileReads: () => profileAsks,
-    profileAsked: (data) => (data && typeof data === "object" ? profileAsked.get(data) || 0 : 0),
     pin: async (name, on) => {
       await api("/xbot-api/bots/" + encodeURIComponent(name) + "/pin", { method: "POST", body: { pinned: on } });
       await refreshLists();

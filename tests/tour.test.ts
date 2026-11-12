@@ -541,15 +541,26 @@ test('the guide speaks the app\'s own words, says once that the chats are staged
   assert.doesNotMatch(css.replace(/\/\*[\s\S]*?\*\//g, ''), /#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i, 'no colour of its own: tokens only (a cat\'s accent comes from the server)');
 });
 
-test('回复是活的 says once that the cats talk as in a chat, that each cat can switch it, and how to see a follow-up join the reply being written', () => {
+test('回复是活的 says once that every cat talks as in a chat by default, with nothing to set, and how to see a follow-up join the reply being written', () => {
   const section = /<section[^>]*id="a-live"[\s\S]*?<\/section>/.exec(html)![0];
-  // Said as what it is: cats made here are asked to talk this way, it can be switched per cat, and a change shows in a new conversation.
-  assert.match(section, /<p>在这里建的猫，会被叮嘱像聊天一样说话：先说结论，几句话说完，要清单、表格、代码或长文时照给。每只猫的资料页里可以开关「说话简短」，改了从新对话开始生效。<\/p>/);
-  assert.equal((html.match(/像聊天一样说话|开关「说话简短」/g) || []).length, 2, 'said once, where it fits');
+  // Said as what it is (item 39): every cat here, by default, nothing to set; a default manner (usually a few sentences), and what is asked for is still given.
+  assert.match(section, /<p>这里的每只猫都像聊天一样说话：先说结论，通常几句话说完；要清单、表格、代码或长文时照给。这是默认的，不用设置。<\/p>/);
+  assert.equal((html.match(/像聊天一样说话/g) || []).length, 1, 'said once, where it fits');
+  // No switch for it anywhere on the page any more, nor the old promise that cats are told one by one.
+  assert.doesNotMatch(html, /说话简短|简短|可以开关|单独开关|从新对话开始生效|会被叮嘱/);
   // Taken in only when the cat can take it in; otherwise it answers afterwards, in a reply of its own.
   assert.match(section, /它接得住，就在同一条回复里一起回答，排在你这句下面；接不住，写完这条再另起一条回答。/);
   assert.doesNotMatch(section, /同一条回复把你后来说的也一起回答/);
   assert.match(section, /<p class="t-try"><span class="t-try-k">怎么试<\/span>[^<]*；或者趁它还在写再说一句，看它在同一条回复里接着回答<\/p>/);
-  // The picture of 资料 shows the switch, and its words say so.
-  assert.match(html, /alt="宪宪的资料页：[^"]*「说话简短」/);
+  // The picture of 资料 is the page as it is now: 置顶, 新对话 and 历史对话, nothing for how a cat talks; its words say so.
+  assert.match(html, /<img src="shots\/profile-light\.png" width="384" height="540" decoding="async" alt="宪宪的资料页：职责，开着的「置顶」，新对话和历史对话，收起的「高级」，最下面是「删除猫猫」。">/);
+});
+
+test('each picture is drawn at the size it was taken: the width and height in the page are half the file\'s pixels (taken at 2×), in both themes', () => {
+  const size = (file: string) => { const png = readFileSync(new URL(`../showcase/shots/${file}`, import.meta.url)); return [png.readUInt32BE(16), png.readUInt32BE(20)]; };
+  const imgs = [...html.matchAll(/<img src="shots\/([\w-]+)-light\.png" width="(\d+)" height="(\d+)"/g)];
+  assert.equal(imgs.length, (html.match(/<img src="shots\//g) || []).length, 'every picture says its size');
+  for (const [, name, width, height] of imgs) {
+    for (const theme of ['light', 'dark']) assert.deepEqual(size(`${name}-${theme}.png`), [2 * Number(width), 2 * Number(height)], `${name}-${theme}.png`);
+  }
 });
