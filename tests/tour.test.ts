@@ -565,3 +565,14 @@ test('each picture is drawn at the size it was taken: the width and height in th
     for (const theme of ['light', 'dark']) assert.deepEqual(size(`${name}-${theme}.png`), [2 * Number(width), 2 * Number(height)], `${name}-${theme}.png`);
   }
 });
+
+test('the way in to 新建 that the page describes and the capture script clicks is the sidebar\'s own (item 43): the round ＋ opens one dialog, no menu', () => {
+  const shots = read('scripts/showcase-shots.mjs');
+  assert.match(shots, /await page\.locator\('#side-new'\)\.click\(\);\n\s+await page\.waitForSelector\('\.qc-card \.qc-face'\);/);
+  assert.doesNotMatch(shots, /new-menu|\.pin\.add/);
+  assert.match(shots, /await page\.locator\('#account'\)\.click\(\);\n\s+await page\.locator\('#account-settings'\)\.click\(\);/, '设置 is in 我\'s menu, opened from the owner\'s face');
+  const start = /<section[^>]*id="a-start"[\s\S]*?<\/section>/.exec(html)![0];
+  assert.match(start, /<p class="t-try"><span class="t-try-k">怎么试<\/span>点左栏上方的「＋」（新建），在弹窗里切换「猫猫」或「群聊」<\/p>/);
+  assert.match(start, /alt="「新建」弹窗的「猫猫」一边（右上角可以切到「群聊」）：/);
+  assert.doesNotMatch(html, /左上角「新建」|新建猫猫，或新建群聊|「新建猫猫」弹层/);
+});
