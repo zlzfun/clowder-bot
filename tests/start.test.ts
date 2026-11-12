@@ -9,7 +9,7 @@ import { createApp } from '../server/app.js';
 import { ApiError } from '../server/errors.js';
 import { NativeFixture } from './native-fixture.js';
 import { defaultRuntime } from '../server/native/agents.js';
-import type { NativeRuntime } from '../server/native/bridge.js';
+import { chatManner, type NativeRuntime } from '../server/native/bridge.js';
 import type { NativeCat } from '../server/native/types.js';
 
 // The unpatched native member creation as the adapter sees it: POST /api/cats
@@ -134,7 +134,8 @@ test('a cat needs only a name: one unpatched native creation with the Agent’s 
     'the logged-in Agent, its own model: nothing is chosen for it');
   assert.deepEqual(sent.mentionPatterns, ['@团子', '@' + sent.catId]);
   // Picking a face picks that cat: the engine's template of the same id (here the Claude default, 布偶猫) gives the portrait, as written upstream.
-  assert.deepEqual([sent.roleDescription, sent.personality, sent.teamStrengths], ['主架构师和核心开发者，擅长深度思考和系统设计', '温柔但有主见，喜欢深入分析问题，写代码快但注重质量', '架构设计、写代码一把好手']);
+  // …and the cat talks the way a chat is talked in: that sentence follows the template's own personality.
+  assert.deepEqual([sent.roleDescription, sent.personality, sent.teamStrengths], ['主架构师和核心开发者，擅长深度思考和系统设计', '温柔但有主见，喜欢深入分析问题，写代码快但注重质量。' + chatManner, '架构设计、写代码一把好手']);
   for (const field of ['breedId', 'cli', 'accountRef', 'carrier', 'provider']) assert.equal(field in sent, false, field);
   // A Claude Code cat starts with the CLI's own schedulers off (memberCliArgs). The creation request never carries
   // them — it must stay what native recorded for its key — they are written as a second native step.
@@ -178,13 +179,15 @@ test('a cat needs only a name: one unpatched native creation with the Agent’s 
   // A chosen face is that cat: its portrait and its own tool (缅因猫 thinks with Codex), whatever the usual tool here is.
   assert.equal((await r.call('/xbot-api/bots', 'POST', { name: '花花', simple: { face: 'maine-coon' }, idempotencyKey: randomUUID() })).status, 201);
   assert.deepEqual([creations().at(-1)!.body.clientId, creations().at(-1)!.body.roleDescription, creations().at(-1)!.body.personality],
-    ['openai', '代码审查专家，擅长安全分析、测试覆盖和代码质量把控', '严谨认真，注重细节，会直言不讳地指出问题']);
+    ['openai', '代码审查专家，擅长安全分析、测试覆盖和代码质量把控', '严谨认真，注重细节，会直言不讳地指出问题。' + chatManner]);
   // Custom: the face only gives the looks. Without words of the owner's own it is a plain helper; with them, theirs.
   assert.equal((await r.call('/xbot-api/bots', 'POST', { name: '白板', simple: { face: 'maine-coon', custom: true, agent: 'codex' }, idempotencyKey: randomUUID() })).status, 201);
   const plain = creations().at(-1)!.body;
   assert.match(plain.roleDescription, /随叫随到/); assert.ok(plain.personality && plain.teamStrengths, 'a stock portrait is not left for native to fill in');
   assert.doesNotMatch(plain.roleDescription + plain.personality, /代码审查|严谨认真/);
+  assert.equal(plain.personality, '亲切耐心，讲得清楚；做事利落，不绕弯子。' + chatManner, 'a plain helper talks briefly too');
   assert.equal((await r.call('/xbot-api/bots', 'POST', { name: '小诗', simple: { face: 'bengal', custom: true, about: '陪我写诗', personality: '话少，爱用比喻', agent: 'codex' }, idempotencyKey: randomUUID() })).status, 201);
+  // A personality the owner wrote is theirs alone: nothing is added to it.
   assert.deepEqual([creations().at(-1)!.body.roleDescription, creations().at(-1)!.body.personality, creations().at(-1)!.body.teamStrengths], ['陪我写诗', '话少，爱用比喻', '陪我写诗']);
   assert.equal((await r.call('/xbot-api/bots', 'POST', { name: '错', simple: { custom: false }, idempotencyKey: randomUUID() })).status, 400);
   // Words of the owner's own make it custom even without the flag (a line about the cat becomes its role and short description).
@@ -273,7 +276,7 @@ test('the cat that is made is the one that was described, and a repeat reaches n
   const again = await r.call('/xbot-api/bots', 'POST', ask);
   assert.equal(again.status, 201);
   assert.deepEqual({ ...creations()[1]!.body }, { ...creations()[0]!.body }, 'identical, though the template changed in between');
-  assert.equal(creations()[1]!.body.personality, '严谨认真，注重细节，会直言不讳地指出问题');
+  assert.equal(creations()[1]!.body.personality, '严谨认真，注重细节，会直言不讳地指出问题。' + chatManner);
   assert.equal(r.native.cats.length, 1);
   // A new request that still carries the portrait the screen showed earlier is not created as something else: it is refused by code, before native is asked.
   const stale = await r.call('/xbot-api/bots', 'POST', { name: '小审', simple: { face: 'maine-coon', rev: coon.rev }, idempotencyKey: randomUUID() });
@@ -283,7 +286,7 @@ test('the cat that is made is the one that was described, and a repeat reaches n
   const fresh = (await (await r.call('/xbot-api/start')).json()).faces.find((face: any) => face.id === 'maine-coon');
   assert.notEqual(fresh.rev, coon.rev); assert.equal(fresh.personality, '换了一种脾气');
   assert.equal((await r.call('/xbot-api/bots', 'POST', { name: '小审', simple: { face: 'maine-coon', rev: fresh.rev }, idempotencyKey: randomUUID() })).status, 201);
-  assert.equal(creations().at(-1)!.body.personality, '换了一种脾气');
+  assert.equal(creations().at(-1)!.body.personality, '换了一种脾气。' + chatManner);
   // A custom cat does not depend on the portrait; without `rev` the current template is used.
   assert.equal((await r.call('/xbot-api/bots', 'POST', { name: '自己的', simple: { face: 'maine-coon', rev: coon.rev, custom: true }, idempotencyKey: randomUUID() })).status, 201);
   assert.equal((await r.call('/xbot-api/bots', 'POST', { name: '不带', simple: { face: 'maine-coon' }, idempotencyKey: randomUUID() })).status, 201);
@@ -297,6 +300,33 @@ test('the cat that is made is the one that was described, and a repeat reaches n
     assert.equal(said.code, 'faces_unavailable'); assert.match(said.error, /没有创建/);
   }
   assert.equal(creations().length, before);
+});
+
+test('talking briefly is a sentence in a cat’s own personality that can be put in and taken out', async t => {
+  const r = await setup(t);
+  r.native.runtimes = [runtime('codex', 'openai', 'configured')];
+  await r.call('/xbot-api/bots', 'POST', { name: '砚砚', simple: { face: 'maine-coon' }, idempotencyKey: randomUUID() });
+  const panel = async (name: string) => (await (await r.call('/xbot-api/bots/' + encodeURIComponent(name))).json());
+  const own = (name: string) => r.native.cats.find(cat => cat.name === name)!.personality;
+  assert.equal((await panel('砚砚')).concise, true);
+  // Taken out: the template's own words stay as they were; put back: once.
+  let answer = await r.call('/xbot-api/bots/' + encodeURIComponent('砚砚'), 'PATCH', { concise: false });
+  assert.deepEqual([answer.status, await answer.json()], [200, { name: '砚砚', concise: false }]);
+  assert.equal(own('砚砚'), '严谨认真，注重细节，会直言不讳地指出问题。'); assert.equal((await panel('砚砚')).concise, false);
+  for (let again = 0; again < 2; again++) await r.call('/xbot-api/bots/' + encodeURIComponent('砚砚'), 'PATCH', { concise: true });
+  assert.equal(own('砚砚'), '严谨认真，注重细节，会直言不讳地指出问题。' + chatManner);
+  // A cat made before this, or elsewhere: off until its owner switches it on; an empty personality becomes just that sentence.
+  for (const [name, personality] of [['旧猫', '话多，爱讲故事'], ['空白', undefined]] as const)
+    r.native.cats.push({ id: 'old-' + name, name, displayName: name, roleDescription: '帮忙', ...(personality ? { personality } : {}), clientId: 'openai', defaultModel: '', mentionPatterns: ['@' + name], color: { primary: '#888888', secondary: '#eeeeee' }, configurationRevision: 'r1' });
+  assert.equal((await panel('旧猫')).concise, false);
+  await r.call('/xbot-api/bots/' + encodeURIComponent('旧猫'), 'PATCH', { concise: true });
+  await r.call('/xbot-api/bots/' + encodeURIComponent('空白'), 'PATCH', { concise: true });
+  assert.deepEqual([own('旧猫'), own('空白')], ['话多，爱讲故事。' + chatManner, chatManner]);
+  // Switching it to what it already is asks nothing of native.
+  const edits = r.native.calls.filter(c => c.method === 'PATCH').length;
+  await r.call('/xbot-api/bots/' + encodeURIComponent('旧猫'), 'PATCH', { concise: true });
+  assert.equal(r.native.calls.filter(c => c.method === 'PATCH').length, edits);
+  assert.equal((await r.call('/xbot-api/bots/' + encodeURIComponent('旧猫'), 'PATCH', { concise: 'yes' })).status, 400);
 });
 
 test('a repeat is answered by what is known: the cat that exists, or the tools as they are now', async t => {

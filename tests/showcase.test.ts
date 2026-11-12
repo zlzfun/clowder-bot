@@ -175,6 +175,20 @@ test('the showcase stages one cat per template, and each chat shows what it is t
   const answers = (await until('产品评审', async () => (await get(review)).messages.slice(-3), tail => tail.every((message: any) => message.kind === 'bot' && message.status === 'completed' && Date.parse(message.time) > Date.now() - 20_000)));
   assert.deepEqual(answers.map((message: any) => message.sender).sort(), ['宪宪', '烁烁', '砚砚'].sort());
   assert.equal(answers.filter((message: any) => message.text.endsWith(said)).length, 1);
+  // Said while a cat is writing: the same reply takes it in, as on the engine, and names the message it now follows.
+  assert.equal((await post('/__preview', { speed: 0.3 })).status, 200);
+  const before = (await rows('砚砚')).length, tell = (text: string) => post(`${chat('砚砚')}/messages`, { text });
+  assert.equal((await tell('那导出呢？')).status, 200);
+  // (the second one is said once the reply has begun, as a person would)
+  await until('砚砚 has begun', async () => (await rows('砚砚')).at(-1), row => row.role === 'assistant' && row.in_progress === true);
+  assert.equal((await tell('再看一眼同步。')).status, 200);
+  const both = await until('砚砚 answers both in one reply', async () => (await rows('砚砚')).slice(before), tail => tail.length === 3 && tail[1].status === 'completed');
+  assert.deepEqual(both.map((row: any) => row.role), ['user', 'assistant', 'user']);
+  assert.equal(both[1].follows, both[2].seq);
+  assert.deepEqual(kinds([both[1]]), ['card', 'checklist', 'card', 'checklist'], 'one reply carries both answers');
+  assert.equal(both[1].content.split('看了导出那段').length - 1, 2); assert.doesNotMatch(both[1].content, /🐾/, 'no signature between them');
+  assert.equal((await post('/__preview', { speed: 0.02 })).status, 200);
+
   // A message that names no cat is taken the way the engine decides it: by the cat the owner last addressed by name.
   const say = (text: string) => post(`${review}/messages`, { text });
   assert.equal((await say('@砚砚 导出那段看过了吗？')).status, 202);

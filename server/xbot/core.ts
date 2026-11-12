@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { ApiError } from '../errors.js';
-import { BotBridge, encode } from '../native/bridge.js';
+import { BotBridge, encode, speaksBriefly, withChatManner, withoutChatManner } from '../native/bridge.js';
 import type { NativeCat } from '../native/types.js';
 import { agentBinding, catFaces } from '../native/agents.js';
 import { catConfigSchema, catConfiguration, sourceTemplateSchema } from '../native/cat-templates.js';
@@ -41,6 +41,8 @@ export function createXbotCoreRouter(bridge: BotBridge) {
     const [memory, queue, runtimes] = await Promise.all([bridge.notes(thread.id), bridge.queue(thread.id), bridge.runtimes()]);
     return { ...bridge.botItem(cat), persona: cat.roleDescription, timezone: store.bot(cat.id).timezone ?? 'Asia/Shanghai',
       agent: agentBinding(cat, runtimes), persona_card: null, memory, routines: [],
+      // Whether this cat talks the way a chat is talked in (the sentence in its personality, see chatManner).
+      concise: speaksBriefly(cat),
       cat_config: catConfiguration(cat, runtimes), source_template: store.bot(cat.id).sourceTemplate ?? null,
       agents: queue.activeInvocations.map(i => ({ id: i.invocationId ?? i.catId, type: 'agent', status: i.status ?? 'running', task: '正在处理', mode: 'chat', steps: 0, started_at: i.startedAt ? new Date(i.startedAt).toISOString() : '', native: i })),
       native: { cat, thread, queue }, memory_description: '这段对话的共享笔记。长期记忆由 Clowder AI 管理。' };
@@ -82,6 +84,7 @@ export function createXbotCoreRouter(bridge: BotBridge) {
     const first = page.messages[0];
     // A cat that was addressed but is not in this group: said once by name instead of the engine's raw refusal lines.
     const refusals = rosterRefusals(page.messages, id => cats.find(cat => cat.id === id)?.name, true), decided = bridge.decisions(page.messages);
+    const later = bridge.laterInputs(page.messages);
     res.json({ group: bridge.groupItem(thread, cats), hasMore: page.hasMore,
       // The cursor for the page before this one, as the single-chat transcript gives it.
       before: first ? `${first.timelineOrderAt ?? first.timestamp}:${first.id}` : null,
@@ -92,6 +95,8 @@ export function createXbotCoreRouter(bridge: BotBridge) {
         return { id: m.id, time: new Date(m.timestamp).toISOString(), sender: m.type === 'user' ? 'local' : name,
           kind: m.type === 'user' ? 'person' : 'bot', text: refusal ?? messageDisplayText(m, thread.id, presentation.speaker?.name), ...(refusal ? { notice: true } : {}),
           ...(reminder ? { reminder: true } : {}),
+          // The last message of the owner's that this reply took in after it had begun (by message id here).
+          ...(later.has(m.id) ? { follows: later.get(m.id) } : {}),
           status: m.lifecycle?.status ?? (m.isDraft ? 'processing' : 'complete'), ...(replyInProgress(m) ? { in_progress: true } : {}),
           ...(replyEnding(m) ? { ended: replyEnding(m) } : {}),
           attachments: bridge.workspaces.messageFiles(thread.id, m),
@@ -110,19 +115,21 @@ export function createXbotCoreRouter(bridge: BotBridge) {
   });
   router.patch('/bots/:name', async (req, res) => {
     const cat = await bot(req.params.name);
-    const input = z.object({ ...botBody, name: label.optional(), group: z.string().max(80).optional() }).omit({ runtimeId: true, templateId: true, catConfig: true, sourceTemplate: true, idempotencyKey: true }).strict().parse(req.body);
+    const input = z.object({ ...botBody, name: label.optional(), group: z.string().max(80).optional(), concise: z.boolean().optional() }).omit({ runtimeId: true, templateId: true, catConfig: true, sourceTemplate: true, idempotencyKey: true }).strict().parse(req.body);
     if (input.group && !store.state.folders.includes(input.group)) throw new ApiError(400, '分组不存在');
     if (input.name && (await bridge.cats()).some(c => c.id !== cat.id && c.name.toLowerCase() === input.name!.toLowerCase())) throw new ApiError(409, '已经有一只叫这个名字的猫猫了', undefined, 'name_taken');
     const update: Record<string, unknown> = {};
     if (input.name) Object.assign(update, { name: input.name, displayName: input.name, nickname: input.name, mentionPatterns: [`@${input.name}`, `@${cat.id}`] });
     if (input.persona !== undefined) update.roleDescription = z.string().trim().min(1).parse(input.persona);
     if (input.description !== undefined) update.teamStrengths = input.description;
+    // Talking briefly is a sentence in the cat's own personality: put in or taken out, the rest of it untouched.
+    if (input.concise !== undefined && input.concise !== speaksBriefly(cat)) update.personality = input.concise ? withChatManner(cat.personality) : withoutChatManner(cat.personality);
     if (Object.keys(update).length) await native.request(`/api/cats/${encode(cat.id)}`, { method: 'PATCH', body: { ...update, expectedRevision: cat.configurationRevision } });
     const meta = store.bot(cat.id);
     if (input.group !== undefined) meta.folder = input.group;
     if (input.timezone !== undefined) meta.timezone = input.timezone;
     if (input.avatar_seed !== undefined) { meta.avatarSeed = input.avatar_seed; delete meta.avatarData; delete meta.avatarMime; }
-    store.save(); res.json({ name: input.name ?? cat.name });
+    store.save(); res.json({ name: input.name ?? cat.name, ...(input.concise !== undefined ? { concise: input.concise } : {}) });
   });
   router.post('/bots/:name/pin', async (req, res) => { const cat = await bot(req.params.name); store.bot(cat.id).pinned = z.object({ pinned: z.boolean() }).parse(req.body).pinned; store.save(); res.json({ status: 'ok' }); });
   router.post('/bots/:name/fork', async (req, res) => {

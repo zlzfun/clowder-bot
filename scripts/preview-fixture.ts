@@ -67,7 +67,8 @@ const agentSets: Record<string, NativeRuntime[]> = (() => {
 
 export class PreviewNative extends NativeFixture {
   listeners = new Map<string, Set<(event: NativeEvent) => void>>();
-  turns = new Map<string, { threadId: string; catId: string; invocationId: string; stop: boolean }>();
+  /** Replies being written. `more` holds what the owner said to that cat meanwhile: the engine lets the same reply take it in. */
+  turns = new Map<string, { threadId: string; catId: string; invocationId: string; stop: boolean; reply?: NativeMessage; more: NativeMessage[] }>();
   speed = 1; counter = 0; epoch = randomUUID(); seq = new Map<string, number>();
   /** What cats asked the owner to confirm (the native Approval Hub), and whether deciding should fail like a broken store. */
   hub: Array<Record<string, any>> = []; hubFails = false;
@@ -203,7 +204,16 @@ export class PreviewNative extends NativeFixture {
       list.push(user);
       const entries = targets.map(cat => ({ entryId: 'queue:' + randomBytes(8).toString('hex'), targetCatId: cat.id }));
       this.emit(thread.id, { type: 'queue_updated', action: 'enqueued' });
-      for (const cat of targets) void this.turn(thread.id, cat, user).catch(error => console.error('[preview]', error));
+      // A cat that is writing a reply here takes the new message into that reply instead of starting another (the engine's
+      // continue_current, recorded as the engine records it: read off the isolated runtime, 2026-11-12). Others start a turn.
+      user.lifecycle = { kind: 'input', dispatchRefs: [] };
+      for (const cat of targets) {
+        const writing = [...this.turns.values()].find(turn => turn.threadId === thread.id && turn.catId === cat.id && !turn.stop && turn.reply);
+        if (!writing) { void this.turn(thread.id, cat, user).catch(error => console.error('[preview]', error)); continue; }
+        (user.lifecycle.dispatchRefs as unknown[]).push({ targetId: cat.id, phase: 'settled', statusMessageId: writing.reply!.id, dispatchedAt: Date.now(), inputRead: { status: 'read', at: Date.now() }, appendAcceptance: 'accepted' });
+        (writing.reply!.lifecycle!.inputMessageIds as string[]).push(user.id);
+        writing.more.push(user);
+      }
       return done({ status: 'queued', queuePosition: 1, entryId: entries[0]?.entryId, entries, merged: false, userMessageId: user.id, userMessage: { id: user.id, timestamp: user.timestamp } });
     }
     return super.request(path, options);
@@ -312,17 +322,21 @@ export class PreviewNative extends NativeFixture {
   }
   async turn(threadId: string, cat: NativeCat, user: NativeMessage) {
     const list = this.messages.get(threadId)!, invocationId = randomUUID(), key = `${threadId}:${cat.id}:${invocationId}`;
-    const state = { threadId, catId: cat.id, invocationId, stop: false }; this.turns.set(key, state);
-    const { steps, reply, fail, think, blocks, proposal, files } = this.script(cat, user.content, threadId);
+    const state: { threadId: string; catId: string; invocationId: string; stop: boolean; reply?: NativeMessage; more: NativeMessage[] } = { threadId, catId: cat.id, invocationId, stop: false, more: [] };
+    this.turns.set(key, state);
+    const first = this.script(cat, user.content, threadId);
     const message: NativeMessage = { id: this.id(), type: 'assistant', catId: cat.id, timestamp: Date.now(), content: '', origin: 'stream', replyTo: user.id,
-      lifecycle: { kind: 'response', status: 'processing', invocationId }, toolEvents: [] };
+      lifecycle: { kind: 'response', status: 'processing', invocationId, inputMessageIds: [user.id], startedAt: Date.now() }, toolEvents: [] };
+    (user.lifecycle?.dispatchRefs as unknown[] | undefined)?.push({ targetId: cat.id, phase: 'settled', statusMessageId: message.id, dispatchedAt: Date.now() });
     const stamp = { catId: cat.id, messageId: message.id, invocationId: 'outer-' + invocationId, turnInvocationId: invocationId };
     const info = (content: Record<string, unknown>, more: Record<string, unknown> = {}) =>
       this.emit(threadId, { type: 'system_info', ...stamp, content: JSON.stringify(content), timestamp: Date.now(), ...more }, true);
     const settle = (status: string, reason?: string) => {
-      message.lifecycle = { kind: 'response', status, invocationId, completedAt: Date.now(), ...(reason ? { reason } : {}) }; delete message.isDraft;
+      message.lifecycle = { ...message.lifecycle, kind: 'response', status, invocationId, completedAt: Date.now(), ...(reason ? { reason } : {}) }; delete message.isDraft;
       this.turns.delete(key); this.emit(threadId, { type: 'queue_updated', action: 'completed' });
     };
+    // From here on what the owner says to this cat joins this reply.
+    state.reply = message;
     await wait(120 * this.speed);
     list.push(message);
     this.emit(threadId, { type: 'queue_updated', action: 'processing' });
@@ -332,42 +346,55 @@ export class PreviewNative extends NativeFixture {
     const codex = cat.clientId === 'openai';
     const status = (content: string) => this.emit(threadId, { type: 'status', ...stamp, content, timestamp: Date.now() }, true);
     const thinking = () => codex ? status('thinking') : info({ type: 'thinking', catId: cat.id, text: '' });
-    thinking();
-    for (let waited = 0; waited < think && !state.stop; waited += 100) await wait(100 * this.speed);
-    for (const [toolName, toolInput] of steps) {
-      if (state.stop) break;
-      this.emit(threadId, { type: 'tool_use', ...stamp, toolName, toolInput, toolUseId: 'toolu_' + randomBytes(6).toString('hex'), timestamp: Date.now() }, true);
-      (message.toolEvents as unknown[]).push({ type: 'tool_use', toolName, label: toolName, detail: JSON.stringify(toolInput) });
-      await wait(900 * this.speed);
-      thinking();
-    }
+    const layout = () => ({ outputLayout: { v: 1, owner: { threadId, catId: cat.id, turnInvocationId: invocationId }, contentRevision: { length: written.length, sha256: '' }, status: 'unavailable' } });
     // The stream runs ahead of the persisted draft, as on the real runtime (a draft is flushed about every two seconds).
     let written = '', flushed = Date.now();
-    const pieces = reply.match(/[\s\S]{1,3}/gu) ?? [];
-    for (const piece of pieces) {
-      if (state.stop) break;
-      written += piece;
-      this.emit(threadId, { type: 'text', ...stamp, origin: 'stream', content: piece, textMode: 'append', timestamp: Date.now(),
-        extra: { outputLayout: { v: 1, owner: { threadId, catId: cat.id, turnInvocationId: invocationId }, contentRevision: { length: written.length, sha256: '' }, status: 'unavailable' } } }, true);
-      if (codex) {
-        status('streaming');
-        // Codex also sends the whole reply so far at the end of each paragraph and once more at the end.
-        if (piece.includes('\n') || written.length === reply.length) this.emit(threadId, { type: 'text', ...stamp, origin: 'stream', content: written, textMode: 'replace', timestamp: Date.now(),
-          extra: { outputLayout: { v: 1, owner: { threadId, catId: cat.id, turnInvocationId: invocationId }, contentRevision: { length: written.length, sha256: '' }, status: 'unavailable' } } }, true);
+    const blocks: Array<Record<string, unknown>> = [], files: NonNullable<Script['files']> = [], proposals: Array<[Proposal, string]> = [];
+    /** One answer inside this reply: its thinking, its steps, its words. Returns false when it failed. */
+    const answer = async (script: ReturnType<PreviewNative['script']>, to: NativeMessage): Promise<boolean> => {
+      thinking();
+      for (let waited = 0; waited < script.think && !state.stop; waited += 100) await wait(100 * this.speed);
+      for (const [toolName, toolInput] of script.steps) {
+        if (state.stop) break;
+        this.emit(threadId, { type: 'tool_use', ...stamp, toolName, toolInput, toolUseId: 'toolu_' + randomBytes(6).toString('hex'), timestamp: Date.now() }, true);
+        (message.toolEvents as unknown[]).push({ type: 'tool_use', toolName, label: toolName, detail: JSON.stringify(toolInput) });
+        await wait(900 * this.speed);
+        thinking();
       }
-      if (Date.now() - flushed > 1800 * this.speed) { message.content = written; message.isDraft = true; flushed = Date.now(); }
-      if (fail && written.length > 4) break;
-      await wait(35 * this.speed);
-    }
+      // An answer to something said meanwhile follows what was written before it, after that part's own signature.
+      const text = (written ? '\n\n' : '') + script.reply, end = written.length + text.length;
+      for (const piece of text.match(/[\s\S]{1,3}/gu) ?? []) {
+        if (state.stop) break;
+        written += piece;
+        this.emit(threadId, { type: 'text', ...stamp, origin: 'stream', content: piece, textMode: 'append', timestamp: Date.now(), extra: layout() }, true);
+        if (codex) {
+          status('streaming');
+          // Codex also sends the whole reply so far at the end of each paragraph and once more at the end.
+          if (piece.includes('\n') || written.length === end) this.emit(threadId, { type: 'text', ...stamp, origin: 'stream', content: written, textMode: 'replace', timestamp: Date.now(), extra: layout() }, true);
+        }
+        if (Date.now() - flushed > 1800 * this.speed) { message.content = written; message.isDraft = true; flushed = Date.now(); }
+        if (script.fail && written.length > 4) break;
+        await wait(35 * this.speed);
+      }
+      if (script.fail) return false;
+      blocks.push(...script.blocks); files.push(...script.files);
+      if (script.proposal) proposals.push([script.proposal, to.id]);
+      return true;
+    };
+    let failed: boolean | string = false;
+    if (!await answer(first, user)) failed = first.fail || true;
+    // What the owner said while this was being written is answered in the same reply, in the order it came.
+    while (!failed && !state.stop && state.more.length) { const next = state.more.shift()!; await answer({ ...this.script(cat, next.content, threadId), fail: false }, next); }
     if (codex) status('done');
     if (state.stop) { message.content = written; settle('canceled'); this.emit(threadId, { type: 'done', ...stamp, isFinal: true, timestamp: Date.now() }, true); return; }
-    if (fail) { message.content = ''; settle('failed', typeof fail === 'string' ? fail : undefined); this.emit(threadId, { type: 'error', ...stamp, error: 'preview failure', timestamp: Date.now() }, true); return; }
+    if (failed) { message.content = ''; settle('failed', typeof failed === 'string' ? failed : undefined); this.emit(threadId, { type: 'error', ...stamp, error: 'preview failure', timestamp: Date.now() }, true); return; }
     message.content = written;
     if (blocks.length) message.extra = { ...message.extra, rich: { v: 1, blocks } };
     for (const file of files) this.publish(threadId, message, file);
     settle('completed');
     this.emit(threadId, { type: 'done', ...stamp, isFinal: true, timestamp: Date.now() }, true);
-    if (proposal) { this.propose(threadId, cat, proposal, Date.now(), user.id); this.emit(threadId, { type: 'thread_updated' }); }
+    for (const [proposal, about] of proposals) this.propose(threadId, cat, proposal, Date.now(), about);
+    if (proposals.length) this.emit(threadId, { type: 'thread_updated' });
   }
 }
 

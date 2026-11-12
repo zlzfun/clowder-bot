@@ -55,6 +55,23 @@ const defaultRole = '随叫随到的伙伴：聊天、答疑、查资料、写�
 // A custom cat without words of the owner's own is a plain helper; said explicitly so native does not fill in a breed's stock portrait.
 const defaultPersonality = '亲切耐心，讲得清楚；做事利落，不绕弯子。';
 const defaultStrengths = '聊天答疑、查资料、写东西、整理文件';
+/**
+ * How a cat talks in a chat: a sentence added to the personality of a cat this app makes (性格 in the
+ * identity the engine gives the cat). Without it a cat answers like a workspace assistant — headings,
+ * bullet lists, tables, emoji. Measured on the isolated runtime (2026-11-12, Claude haiku, the same two
+ * questions): 261 and 527 characters in 20 and 29 lines before; 95 and 119 characters in 3 lines each
+ * with it, and still a table when a table was asked for. The engine builds a cat's identity when a
+ * conversation starts, so a change shows in conversations started afterwards.
+ */
+export const chatManner = '说话像在聊天软件里回消息：先说结论，通常两三句话说完；不用标题、列表、表格和表情符号，不复述问题，不铺垫，不在结尾总结。对方明确要清单、表格、代码或长文时照给；内容确实多时先说要点，问一句要不要展开。';
+/** A personality with that manner added once. */
+export function withChatManner(personality: string | undefined): string {
+  const own = (personality ?? '').trim();
+  return own.includes(chatManner) ? own : !own ? chatManner : `${own}${/[。！？.!?；;]$/.test(own) ? '' : '。'}${chatManner}`;
+}
+/** …and with it taken out again; what the cat's personality otherwise says stays. */
+export function withoutChatManner(personality: string | undefined): string { return (personality ?? '').replace(chatManner, '').trim(); }
+export const speaksBriefly = (cat: NativeCat) => typeof cat.personality === 'string' && cat.personality.includes(chatManner);
 
 const hex = (value: unknown): value is string => typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value);
 /** Only a well-formed colour pair is passed on; the value ends up in a style. */
@@ -170,7 +187,7 @@ export class BotBridge {
     let lastUser: string | undefined, previous: string | undefined;
     // A cat that was addressed but does not belong to this conversation: said once by name (see rosterRefusals).
     const refusals = rosterRefusals(page.messages, id => cats.find(cat => cat.id === id)?.name, false);
-    const decided = this.decisions(page.messages);
+    const decided = this.decisions(page.messages), later = this.laterInputs(page.messages);
     for (const { message, ...presentation } of this.presentMessages(page.messages, cats)) {
       if (message.type === 'user' && message.id === source) continue;
       if (refusals.get(message.id) === null) continue;
@@ -191,6 +208,8 @@ export class BotBridge {
         reply_to: quoted ? this.store.state.messageRefs[thread.id]?.[quoted] ?? 0 : 0,
         status: message.lifecycle?.status ?? (message.isDraft ? 'processing' : 'complete'), ...(inProgress ? { in_progress: true } : {}),
         ...(ending ? { ended: ending } : {}), ...(refusal ? { notice: true } : {}), ...(reminder ? { reminder: true } : {}),
+        // The owner said more while this reply was being written and the engine let the reply take it in: the last such message (see laterInputs).
+        ...(later.has(message.id) ? { follows: this.store.sequence(thread.id, later.get(message.id)!) } : {}),
         attachments: this.workspaces.messageFiles(thread.id, message),
         // Cards, checklists and choices the cat attached; `blocks_hidden` counts what the chat cannot draw yet.
         ...(rich.blocks.length ? { blocks: rich.blocks } : {}), ...(rich.hidden ? { blocks_hidden: rich.hidden } : {}), native: message };
@@ -258,6 +277,22 @@ export class BotBridge {
     const request = invite();
     this.greetingRequests.set(key, request);
     try { return await request; } finally { this.greetingRequests.delete(key); }
+  }
+  /**
+   * Replies that took in something the owner said after they had begun, by the engine's own record: a response
+   * lists the messages it answers (`lifecycle.inputMessageIds`), and one that was appended to a running reply
+   * comes later in the conversation than the reply itself. Maps the reply to the last such message on the page,
+   * so a chat can draw the reply under everything it answers. The order of the records is not changed.
+   */
+  laterInputs(messages: NativeMessage[]): Map<string, string> {
+    const place = new Map(messages.map((message, index) => [message.id, index])), later = new Map<string, string>();
+    for (const [index, message] of messages.entries()) {
+      const inputs = message.type === 'assistant' && Array.isArray(message.lifecycle?.inputMessageIds) ? message.lifecycle.inputMessageIds as unknown[] : [];
+      const last = inputs.filter((id): id is string => typeof id === 'string' && (place.get(id) ?? -1) > index && messages[place.get(id)!]!.type === 'user')
+        .sort((a, b) => place.get(a)! - place.get(b)!).at(-1);
+      if (last) later.set(message.id, last);
+    }
+    return later;
   }
   /** How the requests for confirmation on this page were answered, from the engine's own receipts. */
   decisions(messages: NativeMessage[]): ApprovalDecision[] {
@@ -488,10 +523,11 @@ export class BotBridge {
     if (!template?.color) throw new ApiError(503, '暂时读不到猫猫的资料，这次没有创建，请稍后再试', undefined, 'faces_unavailable');
     // The cat that is made is the one that was described: a portrait that changed since the screen read it is shown again first.
     if (!custom && simple.rev && simple.rev !== template.rev) throw new ApiError(409, '这只猫猫的介绍刚刚更新了，请再看一眼后重试', undefined, 'face_changed');
+    // Every cat made here talks the way a chat is talked in (chatManner), unless the owner wrote its personality themselves.
     const portrait = custom
-      ? { roleDescription: about || defaultRole, personality: temper || defaultPersonality, teamStrengths: about ? clip(about.replace(/\s+/g, ' '), 60) : defaultStrengths }
+      ? { roleDescription: about || defaultRole, personality: temper || withChatManner(defaultPersonality), teamStrengths: about ? clip(about.replace(/\s+/g, ' '), 60) : defaultStrengths }
       // The engine's template of the same id gives the role, the personality and the strengths, as written upstream.
-      : { roleDescription: template.roleDescription || defaultRole, personality: template.personality || defaultPersonality, teamStrengths: template.teamStrengths || defaultStrengths };
+      : { roleDescription: template.roleDescription || defaultRole, personality: withChatManner(template.personality || defaultPersonality), teamStrengths: template.teamStrengths || defaultStrengths };
     return { input, face, tool: runtime.id, body: { catId, name, displayName: name, nickname: name, color: template.color, mentionPatterns: [`@${name}`, `@${catId}`],
       ...portrait, clientId: runtime.clientId, configurationSource: 'native_tool', defaultModel: '' } as Record<string, unknown> };
   }
