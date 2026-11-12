@@ -421,15 +421,21 @@
     // when 自定义 is chosen, else the first face.
     // agent: 自定义's tool; toolPicked: the owner chose it. Untouched, it is the
     // usual one, or the tool of the cat on screen when 自定义 was chosen.
-    let s = null, agent = null, toolPicked = false, faceTouched = false, picked = null, cat = null, suggested = "", busy = false, loads = 0, refused = "", refusedFaces = false, kind = "";
+    // typed: the owner wrote the name box (set by its input event, never inferred
+    // from its value); emptied by the owner, it follows the chosen option again.
+    let s = null, agent = null, toolPicked = false, faceTouched = false, picked = null, cat = null, typed = false, busy = false, loads = 0, refused = "", refusedFaces = false, kind = "";
     let looks = null, looksTouched = false;
     // presented: the form has been shown; from then on only the owner changes between 自定义 and a cat.
     // refusal: the error line holds a refusal about the chosen cat's tool (cleared once it no longer holds).
     let offered = R.offer([], presets()), custom = false, modeTouched = false, presented = false, painted = "", whoShown = "", heroShown = null, usesShown = "", refusal = false;
-    // The keys of requests whose answer was lost, by request body: the same
-    // body again — after moving to 自定义 and back, too — is the same request
-    // under its own key; a changed body (自定义, another tool or other looks) is new.
+    // The requests whose answer was lost, by request body ({key, name}): the
+    // same body again — after moving to 自定义 and back, too — is the same
+    // request under its own key; a changed body (自定义, another tool or other
+    // looks) is new. A name that went out in one of them is held while it is
+    // here: no choice re-suggests it away, so coming back to that option is the
+    // same body again.
     const unsure = new Map();
+    const held = () => { const name = R.trim(nameIn.value); return !!name && [...unsure.values()].some((u) => u.name === name); };
     const root = node(dialog ? "div" : "form", "qc-flow");
     root.tabIndex = -1;
     if (!dialog) {
@@ -516,6 +522,8 @@
     // A cat of the owner's own does not borrow a template's name: its box starts empty, this placeholder asking for one.
     const nameF = field("名字", { max: R.NAME_INPUT_MAX, placeholder: R.NAME_PLACEHOLDER }), nameIn = nameF.input;
     nameIn.spellcheck = false;
+    // The owner's own name, from the moment they write one, until they empty the box.
+    nameIn.addEventListener("input", () => { typed = !!R.trim(nameIn.value); });
     // 自定义: what it is for (simple.about), what it is like
     // (simple.personality), both optional, and which tool it thinks with.
     const aboutF = field("它主要帮你做什么", { max: R.ABOUT_INPUT_MAX, optional: true, placeholder: "比如：帮我改简历、陪我练口语" });
@@ -610,7 +618,6 @@
       faces.own(ready);
       faces.mark(away && away.size ? away : null);
       const blocked = ready && stuck();
-      about.classList.toggle("mixed", !!(away && away.size));
       about.classList.toggle("described", offered.some((f) => f.hint));
       about.classList.toggle("own", custom);
       about.classList.toggle("away", blocked);
@@ -779,13 +786,13 @@
       follow(cat);
       paintAbout();
     }
-    // The name box keeps the chosen cat's nickname until the owner writes their
-    // own; 自定义 borrows none (its box is empty, asking for a name). A name the
-    // owner typed is never overwritten.
+    // The name box follows the chosen option until the owner writes their own:
+    // a cat's nickname, made free (宪宪 2); 自定义 borrows none (the box empties,
+    // asking for a name). A name the owner typed is never overwritten, whatever
+    // it equals; nor is a name that went out in a request whose answer was lost.
     function follow(face) {
-      const next = custom ? "" : R.suggestName(face, offered, h.cats());
-      if (R.followsFace(nameIn.value, suggested)) nameIn.value = next;
-      suggested = next;
+      if (typed || held()) return;
+      nameIn.value = custom ? "" : R.suggestName(face, offered, h.cats());
     }
     // The dialog starts in the name, its suggestion selected so typing replaces
     // it. The stage leaves focus alone on arrival (the cats are the first thing
@@ -941,7 +948,7 @@
       // The same request as one whose answer was lost goes back under its key
       // even when the refreshed list now knows the name: that cat may be this
       // request's own, and the server answers with it instead of a second one.
-      const known = unsure.get(print) || "";
+      const known = (unsure.get(print) || {}).key || "";
       const problem = R.nameProblem(nameIn.value, known ? [] : h.cats());
       if (problem) { nameF.mark(problem); nameIn.focus(); return; }
       if (custom) {
@@ -966,7 +973,7 @@
         // A refused one made none (face_changed, faces_unavailable and
         // face_unavailable are refusals too): the next is new, checked against
         // the list again.
-        if (what.kind === "unsure") unsure.set(print, key); else unsure.delete(print);
+        if (what.kind === "unsure") unsure.set(print, { key, name: body.name }); else unsure.delete(print);
         if (what.kind === "name") { nameF.mark(what.text); nameIn.focus(); quietly(h.refresh); }
         // What blocks (the tool, or the cats' details) is read again and shown as item 28 does; nothing was made.
         else if (what.kind === "blocked" || what.kind === "unavailable") { refused = what.text; refusedFaces = what.kind === "unavailable"; await load("refused"); }
@@ -1008,7 +1015,7 @@
       // already made here; and whether the owner has a draft (their own cat,
       // name, 自定义, its looks, its tool or its lines) or a request whose answer was lost.
       waiting: () => busy || kind === "later",
-      kept: () => faceTouched || (custom && modeTouched) || looksTouched || toolPicked || !R.followsFace(nameIn.value, suggested)
+      kept: () => faceTouched || (custom && modeTouched) || looksTouched || toolPicked || typed
         || !!R.trim(aboutF.input.value) || !!R.trim(temperF.input.value) || unsure.size > 0,
     };
   }

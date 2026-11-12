@@ -86,8 +86,9 @@
     return face && face.nickname ? freeName(face.nickname, taken) : "";
   }
   // The name box follows the chosen face until the owner types a name of their
-  // own; emptied again, it follows once more.
-  const followsFace = (value, suggested) => !trim(value) || value === suggested;
+  // own; emptied again, it follows once more. Whether the owner typed is the
+  // box's input event (quick-create.js), never guessed from what the box holds:
+  // a name typed by hand may well equal a cat's own (item 44, review).
 
   // ---- what each face's cat is like ----
   // Picking a face picks a cat: by default it starts with the engine's template
@@ -423,7 +424,7 @@
   const startError = (err) => (plain(err && err.message) ? String(err.message) : "没能读取这台电脑的情况");
 
   root.ClowderQuickCreateRules = Object.freeze({
-    trim, nameProblem, groupNameProblem, groupName, freeName, suggestName, followsFace, NAME_INPUT_MAX, ABOUT_INPUT_MAX, aboutProblem,
+    trim, nameProblem, groupNameProblem, groupName, freeName, suggestName, NAME_INPUT_MAX, ABOUT_INPUT_MAX, aboutProblem,
     PERSONALITY_INPUT_MAX, personalityProblem, offer, usable, facesNeed, trait, clipLine, TRAIT_MAX, OWN_TITLE, OWN_NOTE, GROUPS, NAME_PLACEHOLDER, FACE_CHANGED,
     toolOf, faceUsable, firstUsable, uses, USES, UNREAD, why, tag, TAGS, toolHelp, loginHelp, BORROW, forward, joinSaid,
     start, choices, choiceOf, loginCommand, sameStart, need, TOOL_LINE, unconfirmed,

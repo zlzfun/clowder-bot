@@ -23,7 +23,7 @@
 .thread-inner.no-chat { width: min(840px, 100% - 64px); }
 .thread-inner > .qc-stage { margin: auto; }
 .qc-stage {
-  width: 100%; padding: var(--x-s8) 0 var(--x-s9);
+  width: 100%; padding: var(--x-s7) 0;
   display: flex; flex-direction: column; align-items: center; text-align: center;
   animation: rise 180ms ease-out;
 }
@@ -39,25 +39,26 @@
 .qc-arrived .text-btn:hover { background: var(--x-fill-2); }
 .qc-stage .qc-flow { margin-top: var(--x-s8); }
 
-/* ---- the composition: the cats | the chosen one's panel ---- */
+/* ---- the composition: the cats, then the chosen one's panel ----
+   Stacked is the default — a phone, a narrow window, or a browser without
+   container queries gets the cats with the panel under them; side by side is
+   what the container query at the end of this section turns on where the flow
+   has 640px. The worst case is the phone layout on a wide screen, never the
+   wide layout on a phone. */
 .qc-flow { width: 100%; container-type: inline-size; text-align: left; }
 .qc-flow:focus { outline: none; }
-.qc-meet { display: grid; grid-template-columns: 300px minmax(0, 1fr); column-gap: var(--x-s8); align-items: stretch; }
+.qc-meet { display: flex; flex-direction: column; align-items: stretch; row-gap: var(--x-s5); }
 .qc-side {
   min-width: 0; display: flex; flex-direction: column; align-items: stretch;
-  padding: var(--x-s6); border-radius: 16px; background: var(--x-fill-1);
+  padding: var(--x-s5) var(--x-s5) var(--x-s5) var(--x-s4); border-radius: 16px; background: var(--x-fill-1);
 }
-/* While some cat cannot come home as it is, the panel keeps room for its
-   reason and the way on, so the name at its foot holds still from one cat to
-   the next. */
-.qc-side:has(> .qc-about.mixed) { min-height: 384px; }
-.qc-fields { margin-top: auto; display: flex; flex-direction: column; align-items: stretch; }
+.qc-fields { display: flex; flex-direction: column; align-items: stretch; }
 
 /* ---- the cats to choose from: named tiles in one radio group ----
    Two groups when some cat cannot come home as it is (those that can, and
    自定义; then those that cannot), each under its few words; one quiet group
    while nothing can be chosen. As many tiles as the server offers: they wrap. */
-.qc-faces { display: flex; flex-direction: column; gap: var(--x-s5); min-width: 0; }
+.qc-faces { display: flex; flex-direction: column; gap: var(--x-s4); min-width: 0; }
 .qc-group { display: flex; flex-wrap: wrap; align-content: flex-start; gap: var(--x-s1); min-width: 0; }
 .qc-group-head {
   flex: 0 0 100%; margin: 0; padding: 0 var(--x-s1) 2px;
@@ -65,8 +66,8 @@
 }
 .qc-faces:not(.split) .qc-group-head { display: none; }
 .qc-face {
-  flex: 0 0 72px;
-  position: relative; min-width: 0; padding: 6px 2px 7px; border: 0; border-radius: var(--x-r-card);
+  flex: 0 0 calc(25% - 3px);
+  position: relative; min-width: 0; padding: 5px 2px 6px; border: 0; border-radius: var(--x-r-card);
   display: flex; flex-direction: column; align-items: center; gap: 2px;
   background: transparent; color: var(--x-text-2); cursor: pointer; -webkit-tap-highlight-color: transparent;
   transition: background 160ms ease-out, color 160ms ease-out;
@@ -74,7 +75,7 @@
 .qc-face:disabled { cursor: default; }
 .qc-face:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .qc-portrait {
-  position: relative; display: block; width: 52px; height: 52px;
+  position: relative; display: block; width: 48px; height: 48px;
   transform: scale(.9);
   transition: transform var(--dur-pop) var(--ease-spring), opacity var(--dur-pop) ease-out, filter var(--dur-pop) ease-out;
 }
@@ -123,9 +124,9 @@
 .qc-about {
   position: relative; min-width: 0;
   display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "hero who" "hero trait" "tail tail" "own own";
-  grid-template-rows: auto 1fr auto auto; column-gap: var(--x-s6); align-content: start;
+  grid-template-rows: auto 1fr auto auto; column-gap: var(--x-s4); align-content: start;
 }
-.qc-hero { grid-area: hero; position: relative; width: 104px; height: 104px; align-self: start; margin-left: -4px; }
+.qc-hero { grid-area: hero; position: relative; width: 80px; height: 80px; align-self: start; margin-left: -4px; }
 /* The cushion: a soft oval the cat sits on. Empty and outlined when the cat cannot come home as it is. */
 .qc-hero::before {
   content: ""; position: absolute; left: 3%; right: 3%; bottom: 1%; height: 30%; border-radius: 50%;
@@ -151,14 +152,14 @@
 .qc-agent-tag { flex: none; color: var(--x-muted); }
 .qc-agent-tag::before { content: "·"; margin-right: 5px; }
 /* Its temperament in its own words (quoted), then what it is good at. */
-.qc-trait { grid-area: trait; margin: var(--x-s3) 0 0; display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 13px; line-height: 20px; color: var(--x-muted); }
-.qc-trait-line { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; animation: fade 180ms ease-out; }
+.qc-trait { grid-area: trait; margin: var(--x-s3) 0 0; display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: var(--x-fs-ui); line-height: 21px; color: var(--x-muted); }
+.qc-trait-line { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; text-wrap: pretty; animation: fade 180ms ease-out; }
 .qc-trait-line:first-child { color: var(--x-text-2); }
 .qc-trait-line:first-child:not(:only-child)::before { content: "「"; margin-left: -.5em; }
 .qc-trait-line:first-child:not(:only-child)::after { content: "」"; }
 /* Why it cannot come home as it is, what can be done, and the way on. */
-.qc-tail { grid-area: tail; min-width: 0; margin-top: var(--x-s5); display: flex; flex-direction: column; align-items: flex-start; gap: var(--x-s3); }
-.qc-uses-line { margin: 0; font-size: 13px; line-height: 20px; color: var(--x-text-2); }
+.qc-tail { grid-area: tail; min-width: 0; margin-top: var(--x-s4); display: flex; flex-direction: column; align-items: flex-start; gap: var(--x-s3); }
+.qc-uses-line { margin: 0; font-size: 13px; line-height: 20px; color: var(--x-text-2); text-wrap: pretty; }
 .qc-uses-text { animation: fade 180ms ease-out; }
 .qc-uses-more {
   display: flex; flex-wrap: wrap; align-items: center; gap: var(--x-s2);
@@ -203,7 +204,7 @@
 
 /* ---- the fields on the panel: the name at its foot, 自定义's two lines ---- */
 .qc-side .field.qc-field { margin: var(--x-s4) 0 0; }
-.qc-fields .field.qc-field { margin-top: var(--x-s5); }
+.qc-fields .field.qc-field { margin-top: var(--x-s4); }
 .qc-side .field input { background: var(--x-card); }
 .qc-side .field input:focus { background: var(--x-card); box-shadow: inset 0 0 0 1px var(--x-fill-3); }
 .qc-opt { margin-left: var(--x-s2); font-size: var(--x-fs-cap); color: var(--x-faint); }
@@ -212,6 +213,33 @@
 .qc-err:empty { display: none; }
 /* 带它回家, at the panel's foot on the stage. */
 .qc-go { min-height: 44px; margin-top: var(--x-s5); border-radius: var(--x-r-card); font-size: 15px; }
+
+/* ---- side by side, where the flow has 640px ----
+   The cats at the left, the panel at the right, each as tall as it is (no
+   room kept inside the panel, so the view seen first has no empty band). The
+   name holds still among the cats that can come home: the card keeps room for
+   two lines of temperament and two of what it is good at. A cat that cannot
+   come home, or 自定义, may make the panel taller — eased in the dialog,
+   glided on the stage. The tiles are sized so that, in the usual mixes, the
+   two columns end on about the same line: four to a row beside the stage's
+   taller panel (it holds 带它回家), five to a row in the dialog. */
+@container (min-width: 640px) {
+  .qc-meet { display: grid; grid-template-columns: 300px minmax(0, 1fr); column-gap: var(--x-s8); align-items: start; }
+  .qc-faces { gap: var(--x-s6); }
+  .qc-face { flex-basis: 72px; padding: 6px 2px 7px; }
+  .qc-portrait { width: 52px; height: 52px; }
+  .qc-side { padding: var(--x-s6); }
+  .qc-about { column-gap: var(--x-s6); }
+  .qc-hero { width: 120px; height: 120px; }
+  .qc-nick-name { font-size: 20px; }
+  .qc-about.described .qc-trait { min-height: calc(4 * 21px + 2px); }
+  .qc-tail { margin-top: var(--x-s5); }
+  .qc-fields .field.qc-field { margin-top: var(--x-s5); }
+  .qc-card .qc-meet { grid-template-columns: 326px minmax(0, 1fr); }
+  .qc-card .qc-face { flex-basis: 62px; padding: 7px 2px 8px; }
+  .qc-card .qc-portrait { width: 50px; height: 50px; }
+  .qc-card .qc-hero { width: 108px; height: 108px; }
+}
 /* 创建 / 带它回家 for a cat that cannot come home as it is: still focusable
    (aria-disabled, so its reason is read on it), drawn as the original
    .primary:disabled. */
@@ -293,7 +321,7 @@
    Wide enough for the cats beside the chosen one's panel. */
 .qc-modal { --qc-top: max(16px, calc((100vh - 600px) / 2)); place-items: start center; padding-top: var(--qc-top); }
 @supports (height: 100dvh) { .qc-modal { --qc-top: max(16px, calc((100dvh - 600px) / 2)); } }
-.qc-modal .modal-card { width: min(720px, 100%); max-height: min(760px, calc(100vh - var(--qc-top) - 16px)); overscroll-behavior: contain; }
+.qc-modal .modal-card { width: min(760px, 100%); max-height: min(760px, calc(100vh - var(--qc-top) - 16px)); overscroll-behavior: contain; }
 @supports (height: 100dvh) { .qc-modal .modal-card { max-height: min(760px, calc(100dvh - var(--qc-top) - 16px)); } }
 .qc-card:focus { outline: none; }
 .qc-card.qc-easing { overflow: hidden; }
@@ -342,21 +370,6 @@
 .qc-ghost { position: fixed; z-index: 70; pointer-events: none; transform-origin: 0 0; will-change: transform; }
 .qc-ghost > svg { display: block; width: 100%; height: 100%; }
 
-/* Narrower than 640px (a phone, a narrow window): the cats, then the panel
-   under them. The cats sit above the panel, so a taller card (a cat that
-   cannot come home as it is) only moves what is below it; no room is kept. */
-@container (max-width: 639px) {
-  .qc-meet { display: flex; flex-direction: column; align-items: stretch; row-gap: var(--x-s5); }
-  .qc-faces { gap: var(--x-s4); }
-  .qc-face { flex-basis: calc(25% - 3px); padding: 5px 2px 6px; }
-  .qc-portrait { width: 48px; height: 48px; }
-  .qc-side { padding: var(--x-s5) var(--x-s5) var(--x-s5) var(--x-s4); }
-  .qc-side:has(> .qc-about.mixed) { min-height: 0; }
-  .qc-about { column-gap: var(--x-s4); }
-  .qc-hero { width: 80px; height: 80px; }
-  .qc-tail { margin-top: var(--x-s4); }
-  .qc-fields .field.qc-field { margin-top: var(--x-s4); }
-}
 @media (max-width: 560px) {
   .thread-inner.no-chat { width: calc(100% - 32px); }
   /* On a phone the stage starts at the top: the cats first, the panel under them. */
@@ -366,7 +379,19 @@
   .qc-stage .qc-flow { margin-top: var(--x-s6); }
   .qc-modal { --qc-top: max(16px, calc((100vh - 800px) / 2)); }
   @supports (height: 100dvh) { .qc-modal { --qc-top: max(16px, calc((100dvh - 800px) / 2)); } }
-  .qc-modal .modal-card { padding: var(--x-s7); }
+  /* The dialog's actions stay in reach: pinned to the card's bottom edge on
+     its own surface while the side above scrolls under it (a soft fade over
+     what passes beneath); a field brought into view is kept clear of them. */
+  .qc-modal .modal-card { padding: var(--x-s7); scroll-padding-bottom: 92px; }
+  .qc-card .modal-actions {
+    position: sticky; bottom: calc(-1 * var(--x-s7)); z-index: 2;
+    margin: var(--x-s5) calc(-1 * var(--x-s7)) calc(-1 * var(--x-s7));
+    padding: var(--x-s4) var(--x-s7) var(--x-s7); background: var(--bg);
+  }
+  .qc-card .modal-actions::before {
+    content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: var(--x-s6);
+    background: linear-gradient(to bottom, transparent, var(--bg)); pointer-events: none;
+  }
   .qc-tab { height: 38px; }
   /* 44px to touch on a phone. */
   .qc-look { width: 44px; height: 44px; }
