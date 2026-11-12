@@ -183,20 +183,37 @@
     if (Array.isArray(n.toolEvents) && n.toolEvents.length > 0) return true;
     return status === "completed";
   }
+  // A message the owner sent while this reply was being written, which the
+  // reply took in (the engine lists it among the messages the reply answers,
+  // lifecycle.inputMessageIds) and which says the cat read it: its own
+  // record has a dispatch to this reply (statusMessageId, and this cat when
+  // it names one) marked inputRead "read" (chat-live-api.md 「会话行」).
+  function readBy(owner, reply) {
+    const refs = owner && owner.native && owner.native.lifecycle && Array.isArray(owner.native.lifecycle.dispatchRefs) ? owner.native.lifecycle.dispatchRefs : [];
+    const id = str(reply.native.id), cat = str(reply.native.catId);
+    return !!id && refs.some((r) => !!r && typeof r === "object" && !!r.inputRead && r.inputRead.status === "read"
+      && str(r.statusMessageId) === id && (r.targetId === undefined || str(r.targetId) === cat));
+  }
   // owner message ID → the cats (native IDs) whose reply answers it, in
-  // order. The reply's native replyTo names the owner message it answers.
-  // Only a reply that began says so: a message waiting in the queue, one
-  // that did not go out, or one whose reply failed before starting has none.
+  // order. The reply's native replyTo names the owner message it answers,
+  // and a reply that went on with what the owner said meanwhile answers
+  // those too, once they were read (readBy). Only a reply that began says
+  // so: a message waiting in the queue, one that did not go out, or one
+  // whose reply failed before starting has none.
   function picked(messages) {
-    const owners = new Set(), out = new Map();
-    for (const m of messages || []) if (ownerRow(m) && midOf(m)) owners.add(midOf(m));
+    const owners = new Map(), out = new Map();
+    for (const m of messages || []) if (ownerRow(m) && midOf(m)) owners.set(midOf(m), m);
+    const add = (to, cat) => {
+      const list = out.get(to) || [];
+      if (!list.includes(cat)) list.push(cat);
+      out.set(to, list);
+    };
     for (const m of messages || []) {
       if (!began(m)) continue;
       const to = typeof m.native.replyTo === "string" ? m.native.replyTo : "";
-      if (!to || !owners.has(to)) continue;
-      const list = out.get(to) || [];
-      if (!list.includes(m.native.catId)) list.push(m.native.catId);
-      out.set(to, list);
+      if (to && owners.has(to)) add(to, m.native.catId);
+      const inputs = m.native.lifecycle && Array.isArray(m.native.lifecycle.inputMessageIds) ? m.native.lifecycle.inputMessageIds : [];
+      for (const id of inputs) if (typeof id === "string" && id !== to && owners.has(id) && readBy(owners.get(id), m)) add(id, m.native.catId);
     }
     return out;
   }

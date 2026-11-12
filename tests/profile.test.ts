@@ -443,7 +443,9 @@ test('资料: 职责 (or the way to write one), 置顶 as a switch, 新对话 wi
   d.P.catPage(TUANZI, PROFILE);
   // The order a messenger's profile reads in.
   const order = page.children.map(n => n.className);
-  assert.deepEqual(order, ['psec pf-duty', 'pf-row pf-pin', 'pf-line', 'psec pf-convs', 'pf-rule', 'task-details pf-adv', 'pf-foot']);
+  assert.deepEqual(order, ['psec pf-duty', 'pf-row pf-pin', 'pf-line', 'pf-row pf-brief', 'pf-line', 'psec pf-convs', 'pf-rule', 'task-details pf-adv', 'pf-foot']);
+  // 说话简短 waits for the profile to say which way it is (this one does not).
+  assert.equal(shown(one(page, 'pf-brief')), false);
   assert.match(visibleText(one(page, 'pf-convs')), /^对话新对话现在的对话会收进「历史对话」/);
   assert.ok(one(page, 'pf-convs-slot').firstChild === d.convNode, '历史对话 is the conversations module\'s node');
   assert.equal(one(page, 'pf-remove').textContent, '删除猫猫');
@@ -551,6 +553,105 @@ test('置顶: the switch says only what the list confirms — while saving it ke
   await settle();
   assert.equal(sw.getAttribute('aria-checked'), 'false');
   assert.equal(visibleText(one(page, 'pf-line')), '没能置顶：服务出了点问题，请稍后再试。');
+});
+
+test('说话简短: the rule shows what the server confirmed — the profile\'s word, or right after a change the answer until a read agrees or the second read after it', () => {
+  const R = load(RULES).window.ClowderProfileRules;
+  assert.deepEqual(plain(R.briefShown(true, null)), { value: true, keep: false });
+  assert.deepEqual(plain(R.briefShown(undefined, null)), { value: null, keep: false }, 'not read (or an older server): no switch');
+  assert.deepEqual(plain(R.briefShown('yes', null)), { value: null, keep: false });
+  // The answer stands over a read that may have been asked for before the change…
+  assert.deepEqual(plain(R.briefShown(false, { value: true, reads: 1 })), { value: true, keep: true });
+  // …until a read agrees, or the second read after it says otherwise (changed elsewhere).
+  assert.deepEqual(plain(R.briefShown(true, { value: true, reads: 1 })), { value: true, keep: false });
+  assert.deepEqual(plain(R.briefShown(false, { value: true, reads: 2 })), { value: false, keep: false });
+  assert.deepEqual(plain(R.briefShown(undefined, { value: true, reads: 5 })), { value: true, keep: true });
+  // Its words: what it does, in one line, and nothing technical.
+  assert.equal(R.BRIEF.title, '说话简短');
+  assert.equal(R.BRIEF.hint, '先说结论，几句话说完；要清单、表格、代码或长文时照给');
+  assert.doesNotMatch(Object.values(R.BRIEF).join(''), /Agent|模型|性格|提示词|会话|Bot/);
+});
+
+test('说话简短 on 资料: shown once the profile says which way it is; the switch keeps the confirmed state while saving, takes the server\'s answer, points at 新对话 after a change, and says why when it did not save', async () => {
+  let gate: Promise<void> | null = null, fails = false, answer: ((asked: boolean) => unknown) | null = null;
+  const d = drawer({ route: async (path, method, body) => {
+    if (path !== '/xbot-api/bots/%E5%BF%AB%E6%89%8B' || method !== 'PATCH') return undefined;
+    if (gate) await gate;
+    if (fails) throw fail(409, '这只猫猫的资料刚刚被改过了，请再试一次');
+    return answer ? answer(body.concise) : { name: '快手', concise: body.concise };
+  } });
+  d.s.sel = TUANZI;
+  // Not read yet: no switch, and nothing to click.
+  const page = d.show(d.P.catPage(TUANZI, PROFILE));
+  const row = one(page, 'pf-brief'), sw = named(page, 'pf-switch')[1]!, line = named(page, 'pf-line')[1]!;
+  assert.equal(shown(row), false);
+  sw.click();
+  await settle();
+  assert.deepEqual(d.writes(), [], 'an unknown state is never sent');
+  // Read: off. The row, its one line, the switch.
+  const off = { ...PROFILE, concise: false };
+  d.P.catPage(TUANZI, off);
+  assert.equal(shown(row), true);
+  assert.equal(visibleText(row), '说话简短先说结论，几句话说完；要清单、表格、代码或长文时照给');
+  assert.equal(sw.getAttribute('role'), 'switch');
+  assert.equal(sw.getAttribute('aria-checked'), 'false');
+  assert.equal(d.doc.getElementById(sw.getAttribute('aria-describedby')!)?.textContent, '先说结论，几句话说完；要清单、表格、代码或长文时照给');
+  // Saving: the switch keeps the confirmed state, busy and inert (focus stays); one request at a time.
+  let open!: () => void;
+  gate = new Promise<void>((r) => { open = r; });
+  sw.focus();
+  one(row, 'pf-row-title').click();
+  assert.equal(sw.getAttribute('aria-checked'), 'false', 'not on until the server says so');
+  assert.equal(sw.getAttribute('aria-busy'), 'true');
+  assert.equal(sw.getAttribute('aria-disabled'), 'true');
+  assert.equal(named(row, 'pf-row-hint')[0]!.textContent, '正在保存…');
+  assert.equal(shown(line), false, 'nothing announced before the answer');
+  sw.click();
+  assert.deepEqual(d.writes(), [{ path: '/xbot-api/bots/%E5%BF%AB%E6%89%8B', method: 'PATCH', body: { concise: true } }]);
+  open();
+  await settle();
+  gate = null;
+  assert.equal(sw.getAttribute('aria-checked'), 'true');
+  assert.equal(sw.getAttribute('aria-busy'), null);
+  assert.equal(d.doc.activeElement, sw);
+  // The change shows in a new conversation: the line points at 新对话.
+  assert.equal(visibleText(line), '在新对话里生效。开始新对话');
+  assert.equal(line.getAttribute('role'), 'status');
+  button(line, '开始新对话').click();
+  assert.deepEqual(d.log.at(-1), 'new:bot:快手');
+  assert.equal(d.s.opener, button(line, '开始新对话'), 'focus comes back to the link');
+  // A poll that was asked for before the change still says off: the answer stands; a later one that agrees takes over.
+  d.P.catPage(TUANZI, { ...off });
+  assert.equal(sw.getAttribute('aria-checked'), 'true');
+  d.P.catPage(TUANZI, { ...PROFILE, concise: true });
+  assert.equal(sw.getAttribute('aria-checked'), 'true');
+  // A new conversation: the line has done its job.
+  d.P.catPage(TUANZI, { ...PROFILE, concise: true, thread_id: 'thread-2' });
+  assert.equal(shown(line), false);
+  // Changed elsewhere afterwards: the profile says so.
+  d.P.catPage(TUANZI, { ...PROFILE, concise: false, thread_id: 'thread-2' });
+  assert.equal(sw.getAttribute('aria-checked'), 'false');
+  // The server answers what the cat has now, which may not be what was asked: that is shown, and nothing changed, so no line.
+  answer = () => ({ name: '快手', concise: false });
+  sw.click();
+  await settle();
+  assert.equal(sw.getAttribute('aria-checked'), 'false');
+  assert.equal(shown(line), false);
+  answer = null;
+  // A refusal: the switch stays as it was, with the reason under it.
+  fails = true;
+  sw.click();
+  await settle();
+  assert.equal(sw.getAttribute('aria-checked'), 'false');
+  assert.equal(visibleText(line), '没能保存：这只猫猫的资料刚刚被改过了，请再试一次');
+  assert.equal(line.getAttribute('role'), 'alert');
+  assert.equal(named(row, 'pf-row-hint')[0]!.textContent, '先说结论，几句话说完；要清单、表格、代码或长文时照给');
+  // 置顶 is untouched by all of this.
+  assert.deepEqual(d.log.filter((x: string) => x.startsWith('pin:')), []);
+  // A group has no such switch: it is the cat's.
+  const g = d.show(d.P.groupPage({ type: 'group', id: 'g1' }, d.group()));
+  assert.equal(named(g, 'pf-brief').length, 0);
+  assert.doesNotMatch(visibleText(g), /说话简短/);
 });
 
 test('新对话 on 资料 opens the shared dialog (the header ⋯ menu\'s own) for this cat, with focus to come back to the button; the page itself sends nothing', async () => {
@@ -1086,9 +1187,11 @@ test('the shell wires 资料页与群: scripts before app.js, styles before the 
   assert.match(app, /apply: composerEdit,/);
   assert.match(app, /function composerEdit\(text, caret\) \{[\s\S]*?composerRecord\(before, text, caret\);/);
   assert.match(app, /mention\.close\(\);/);
-  // Requests: only the documented group and conversation routes.
+  // Requests: only the documented cat (说话简短), group and conversation routes.
   const profile = read('client/public/profile.js');
-  assert.deepEqual([...new Set([...profile.matchAll(/"(\/xbot-api\/[^"]*)"/g)].map(m => m[1]))].sort(), ['/xbot-api/groups/']);
+  assert.deepEqual([...new Set([...profile.matchAll(/"(\/xbot-api\/[^"]*)"/g)].map(m => m[1]))].sort(), ['/xbot-api/bots/', '/xbot-api/groups/']);
+  assert.equal((profile.match(/"\/xbot-api\/bots\/"/g) || []).length, 1);
+  assert.match(profile, /H\.api\("\/xbot-api\/bots\/" \+ enc\(name\), \{ method: "PATCH", body: \{ concise: next \} \}\)/, 'the cat route only for concise');
   assert.match(app, /newConversation: \(sel, opener\) => chatHistory\.newConversation\(sel, opener\),/);
   assert.match(read('client/public/chat-history.js'), /init, select, merge, top, starters, load, sync: syncMenu, openMenu, closeMenu, newConversation,/);
   assert.doesNotMatch(profile + read('client/public/mention.js'), /innerHTML\s*=(?!\s*body;)|localStorage|sessionStorage|\/stop"|\/cancel"/);

@@ -2750,8 +2750,17 @@
   // divider, and the reply that follows it shares that divider.
   const TIMED_ROWS = [".msg[data-time]", ".routine-line[data-time]", ".ck-notice[data-time]"];
 
+  // Time only moves on: a reply drawn under a follow-up it took in began
+  // before that message (chat-live-rules.js order()), so the rows on screen
+  // are not always in time order. The latest time so far is what the next
+  // row is measured against; an earlier one opens no divider and does not
+  // move it back.
+  function laterTime(a, b) {
+    return Date.parse(a) > Date.parse(b) ? a : b;
+  }
+
   function addTimeDivider(inner, row, previous) {
-    const last = previous || Array.from(inner.querySelectorAll(TIMED_ROWS.join(", "))).at(-1)?.dataset.time;
+    const last = previous || Array.from(inner.querySelectorAll(TIMED_ROWS.join(", ")), (n) => n.dataset.time).reduce(laterTime, undefined);
     const label = timeDivider(last, row.dataset.time);
     if (label) inner.append(el("div", "tdiv", label));
   }
@@ -2760,9 +2769,10 @@
   function addTimeDividers(inner) {
     let previous;
     for (const row of inner.querySelectorAll(TIMED_ROWS.map((s) => ":scope > " + s).join(", "))) {
-      const label = row.dataset.timed ? "" : timeDivider(previous, row.dataset.time);
+      const earlier = Date.parse(row.dataset.time) < Date.parse(previous);
+      const label = row.dataset.timed || earlier ? "" : timeDivider(previous, row.dataset.time);
       if (label) row.before(el("div", "tdiv", label));
-      previous = row.dataset.time;
+      previous = laterTime(previous, row.dataset.time);
     }
   }
 
@@ -3051,13 +3061,14 @@
 
   // A reply in progress changes with every draft the engine saves; its words
   // are drawn live (live.frame), so only its place in the history decides a
-  // redraw. Every other row, including a running execution record (drawn
+  // redraw (follows included: taking in a follow-up moves it under that
+  // message). Every other row, including a running execution record (drawn
   // from the history, not live), redraws on any change.
   function sigRows(messages) {
     const drawnLive = (m) => !!m && !!m.in_progress && !presentation.isActivity(m) && (m.role === "assistant" || m.kind === "bot");
     return (messages || []).map((m) => (drawnLive(m) ? {
       id: m.id, seq: m.seq, role: m.role, kind: m.kind, time: m.time, in_progress: true, native_cat_id: m.native_cat_id,
-      presentation_kind: m.presentation_kind, speaker: m.speaker, sender: m.sender, attachments: m.attachments,
+      presentation_kind: m.presentation_kind, speaker: m.speaker, sender: m.sender, attachments: m.attachments, follows: m.follows,
     } : m));
   }
 
@@ -3130,7 +3141,11 @@
       const appr = approvalCardOf(m && m.content);
       if (appr) latestApproval[appr.id] = i;
     });
-    messages.forEach((m, i) => {
+    // Drawn in the engine's order, except that a reply that took in what the
+    // owner said after it had begun goes under that message (follows,
+    // chat-live-rules.js order()). Every index below is still the row's own.
+    liveRules.order(messages, false).forEach((i) => {
+      const m = messages[i];
       if (skipMessage(m) || wakeRuns.hidden.has(i)) return;
       // Background turns have no cards in the chat; the header badge lists them.
       if (m.kind === "fork" || m.kind === "fork_end") return;
@@ -3363,7 +3378,8 @@
     const anchor = near ? null : readingAnchor();
     let last = "";
     let lastMsg = null;
-    for (const m of messages) {
+    // A reply under the follow-ups it took in, as in single chats (follows).
+    for (const m of liveRules.order(messages, true).map((i) => messages[i])) {
       const mine = m.kind === "person";
       const text = m.text || "";
       if (!mine && m.kind === "bot" && last && last !== m.sender && mine === false) {

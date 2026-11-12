@@ -540,3 +540,13 @@ test('the guide speaks the app\'s own words, says once that the chats are staged
   assert.match(js, /reduce\(\) \? "auto" : "smooth"/);
   assert.doesNotMatch(css.replace(/\/\*[\s\S]*?\*\//g, ''), /#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i, 'no colour of its own: tokens only (a cat\'s accent comes from the server)');
 });
+
+test('回复是活的 says once that the cats talk as in a chat, that each cat can switch it, and how to see a follow-up join the reply being written', () => {
+  const section = /<section[^>]*id="a-live"[\s\S]*?<\/section>/.exec(html)![0];
+  assert.match(section, /<p>平常它们像聊天一样说话：先说结论，几句话说完；你要清单、表格、代码或长文时才照给。每只猫的资料页里都有「说话简短」，可以单独开关。<\/p>/);
+  assert.equal((html.match(/像聊天一样说话|可以单独开关/g) || []).length, 2, 'said once, where it fits');
+  assert.match(section, /同一条回复把你后来说的也一起回答，排在你这句下面/);
+  assert.match(section, /<p class="t-try"><span class="t-try-k">怎么试<\/span>[^<]*；或者趁它还在写再说一句，看它在同一条回复里接着回答<\/p>/);
+  // The picture of 资料 shows the switch, and its words say so.
+  assert.match(html, /alt="宪宪的资料页：[^"]*「说话简短」/);
+});

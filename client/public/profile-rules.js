@@ -54,6 +54,31 @@
   // happens to the conversation on screen.
   const NEW_CHAT_NOTE = "现在的对话会收进「历史对话」，随时能回去接着聊；它记得的关于你的事都还在。";
 
+  // 说话简短: how a cat talks (`concise` on GET /xbot-api/bots/:name, set by
+  // PATCH {concise}; docs/xbot-api.md 「说话简短」). It is a sentence in the
+  // cat's personality, which the engine reads when a conversation starts, so
+  // a change shows in a new conversation.
+  const BRIEF = Object.freeze({
+    title: "说话简短",
+    hint: "先说结论，几句话说完；要清单、表格、代码或长文时照给",
+    saving: "正在保存…",
+    applies: "在新对话里生效。",
+    start: "开始新对话",
+    failed: "没能保存：",
+  });
+  // What the switch shows: what the server confirmed, never what was asked
+  // for. read: the profile's `concise` (anything but a boolean is not known:
+  // no switch). hold: the PATCH's answer {value, reads} (reads: profile reads
+  // seen since it). The answer stands until a read agrees with it, or until
+  // the second read after it, which was surely asked for after the change
+  // (the first may have been asked for before it, and say what was).
+  function briefShown(read, hold) {
+    const known = typeof read === "boolean" ? read : null;
+    if (!hold || typeof hold.value !== "boolean") return { value: known, keep: false };
+    if (known === hold.value || (known !== null && hold.reads >= 2)) return { value: known, keep: false };
+    return { value: hold.value, keep: true };
+  }
+
   // ---- a group ----
   const MIN = 2, MAX = 10;
   // The members as the server lists them (cat names, or a native ID for a cat
@@ -116,7 +141,7 @@
 
   root.ClowderProfileRules = Object.freeze({
     trim, plain, key, TABS, tabs, home, tabFor, opensAdvanced,
-    accent, ownBreed, NEW_CHAT_NOTE,
+    accent, ownBreed, NEW_CHAT_NOTE, BRIEF, briefShown,
     MIN, MAX, members, known, countText, addable, room, canRemove, addBody, removeBody, groupFrom,
     defaultName, nameProblem, renameBody, HOW_TO_TALK, groupError,
   });

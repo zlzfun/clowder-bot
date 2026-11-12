@@ -70,6 +70,8 @@
     // Replies the history drawing in progress has a row for.
     built: new Set(),
     stopping: 0, frame: 0, seq: 0, fresh: false, pill: null, pillText: null, scroll: false,
+    // Rows the last redraw moved, and where they were (reconcile → rendered()).
+    glide: null,
     // Conversation generation, and the stop's withdrawn sends and cleanup timer.
     gen: 0, stopWaits: [], stopTimer: 0,
     // The owner was reading the latest at the last look (scroll or our own move to the end).
@@ -95,6 +97,7 @@
     S.stopping = 0;
     S.fresh = false;
     S.follow = true;
+    S.glide = null;
     pill();
     told();
   }
@@ -511,12 +514,17 @@
   // and a selection, an open drawer or a playing picture stays), a changed
   // row is replaced in place without rising, only rows that were not there
   // rise in, and the rows this page holds itself (keep) follow at the end in
-  // their order on screen. Elements already in place are never moved.
-  // Returns how many message rows are new.
+  // their order on screen. Elements already in place are not moved; rows
+  // change places only when the drawing's order changed (a reply drawn under
+  // a follow-up it took in, chat-live-rules.js order()), and then only the
+  // rows out of their old order move, without rising again, and glide to
+  // their new places (glide()). Returns how many message rows are new.
   function reconcile(live, next, keep = []) {
     const held = new Set(keep);
     const before = new Map(keyed(kids(live).filter((n) => !held.has(n))));
     const out = [];
+    // A replaced row's element on screen, for where it was.
+    const was = new Map();
     const pairs = keyed(kids(next));
     for (const [, n] of pairs) sig(n);
     // New message rows above the first one that was already there are
@@ -527,11 +535,12 @@
     pairs.forEach(([k, n], i) => {
       const old = before.get(k);
       if (old && sig(old) === n._lvSig) { out.push(old); before.delete(k); return; }
-      if (old) { before.delete(k); n.classList.add("lv-still"); }
+      if (old) { before.delete(k); n.classList.add("lv-still"); was.set(n, old); }
       else if (n.classList.contains("msg")) { if (top >= 0 && i < top) n.classList.add("lv-still"); else added++; }
       out.push(n);
     });
     out.push(...keep);
+    S.glide = swapped(live, out, was);
     const wanted = new Set(out);
     for (const n of kids(live)) if (!wanted.has(n)) n.remove();
     const now = kids(live);
@@ -540,7 +549,11 @@
       if (now[i] === n) { i++; continue; }
       live.insertBefore(n, now[i] || null);
       const j = now.indexOf(n, i);
-      if (j >= 0) now.splice(j, 1);
+      if (j >= 0) {
+        now.splice(j, 1);
+        // Moved, not new: it does not rise (or land) again.
+        if (n.classList.contains("msg")) n.classList.add("lv-still");
+      }
     }
     live.className = next.className;
     for (const k of ["chat", "chatThread"]) {
@@ -548,6 +561,46 @@
       else delete live.dataset[k];
     }
     return added;
+  }
+  // The rows a drawing puts out of their old order on screen, from the first
+  // that now comes after a row that was below it to the last that now comes
+  // before one that was above it, each with where it was (a changed row:
+  // where its old element was), measured before anything moves. null when
+  // the order stayed, as it nearly always does, or motion is reduced.
+  function swapped(live, out, was) {
+    if (reduced()) return null;
+    const on = new Map(kids(live).map((n, i) => [n, i]));
+    const at = out.map((n) => { const o = was.get(n) || n; return on.has(o) ? on.get(o) : -1; });
+    let max = -1, last = -1, least = Infinity;
+    at.forEach((p, k) => {
+      if (p < 0) return;
+      if (p < max) { last = k; least = Math.min(least, p); }
+      else max = p;
+    });
+    if (last < 0) return null;
+    const first = at.findIndex((p) => p > least);
+    const list = [];
+    for (let k = first; k <= last; k++) {
+      const o = was.get(out[k]) || out[k];
+      if (at[k] >= 0 && typeof o.getBoundingClientRect === "function") list.push({ n: out[k], top: o.getBoundingClientRect().top });
+    }
+    return list.length ? list : null;
+  }
+  // Once the renderer has placed the view: those rows glide from where they
+  // were to where they are (180 ms ease-out), so a follow-up reads as
+  // slipping in above the reply that keeps writing. A row that would cross
+  // more than the view just takes its place.
+  function glide() {
+    const list = S.glide;
+    S.glide = null;
+    if (!list || reduced() || !H || !H.thread) return;
+    const view = H.thread.clientHeight || 0;
+    for (const { n, top } of list) {
+      if (!n.isConnected || typeof n.animate !== "function" || typeof n.getBoundingClientRect !== "function") continue;
+      const dy = top - n.getBoundingClientRect().top;
+      if (Math.abs(dy) < 1 || (view && Math.abs(dy) > view)) continue;
+      n.animate([{ transform: "translateY(" + Math.round(dy) + "px)" }, { transform: "none" }], { duration: 180, easing: "ease-out" });
+    }
   }
   // The rows this page holds and the history does not draw: sends, reply
   // errors (from app.js) and its own reply rows, in their order on screen.
@@ -567,6 +620,7 @@
     const live = innerEl(), rows = held(keep), pin = following();
     let added = 0, first = false;
     if (!live || !next.dataset.chat || live.dataset.chat !== next.dataset.chat) {
+      S.glide = null;
       for (const n of kids(next)) sig(n);
       next.append(...rows);
       H.thread.replaceChildren(next);
@@ -602,8 +656,10 @@
     H.changed();
     told();
   }
-  // After the renderer placed the scroll: new rows below the view are news.
+  // After the renderer placed the scroll: rows that changed places glide
+  // there, and new rows below the view are news.
   function rendered(result) {
+    glide();
     if (result && result.added && !result.first && !following()) S.fresh = true;
     pill();
   }
