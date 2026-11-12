@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ApiError } from '../server/errors.js';
 import type { NativeTransport, NativeCat, NativeThread, NativeMessage, NativeEvent } from '../server/native/types.js';
@@ -17,6 +18,33 @@ export const catTemplates: Array<[id: string, name: string, role: string, person
   ['golden-chinchilla', '金渐层', '开源多模型编码 agent，自带多专家编排 + LSP + 主题生态', '沉稳可靠，什么 provider 都能接，什么任务都能扛', '多专家内部编排、LSP 集成、开源生态、provider-agnostic', '金哥'],
 ];
 
+/**
+ * What the pinned engine requires of a pack it installs from a directory (packages/shared/src/schemas/pack.ts and
+ * PackSecurityGuard, F129), for the two files this app writes: strict keys, bounded strings, the name pattern, the
+ * blocklist of instruction-like phrases. Refuses as the engine does, with 400.
+ */
+function readPack(source: unknown) {
+  const refuse = (why: string): never => { throw new ApiError(400, why); };
+  if (typeof source !== 'string' || !existsSync(join(source, 'pack.yaml'))) refuse(`Source path not found or not a directory: ${String(source)}`);
+  const dir = source as string;
+  const strict = (value: any, keys: string[], optional: string[] = []) => value && typeof value === 'object' && !Array.isArray(value)
+    && Object.keys(value).every(key => keys.includes(key) || optional.includes(key)) && keys.every(key => key in value);
+  const bounded = (value: unknown, max: number) => typeof value === 'string' && value.length >= 1 && value.length <= max;
+  const extra = readdirSync(dir).filter(name => !['pack.yaml', 'defaults.yaml'].includes(name));
+  if (extra.length) refuse(`Unexpected pack content in this fixture: ${extra.join(', ')}`);
+  const texts = ['pack.yaml', 'defaults.yaml'].filter(name => existsSync(join(dir, name))).map(name => readFileSync(join(dir, name), 'utf8'));
+  if (texts.some(text => /ignore\s+(all\s+)?(previous|above|prior)\s+instructions|you\s+are\s+now\b|from\s+now\s+on\s+you\b|forget\s+(everything|all|your)|system\s+prompt|reveal\s+your|show\s+me\s+your\s+instructions|override\s+(your|the)\s+(rules|identity|constraints|personality)|do\s+not\s+follow|disregard\b|bypass\b/i.test(text)))
+    refuse('Pack security validation failed');
+  const [manifest, defaults] = texts.map(text => JSON.parse(text));
+  if (!strict(manifest, ['name', 'version', 'description', 'packType'], ['author', 'license', 'compatibility'])
+    || !bounded(manifest.name, 100) || !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(manifest.name) || !bounded(manifest.version, 20) || !bounded(manifest.description, 500)
+    || !['domain', 'scenario', 'style', 'bridge', 'capability'].includes(manifest.packType)) refuse('Invalid pack.yaml');
+  const behaviors: any[] = defaults === undefined ? [] : defaults?.behaviors;
+  if (defaults !== undefined && (!strict(defaults, ['behaviors']) || !Array.isArray(behaviors) || behaviors.length > 50 || !behaviors.every(item => strict(item, ['id', 'scope', 'behavior', 'overridable'], ['breeds'])
+    && bounded(item.id, 100) && ['all-cats', 'specific-breeds'].includes(item.scope) && bounded(item.behavior, 500) && item.overridable === true))) refuse('defaults.yaml schema error');
+  return { name: manifest.name as string, version: manifest.version as string, description: manifest.description as string, packType: manifest.packType as string, behaviors: behaviors.map(item => item.behavior as string) };
+}
+
 export class NativeFixture implements NativeTransport {
   calls: Array<{ path: string; method: string; body?: any }> = [];
   cats: NativeCat[] = [];
@@ -34,6 +62,8 @@ export class NativeFixture implements NativeTransport {
   memoryViews: Record<string, any> = { profile: {readStatus:'ready',entries:[]}, taste: {readStatus:'ready',entries:[]} };
   uploads = new Map<string, Buffer>();
   fail?: ApiError;
+  /** Installed engine packs, in the order the engine lists them (F129): the manifest and, for this fixture, the default behaviours read from the source. */
+  packs: Array<{ name: string; version: string; description: string; packType: string; behaviors: string[] }> = [];
   async request<T>(path: string, options: { method?: string; body?: any } = {}): Promise<T> {
     const method = options.method ?? 'GET', body = options.body;
     this.calls.push({ path, method, body });
@@ -44,6 +74,13 @@ export class NativeFixture implements NativeTransport {
     if (path === '/api/health') result = { status: 'ok', callbackAuth: { backend: 'redis', durability: 'durable' } };
     else if (path === '/api/projects/mkdir' && method === 'POST') result = { createdPath: join(body.parentPath, body.name), name: body.name };
     else if (url.pathname === '/api/projects/browse') result = { current: url.searchParams.get('path'), entries: [] };
+    else if (path === '/api/packs' && method === 'GET') result = { packs: this.packs.map(({ behaviors: _behaviors, ...manifest }) => manifest) };
+    else if (path === '/api/packs/add' && method === 'POST') {
+      const manifest = readPack(body?.source);
+      this.packs = [...this.packs.filter(pack => pack.name !== manifest.name), manifest];
+      const { behaviors: _behaviors, ...listed } = manifest;
+      result = { ok: true, manifest: listed };
+    }
     else if (path === '/api/cat-templates') result = { templates: catTemplates.map(([id, name, roleDescription, personality, teamStrengths, nickname]) => ({ id, name, nickname, roleDescription, personality, teamStrengths, color: { primary: '#888888', secondary: '#eeeeee' } })), clientDefaults: {} };
     else if (url.pathname === '/api/cats/native-runtimes') result = { runtimes: this.runtimes };
     else if (path === '/api/accounts') result = { providers: [] };

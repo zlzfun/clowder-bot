@@ -11,6 +11,7 @@ import { Workspaces } from '../workspaces.js';
 import { NativeFiles } from './files.js';
 import { Activity } from './activity.js';
 import { Approvals } from './approvals.js';
+import { ChatPack } from './chat-pack.js';
 
 export const encode = encodeURIComponent;
 // A regular conversation request. The native member receives its own name, role
@@ -55,29 +56,6 @@ const defaultRole = '随叫随到的伙伴：聊天、答疑、查资料、写�
 // A custom cat without words of the owner's own is a plain helper; said explicitly so native does not fill in a breed's stock portrait.
 const defaultPersonality = '亲切耐心，讲得清楚；做事利落，不绕弯子。';
 const defaultStrengths = '聊天答疑、查资料、写东西、整理文件';
-/**
- * How a cat talks in a chat: a sentence added to the personality of a cat this app makes (性格 in the
- * identity the engine gives the cat). Without it a cat answers like a workspace assistant — headings,
- * bullet lists, tables, emoji. Measured on the isolated runtime (2026-11-12, Claude haiku, the same two
- * questions): 261 and 527 characters in 20 and 29 lines before; 95 and 119 characters in 3 lines each
- * with it, and still a table when a table was asked for. The engine builds a cat's identity when a
- * conversation starts, so a change shows in conversations started afterwards.
- */
-export const chatManner = '说话像在聊天软件里回消息：先说结论，通常两三句话说完；不用标题、列表、表格和表情符号，不复述问题，不铺垫，不在结尾总结。对方明确要清单、表格、代码或长文时照给；内容确实多时先说要点，问一句要不要展开。';
-/**
- * A personality with that manner added once, as a paragraph of its own after whatever the personality says:
- * not a character of the rest is changed, so taking it out again gives back exactly what was there.
- */
-export function withChatManner(personality: string | undefined): string {
-  const own = personality ?? '';
-  return own.includes(chatManner) ? own : own.trim() ? `${own}\n\n${chatManner}` : chatManner;
-}
-/** …and with it taken out again, wherever and however often it stands; what the cat's personality otherwise says stays as it is. */
-export function withoutChatManner(personality: string | undefined): string {
-  return (personality ?? '').split(`\n\n${chatManner}`).join('').split(chatManner).join('');
-}
-export const speaksBriefly = (cat: NativeCat) => typeof cat.personality === 'string' && cat.personality.includes(chatManner);
-
 const hex = (value: unknown): value is string => typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value);
 /** Only a well-formed colour pair is passed on; the value ends up in a style. */
 const accent = (cat: NativeCat) => hex(cat.color?.primary) && hex(cat.color?.secondary) ? { primary: cat.color.primary, secondary: cat.color.secondary } : undefined;
@@ -89,9 +67,11 @@ export class BotBridge {
   readonly nativeFiles: NativeFiles;
   readonly activity: Activity;
   readonly approvals: Approvals;
+  /** The engine pack that makes every cat talk the way a chat is talked in; asked for before a cat is given something to answer. */
+  readonly manner: ChatPack;
   constructor(readonly native: NativeTransport, readonly store: ProductStore, readonly workspace: string) {
     this.workspaces = new Workspaces(this); this.nativeFiles = new NativeFiles(this); this.activity = new Activity(this);
-    this.approvals = new Approvals(this);
+    this.approvals = new Approvals(this); this.manner = new ChatPack(native);
   }
   cats(): Promise<NativeCat[]> { return this.native.request<{ cats: NativeCat[] }>('/api/cats').then(r => r.cats); }
   templates(): Promise<{ templates: RoleTemplate[]; clientDefaults: Record<string, { defaultModel: string; models: string[] }> }> { return this.native.request('/api/cat-templates'); }
@@ -255,6 +235,8 @@ export class BotBridge {
         const work = await this.queue(threadId);
         if (work.activeInvocations.length || work.queue.length) return { status: 'exists' };
       }
+      // The first thing a cat says in a conversation is said the way a chat is talked in, too.
+      await this.manner.ensure();
       if (meta.activeThreadId !== threadId) throw new ApiError(409, '对话已切换，请重新打开');
       // Record only that this empty chat requested an opening. An uncertain
       // POST may already have landed. Explicit recovery reuses the same native
@@ -539,11 +521,11 @@ export class BotBridge {
     if (!template?.color) throw new ApiError(503, '暂时读不到猫猫的资料，这次没有创建，请稍后再试', undefined, 'faces_unavailable');
     // The cat that is made is the one that was described: a portrait that changed since the screen read it is shown again first.
     if (!custom && simple.rev && simple.rev !== template.rev) throw new ApiError(409, '这只猫猫的介绍刚刚更新了，请再看一眼后重试', undefined, 'face_changed');
-    // Every cat made here talks the way a chat is talked in (chatManner), unless the owner wrote its personality themselves.
+    // How a cat talks in a chat is not written here: it is a default of the engine pack this app keeps installed (chat-pack.ts).
     const portrait = custom
-      ? { roleDescription: about || defaultRole, personality: temper || withChatManner(defaultPersonality), teamStrengths: about ? clip(about.replace(/\s+/g, ' '), 60) : defaultStrengths }
+      ? { roleDescription: about || defaultRole, personality: temper || defaultPersonality, teamStrengths: about ? clip(about.replace(/\s+/g, ' '), 60) : defaultStrengths }
       // The engine's template of the same id gives the role, the personality and the strengths, as written upstream.
-      : { roleDescription: template.roleDescription || defaultRole, personality: withChatManner(template.personality || defaultPersonality), teamStrengths: template.teamStrengths || defaultStrengths };
+      : { roleDescription: template.roleDescription || defaultRole, personality: template.personality || defaultPersonality, teamStrengths: template.teamStrengths || defaultStrengths };
     return { input, face, tool: runtime.id, body: { catId, name, displayName: name, nickname: name, color: template.color, mentionPatterns: [`@${name}`, `@${catId}`],
       ...portrait, clientId: runtime.clientId, configurationSource: 'native_tool', defaultModel: '' } as Record<string, unknown> };
   }
@@ -553,6 +535,7 @@ export class BotBridge {
     const attachments = body.attachments?.length ? await this.workspaces.attachments(thread.id, body.attachments) : [];
     const replyTo = body.reply_to ? this.store.messageId(thread.id, body.reply_to) : undefined;
     if (body.reply_to && !replyTo) throw new ApiError(400, '引用的消息不存在，请刷新对话');
+    await this.manner.ensure();
     return this.native.request('/api/messages', { method: 'POST', body: {
       threadId: thread.id, content: body.text, idempotencyKey: body.idempotencyKey ?? randomUUID(),
       // Native admission binds the exact active parent and appends without interrupting.

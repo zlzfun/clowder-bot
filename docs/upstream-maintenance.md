@@ -101,6 +101,15 @@ node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=
 
 旧版 `data/state.json`、provider-secrets.json 不自动导入，也不会被删除。本工作区未发现旧业务数据。以后有旧数据迁移需求，应单独转换成员/消息/记忆并验证可表达性，不能将旧 CLI session ID 或摘要伪造成原生运行状态。
 
+## 引擎的包（2026-11-12）
+
+「说话简短」是引擎 Pack 机制（上游 F129）里的一条默认行为，不是补丁，也不写进猫的资料：
+
+- 用的是未打补丁的 `GET /api/packs` 和 `POST /api/packs/add`。适配层（`server/native/chat-pack.ts`）在发消息、请猫打招呼之前和 Bot 启动时确认引擎里装着 style 包 `clowder-bot-chat`，没有或版本不同就装；它不删除、不调整别的包。
+- 包存在引擎自己的目录里：`<数据目录>/native/workspace/.cat-cafe/packs/clowder-bot-chat/`（构建目录里的 `.cat-cafe` 是指向数据目录的链接，重建运行时不丢）。看装了什么：`curl http://127.0.0.1:<原生端口>/api/packs`。
+- 升级固定提交时：`tests/chat-pack.test.ts` 对照上游源码里的包模式（`packages/shared/src/schemas/pack.ts`）、默认行为编成的那一节（`PackCompiler.ts`）、「只应用列出的第一个包」（`getActivePackBlocks.ts`）和两条路由；上游改了其中任何一处，这项测试会先失败，再到隔离运行时上重新量一遍回复长度。
+- 固定的这版引擎一次只应用一个包（Phase A）。上游做了多包合并之后，「别的包排在前面就不生效」这条限制可以去掉。
+
 ## 当前已知限制
 
 - Git 子模块首次拉取与原生依赖安装较大；需要可访问上游及包仓库。
