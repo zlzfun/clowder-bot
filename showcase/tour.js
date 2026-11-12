@@ -22,8 +22,8 @@
   // Opened from the checkout (file://), the product's files are next door in client/public.
   const ROOT = location.protocol === "file:" ? "../client/public/" : "/";
   const served = location.protocol === "http:" || location.protocol === "https:";
-  // The staged chats (scripts/showcase-scene.ts): each cat's face is its engine template.
-  const FACES = { 布偶猫: "ragdoll", 缅因猫: "maine-coon", 暹罗猫: "siamese", 梵花猫: "turkish-van", 小鲸鱼: "dsh", 狸花猫: "dragon-li", 孟加拉猫: "bengal", 金渐层: "golden-chinchilla" };
+  // The staged chats (scripts/showcase-scene.ts): each cat is called what its engine template calls its cat, with that template's face.
+  const FACES = { 宪宪: "ragdoll", 砚砚: "maine-coon", 烁烁: "siamese", 墨墨: "turkish-van", 鲸鲸: "dsh", 小狸花: "dragon-li", 斑斑: "bengal", 金哥: "golden-chinchilla" };
   const POLL_MS = 8000, READ_MS = 6000;
   const reduce = () => !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
   const $ = (sel, root = document) => root.querySelector(sel);

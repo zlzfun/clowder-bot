@@ -50,8 +50,8 @@
     <div class="t-hero-copy">
       <p class="t-eyebrow">clowder-bot 能做什么</p>
       <h1 id="hero-h"><span class="t-nowrap">挑一只猫，</span><span class="t-nowrap">说句话，</span><span class="t-nowrap">收结果。</span></h1>
-      <p class="t-lead">clowder-bot 是在你自己电脑上运行的聊天软件。联系人是猫猫，可以单聊，也可以拉几只进一个群；回复由这台电脑上已经登录的 Claude Code 或 Codex 写出。</p>
-      <p class="t-honest"><span class="t-honest-k">关于示例</span>示例联系人里的对话是事先写好的，由一个脚本代替引擎回放；界面和适配层都是真的。装好的 clowder-bot 里，回复来自这台电脑上的 Claude Code 或 Codex。</p>
+      <p class="t-lead">clowder-bot 是在你自己电脑上运行的聊天软件。联系人是猫猫，可以单聊，也可以拉几只进一个群；回复由这台电脑上的 Claude Code、Codex 或其它模型写出，每只猫用哪一个，跟它的性格一样，是它自己带着的。</p>
+      <p class="t-honest"><span class="t-honest-k">关于示例</span>示例联系人里的对话是事先写好的，由一个脚本代替引擎回放；界面和适配层都是真的。装好的 clowder-bot 里，回复来自每只猫自己用的那个工具。示例假定这台电脑装着这个应用能接的三种工具（Claude Code、Codex、Kimi）；另外五只猫是照引擎里已有的猫摆进列表的，只为列表完整，不表示它们的工具在这里跑过。</p>
       <p class="t-off" id="off">示例对话现在没在运行，下面的图照样能看。想点进对话里试：在项目目录运行 <code>npm run showcase</code>，打开它给出的 <code>/tour/</code> 地址。</p>
     </div>
 
@@ -61,19 +61,19 @@
         <span class="t-roster-sub">每个对话演示一件事，点一行就去看</span>
       </div>
       <ul class="t-rows">
-        <li><a class="t-row" href="#a-live" data-row="布偶猫" data-face="ragdoll"><span class="t-row-face" aria-hidden="true"></span><span class="t-row-main"><span class="t-row-top"><span class="t-row-name">布偶猫</span><span class="t-row-what">回复是活的</span><time class="t-row-time"></time></span><span class="t-row-sub"><span class="t-row-line">逐字写出，边做边说，随时能停</span></span></span></a></li>
-        <li><a class="t-row" href="#a-cards" data-row="缅因猫" data-face="maine-coon"><span class="t-row-face" aria-hidden="true"></span><span class="t-row-main"><span class="t-row-top"><span class="t-row-name">缅因猫</span><span class="t-row-what">卡片、清单、差异</span><time class="t-row-time"></time></span><span class="t-row-sub"><span class="t-row-line">审查结论、待改清单和代码改动</span></span></span></a></li>
-        <li><a class="t-row" href="#a-choices" data-row="暹罗猫" data-face="siamese"><span class="t-row-face" aria-hidden="true"></span><span class="t-row-main"><span class="t-row-top"><span class="t-row-name">暹罗猫</span><span class="t-row-what">选项直接点</span><time class="t-row-time"></time></span><span class="t-row-sub"><span class="t-row-line">单选、多选、确认，点一下就是回答</span></span></span></a></li>
-        <li><a class="t-row" href="#a-files" data-row="梵花猫" data-face="turkish-van"><span class="t-row-face" aria-hidden="true"></span><span class="t-row-main"><span class="t-row-top"><span class="t-row-name">梵花猫</span><span class="t-row-what">发资料，收文件</span><time class="t-row-time"></time></span><span class="t-row-sub"><span class="t-row-line">发去会议记录，收回纪要和待办</span></span></span></a></li>
-        <li><a class="t-row" href="#a-reminder" data-row="小鲸鱼" data-face="dsh"><span class="t-row-face" aria-hidden="true"></span><span class="t-row-main"><span class="t-row-top"><span class="t-row-name">小鲸鱼</span><span class="t-row-what">说一句就设提醒</span><time class="t-row-time"></time></span><span class="t-row-sub"><span class="t-row-line">每天 9 点的提醒，到点在对话里叫你</span></span></span></a></li>
-        <li><a class="t-row" href="#a-memory" data-row="狸花猫" data-face="dragon-li"><span class="t-row-face" aria-hidden="true"></span><span class="t-row-main"><span class="t-row-top"><span class="t-row-name">狸花猫</span><span class="t-row-what">要记住的事先问你</span><time class="t-row-time"></time></span><span class="t-row-sub"><span class="t-row-line">想记住你的习惯，先问你一句</span></span></span></a></li>
-        <li><a class="t-row" href="#a-honest" data-row="孟加拉猫" data-face="bengal"><span class="t-row-face" aria-hidden="true"></span><span class="t-row-main"><span class="t-row-top"><span class="t-row-name">孟加拉猫</span><span class="t-row-what">没做完也如实说</span><time class="t-row-time"></time></span><span class="t-row-sub"><span class="t-row-line">没完成、被打断，都写清楚</span></span></span></a></li>
-        <li><a class="t-row" href="#a-find" data-row="金渐层" data-face="golden-chinchilla"><span class="t-row-face" aria-hidden="true"></span><span class="t-row-main"><span class="t-row-top"><span class="t-row-name">金渐层</span><span class="t-row-what">找得到</span><time class="t-row-time"></time></span><span class="t-row-sub"><span class="t-row-line">往上翻、引用、⌘K 搜索</span></span></span></a></li>
+        <li><a class="t-row" href="#a-live" data-row="宪宪" data-face="ragdoll"><span class="t-row-face" aria-hidden="true"></span><span class="t-row-main"><span class="t-row-top"><span class="t-row-name">宪宪</span><span class="t-row-what">回复是活的</span><time class="t-row-time"></time></span><span class="t-row-sub"><span class="t-row-line">逐字写出，边做边说，随时能停</span></span></span></a></li>
+        <li><a class="t-row" href="#a-cards" data-row="砚砚" data-face="maine-coon"><span class="t-row-face" aria-hidden="true"></span><span class="t-row-main"><span class="t-row-top"><span class="t-row-name">砚砚</span><span class="t-row-what">卡片、清单、差异</span><time class="t-row-time"></time></span><span class="t-row-sub"><span class="t-row-line">审查结论、待改清单和代码改动</span></span></span></a></li>
+        <li><a class="t-row" href="#a-choices" data-row="烁烁" data-face="siamese"><span class="t-row-face" aria-hidden="true"></span><span class="t-row-main"><span class="t-row-top"><span class="t-row-name">烁烁</span><span class="t-row-what">选项直接点</span><time class="t-row-time"></time></span><span class="t-row-sub"><span class="t-row-line">单选、多选、确认，点一下就是回答</span></span></span></a></li>
+        <li><a class="t-row" href="#a-files" data-row="墨墨" data-face="turkish-van"><span class="t-row-face" aria-hidden="true"></span><span class="t-row-main"><span class="t-row-top"><span class="t-row-name">墨墨</span><span class="t-row-what">发资料，收文件</span><time class="t-row-time"></time></span><span class="t-row-sub"><span class="t-row-line">发去会议记录，收回纪要和待办</span></span></span></a></li>
+        <li><a class="t-row" href="#a-reminder" data-row="鲸鲸" data-face="dsh"><span class="t-row-face" aria-hidden="true"></span><span class="t-row-main"><span class="t-row-top"><span class="t-row-name">鲸鲸</span><span class="t-row-what">说一句就设提醒</span><time class="t-row-time"></time></span><span class="t-row-sub"><span class="t-row-line">每天 9 点的提醒，到点在对话里叫你</span></span></span></a></li>
+        <li><a class="t-row" href="#a-memory" data-row="小狸花" data-face="dragon-li"><span class="t-row-face" aria-hidden="true"></span><span class="t-row-main"><span class="t-row-top"><span class="t-row-name">小狸花</span><span class="t-row-what">要记住的事先问你</span><time class="t-row-time"></time></span><span class="t-row-sub"><span class="t-row-line">想记住你的习惯，先问你一句</span></span></span></a></li>
+        <li><a class="t-row" href="#a-honest" data-row="斑斑" data-face="bengal"><span class="t-row-face" aria-hidden="true"></span><span class="t-row-main"><span class="t-row-top"><span class="t-row-name">斑斑</span><span class="t-row-what">没做完也如实说</span><time class="t-row-time"></time></span><span class="t-row-sub"><span class="t-row-line">没完成、被打断，都写清楚</span></span></span></a></li>
+        <li><a class="t-row" href="#a-find" data-row="金哥" data-face="golden-chinchilla"><span class="t-row-face" aria-hidden="true"></span><span class="t-row-main"><span class="t-row-top"><span class="t-row-name">金哥</span><span class="t-row-what">找得到</span><time class="t-row-time"></time></span><span class="t-row-sub"><span class="t-row-line">往上翻、引用、⌘K 搜索</span></span></span></a></li>
       </ul>
       <p class="t-rows-label">群聊</p>
       <ul class="t-rows">
-        <li><a class="t-row" href="#a-group" data-row="产品评审" data-group="布偶猫 缅因猫 暹罗猫"><span class="t-row-face" aria-hidden="true"></span><span class="t-row-main"><span class="t-row-top"><span class="t-row-name">产品评审</span><span class="t-row-what">群聊</span><time class="t-row-time"></time></span><span class="t-row-sub"><span class="t-row-line">三只猫，@ 谁谁答</span></span></span></a></li>
-        <li><a class="t-row" href="#a-group" data-row="读书会" data-group="小鲸鱼 狸花猫 梵花猫 金渐层"><span class="t-row-face" aria-hidden="true"></span><span class="t-row-main"><span class="t-row-top"><span class="t-row-name">读书会</span><span class="t-row-what">群聊</span><time class="t-row-time"></time></span><span class="t-row-sub"><span class="t-row-line">四只猫，一起投了票</span></span></span></a></li>
+        <li><a class="t-row" href="#a-group" data-row="产品评审" data-group="宪宪 砚砚 烁烁"><span class="t-row-face" aria-hidden="true"></span><span class="t-row-main"><span class="t-row-top"><span class="t-row-name">产品评审</span><span class="t-row-what">群聊</span><time class="t-row-time"></time></span><span class="t-row-sub"><span class="t-row-line">三只猫，@ 谁谁答</span></span></span></a></li>
+        <li><a class="t-row" href="#a-group" data-row="读书会" data-group="鲸鲸 小狸花 墨墨 金哥"><span class="t-row-face" aria-hidden="true"></span><span class="t-row-main"><span class="t-row-top"><span class="t-row-name">读书会</span><span class="t-row-what">群聊</span><time class="t-row-time"></time></span><span class="t-row-sub"><span class="t-row-line">四只猫，一起投了票</span></span></span></a></li>
       </ul>
     </nav>
   </section>
@@ -82,138 +82,139 @@
     <div class="t-copy">
       <p class="t-host"><span class="t-host-k">第一次打开</span></p>
       <h2 id="a-start-h">打开就能聊</h2>
-      <p>第一次打开，它请你领一只猫猫回家：挑一张脸，起个名字。每张脸是一只有自己性格的猫，选中时下面一两行字说它的特点；想自己定，就点「自定义」，只借它的长相。</p>
-      <p>它用这台电脑上已经登录的 Claude Code 或 Codex 来思考，不用另外填什么。选几只猫猫就是一个群聊，群名可以不填。</p>
+      <p>第一次打开，它请你领一只猫猫回家：挑一张脸，起个名字。每张脸是一只有自己性格的猫，选中时下面几行字说它的特点，和它用这台电脑上的哪个工具思考：宪宪用 Claude Code，砚砚用 Codex，墨墨用 Kimi，别的猫用其它模型。这是猫自己带着的，不用另外选。</p>
+      <p>它要用的工具不在这台电脑上，或者这个应用还接不上，这只猫就按原样领不了，界面会直说为什么；点「自定义」可以只借它的长相，用这台电脑上的工具来思考。选几只猫猫就是一个群聊，群名可以不填。</p>
       <p class="t-try"><span class="t-try-k">怎么试</span>左上角「新建」→ 新建猫猫，或新建群聊</p>
       <div class="t-actions" hidden><a class="t-btn" href="/" data-app>打开 clowder-bot</a></div>
     </div>
-    <figure class="t-fig t-float" style="--t-r: 20px">
-      <picture><source srcset="shots/new-cat-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/new-cat-light.png" width="480" height="400" decoding="async" alt="「新建猫猫」弹层：一排八张猫脸，选中的暹罗猫下面两行字写着它的性格和擅长；下面是「自定义」、名字「烁烁」、它用哪个工具来思考，和「创建」按钮。"></picture>
+    <figure class="t-fig t-pair t-pair-wide">
+      <picture class="t-main t-float" style="--t-r: 20px"><source srcset="shots/new-cat-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/new-cat-light.png" width="480" height="408" decoding="async" alt="「新建猫猫」弹层：一排八张猫脸，选中的梵花猫下面写着它的性格、擅长，和「它用这台电脑上的 Kimi 来思考」；另外几张退得更远、颜色更淡，它们的工具这里用不了。下面是「自定义」、名字「年糕」和「创建」按钮。"></picture>
+      <picture class="t-inset t-float" style="--t-r: 14px"><source srcset="shots/new-cat-away-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/new-cat-away-light.png" width="472" height="211" decoding="async" alt="选中暹罗猫时：它坐在一圈虚线上，下面写着「它要用 AGY Native 来思考。这个应用还接不上 AGY Native，所以它现在按原样领不了。」；旁边的「自定义」写着「只借它的长相，用这台电脑上的工具来思考」。"></picture>
     </figure>
   </section>
 
-  <section class="t-ability t-wrap t-reveal" id="a-live" aria-labelledby="a-live-h" data-host="布偶猫">
+  <section class="t-ability t-wrap t-reveal" id="a-live" aria-labelledby="a-live-h" data-host="宪宪">
     <div class="t-copy">
-      <p class="t-host"><span class="t-host-face" data-face="ragdoll" aria-hidden="true"></span>在「布偶猫」的对话里</p>
+      <p class="t-host"><span class="t-host-face" data-face="ragdoll" aria-hidden="true"></span>在「宪宪」的对话里</p>
       <h2 id="a-live-h">回复是活的</h2>
       <p>发出去就看到它在输入。字一段一段写出来，标题、代码和表格当场排好；它去读文件、查资料时，下面有一行说它正在做什么。</p>
       <p>随时能停，也能在它写的时候接着说。停下的回复会写明「已停止」。</p>
       <p class="t-try"><span class="t-try-k">怎么试</span>点「看它现场演示」，写到一半时按输入框右边的停止键</p>
-      <div class="t-actions" hidden><button type="button" class="t-btn t-btn-primary" data-play="布偶猫">看它现场演示</button><a class="t-btn" data-chat="布偶猫">打开这个对话</a></div>
+      <div class="t-actions" hidden><button type="button" class="t-btn t-btn-primary" data-play="宪宪">看它现场演示</button><a class="t-btn" data-chat="宪宪">打开这个对话</a></div>
       <p class="t-note" role="status"></p>
     </div>
     <figure class="t-fig">
-      <picture><source srcset="shots/live-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/live-light.png" width="712" height="420" decoding="async" alt="布偶猫正在写的回复：标题、加粗和编号列表已经排好，最后一行后面是光标；输入框右边的发送键变成了停止键。"></picture>
+      <picture><source srcset="shots/live-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/live-light.png" width="712" height="420" decoding="async" alt="宪宪正在写的回复：标题、加粗和编号列表已经排好，最后一行后面是光标；输入框右边的发送键变成了停止键。"></picture>
     </figure>
   </section>
 
-  <section class="t-ability t-wrap t-reveal" id="a-cards" aria-labelledby="a-cards-h" data-host="缅因猫">
+  <section class="t-ability t-wrap t-reveal" id="a-cards" aria-labelledby="a-cards-h" data-host="砚砚">
     <div class="t-copy">
-      <p class="t-host"><span class="t-host-face" data-face="maine-coon" aria-hidden="true"></span>在「缅因猫」的对话里</p>
+      <p class="t-host"><span class="t-host-face" data-face="maine-coon" aria-hidden="true"></span>在「砚砚」的对话里</p>
       <h2 id="a-cards-h">卡片、清单、差异</h2>
       <p>猫猫交来的不只是文字。审查结论是一张卡片，要改的事是一份清单，代码改动画成差异，都在对话里直接看。</p>
       <p class="t-try"><span class="t-try-k">怎么试</span>点「看它现场演示」，它再审一段代码，交来新的结论</p>
-      <div class="t-actions" hidden><button type="button" class="t-btn t-btn-primary" data-play="缅因猫">看它现场演示</button><a class="t-btn" data-chat="缅因猫">打开这个对话</a></div>
+      <div class="t-actions" hidden><button type="button" class="t-btn t-btn-primary" data-play="砚砚">看它现场演示</button><a class="t-btn" data-chat="砚砚">打开这个对话</a></div>
       <p class="t-note" role="status"></p>
     </div>
     <figure class="t-fig">
-      <picture><source srcset="shots/cards-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/cards-light.png" width="708" height="699" decoding="async" alt="缅因猫的回复：一张「审查结论：先改再合」的卡片，列着必改 2 处、建议 1 处；下面是「上线前要改的」三项清单，和 save.js 的代码差异（+6 −1）。"></picture>
+      <picture><source srcset="shots/cards-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/cards-light.png" width="708" height="699" decoding="async" alt="砚砚的回复：一张「审查结论：先改再合」的卡片，列着必改 2 处、建议 1 处；下面是「上线前要改的」三项清单，和 save.js 的代码差异（+6 −1）。"></picture>
     </figure>
   </section>
 
-  <section class="t-ability t-wrap t-reveal" id="a-choices" aria-labelledby="a-choices-h" data-host="暹罗猫">
+  <section class="t-ability t-wrap t-reveal" id="a-choices" aria-labelledby="a-choices-h" data-host="烁烁">
     <div class="t-copy">
-      <p class="t-host"><span class="t-host-face" data-face="siamese" aria-hidden="true"></span>在「暹罗猫」的对话里</p>
+      <p class="t-host"><span class="t-host-face" data-face="siamese" aria-hidden="true"></span>在「烁烁」的对话里</p>
       <h2 id="a-choices-h">选项直接点</h2>
       <p>它给出几个选项，点一下就是回答：单选、多选（有上限）、确认都行。点完发出去的是一句普通的话，选项随之收起。</p>
       <p class="t-try"><span class="t-try-k">怎么试</span>在最后的「首页放什么」里挑两三项，点「确认选择」；它会再问你要不要开始</p>
-      <div class="t-actions" hidden><a class="t-btn t-btn-primary" data-chat="暹罗猫">打开这个对话</a><button type="button" class="t-btn" data-play="暹罗猫">看它现场演示</button></div>
+      <div class="t-actions" hidden><a class="t-btn t-btn-primary" data-chat="烁烁">打开这个对话</a><button type="button" class="t-btn" data-play="烁烁">看它现场演示</button></div>
       <p class="t-note" role="status"></p>
     </div>
     <figure class="t-fig">
-      <picture><source srcset="shots/choices-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/choices-light.png" width="720" height="501" decoding="async" alt="暹罗猫交来的配色稿图片（带缩略图），和一个多选「首页放什么」：「最近在读」「摘抄墙」已勾选，按钮写着「确认选择（2）」，旁边注明最多选 3 项。"></picture>
+      <picture><source srcset="shots/choices-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/choices-light.png" width="720" height="501" decoding="async" alt="烁烁交来的配色稿图片（带缩略图），和一个多选「首页放什么」：「最近在读」「摘抄墙」已勾选，按钮写着「确认选择（2）」，旁边注明最多选 3 项。"></picture>
     </figure>
   </section>
 
-  <section class="t-ability t-wrap t-reveal" id="a-files" aria-labelledby="a-files-h" data-host="梵花猫">
+  <section class="t-ability t-wrap t-reveal" id="a-files" aria-labelledby="a-files-h" data-host="墨墨">
     <div class="t-copy">
-      <p class="t-host"><span class="t-host-face" data-face="turkish-van" aria-hidden="true"></span>在「梵花猫」的对话里</p>
+      <p class="t-host"><span class="t-host-face" data-face="turkish-van" aria-hidden="true"></span>在「墨墨」的对话里</p>
       <h2 id="a-files-h">发资料，收文件</h2>
       <p>把文件附在消息里发给它；它交来的文件就出现在对话里，能预览、能下载，图片带缩略图。所有文件都在它资料的「文件」里。</p>
       <p class="t-try"><span class="t-try-k">怎么试</span>点「看它现场演示」，它把决定整理成「一页纸.md」交给你</p>
-      <div class="t-actions" hidden><button type="button" class="t-btn t-btn-primary" data-play="梵花猫">看它现场演示</button><a class="t-btn" data-chat="梵花猫">打开这个对话</a></div>
+      <div class="t-actions" hidden><button type="button" class="t-btn t-btn-primary" data-play="墨墨">看它现场演示</button><a class="t-btn" data-chat="墨墨">打开这个对话</a></div>
       <p class="t-note" role="status"></p>
     </div>
     <figure class="t-fig t-pair">
-      <picture class="t-main"><source srcset="shots/files-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/files-light.png" width="720" height="485" decoding="async" alt="你发给梵花猫的「周会记录.txt」，它交回的「周会纪要.md」和「待办清单.md」，每个文件都能预览和下载。"></picture>
-      <picture class="t-inset t-float"><source srcset="shots/files-tab-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/files-tab-light.png" width="384" height="535" decoding="async" alt="梵花猫资料里的「文件」页：成果两个（待办清单.md、周会纪要.md），附件一个（周会记录.txt）。"></picture>
+      <picture class="t-main"><source srcset="shots/files-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/files-light.png" width="720" height="485" decoding="async" alt="你发给墨墨的「周会记录.txt」，它交回的「周会纪要.md」和「待办清单.md」，每个文件都能预览和下载。"></picture>
+      <picture class="t-inset t-float"><source srcset="shots/files-tab-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/files-tab-light.png" width="384" height="535" decoding="async" alt="墨墨资料里的「文件」页：成果两个（待办清单.md、周会纪要.md），附件一个（周会记录.txt）。"></picture>
     </figure>
   </section>
 
-  <section class="t-ability t-wrap t-reveal" id="a-reminder" aria-labelledby="a-reminder-h" data-host="小鲸鱼">
+  <section class="t-ability t-wrap t-reveal" id="a-reminder" aria-labelledby="a-reminder-h" data-host="鲸鲸">
     <div class="t-copy">
-      <p class="t-host"><span class="t-host-face" data-face="dsh" aria-hidden="true"></span>在「小鲸鱼」的对话里</p>
+      <p class="t-host"><span class="t-host-face" data-face="dsh" aria-hidden="true"></span>在「鲸鲸」的对话里</p>
       <h2 id="a-reminder-h">说一句就设提醒</h2>
       <p>说一句「每天早上 9 点提醒我…」，它在对话里出一张确认卡；点「设上」才生效，之后在它资料的「定时」里看得到。</p>
       <p>到点了，对话里出现一行提醒，它接着跟进。</p>
       <p class="t-try"><span class="t-try-k">怎么试</span>最下面「写周报」那张卡还在等你，点「设上」</p>
-      <div class="t-actions" hidden><a class="t-btn t-btn-primary" data-chat="小鲸鱼">打开这个对话</a><button type="button" class="t-btn" data-play="小鲸鱼">看它现场演示</button></div>
+      <div class="t-actions" hidden><a class="t-btn t-btn-primary" data-chat="鲸鲸">打开这个对话</a><button type="button" class="t-btn" data-play="鲸鲸">看它现场演示</button></div>
       <p class="t-note" role="status"></p>
     </div>
     <figure class="t-fig t-pair">
-      <picture class="t-main"><source srcset="shots/reminder-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/reminder-light.png" width="720" height="649" decoding="async" alt="小鲸鱼的对话：两次到点的「提醒：看一眼当天的日程」，各在自己的时间下面，后面跟着它的早安；最下面一张「小鲸鱼想设一个定时 · 写周报 · 每周五 17:00」的卡片，按钮是「不用」和「设上」。"></picture>
-      <picture class="t-inset t-float"><source srcset="shots/reminder-tab-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/reminder-tab-light.png" width="384" height="238" decoding="async" alt="小鲸鱼资料里的「定时」页：「看当天的日程 · 每天 09:00」，已启用。"></picture>
+      <picture class="t-main"><source srcset="shots/reminder-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/reminder-light.png" width="720" height="649" decoding="async" alt="鲸鲸的对话：两次到点的「提醒：看一眼当天的日程」，各在自己的时间下面，后面跟着它的早安；最下面一张「鲸鲸想设一个定时 · 写周报 · 每周五 17:00」的卡片，按钮是「不用」和「设上」。"></picture>
+      <picture class="t-inset t-float"><source srcset="shots/reminder-tab-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/reminder-tab-light.png" width="384" height="238" decoding="async" alt="鲸鲸资料里的「定时」页：「看当天的日程 · 每天 09:00」，已启用。"></picture>
     </figure>
   </section>
 
-  <section class="t-ability t-wrap t-reveal" id="a-memory" aria-labelledby="a-memory-h" data-host="狸花猫">
+  <section class="t-ability t-wrap t-reveal" id="a-memory" aria-labelledby="a-memory-h" data-host="小狸花">
     <div class="t-copy">
-      <p class="t-host"><span class="t-host-face" data-face="dragon-li" aria-hidden="true"></span>在「狸花猫」的对话里</p>
+      <p class="t-host"><span class="t-host-face" data-face="dragon-li" aria-hidden="true"></span>在「小狸花」的对话里</p>
       <h2 id="a-memory-h">要记住的事先问你</h2>
       <p>它想记住你的一个习惯，会先出一张卡片问你：记住，还是不用记。</p>
       <p>记住了什么，在它资料的「记忆」里看得到：关于你、你的偏好、这个对话的便笺，只能看、不在这里改。记住的偏好记下了出处时，还能回到当初说的那句话。</p>
       <p class="t-try"><span class="t-try-k">怎么试</span>点卡片上的「记住」，再点顶栏的名字，打开「记忆」</p>
-      <div class="t-actions" hidden><a class="t-btn t-btn-primary" data-chat="狸花猫">打开这个对话</a><button type="button" class="t-btn" data-play="狸花猫">看它现场演示</button></div>
+      <div class="t-actions" hidden><a class="t-btn t-btn-primary" data-chat="小狸花">打开这个对话</a><button type="button" class="t-btn" data-play="小狸花">看它现场演示</button></div>
       <p class="t-note" role="status"></p>
     </div>
     <figure class="t-fig t-pair">
-      <picture class="t-main"><source srcset="shots/memory-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/memory-light.png" width="720" height="352" decoding="async" alt="狸花猫想记住你的一个偏好：「引用资料时带上出处」，下面引着你的原话，按钮是「不用记」和「记住」。"></picture>
-      <picture class="t-inset t-float"><source srcset="shots/memory-tab-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/memory-tab-light.png" width="384" height="554" decoding="async" alt="狸花猫资料里的「记忆」页：「你的偏好」展开着，记着「回答时先说结论，再给依据」和它的来源；下面是这个对话的一条便笺。"></picture>
+      <picture class="t-main"><source srcset="shots/memory-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/memory-light.png" width="720" height="352" decoding="async" alt="小狸花想记住你的一个偏好：「引用资料时带上出处」，下面引着你的原话，按钮是「不用记」和「记住」。"></picture>
+      <picture class="t-inset t-float"><source srcset="shots/memory-tab-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/memory-tab-light.png" width="384" height="554" decoding="async" alt="小狸花资料里的「记忆」页：「你的偏好」展开着，记着「回答时先说结论，再给依据」和它的来源；下面是这个对话的一条便笺。"></picture>
     </figure>
   </section>
 
-  <section class="t-ability t-wrap t-reveal" id="a-honest" aria-labelledby="a-honest-h" data-host="孟加拉猫">
+  <section class="t-ability t-wrap t-reveal" id="a-honest" aria-labelledby="a-honest-h" data-host="斑斑">
     <div class="t-copy">
-      <p class="t-host"><span class="t-host-face" data-face="bengal" aria-hidden="true"></span>在「孟加拉猫」的对话里</p>
+      <p class="t-host"><span class="t-host-face" data-face="bengal" aria-hidden="true"></span>在「斑斑」的对话里</p>
       <h2 id="a-honest-h">没做完也如实说</h2>
       <p>没写完的回复会说清楚：这次没完成、中途被打断，还是你停下的。可以看详情，也可以再发一次。</p>
       <p>对话里暂时画不出来的内容，会写「还有 1 项内容暂时无法显示」，不会悄悄丢掉。</p>
       <p class="t-try"><span class="t-try-k">怎么试</span>看它现场演示：先失败一次，点「再发一次」就成了</p>
-      <div class="t-actions" hidden><button type="button" class="t-btn t-btn-primary" data-play="孟加拉猫">看它现场演示</button><a class="t-btn" data-chat="孟加拉猫">打开这个对话</a></div>
+      <div class="t-actions" hidden><button type="button" class="t-btn t-btn-primary" data-play="斑斑">看它现场演示</button><a class="t-btn" data-chat="斑斑">打开这个对话</a></div>
       <p class="t-note" role="status"></p>
     </div>
     <figure class="t-fig">
-      <picture><source srcset="shots/honest-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/honest-light.png" width="720" height="685" decoding="async" alt="孟加拉猫的对话：一条「这次没完成」、一条「中途被打断」，各带「详情」和「再发一次」；最后的回复带一张卡片，下面写着「还有 1 项内容暂时无法显示」。"></picture>
+      <picture><source srcset="shots/honest-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/honest-light.png" width="720" height="685" decoding="async" alt="斑斑的对话：一条「这次没完成」、一条「中途被打断」，各带「详情」和「再发一次」；最后的回复带一张卡片，下面写着「还有 1 项内容暂时无法显示」。"></picture>
     </figure>
   </section>
 
-  <section class="t-ability t-wrap t-reveal" id="a-find" aria-labelledby="a-find-h" data-host="金渐层">
+  <section class="t-ability t-wrap t-reveal" id="a-find" aria-labelledby="a-find-h" data-host="金哥">
     <div class="t-copy">
-      <p class="t-host"><span class="t-host-face" data-face="golden-chinchilla" aria-hidden="true"></span>在「金渐层」的对话里</p>
+      <p class="t-host"><span class="t-host-face" data-face="golden-chinchilla" aria-hidden="true"></span>在「金哥」的对话里</p>
       <h2 id="a-find-h">找得到</h2>
       <p>⌘K（Windows 上是 Ctrl+K）搜猫猫、群聊和聊过的话，回车直接跳到那条消息；也能只在当前对话里找。它搜的是每个对话最近的消息，也会这样告诉你。</p>
       <p>往上翻会加载更早的消息，引用能跳回原话；新对话和历史对话在顶栏的 ⋯ 里。</p>
       <p class="t-try"><span class="t-try-k">怎么试</span>打开对话后按 ⌘K，输入「纸页感」</p>
-      <div class="t-actions" hidden><a class="t-btn t-btn-primary" data-chat="金渐层">打开这个对话</a></div>
+      <div class="t-actions" hidden><a class="t-btn t-btn-primary" data-chat="金哥">打开这个对话</a></div>
     </div>
     <figure class="t-fig t-float" style="--t-r: 16px">
-      <picture><source srcset="shots/search-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/search-light.png" width="640" height="423" decoding="async" alt="⌘K 搜索「纸页感」：结果来自暹罗猫和产品评审，命中的字带底色；下面写着「只搜了最近的消息，更早的里可能还有。」"></picture>
+      <picture><source srcset="shots/search-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/search-light.png" width="640" height="423" decoding="async" alt="⌘K 搜索「纸页感」：结果来自烁烁和产品评审，命中的字带底色；下面写着「只搜了最近的消息，更早的里可能还有。」"></picture>
     </figure>
   </section>
 
   <section class="t-ability t-wrap t-reveal" id="a-group" aria-labelledby="a-group-h" data-host="产品评审">
     <div class="t-copy">
-      <p class="t-host"><span class="t-host-face t-host-group" data-group="布偶猫 缅因猫 暹罗猫" aria-hidden="true"></span>在「产品评审」群里</p>
+      <p class="t-host"><span class="t-host-face t-host-group" data-group="宪宪 砚砚 烁烁" aria-hidden="true"></span>在「产品评审」群里</p>
       <h2 id="a-group-h">群聊</h2>
       <p>直接说，由一只猫猫接；@名字 叫某一只；输入 @ 还能选「全体」，把每只都叫上。不在群里的猫，会直说它没有回答。</p>
       <p>群可以改名、加减成员、删除；每只猫有自己的颜色和脸。</p>
@@ -222,8 +223,8 @@
       <p class="t-note" role="status"></p>
     </div>
     <figure class="t-fig t-pair">
-      <picture class="t-main"><source srcset="shots/group-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/group-light.png" width="720" height="468" decoding="async" alt="产品评审群：@金渐层 之后一行「金渐层不在这个群里，没有回答。」；一句话 @ 了三只猫，布偶猫、缅因猫、暹罗猫各答一句。"></picture>
-      <picture class="t-inset t-float" style="--t-r: 12px"><source srcset="shots/group-at-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/group-at-light.png" width="288" height="172" decoding="async" alt="在群里输入 @ 弹出的列表：布偶猫、缅因猫、暹罗猫，和「全体 · @ 群里每一只」。"></picture>
+      <picture class="t-main"><source srcset="shots/group-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/group-light.png" width="720" height="468" decoding="async" alt="产品评审群：@金哥 之后一行「金哥不在这个群里，没有回答。」；一句话 @ 了三只猫，宪宪、砚砚、烁烁各答一句。"></picture>
+      <picture class="t-inset t-float" style="--t-r: 12px"><source srcset="shots/group-at-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/group-at-light.png" width="288" height="172" decoding="async" alt="在群里输入 @ 弹出的列表：宪宪、砚砚、烁烁，和「全体 · @ 群里每一只」。"></picture>
     </figure>
   </section>
 
@@ -233,12 +234,12 @@
       <article class="t-tile" aria-labelledby="t-list-h">
         <h3 id="t-list-h">联系人列表</h3>
         <p>最后一句和时间，最近聊的在上面；未读有数字，标签页的标题里也有；等你确认的写在行上，置顶的猫在最上面，没发出去的话各留各的。</p>
-        <picture class="t-tile-pic"><source srcset="shots/list-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/list-light.png" width="280" height="663" decoding="async" alt="侧栏的联系人列表：置顶的布偶猫在最上面；小鲸鱼有 2 条未读、写着「等你确认」；暹罗猫、梵花猫、狸花猫等各有最后一句和时间；群聊「产品评审」有 3 条未读。"></picture>
+        <picture class="t-tile-pic"><source srcset="shots/list-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/list-light.png" width="280" height="663" decoding="async" alt="侧栏的联系人列表：置顶的宪宪在最上面；鲸鲸有 2 条未读、写着「等你确认」，小狸花也在等你确认；烁烁、墨墨、砚砚等各有最后一句和时间；群聊「产品评审」有 3 条未读。"></picture>
       </article>
       <article class="t-tile" aria-labelledby="t-profile-h">
         <h3 id="t-profile-h">资料页</h3>
         <p>点顶栏的名字：资料、文件、记忆、定时。用哪个工具、哪个模型，收在「高级」里，平时用不到。</p>
-        <picture class="t-tile-pic t-float"><source srcset="shots/profile-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/profile-light.png" width="384" height="540" decoding="async" alt="布偶猫的资料页：职责、置顶开关、新对话和历史对话，收起的「高级」，最下面是「删除猫猫」。"></picture>
+        <picture class="t-tile-pic t-float"><source srcset="shots/profile-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/profile-light.png" width="384" height="540" decoding="async" alt="宪宪的资料页：职责、置顶开关、新对话和历史对话，收起的「高级」，最下面是「删除猫猫」。"></picture>
       </article>
       <article class="t-tile t-tile-wide" aria-labelledby="t-notify-h">
         <div>
@@ -252,12 +253,12 @@
 
   <section class="t-under t-wrap t-reveal" id="a-under" aria-labelledby="a-under-h">
     <h2 id="a-under-h">底下是什么</h2>
-    <p>引擎是 Clowder AI：规划、工具、记忆、定时和存储都由它负责。clowder-bot 是它上面的聊天界面和一层适配，不另做一套。回复由这台电脑上的 Claude Code 或 Codex 写出。</p>
+    <p>引擎是 Clowder AI：规划、工具、记忆、定时和存储都由它负责。clowder-bot 是它上面的聊天界面和一层适配，不另做一套。回复由这台电脑上的 Claude Code、Codex 或其它模型写出，每只猫用它自己的那个。</p>
     <ol class="t-stack" aria-label="从你到写回复的工具，一层一层">
       <li class="t-layer"><span class="t-layer-name">你</span><span class="t-layer-what">挑猫、说话、收结果</span></li>
       <li class="t-layer t-layer-us"><span class="t-layer-name">clowder-bot</span><span class="t-layer-what">聊天界面 · 适配层</span></li>
       <li class="t-layer"><span class="t-layer-name">Clowder AI</span><span class="t-layer-what">规划 · 工具 · 记忆 · 定时 · 存储</span></li>
-      <li class="t-layer"><span class="t-layer-name">Claude Code / Codex</span><span class="t-layer-what">在这台电脑上，用你已经登录的账号</span></li>
+      <li class="t-layer"><span class="t-layer-name">Claude Code、Codex <span class="t-nowrap">或其它模型</span></span><span class="t-layer-what">每只猫用它自己的那个，在这台电脑上，用你已经登录的账号</span></li>
     </ol>
   </section>
 </main>
