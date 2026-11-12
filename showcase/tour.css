@@ -180,6 +180,8 @@ body.t-page {
 .t-pair .t-main img { width: 100%; }
 .t-pair .t-inset { position: relative; z-index: 1; width: 46%; margin: -16px 0 0 auto; }
 .t-pair .t-inset img { width: 100%; }
+/* 新建猫猫 and, below it, the same row with a cat that cannot come home as it is: words to read, so wider. */
+.t-pair-wide .t-inset { width: 80%; }
 /* The host cat's own colour, very quiet, behind its picture (as behind its face in the drawer). */
 .t-tinted .t-fig::before {
   content: ""; position: absolute; inset: -8% -10%; z-index: -1; pointer-events: none;
@@ -260,6 +262,7 @@ html[data-theme="dark"] .t-tinted .t-fig::before {
   .t-copy h2, .t-daily > h2, .t-under > h2 { font-size: 24px; }
   .t-copy > p:not(.t-host):not(.t-try):not(.t-note) { font-size: 15px; }
   .t-pair .t-inset { width: 62%; }
+  .t-pair-wide .t-inset { width: 92%; }
   .t-tiles { grid-template-columns: minmax(0, 1fr); gap: var(--x-s6); }
   .t-tile { padding: var(--x-s8) var(--x-s7) 0; }
   .t-tile-wide { grid-template-columns: minmax(0, 1fr); gap: var(--x-s6); padding-bottom: var(--x-s7); }

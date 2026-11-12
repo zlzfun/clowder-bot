@@ -75,6 +75,20 @@
 /* Nothing chosen (still reading, or blocked): the row is only a picture. */
 .qc-faces.rest .qc-portrait { opacity: .62; }
 .qc-faces.rest .qc-face-name { display: none; }
+/* A face whose cat cannot come home as it is (its tool is not usable here; a
+   face's own cat only — in 自定义 every face is only a look, so none is
+   marked): it sits further back and paler, and chosen it steps forward only
+   part way, onto an empty dashed cushion. Still there, not broken; its size
+   and the cushion's outline tell it apart, not its colour. */
+.qc-face.away .qc-portrait { transform: scale(.6); opacity: .44; filter: saturate(.3); }
+.qc-faces.compact .qc-face.away[aria-checked="false"] .qc-portrait { transform: scale(.66); }
+.qc-face.away[aria-checked="true"] .qc-portrait { transform: scale(.88); opacity: .8; filter: saturate(.55); }
+.qc-face.away[aria-checked="true"] .qc-portrait::before { background: transparent; border: 1.5px dashed var(--x-faint); }
+.qc-face.away:not(:disabled)[aria-checked="true"]:active .qc-portrait { transform: scale(.85); }
+@media (hover: hover) {
+  .qc-face.away:not(:disabled)[aria-checked="false"]:hover .qc-portrait { transform: scale(.66); opacity: .64; filter: saturate(.45); }
+  .qc-faces.compact .qc-face.away:not(:disabled)[aria-checked="false"]:hover .qc-portrait { transform: scale(.72); }
+}
 
 /* ---- what the chosen cat is like, and 自定义 ----
    A hint, not a spec sheet: the template's personality, then what it is good
@@ -88,8 +102,36 @@
 .qc-trait-line:first-child { color: var(--x-text-2); }
 .qc-trait.own .qc-trait-line { color: var(--x-muted); }
 .qc-trait-who { margin-right: var(--x-s2); font-weight: 600; color: var(--x-text); }
+/* Which tool the chosen cat thinks with, under its hint: part of the cat, so a
+   line of its description, not a control. The tool's name is set apart like
+   the cat's. A tool that is not usable here: what it needs and why, a shade
+   stronger (it decides what can be done), and, for a login, the command and
+   重新检测. Two lines stay free while any face's cat cannot come home as it
+   is, so the form holds still between such a cat and one that can. */
+.qc-uses { width: 100%; }
+.qc-uses-line { margin: 0; font-size: 13px; line-height: 20px; color: var(--x-muted); }
+.qc-uses-text { animation: fade 180ms ease-out; }
+.qc-uses-line b { font-weight: 560; color: var(--x-text-2); white-space: nowrap; }
+.qc-uses-line.away { color: var(--x-text-2); }
+.qc-uses-line.away b { color: var(--x-text); }
+.qc-about.mixed .qc-uses-line { min-height: 40px; }
+.qc-uses-more {
+  margin-top: var(--x-s2); display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--x-s2);
+  font-size: var(--x-fs-sm); line-height: 1.6; color: var(--x-muted);
+}
+.qc-check { display: inline-flex; align-items: center; gap: var(--x-s1); min-height: 26px; padding: 0 10px; font-size: var(--x-fs-sm); color: var(--x-text-2); }
+.qc-check .icon { width: 13px; height: 13px; flex: none; }
+.qc-check[aria-disabled="true"] { cursor: default; opacity: .7; }
+.qc-uses-note { flex-basis: 100%; margin: 0; font-size: var(--x-fs-sm); line-height: 1.5; color: var(--x-text-2); }
+.qc-uses-note:empty { display: none; }
 /* The portrait changed since the screen read it: a quiet line beside the new words. */
 .qc-fresh { margin: 0; font-size: var(--x-fs-sm); line-height: 1.5; color: var(--x-text-2); animation: fade 180ms ease-out; }
+/* 自定义, and beside it, while the chosen cat cannot come home as it is, what
+   it does then: the way forward, so the switch steps up from quiet to a chip. */
+.qc-modeline { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--x-s1) var(--x-s2); }
+.qc-ahead { font-size: var(--x-fs-sm); line-height: 1.5; color: var(--x-muted); animation: fade 180ms ease-out; }
+.qc-mode.ahead { background: var(--x-fill-1); color: var(--x-text); font-weight: 560; }
+.qc-mode.ahead:hover { background: var(--x-fill-2); color: var(--x-text); }
 .qc-mode { display: inline-flex; align-items: center; gap: var(--x-s1); min-height: 28px; padding: 0 10px; font-size: var(--x-fs-sm); color: var(--x-muted); }
 .qc-mode .icon { width: 13px; height: 13px; flex: none; }
 .qc-mode[aria-pressed="true"] { background: var(--x-fill-1); color: var(--x-text-2); }
@@ -186,6 +228,7 @@
 .qc-card .qc-faces { margin-top: var(--x-s3); }
 /* The dialog reads left to right: the hint under the row, 自定义 at the edge like 更多设置. */
 .qc-card .qc-about { width: 100%; margin-top: var(--x-s2); align-items: flex-start; }
+.qc-card .qc-uses-more, .qc-card .qc-modeline { justify-content: flex-start; }
 .qc-card .qc-own { align-items: stretch; }
 .qc-card .field.qc-field { margin: var(--x-s5) 0 0; }
 .qc-opt { margin-left: var(--x-s2); font-size: var(--x-fs-cap); color: var(--x-faint); }
@@ -241,5 +284,5 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .qc-portrait, .qc-portrait::before, .qc-face-name, .qc-stage.leaving > * { transition: none; }
-  .qc-stage, .qc-wait-text, .qc-trait-line, .qc-fresh, .qc-own:not([hidden]) { animation: none; }
+  .qc-stage, .qc-wait-text, .qc-trait-line, .qc-uses-text, .qc-ahead, .qc-fresh, .qc-own:not([hidden]) { animation: none; }
 }

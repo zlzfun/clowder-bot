@@ -21,10 +21,11 @@
 // default zone for a cat), which makes it the same whichever machine retakes
 // it. The staged chats are dated relative to "now", so all pictures are taken
 // in one run, the light and the dark page side by side at each step. Two of
-// them change what is staged: 布偶猫 plays its demo (the reply is caught while
+// them change what is staged: 宪宪 plays its demo (the reply is caught while
 // it is being written) and the contact list is taken first, before opening a
-// chat clears its unread count. ONLY=live,group retakes some (the rest keep
-// theirs).
+// chat clears its unread count. The cats are called by their names (宪宪, 砚砚,
+// 烁烁…: what their templates call them). ONLY=live,group retakes some (the
+// rest keep theirs).
 //
 // Playwright is not a dependency of this repository: it is loaded from
 // PLAYWRIGHT_MODULES (a node_modules directory that has it); CHROMIUM may name
@@ -156,59 +157,67 @@ try {
   // 联系人列表: the list as it is staged (unread counts, 等你确认, the pinned cat), before any chat is opened.
   if (wanted('list')) await shoot('list', async page => around(page, ['#pin-row', '#roster'], 12, { x0: 0, x1: 280, y0: (await page.locator('#pin-row').boundingBox()).y - 6 }));
 
-  // 打开就能聊: 新建 → 新建猫猫, a face picked, its character under the row.
+  // 打开就能聊: 新建 → 新建猫猫, a cat whose tool is here picked (梵花猫, Kimi), its character and its tool under
+  // the row, a name typed; then, cropped to the row and what is under it, a cat whose tool the app cannot connect
+  // yet (暹罗猫): why it cannot come home as it is, and 自定义 beside it.
   if (wanted('new-cat')) {
     await both(async (page) => {
       await page.locator('.pin.add').click();
       await page.locator('.new-menu').getByText('新建猫猫', { exact: true }).click();
       await page.waitForSelector('.qc-card .qc-face');
-      await page.locator('.qc-card .qc-face[data-face="siamese"]').click();
+      await page.locator('.qc-card .qc-face[data-face="turkish-van"]').click();
+      await page.locator('.qc-card input').first().fill('年糕');
       await page.waitForTimeout(400);
     });
     await shoot('new-cat', page => around(page, ['.qc-card'], 0));
+    await both(async (page) => { await page.locator('.qc-card .qc-face[data-face="siamese"]').click(); await page.waitForTimeout(400); });
+    await shoot('new-cat-away', async page => {
+      const card = await page.locator('.qc-card').boundingBox(), about = await page.locator('.qc-card .qc-about').boundingBox();
+      return around(page, ['.qc-card .qc-faces', '.qc-card .qc-about'], 20, { x0: card.x, x1: card.x + card.width, y1: about.y + about.height + 14 });
+    });
     await both(page => page.locator('.qc-card').getByRole('button', { name: '取消', exact: true }).click());
   }
 
-  // 卡片、清单、差异: 缅因猫's review, a card, a checklist and a code diff in the chat.
+  // 卡片、清单、差异: 砚砚's review, a card, a checklist and a code diff in the chat.
   if (wanted('cards')) {
-    await both(async (page) => { await open(page, '缅因猫'); await page.locator('#thread .msg:has(.ck-diff)').first().scrollIntoViewIfNeeded(); });
+    await both(async (page) => { await open(page, '砚砚'); await page.locator('#thread .msg:has(.ck-diff)').first().scrollIntoViewIfNeeded(); });
     await shoot('cards', async page => around(page, ['#thread .msg:has(.ck-diff)'], 14, await column(page)));
   }
 
-  // 选项直接点: 暹罗猫's multiple choice with two picked, not yet sent.
+  // 选项直接点: 烁烁's multiple choice with two picked, not yet sent.
   if (wanted('choices')) {
     await both(async (page) => {
-      await open(page, '暹罗猫'); await thread(page, 'bottom');
+      await open(page, '烁烁'); await thread(page, 'bottom');
       const block = page.locator('#thread .ask').last();
       await block.getByText('最近在读').click(); await block.getByText('摘抄墙').click();
     });
     await shoot('choices', async page => around(page, ['@last:2'], 20, await column(page)));
   }
 
-  // 发资料，收文件: 梵花猫, a file sent with a message and the files it handed back.
+  // 发资料，收文件: 墨墨, a file sent with a message and the files it handed back.
   if (wanted('files')) {
-    await both(async (page) => { await open(page, '梵花猫'); await thread(page, 'bottom'); });
+    await both(async (page) => { await open(page, '墨墨'); await thread(page, 'bottom'); });
     await shoot('files', async page => around(page, ['#thread .thread-inner > .msg'], 20, await column(page)));
-    await both(page => drawer(page, '梵花猫', '文件'));
+    await both(page => drawer(page, '墨墨', '文件'));
     await shoot('files-tab', panel);
     await both(closeDrawer);
   }
 
-  // 说一句就设提醒: 小鲸鱼, a reminder come due (after its time divider) and the one still waiting.
+  // 说一句就设提醒: 鲸鲸, a reminder come due (after its time divider) and the one still waiting.
   if (wanted('reminder')) {
-    await both(async (page) => { await open(page, '小鲸鱼'); await thread(page, 'bottom'); });
+    await both(async (page) => { await open(page, '鲸鲸'); await thread(page, 'bottom'); });
     await shoot('reminder', async page => around(page, ['#thread .tdiv:has(+ .ck-reminder)', '@last:1'], 20, { ...(await column(page)), y0: 64 }));
-    await both(page => drawer(page, '小鲸鱼', '定时'));
+    await both(page => drawer(page, '鲸鲸', '定时'));
     await shoot('reminder-tab', panel);
     await both(closeDrawer);
   }
 
-  // 要记住的事先问你: 狸花猫's card, and what is kept under 资料 → 记忆.
+  // 要记住的事先问你: 小狸花's card, and what is kept under 资料 → 记忆.
   if (wanted('memory')) {
-    await both(async (page) => { await open(page, '狸花猫'); await thread(page, 'bottom'); });
+    await both(async (page) => { await open(page, '小狸花'); await thread(page, 'bottom'); });
     await shoot('memory', async page => around(page, ['@last:3'], 20, { ...(await column(page)), y0: 64 }));
     await both(async (page) => {
-      await drawer(page, '狸花猫', '记忆');
+      await drawer(page, '小狸花', '记忆');
       await page.locator('#panel').getByText('你的偏好', { exact: true }).click();
       await page.waitForTimeout(700);
     });
@@ -216,16 +225,16 @@ try {
     await both(closeDrawer);
   }
 
-  // 没做完也如实说: 孟加拉猫, a reply that did not finish, one interrupted, content that cannot be drawn yet.
+  // 没做完也如实说: 斑斑, a reply that did not finish, one interrupted, content that cannot be drawn yet.
   if (wanted('honest')) {
-    await both(async (page) => { await open(page, '孟加拉猫'); await thread(page, 'top'); });
+    await both(async (page) => { await open(page, '斑斑'); await thread(page, 'top'); });
     await shoot('honest', async page => around(page, ['#thread .thread-inner > .msg'], 20, await column(page)));
   }
 
   // 找得到: ⌘K, 纸页感.
   if (wanted('search')) {
     await both(async (page) => {
-      await open(page, '金渐层');
+      await open(page, '金哥');
       await page.keyboard.press('Meta+k');
       await page.waitForSelector('.pal-card');
       await page.keyboard.type('纸页感');
@@ -250,7 +259,7 @@ try {
 
   // 资料页: a cat's 资料, technical settings folded under 高级.
   if (wanted('profile')) {
-    await both(page => drawer(page, '布偶猫', '资料'));
+    await both(page => drawer(page, '宪宪', '资料'));
     await shoot('profile', panel);
     await both(closeDrawer);
   }
@@ -273,12 +282,12 @@ try {
     await both(page => page.locator('#settings-close').click());
   }
 
-  // 回复是活的: 布偶猫 plays its demo, slowed down; caught while it is writing (the stop button in the composer).
+  // 回复是活的: 宪宪 plays its demo, slowed down; caught while it is writing (the stop button in the composer).
   if (wanted('live')) {
-    await both(async (page) => { await open(page, '布偶猫'); await thread(page, 'bottom'); });
+    await both(async (page) => { await open(page, '宪宪'); await thread(page, 'bottom'); });
     await preview({ speed: 2 });
     try {
-      await preview({ play: '布偶猫' });
+      await preview({ play: '宪宪' });
       await both(page => page.waitForFunction(() => {
         const row = document.querySelector('#thread .msg.live');
         return row && /为什么是第二个/.test(row.textContent || '');

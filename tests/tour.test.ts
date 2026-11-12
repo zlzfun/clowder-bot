@@ -28,12 +28,14 @@ type Any = any;
 const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
 const settle = async (n = 12) => { for (let i = 0; i < n; i++) await new Promise((done) => setImmediate(done)); };
 
-// What scripts/showcase-scene.ts stages: one cat per template, the groups it makes, and the chats with a demo line.
-const cats = catTemplates.map(([, name]) => name);
+// What scripts/showcase-scene.ts stages: one cat per template, called what the template calls its cat (the
+// sixth column, 宪宪…; the scene names its cats from it), the groups it makes, and the chats with a demo line.
+const cats = catTemplates.map(template => template[5]);
+const breeds = catTemplates.map(template => template[1]);
 const groups = [...scene.matchAll(/\n {4}const name = '([^']+)'/g)].map(m => m[1]!);
 const playLines = /for \(const \[face, line\] of Object\.entries\(\{([\s\S]*?)\}\)\) plays\.set\(cats\[face\]!\.name/.exec(scene);
 const playFaces = [...(playLines?.[1] ?? '').matchAll(/(?:'([\w-]+)'|(\w+)):\s*'/g)].map(m => m[1] ?? m[2]);
-const plays = [...catTemplates.filter(([id]) => playFaces.includes(id)).map(([, name]) => name), ...groups.filter(() => (scene.match(/plays\.set\(name, \{ group: group\.id/g) || []).length === groups.length)];
+const plays = [...catTemplates.filter(([id]) => playFaces.includes(id)).map(template => template[5]), ...groups.filter(() => (scene.match(/plays\.set\(name, \{ group: group\.id/g) || []).length === groups.length)];
 
 const attrs = (name: string) => [...html.matchAll(new RegExp(`\\s${name}="([^"]*)"`, 'g'))].map(m => m[1]!);
 
@@ -51,6 +53,8 @@ function listRules() {
 // ---------------------------------------------------------------- what it points at
 test('every chat the guide opens, plays, lists or hosts a section in is staged by the showcase, and every staged chat is on its list', () => {
   assert.deepEqual(groups, ['产品评审', '读书会'], 'the scene\'s groups, as this test reads them');
+  assert.deepEqual(cats, ['宪宪', '砚砚', '烁烁', '墨墨', '鲸鲸', '小狸花', '斑斑', '金哥'], 'the cast as the scene names it');
+  assert.match(scene, /for \(const \[face, breed, roleDescription, personality, teamStrengths, name\] of catTemplates\)/, 'the scene takes each cat\'s name from the same column');
   assert.equal(playFaces.length, 8, 'the scene has a demo line for each cat');
   const opened = attrs('data-chat'), played = attrs('data-play'), listed = attrs('data-row'), hosts = attrs('data-host');
   const members = attrs('data-group').flatMap(list => list.split(/\s+/));
@@ -65,9 +69,37 @@ test('every chat the guide opens, plays, lists or hosts a section in is staged b
   // The faces the guide draws are the templates the scene names its cats after.
   const faces = /const FACES = (\{[^}]*\});/.exec(js);
   assert.ok(faces, 'tour.js keeps the cats\' faces in one place');
-  assert.deepEqual(plain(vm.runInNewContext('(' + faces![1] + ')')), Object.fromEntries(catTemplates.map(([id, name]) => [name, id])));
-  for (const [, name, face] of html.matchAll(/data-row="([^"]+)" data-face="([^"]+)"/g)) assert.equal(face, catTemplates.find(([, n]) => n === name)?.[0], name);
+  assert.deepEqual(plain(vm.runInNewContext('(' + faces![1] + ')')), Object.fromEntries(catTemplates.map(template => [template[5], template[0]])));
+  for (const [, name, face] of html.matchAll(/data-row="([^"]+)" data-face="([^"]+)"/g)) assert.equal(face, catTemplates.find(template => template[5] === name)?.[0], name);
   assert.doesNotMatch(html, /href="\/#chat=/, 'links are built from data-chat, not written by hand');
+});
+
+test('the cats are called by their names wherever the page shows or says one; only the 新建猫猫 pictures name the faces; replies are not said to come only from Claude Code or Codex', () => {
+  // What is shown matches what is opened: each row's name, each section's host, each group's members.
+  for (const [, row, name] of html.matchAll(/data-row="([^"]+)"[^>]*>(?:(?!<\/a>)[\s\S])*?<span class="t-row-name">([^<]+)<\/span>/g)) assert.equal(name, row);
+  for (const [, host, said] of html.matchAll(/data-host="([^"]+)">[\s\S]*?<\/span>在「([^」]+)」(?:的对话里|群里)<\/p>/g)) assert.equal(said, host);
+  assert.equal([...html.matchAll(/在「[^」]+」(?:的对话里|群里)/g)].length, attrs('data-host').length, 'every section with a host names it');
+  // The faces' own names (布偶猫, 小鲸鱼…) appear only where the 新建猫猫 dialog itself shows them.
+  const start = /<section[^>]*id="a-start"[\s\S]*?<\/section>/.exec(html)![0];
+  const rest = html.replace(start, '').replace(/<script[\s\S]*?<\/script>|<!--[\s\S]*?-->/g, '');
+  for (const breed of [...breeds, '蓝灰短毛猫']) assert.doesNotMatch(rest, new RegExp(breed), breed + ' outside 打开就能聊');
+  // Which tool a cat thinks with is the cat's own: the page says so where it speaks of where replies come from.
+  const words = html.replace(/<script[\s\S]*?<\/script>|<!--[\s\S]*?-->/g, ' ').replace(/<[^>]+>/g, ' ');
+  assert.doesNotMatch(words, /Claude Code (?:或|\/) Codex/, 'never only Claude Code or Codex');
+  const lead = /<p class="t-lead">([\s\S]*?)<\/p>/.exec(html)![1], under = /<section[^>]*id="a-under"[\s\S]*?<\/section>/.exec(html)![0];
+  for (const [where, said] of [['the opening', lead], ['打开就能聊', start], ['底下是什么', under.replace(/<ol[\s\S]*<\/ol>/, '')], ['its last box', /<ol[\s\S]*<\/ol>/.exec(under)![0]]] as const) {
+    assert.match(said, /其它模型/, where);
+  }
+  assert.match(start, /宪宪用 Claude Code，砚砚用 Codex，墨墨用 Kimi，别的猫用其它模型/);
+  // A cat whose tool is not here cannot come home as it is; 自定义 borrows its looks — said once, in 打开就能聊.
+  const prose = words.replace(/\salt="[^"]*"/g, '');
+  assert.equal((html.replace(/\salt="[^"]*"/g, '').match(/按原样领不了/g) || []).length, 1);
+  assert.match(start.replace(/\salt="[^"]*"/g, ''), /按原样领不了[^<]*「自定义」可以只借它的长相/);
+  assert.ok(prose.length > 0);
+  // 关于示例: the showcase's computer has the three tools the app can connect; the other five are placed for the list, not seen running.
+  const honest = /<p class="t-honest">([\s\S]*?)<\/p>/.exec(html)![1];
+  assert.match(honest, /三种工具（Claude Code、Codex、Kimi）/);
+  assert.match(honest, /另外五只猫是照引擎里已有的猫摆进列表的，只为列表完整，不表示它们的工具在这里跑过/);
 });
 
 // ---------------------------------------------------------------- rules
@@ -77,8 +109,8 @@ test('the staged chats run only when the scripted preview says so: {preview: tru
   for (const other of [null, undefined, 'x', {}, { preview: true, scene: 'plain', staged: false }, { preview: true, scene: 'showcase', staged: false }, { preview: 'true', scene: 'showcase', staged: true }, { scene: 'showcase', staged: true }, { bots: cats }]) {
     assert.equal(T.staged(other), false, JSON.stringify(other));
   }
-  assert.deepEqual([...T.plays({ preview: true, scene: 'showcase', staged: true, plays: ['布偶猫', 7, '读书会'] })], ['布偶猫', '读书会']);
-  assert.deepEqual([...T.plays({ preview: true, scene: 'plain', staged: false, plays: ['布偶猫'] })], [], 'nothing is played where play would not be served');
+  assert.deepEqual([...T.plays({ preview: true, scene: 'showcase', staged: true, plays: ['宪宪', 7, '读书会'] })], ['宪宪', '读书会']);
+  assert.deepEqual([...T.plays({ preview: true, scene: 'plain', staged: false, plays: ['宪宪'] })], [], 'nothing is played where play would not be served');
 });
 
 const day = (ago: number) => new Date(Date.now() - ago).toISOString();
@@ -87,14 +119,14 @@ const unavailable = (name: string, more: Any = {}) => ({ bot: name, state: 'idle
 
 test('a row says what was read whole; an activity not read whole (unavailable, partial) says nothing, so the row keeps what it showed', () => {
   const T = tourRules(), R = listRules(), now = Date.now();
-  const waiting = T.rowView(entry('小鲸鱼', { counts: { approval: 1, running: 0 }, unread: 2 }, { state: 'awaiting' }), false, R, now);
-  assert.deepEqual(plain(waiting), { time: R.ago(Date.parse(waiting.iso), now), iso: waiting.iso, stamp: R.stamp(Date.parse(waiting.iso)), line: 'waiting', said: '小鲸鱼最后说的话', badge: '2', dot: true });
+  const waiting = T.rowView(entry('鲸鲸', { counts: { approval: 1, running: 0 }, unread: 2 }, { state: 'awaiting' }), false, R, now);
+  assert.deepEqual(plain(waiting), { time: R.ago(Date.parse(waiting.iso), now), iso: waiting.iso, stamp: R.stamp(Date.parse(waiting.iso)), line: 'waiting', said: '鲸鲸最后说的话', badge: '2', dot: true });
   assert.ok(waiting.time && waiting.stamp);
-  assert.equal(T.rowView(entry('布偶猫', { counts: { running: 1 } }), false, R, now).line, 'busy');
-  assert.equal(T.rowView(entry('布偶猫', { active: [{ catId: 'x' }] }), false, R, now).line, 'busy');
-  assert.equal(T.rowView(entry('产品评审', { last: { messageId: 'g', time: day(60_000), from: 'cat', catName: '暹罗猫', text: '怕大家嫌它太素', files: 0 } }), true, R, now).said, '暹罗猫：怕大家嫌它太素');
-  assert.equal(T.rowView(unavailable('小鲸鱼'), false, R, now), null, 'unavailable: unread null and zero counts are placeholders, not "nothing waiting"');
-  assert.equal(T.rowView(entry('小鲸鱼', { readStatus: 'partial', unread: null }), false, R, now), null);
+  assert.equal(T.rowView(entry('宪宪', { counts: { running: 1 } }), false, R, now).line, 'busy');
+  assert.equal(T.rowView(entry('宪宪', { active: [{ catId: 'x' }] }), false, R, now).line, 'busy');
+  assert.equal(T.rowView(entry('产品评审', { last: { messageId: 'g', time: day(60_000), from: 'cat', catName: '烁烁', text: '怕大家嫌它太素', files: 0 } }), true, R, now).said, '烁烁：怕大家嫌它太素');
+  assert.equal(T.rowView(unavailable('鲸鲸'), false, R, now), null, 'unavailable: unread null and zero counts are placeholders, not "nothing waiting"');
+  assert.equal(T.rowView(entry('鲸鲸', { readStatus: 'partial', unread: null }), false, R, now), null);
   assert.equal(T.rowView({ bot: 'x' }, false, R, now), null);
   assert.equal(T.rowView(null, false, R, now), null);
 });
@@ -185,10 +217,10 @@ function build(doc: Doc, source: string) {
   }
 }
 
-const cast = Object.fromEntries(catTemplates.map(([id, name]) => [name, id]));
+const cast = Object.fromEntries(catTemplates.map(template => [template[5], template[0]]));
 const identity = (more: Any = {}) => ({ preview: true, scene: 'showcase', staged: true, zone: 'Asia/Shanghai', plays: [...cats, ...groups], cats, ...more });
 const botsAnswer = { bots: cats.map(name => ({ name, avatar_seed: 'cat:' + cast[name], templateId: cast[name], accent: { primary: '#5B8C5A', secondary: '#D4E6D3' } })) };
-const groupsAnswer = { groups: [{ id: 'g-review', name: '产品评审', members: ['布偶猫', '缅因猫', '暹罗猫'] }, { id: 'g-books', name: '读书会', members: ['小鲸鱼', '狸花猫', '梵花猫', '金渐层'] }] };
+const groupsAnswer = { groups: [{ id: 'g-review', name: '产品评审', members: ['宪宪', '砚砚', '烁烁'] }, { id: 'g-books', name: '读书会', members: ['鲸鲸', '小狸花', '墨墨', '金哥'] }] };
 const status = (over: Record<string, Any> = {}) => ({
   bots: cats.map(name => over[name] ?? entry(name)),
   groups: [{ id: 'g-review', thread_id: 'g-review', ...entry('产品评审') }, { id: 'g-books', thread_id: 'g-books', ...entry('读书会') }].map(g => over[g.id] ? { id: g.id, ...over[g.id] } : g),
@@ -266,7 +298,7 @@ test('the page says the staged chats run only when GET /__preview says so; anyth
     assert.ok(p.actions().every((shown: boolean) => !shown), what + ': no buttons');
     assert.ok(p.doc.body.querySelectorAll('button[data-play]').every((b: El) => b.hidden), what + ': nothing to play');
     assert.deepEqual(p.requests.map(r => r.path), ['/__preview'], what + ': the chats themselves are never read');
-    assert.equal(p.line('小鲸鱼'), '每天 9 点的提醒，到点在对话里叫你', 'each row keeps its own line');
+    assert.equal(p.line('鲸鲸'), '每天 9 点的提醒，到点在对话里叫你', 'each row keeps its own line');
     // Not every 8 seconds: only coming back to the page looks again.
     await p.c.advance(16_000);
     assert.equal(p.requests.length, 1, what);
@@ -276,51 +308,51 @@ test('the page says the staged chats run only when GET /__preview says so; anyth
   }
   // Staged, but one chat cannot be played: its button is not offered, the others are.
   const p = page();
-  await p.stage(identity({ plays: cats.filter(n => n !== '孟加拉猫') }));
+  await p.stage(identity({ plays: cats.filter(n => n !== '斑斑') }));
   assert.equal(p.chip(), '示例对话在运行');
   assert.equal(p.off(), false);
   assert.ok(p.actions().every((shown: boolean) => shown));
-  assert.equal(p.playButton('孟加拉猫').hidden, true);
-  assert.equal(p.playButton('布偶猫').hidden, false);
-  assert.equal(p.line('布偶猫'), '布偶猫最后说的话', 'the rows say what the chats say now');
+  assert.equal(p.playButton('斑斑').hidden, true);
+  assert.equal(p.playButton('宪宪').hidden, false);
+  assert.equal(p.line('宪宪'), '宪宪最后说的话', 'the rows say what the chats say now');
 });
 
 test('a row whose activity was not read whole keeps what it showed: 等你确认, the unread count and the time are never cleared by a failed read', async () => {
   const p = page();
   await p.stage(identity(), status({
-    小鲸鱼: entry('小鲸鱼', { counts: { approval: 1, running: 0 }, unread: 2 }, { state: 'awaiting' }),
-    狸花猫: unavailable('狸花猫'),
+    鲸鲸: entry('鲸鲸', { counts: { approval: 1, running: 0 }, unread: 2 }, { state: 'awaiting' }),
+    小狸花: unavailable('小狸花'),
   }));
-  assert.equal(p.line('小鲸鱼'), '等你确认');
-  assert.equal(p.count('小鲸鱼'), '2');
-  assert.equal(p.dot('小鲸鱼'), true);
-  const shown = p.time('小鲸鱼');
+  assert.equal(p.line('鲸鲸'), '等你确认');
+  assert.equal(p.count('鲸鲸'), '2');
+  assert.equal(p.dot('鲸鲸'), true);
+  const shown = p.time('鲸鲸');
   assert.ok(shown);
   // First read unavailable: the row's own line, and no claim about unread or waiting.
-  assert.equal(p.line('狸花猫'), '想记住你的习惯，先问你一句');
-  assert.equal(p.count('狸花猫'), '');
-  assert.equal(p.dot('狸花猫'), false);
-  assert.equal(p.time('狸花猫'), '');
-  // The next read: 小鲸鱼's activity unavailable (unread null, zero counts, no last line), 布偶猫's partial.
+  assert.equal(p.line('小狸花'), '想记住你的习惯，先问你一句');
+  assert.equal(p.count('小狸花'), '');
+  assert.equal(p.dot('小狸花'), false);
+  assert.equal(p.time('小狸花'), '');
+  // The next read: 鲸鲸's activity unavailable (unread null, zero counts, no last line), 宪宪's partial.
   await p.c.advance(8000);
-  await p.answer('/xbot-api/bots/status', status({ 小鲸鱼: unavailable('小鲸鱼', { state: 'idle' }), 布偶猫: entry('布偶猫', { readStatus: 'partial', unread: null, last: null }) }));
-  assert.equal(p.line('小鲸鱼'), '等你确认', 'still waiting, as far as anyone knows');
-  assert.equal(p.count('小鲸鱼'), '2');
-  assert.equal(p.dot('小鲸鱼'), true);
-  assert.equal(p.time('小鲸鱼'), shown);
-  assert.equal(p.line('布偶猫'), '布偶猫最后说的话');
+  await p.answer('/xbot-api/bots/status', status({ 鲸鲸: unavailable('鲸鲸', { state: 'idle' }), 宪宪: entry('宪宪', { readStatus: 'partial', unread: null, last: null }) }));
+  assert.equal(p.line('鲸鲸'), '等你确认', 'still waiting, as far as anyone knows');
+  assert.equal(p.count('鲸鲸'), '2');
+  assert.equal(p.dot('鲸鲸'), true);
+  assert.equal(p.time('鲸鲸'), shown);
+  assert.equal(p.line('宪宪'), '宪宪最后说的话');
   // A whole read later says it was answered: now it changes.
   await p.c.advance(8000);
   await p.answer('/xbot-api/bots/status', status());
-  assert.equal(p.line('小鲸鱼'), '小鲸鱼最后说的话');
-  assert.equal(p.count('小鲸鱼'), '');
-  assert.equal(p.dot('小鲸鱼'), false);
+  assert.equal(p.line('鲸鲸'), '鲸鲸最后说的话');
+  assert.equal(p.count('鲸鲸'), '');
+  assert.equal(p.dot('鲸鲸'), false);
   // The whole status read failing changes nothing while the preview still says the chats are staged.
   await p.c.advance(8000);
   await p.answer('/xbot-api/bots/status', { error: 'busy' }, 503);
   await p.answer('/__preview', identity());
   assert.equal(p.chip(), '示例对话在运行');
-  assert.equal(p.line('布偶猫'), '布偶猫最后说的话');
+  assert.equal(p.line('宪宪'), '宪宪最后说的话');
 });
 
 test('reads never overlap or come out of order: a tick or coming back while one runs adds one read after it, a slow one is given up, its late answer dropped, nothing while hidden', async () => {
@@ -332,12 +364,12 @@ test('reads never overlap or come out of order: a tick or coming back while one 
   p.doc.listeners.get('visibilitychange')!.forEach(fn => fn({}));
   await p.c.advance(5000);
   assert.equal(p.pending('/xbot-api/bots/status').length, 1, 'no pile of reads');
-  await p.answer('/xbot-api/bots/status', status({ 布偶猫: entry('布偶猫', { counts: { running: 1 } }) }));
-  assert.equal(p.line('布偶猫'), '正在输入…');
+  await p.answer('/xbot-api/bots/status', status({ 宪宪: entry('宪宪', { counts: { running: 1 } }) }));
+  assert.equal(p.line('宪宪'), '正在输入…');
   // Exactly one read after it, and its (newer) answer is the one shown.
   assert.equal(p.pending('/xbot-api/bots/status').length, 1);
-  await p.answer('/xbot-api/bots/status', status({ 布偶猫: entry('布偶猫', { last: { messageId: 'n', time: day(1000), from: 'cat', text: '写完了', files: 0 } }) }));
-  assert.equal(p.line('布偶猫'), '写完了');
+  await p.answer('/xbot-api/bots/status', status({ 宪宪: entry('宪宪', { last: { messageId: 'n', time: day(1000), from: 'cat', text: '写完了', files: 0 } }) }));
+  assert.equal(p.line('宪宪'), '写完了');
   assert.equal(p.pending('/xbot-api/bots/status').length, 0);
   // A read that hangs is given up after 6 s; the next tick reads again and shows its answer …
   await p.c.advance(3000);
@@ -346,12 +378,12 @@ test('reads never overlap or come out of order: a tick or coming back while one 
   await p.c.advance(6000);
   assert.equal(slow.init.signal.aborted, true, 'given up');
   await p.c.advance(3000); // the next tick (its own 6 s have not run out)
-  await p.answer('/xbot-api/bots/status', status({ 布偶猫: entry('布偶猫', { last: { messageId: 'z', time: day(500), from: 'cat', text: '更新的一句', files: 0 } }) }));
-  assert.equal(p.line('布偶猫'), '更新的一句');
+  await p.answer('/xbot-api/bots/status', status({ 宪宪: entry('宪宪', { last: { messageId: 'z', time: day(500), from: 'cat', text: '更新的一句', files: 0 } }) }));
+  assert.equal(p.line('宪宪'), '更新的一句');
   // … and the old answer, arriving now, does not paint over it.
-  slow.answer(status({ 布偶猫: entry('布偶猫', { counts: { running: 1 } }) }));
+  slow.answer(status({ 宪宪: entry('宪宪', { counts: { running: 1 } }) }));
   await settle();
-  assert.equal(p.line('布偶猫'), '更新的一句', 'a late answer is dropped');
+  assert.equal(p.line('宪宪'), '更新的一句', 'a late answer is dropped');
   // Hidden: no reads at all.
   (p.doc as Any).visibilityState = 'hidden';
   const before = p.requests.length;
@@ -362,7 +394,7 @@ test('reads never overlap or come out of order: a tick or coming back while one 
 test('看它现场演示 is a button: one press starts exactly one demo and opens the chat here; a middle click or a second press does nothing more; a refusal is said in place', async () => {
   const p = page();
   await p.stage();
-  const b = p.playButton('布偶猫');
+  const b = p.playButton('宪宪');
   assert.equal(b.tagName, 'BUTTON');
   b.dispatch('click', { button: 0, metaKey: true });
   b.dispatch('click', { button: 0 });
@@ -370,20 +402,20 @@ test('看它现场演示 is a button: one press starts exactly one demo and open
   await settle();
   const posts = p.requests.filter(r => r.path === '/__preview' && r.init.method === 'POST');
   assert.equal(posts.length, 1, 'exactly one demo');
-  assert.deepEqual(JSON.parse(posts[0]!.init.body), { play: '布偶猫' });
+  assert.deepEqual(JSON.parse(posts[0]!.init.body), { play: '宪宪' });
   assert.equal(b.getAttribute('aria-busy'), 'true');
   assert.equal(text(b), '正在开始…');
   assert.deepEqual(p.assigned, [], 'the chat opens only once the showcase took the line');
   posts[0]!.answer({ ok: true });
   await settle();
-  assert.deepEqual(p.assigned, ['/#chat=' + encodeURIComponent('布偶猫')], 'opened in this tab; Back returns here');
-  assert.deepEqual(JSON.parse(p.store.get('clowder-tour:seen')!), ['布偶猫'], 'its row gets its stamp on the way back');
+  assert.deepEqual(p.assigned, ['/#chat=' + encodeURIComponent('宪宪')], 'opened in this tab; Back returns here');
+  assert.deepEqual(JSON.parse(p.store.get('clowder-tour:seen')!), ['宪宪'], 'its row gets its stamp on the way back');
   // A middle click alone starts nothing.
-  p.playButton('缅因猫').dispatch('auxclick', { button: 1 });
+  p.playButton('砚砚').dispatch('auxclick', { button: 1 });
   await settle();
   assert.equal(p.requests.filter(r => r.path === '/__preview' && r.init.method === 'POST').length, 1);
   // Refused: said in place, the visitor stays, the button is ready again.
-  const m = p.playButton('孟加拉猫');
+  const m = p.playButton('斑斑');
   m.dispatch('click', { button: 0 });
   await settle();
   p.requests.filter(r => r.path === '/__preview' && r.init.method === 'POST' && !r.done)[0]!.answer({ error: 'play: not sent' }, 502);
@@ -393,10 +425,10 @@ test('看它现场演示 is a button: one press starts exactly one demo and open
   assert.equal(m.getAttribute('aria-busy'), null);
   assert.equal(text(m), '看它现场演示');
   // The plain link beside it opens the chat (a new tab is the browser's own), and stamps it.
-  const link = p.doc.body.querySelector('a[data-chat="缅因猫"]')!;
-  assert.equal(link.href, '/#chat=' + encodeURIComponent('缅因猫'));
+  const link = p.doc.body.querySelector('a[data-chat="砚砚"]')!;
+  assert.equal(link.href, '/#chat=' + encodeURIComponent('砚砚'));
   link.dispatch('click', { button: 0 });
-  assert.ok(JSON.parse(p.store.get('clowder-tour:seen')!).includes('缅因猫'));
+  assert.ok(JSON.parse(p.store.get('clowder-tour:seen')!).includes('砚砚'));
 });
 
 // ---------------------------------------------------------------- the pictures' script
