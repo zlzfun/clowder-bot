@@ -1260,8 +1260,9 @@ test('the shell loads the module before app.js and its styles after every earlie
   assert.match(app, /function openNewBot\(opener\) \{[\s\S]*?quick\.openCat\(\{ opener:/);
   assert.match(app, /more: \(opener\) => openTemplateCreate\(opener\)/);
   assert.match(app, /function openTemplateCreate\(opener\) \{[\s\S]*?window\.ClowderCatTemplates\.openCreate\(\{/);
-  // Focus comes back to the 新建 shown now (the top one, or the rail's).
-  assert.match(app, /opener: \(\) => \[\$\("side-new"\), \$\("rail-new"\)\]\.find\(\(b\) => b && b\.getClientRects\(\)\.length\) \|\| null,/);
+  // Focus comes back to the 新建 on screen now (the top one, or the rail's).
+  assert.match(app, /opener: \(\) => shownNew\(\),/);
+  assert.match(app, /function shownNew\(\) \{\n\s+return \[\$\("side-new"\), \$\("rail-new"\)\]\.find\(\(b\) => \{\n\s+if \(!b \|\| !b\.getClientRects\(\)\.length\) return false;/);
   // Where the new cat's portrait lands: its own face in the header.
   assert.match(app, /landing: \(name\) => \[\.\.\.document\.querySelectorAll\("#title \.avatar\[data-avatar-bot\]"\)\]/);
   // Only existing tokens; no new colour literal.

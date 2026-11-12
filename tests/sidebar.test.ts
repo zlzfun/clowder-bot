@@ -22,10 +22,14 @@ type Box = { left: number; top: number; width: number; height: number };
 class Anim {
   done = false; cancelled = false; resolve!: () => void; reject!: (e: unknown) => void;
   finished: Promise<void>;
+  readonly start: number;
   constructor(readonly el: El, readonly frames: Any[], readonly options: Any, readonly end: number) {
+    this.start = el.doc.now;
     this.finished = new Promise((res, rej) => { this.resolve = res; this.reject = rej; });
     this.finished.catch(() => {});
   }
+  get currentTime() { return this.cancelled ? null : Math.min(this.end, this.el.doc.now) - this.start; }
+  get playState() { return this.cancelled ? 'idle' : this.done ? 'finished' : 'running'; }
   cancel() { if (this.done) return; this.done = true; this.cancelled = true; this.reject(new Error('AbortError')); }
 }
 class El {
@@ -82,21 +86,37 @@ class El {
   removeEventListener() {}
 }
 class Doc {
-  body: El; documentElement: El; sidebar!: El; now = 0; anims: Anim[] = [];
+  body: El; documentElement: El; sidebar!: El; anims: Anim[] = [];
   defaultView: Any;
+  // Two clocks: the animation timeline (now) and the wall clock of plain timers (wall). The timeline runs at
+  // `rate` (slowed down in the browser's animation tools), or not at all when stalled (a timeline that does not
+  // advance); a hidden tab says so in `hidden`.
+  now = 0; wall = 0; rate = 1; stalled = false; hidden = false;
+  timers = new Map<number, { fn: () => void; at: number }>(); private seq = 0; listeners = new Map<string, Array<() => void>>();
   constructor() { this.body = new El(this, 'BODY'); this.documentElement = new El(this, 'HTML'); }
   createElement(tag: string) { return new El(this, tag.toUpperCase()); }
   createElementNS(_ns: string, tag: string) { return new El(this, tag); }
-  // The timeline: animations whose end has come finish, in order.
+  setTimeout = (fn: () => void, ms = 0) => { const id = ++this.seq; this.timers.set(id, { fn, at: this.wall + ms }); return id; };
+  clearTimeout = (id: number) => { this.timers.delete(id); };
+  addEventListener(type: string, fn: () => void) { const l = this.listeners.get(type) ?? []; l.push(fn); this.listeners.set(type, l); }
+  dispatch(type: string) { for (const fn of this.listeners.get(type) ?? []) fn(); }
+  // Wall time goes on by ms: animations whose end has come finish and timers whose time has come run, in order.
   async advance(ms: number) {
-    const end = this.now + ms;
+    const end = this.wall + ms;
     for (;;) {
-      const next = this.anims.filter(a => !a.done && a.end <= end).sort((a, b) => a.end - b.end)[0];
-      if (!next) break;
-      this.now = next.end; next.done = true; next.resolve();
+      const speed = this.stalled ? 0 : this.rate;
+      const anim = speed > 0 ? this.anims.filter(a => !a.done).map(a => ({ a, at: this.wall + Math.max(0, a.end - this.now) / speed }))
+        .filter(x => x.at <= end + 1e-9).sort((x, y) => x.at - y.at)[0] : undefined;
+      const timer = [...this.timers].map(([id, t]) => ({ id, ...t })).filter(t => t.at <= end).sort((x, y) => x.at - y.at)[0];
+      if (!anim && !timer) break;
+      const first = anim && (!timer || anim.at <= timer.at) ? 'anim' : 'timer';
+      const at = first === 'anim' ? anim!.at : timer!.at;
+      this.now += (at - this.wall) * speed; this.wall = at;
+      if (first === 'anim') { this.now = Math.max(this.now, anim!.a.end); anim!.a.done = true; anim!.a.resolve(); }
+      else { this.timers.delete(timer!.id); timer!.fn(); }
       await settle();
     }
-    this.now = end;
+    this.now += (end - this.wall) * (this.stalled ? 0 : this.rate); this.wall = end;
   }
 }
 
@@ -105,7 +125,7 @@ function load(opts: { reduce?: boolean } = {}) {
   const css: Record<string, string> = { '--side-fade': ' 120ms', '--side-move': ' 220ms', '--side-ease': ' cubic-bezier(0.2, 0.75, 0.3, 1)' };
   const window: Any = { matchMedia: (q: string) => ({ matches: !!opts.reduce && q === '(prefers-reduced-motion: reduce)' }), getComputedStyle: () => ({ getPropertyValue: (k: string) => css[k] ?? '' }) };
   doc.defaultView = window;
-  vm.runInContext(read('client/public/sidebar.js'), vm.createContext({ window, document: doc, console }));
+  vm.runInContext(read('client/public/sidebar.js'), vm.createContext({ window, document: doc, console, setTimeout: doc.setTimeout, clearTimeout: doc.clearTimeout }));
   return { doc, window, S: window.ClowderSidebar };
 }
 // A sidebar as index.html has it, with where things sit in each layout (the
@@ -206,6 +226,7 @@ test('into the rail: the words fade first, then the rail takes over while the wi
   await s.doc.advance(220);
   assert.deepEqual(s.states(), [], 'nothing left over at the end');
   assert.equal(s.motion.moving(), false);
+  assert.equal(s.doc.timers.size, 0, 'its watch is gone too');
 });
 
 test('out of the rail: laid out full at once while the words stay hidden, the faces glide back, the rail\'s 新建 fades where it stood, the words fade in last', async () => {
@@ -262,6 +283,79 @@ test('back out before the rail took over: the words fade back in and the rail ne
   t.motion.to(true, 72, false);
   assert.deepEqual(t.states(), []);
   assert.equal(t.side.classes.has('rail'), true);
+});
+
+test('a move always ends: a clock cancelled from outside jumps it to its end, a timeline that stops is noticed by a plain timer, a hidden tab ends it; a slowed one is never cut short', async () => {
+  // Cancelled from outside (not by the move itself): the rail is laid out and nothing is left over.
+  const s = sidebar();
+  s.motion.to(true, 72, true);
+  s.doc.anims.find(a => a.frames.length === 0)!.cancel();
+  await settle();
+  assert.equal(s.motion.moving(), false);
+  assert.equal(s.side.classes.has('rail'), true);
+  assert.equal(s.doc.documentElement.classes.has('has-rail'), true);
+  assert.deepEqual(s.states(), []);
+  assert.deepEqual(s.calls, ['start true', 'layout true']);
+  assert.equal(s.doc.timers.size, 0, 'its watch is gone too');
+  // The next snap runs as usual.
+  s.motion.to(false, 280, true);
+  assert.deepEqual(s.states(), ['side-arriving', 'side-moving']);
+  await s.doc.advance(267);
+  assert.deepEqual(s.states(), []);
+  // A timeline that does not advance (its clock never settles): the watch ends the move within a few seconds.
+  const t = sidebar({ rail: true });
+  t.doc.stalled = true;
+  t.motion.to(false, 280, true);
+  assert.equal(t.side.kids.filter(k => k.classes.has('side-ghost')).length, 2);
+  await t.doc.advance(1019);
+  assert.equal(t.motion.moving(), true, 'not cut at the first look');
+  await t.doc.advance(2100);
+  assert.equal(t.motion.moving(), false);
+  assert.deepEqual(t.states(), []);
+  assert.equal(t.side.classes.has('rail'), false);
+  assert.equal(t.side.kids.some(k => k.classes.has('side-ghost')), false, 'no copy left behind');
+  assert.equal(t.doc.timers.size, 0);
+  // Slowed to 5% in the browser's animation tools, 340 ms of motion take 6.8 s of wall time: the watch waits.
+  const u = sidebar();
+  u.doc.rate = 0.05;
+  u.motion.to(true, 72, true);
+  await u.doc.advance(6000);
+  assert.equal(u.motion.moving(), true, 'still moving after six seconds');
+  assert.deepEqual(u.states(), ['side-fading', 'side-landing', 'side-moving']);
+  await u.doc.advance(1000);
+  assert.equal(u.motion.moving(), false);
+  assert.equal(u.side.classes.has('rail'), true);
+  assert.deepEqual(u.states(), []);
+  // A tab hidden mid-move: the move ends there, so the sidebar is settled when the tab comes back.
+  const v = sidebar();
+  v.motion.to(true, 72, true);
+  v.doc.hidden = true;
+  v.doc.dispatch('visibilitychange');
+  assert.equal(v.motion.moving(), false);
+  assert.equal(v.side.classes.has('rail'), true);
+  assert.deepEqual(v.states(), []);
+  assert.equal(v.doc.timers.size, 0);
+});
+
+test('a resize while a move runs ends it at once, toward the same state too (out of the rail, then into the drawer): no copies or classes stay', async () => {
+  const s = sidebar({ rail: true });
+  s.motion.to(false, 280, true);
+  assert.equal(s.side.kids.filter(k => k.classes.has('side-ghost')).length, 2);
+  // The window went below 768px: the drawer is never the rail, so the target is the same (rail: false), but not animated.
+  s.motion.to(false, 280, false);
+  assert.equal(s.motion.moving(), false);
+  assert.deepEqual(s.states(), []);
+  assert.equal(s.side.kids.some(k => k.classes.has('side-ghost')), false, 'the copies placed for the desktop layout are gone');
+  assert.ok(s.doc.anims.every(a => a.cancelled || a.done), 'its glides and clocks stopped');
+  assert.equal(s.doc.timers.size, 0);
+  // Reduced motion turned on mid-move does the same.
+  const t = sidebar();
+  t.motion.to(true, 72, true);
+  t.window.matchMedia = (q: string) => ({ matches: q === '(prefers-reduced-motion: reduce)' });
+  t.motion.to(true, 72, true);
+  assert.equal(t.motion.moving(), false);
+  assert.equal(t.side.classes.has('rail'), true);
+  assert.deepEqual(t.states(), []);
 });
 
 test('with reduced motion the snap paints at once: no classes, no animation', () => {

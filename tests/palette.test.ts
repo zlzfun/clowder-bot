@@ -318,7 +318,7 @@ function page(opts: { mac?: boolean; chats?: Any[]; order?: Any[]; selection?: A
   const log: Any[] = [];
   // openGate / switchGate: when set, opening a chat or the switch waits for them (a slow app).
   const state = { selection: opts.selection ?? { type: 'bot', id: '团子' }, chats: opts.chats ?? chatsFixture(), order: opts.order ?? null, blocked: false,
-    switchOut: { ok: true } as Any, openGate: null as Promise<unknown> | null, switchGate: null as Promise<Any> | null };
+    switchOut: { ok: true } as Any, openGate: null as Promise<unknown> | null, switchGate: null as Promise<Any> | null, fallback: null as El | null };
   const experience = { located: [] as string[], locate: async (item: Any) => { experience.located.push(item.messageId); return true; } };
   const window: Any = { ClowderExperience: experience };
   const context = vm.createContext({
@@ -349,6 +349,7 @@ function page(opts: { mac?: boolean; chats?: Any[]; order?: Any[]; selection?: A
     setTheme: (mode: string) => log.push(['theme', mode]),
     note: (text: string) => log.push(['note', text]),
     focusComposer: () => log.push(['focusComposer']),
+    fallback: () => state.fallback, // app.js: the 新建 on screen now (shownNew)
     blocked: () => state.blocked || shell.hidden, // app.js passes shell.hidden
   });
   const root = () => doc.body.find('pal')[0];
@@ -411,6 +412,38 @@ test('⌘K opens the palette over an inert shell with the caret in the field; an
   assert.equal(w.P.isOpen(), true);
   assert.equal(w.entry.dataset.tip, '搜索  Ctrl K');
   assert.equal(w.entry.getAttribute('aria-keyshortcuts'), 'Control+K');
+});
+
+test('closed after its way in left sight (the window widened into the rail, which has no 搜索) with no composer to take focus: focus goes to the 新建 on screen, never to the page', () => {
+  const p = page();
+  const railNew = p.h('button', 'rail-new', 'side-glyph');
+  p.shell.append(railNew);
+  p.state.fallback = railNew;
+  p.entry.click();
+  assert.equal(p.P.isOpen(), true);
+  // No chat open, so the composer takes nothing (this harness's focusComposer never focuses); the rail hides 搜索.
+  p.entry.hidden = true;
+  p.key(p.input(), 'Escape');
+  assert.equal(p.P.isOpen(), false);
+  assert.deepEqual(p.log.filter(l => l[0] === 'focusComposer'), [['focusComposer']], 'the composer is tried first');
+  assert.ok(p.doc.activeElement === railNew, 'focus on the 新建 shown now');
+  // Nothing on screen to take it either: nothing is forced (the hidden button is not focused).
+  const q = page();
+  const gone = q.h('button', 'rail-new', 'side-glyph');
+  gone.hidden = true;
+  q.shell.append(gone);
+  q.state.fallback = gone;
+  q.entry.click();
+  q.entry.hidden = true;
+  q.key(q.input(), 'Escape');
+  assert.ok(q.doc.activeElement !== gone);
+  // Its way in still there: focus goes back to it, as before, and the fallback is not asked.
+  const r = page();
+  r.state.fallback = railNew;
+  r.entry.click();
+  r.key(r.input(), 'Escape');
+  assert.ok(r.doc.activeElement === r.entry);
+  assert.match(read('client/public/app.js'), /fallback: \(\) => shownNew\(\),/);
 });
 
 test('it does not open over another dialog or a signed-out page, and keys inside it stay inside it', () => {

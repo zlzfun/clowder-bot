@@ -133,12 +133,36 @@
     }
     // The move's own clock: an empty animation on the sidebar, so each step
     // follows the same timeline as the transitions it waits for (slowed in the
-    // browser's animation tools, they stay in step).
+    // browser's animation tools, they stay in step). clear() takes a clock off
+    // the list before cancelling it; a clock ended any other way (cancelled from
+    // outside, a step that throws) jumps the move to its end.
     function later(r, fn, delay) {
       const clock = sidebar.animate([], { duration: Math.max(0, delay) });
       r.timers.push(clock);
-      clock.finished.then(() => { if (r.timers.includes(clock)) fn(); }, () => {});
+      const mine = () => run === r && r.timers.includes(clock);
+      clock.finished.then(() => {
+        if (!mine()) return;
+        try { fn(); } catch { if (run === r) finish(); }
+      }, () => { if (mine()) finish(); });
     }
+    // A move always ends. A plain timer looks at the move's clock every second
+    // or so: while it runs on (slowed down in the animation tools too) the move
+    // goes on; once it has stopped (cancelled, paused, a timeline that does not
+    // advance) the move jumps to its end. A tab hidden mid-move ends it too
+    // (nobody sees it, and it comes back settled).
+    function watch(r) {
+      r.guard = setTimeout(() => {
+        if (run !== r) return;
+        const clock = r.timers[r.timers.length - 1];
+        const at = clock ? Number(clock.currentTime) || 0 : 0;
+        const going = !!clock && clock.playState === "running" && (clock !== r.seen || at > r.seenAt);
+        if (!going || doc.hidden) { finish(); return; }
+        r.seen = clock;
+        r.seenAt = at;
+        watch(r);
+      }, Math.max(1000, 3 * (r.fade + r.move)));
+    }
+    if (doc.addEventListener) doc.addEventListener("visibilitychange", () => { if (run) finish(); });
     function clear(r) {
       const clocks = r.timers;
       r.timers = [];
@@ -151,6 +175,7 @@
     }
     function cleanup(r) {
       clear(r);
+      clearTimeout(r.guard);
       sidebar.classList.remove(...STATES);
       if (run === r) run = null;
     }
@@ -168,11 +193,15 @@
     function finish() {
       const r = run;
       if (!r) return;
-      if (!r.applied) layout(r.rail, r.width);
-      cleanup(r);
+      try { if (!r.applied) { r.applied = true; layout(r.rail, r.width); } }
+      finally { cleanup(r); }
     }
-    const fresh = (rail, width) => ({ rail, width, applied: false, timers: [], anims: [], ghosts: [], waiting: null,
-      fade: ms("--side-fade", 120), move: ms("--side-move", 220), ease: style("--side-ease") || "ease-out" });
+    const fresh = (rail, width) => {
+      const r = { rail, width, applied: false, timers: [], anims: [], ghosts: [], waiting: null, guard: 0, seen: null, seenAt: 0,
+        fade: ms("--side-fade", 120), move: ms("--side-move", 220), ease: style("--side-ease") || "ease-out" };
+      watch(r);
+      return r;
+    };
 
     function collapse(width) {
       const r = fresh(true, width);
@@ -217,6 +246,9 @@
     // is a snap the owner made (the grip), as opposed to a load or a resize.
     function to(rail, width, animate) {
       rail = !!rail;
+      // A load, a resize (the drawer's width has none of the desktop rules a
+      // move's copies rely on) or reduced motion never leaves a move running.
+      if (run && (!animate || reduced())) finish();
       if (run && run.rail === rail) {
         run.width = width;
         if (run.applied) setWidth(width);

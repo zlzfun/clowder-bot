@@ -6957,8 +6957,19 @@
     setTheme: (mode) => applyTheme(mode),
     note: (text) => showToast(text, "info"),
     focusComposer: () => { if (window.innerWidth >= 768) input.focus({ preventScroll: true }); },
+    // 搜索 gone from sight (the rail has none) and no composer to take focus: the 新建 on screen now.
+    fallback: () => shownNew(),
     blocked: () => shell.hidden,
   });
+  // The 新建 button on screen now (the top one, or the rail's; in a closed
+  // drawer neither): where focus goes when the control a dialog came from is gone.
+  function shownNew() {
+    return [$("side-new"), $("rail-new")].find((b) => {
+      if (!b || !b.getClientRects().length) return false;
+      const r = b.getBoundingClientRect();
+      return r.right > 0 && r.left < window.innerWidth && r.bottom > 0 && r.top < window.innerHeight;
+    }) || null;
+  }
 
   // The remote conversation is a full panel at z-index 12; this drawer sits at
   // 30, so it would cover its header and composer. Close it when one opens.
@@ -7634,8 +7645,8 @@
     more: (opener) => openTemplateCreate(opener),
     showList: () => $("menu").click(),
     error: (e) => setStatus(visibleError(e), true),
-    // The 新建 button shown now (the top one, or the rail's): focus returns there after a dialog.
-    opener: () => [$("side-new"), $("rail-new")].find((b) => b && b.getClientRects().length) || null,
+    // The 新建 button on screen now (the top one, or the rail's): focus returns there after a dialog.
+    opener: () => shownNew(),
   });
   // 找得到 (chat-list.js): rows read the status poll's latest lines; drafts
   // move between the composer and the chat they were written in.

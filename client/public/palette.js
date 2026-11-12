@@ -260,8 +260,15 @@
     const back = S.opener;
     S.opener = null;
     if (!restore) return;
-    if (back && shown(back) && !back.disabled) back.focus({ preventScroll: true });
-    else if (H.focusComposer) H.focusComposer();
+    if (back && shown(back) && !back.disabled) { back.focus({ preventScroll: true }); return; }
+    if (H.focusComposer) H.focusComposer();
+    // The way in is gone (搜索 has no place in the rail) and the composer took
+    // nothing (no chat open, a phone): a control the app says is on screen now.
+    const here = document.activeElement;
+    if ((!here || here === document.body || !shown(here)) && H.fallback) {
+      const next = H.fallback();
+      if (next && shown(next) && !next.disabled) next.focus({ preventScroll: true });
+    }
   }
 
   // ------------------------------------------------------------------ search
