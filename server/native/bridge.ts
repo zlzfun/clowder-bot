@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { ApiError } from '../errors.js';
 import { ProductStore } from '../product-store.js';
 import type { NativeCat, NativeMessage, NativeThread, NativeTransport } from './types.js';
-import { defaultRuntime, faceOfTool, faceTool, memberCliArgs, runtimeUnavailable, supportsRuntime, faceTemplates, type Face, type FaceTemplate } from './agents.js';
+import { defaultRuntime, faceOfTool, faceTool, faceTools, memberCliArgs, runtimeUnavailable, supportsRuntime, faceTemplates, type Face, type FaceTemplate } from './agents.js';
 import { approvalReceipt, approvalReceiptText, messageDisplayText, messagePresentation, replyEnding, replyInProgress, rosterRefusals, scheduledReminder } from './message-presentation.js';
 import { avatarBreed, type CatConfig, type SourceTemplate } from './cat-templates.js';
 import { clip } from './text.js';
@@ -76,7 +76,9 @@ export class BotBridge {
   /** The engine's templates as faces are made from them, with malformed entries left out (see faceTemplates). */
   faceTemplates(): Promise<FaceTemplate[]> { return this.native.request('/api/cat-templates').then(faceTemplates); }
   /** Creation requests in flight or just made, by their key: what was asked and the engine request it resolved to. Not persisted. */
-  private readonly simpleRequests = new Map<string, { input: string; body: Record<string, unknown>; face: string }>();
+  private readonly simpleRequests = new Map<string, { input: string; body: Record<string, unknown>; face: string; tool: string }>();
+  /** The resolutions of those requests that are still being worked out, so that identical requests arriving together share one. */
+  private readonly simpleResolving = new Map<string, Promise<{ input: string; body: Record<string, unknown>; face: string; tool: string }>>();
   runtimes(refresh = false): Promise<NativeRuntime[]> { return this.native.request<{ runtimes: NativeRuntime[] }>(`/api/cats/native-runtimes${refresh ? '?refresh=1' : ''}`).then(r => r.runtimes); }
   async cat(name: string): Promise<NativeCat> {
     const cat = (await this.cats()).find(c => c.name === name || c.id === name);
@@ -376,11 +378,21 @@ export class BotBridge {
   }
   /**
    * A cat from a name alone, on the unpatched native member creation
-   * (POST /api/cats): the local Agent's own model and effort, the colour of the
-   * chosen face and, unless the owner asked for a custom cat, the portrait of
-   * the engine's template for that face. The request carries native's own
-   * creation identity (journey + key), so sending it again returns the same
-   * cat and a different request under the same key is refused by native.
+   * (POST /api/cats): the colour of the chosen face and, unless the owner
+   * asked for a custom cat, the portrait and the tool of the engine's cat for
+   * that face; the tool's own model and effort. The request carries native's
+   * own creation identity (journey + key), so sending it again returns the
+   * same cat and a different request under the same key is refused.
+   *
+   * A repeat of a request (its answer got lost) is handled by what is known:
+   * - the same request again in this process is replayed to native exactly as
+   *   it was first resolved (the tool and the template's words of that moment);
+   * - if no cat was made and the tool it was resolved to is no longer usable,
+   *   it is resolved afresh, so nothing is made on a tool that is not here;
+   * - when this process has no record of the request but the cat its key made
+   *   is there, the answer is that cat — never "nothing was created" — as long
+   *   as the request still describes it; otherwise it is a different request.
+   * Identical requests arriving together share one resolution.
    */
   private async createSimple(name: string, simple: NonNullable<CreateBot['simple']>, key: string, timezone?: string): Promise<NativeCat> {
     const catId = `bot-${createHash('sha256').update(`bot-simple-cat:${key}`).digest('hex').slice(0, 24)}`;
@@ -389,65 +401,96 @@ export class BotBridge {
     const about = simple.about?.trim(), temper = simple.personality?.trim();
     // Custom keeps only the face's looks; otherwise picking a face picks that cat.
     const custom = simple.custom === true || !!about || !!temper;
-    // The same request sent again (its answer got lost) must reach native exactly as it did the first time, or native
-    // refuses it as a different one. What it resolved to — the tool, the template's words at that moment — is kept
-    // with the key while this process lives, and a repeat of the same request is replayed from it.
     const input = createHash('sha256').update(JSON.stringify([name, simple.face ?? null, simple.rev ?? null, custom, about ?? null, temper ?? null, simple.agent ?? null])).digest('hex');
+    const different = (details?: unknown) => new ApiError(409, '这次创建和上一次的内容不一样，或者名字已被占用，请重新创建', details);
+    const keep = (cat: NativeCat, face: string) => {
+      const meta = this.store.bot(cat.id);
+      if (meta.templateId !== face || !meta.avatarSeed) { Object.assign(meta, { templateId: face, avatarSeed: `cat:${face}`, ...(timezone ? { timezone } : {}) }); this.store.save(); }
+      return this.withStartingArguments(cat);
+    };
     let sent = this.simpleRequests.get(key);
-    if (sent?.input !== input) {
-      // A repeat of a request that already made its cat is answered from that cat: what the tools look like now no longer matters.
-      const runtimes = await this.runtimes(!existing);
-      const usual = defaultRuntime(runtimes), none = '这台电脑上还没有可以用的助手程序，装好并登录 Claude Code 或 Codex 后再试。';
-      let runtime: NativeRuntime | undefined;
-      if (existing) runtime = runtimes.find(r => supportsRuntime(r) && r.clientId === existing.clientId);
-      else if (custom) {
-        // A custom cat only borrows the looks: it thinks with the tool the owner picked, or the usual one.
-        runtime = simple.agent ? runtimes.find(r => r.id === simple.agent) : usual;
-        if (!runtime) throw new ApiError(422, simple.agent ? '找不到选的这个助手程序，请重新选择。' : none);
-        // Said with the tool's name: the first screen has no "Agent" vocabulary.
-        if (runtimeUnavailable(runtime)) throw new ApiError(422, runtime.readiness?.status === 'login_required'
-          ? `${runtime.label} 还没有登录，登录后再试。` : `这台电脑上的 ${runtime.label} 现在用不了，换一个或稍后再试。`);
-      } else {
-        // Picking a face picks that cat, and which tool it thinks with is part of the cat: it is not chosen separately,
-        // and without that tool on this computer the cat cannot be made as it is. No face picked: the cat of the tool
-        // that was asked for, or of the one this computer would use anyway.
-        const asked = simple.agent ? runtimes.find(r => r.id === simple.agent) : usual;
-        const picked: Face | undefined = simple.face as Face | undefined ?? (asked && faceOfTool(asked));
-        if (!picked) throw new ApiError(422, simple.agent ? '找不到选的这个助手程序，请重新选择。' : none);
-        const tool = faceTool(picked, runtimes);
-        if (!tool.runtime) throw new ApiError(422, tool.state === 'login' ? `${tool.reason}，登录后再试。`
-          : `${tool.reason}，所以这只猫猫现在领不了。${tool.state === 'missing' ? '装好并登录后再试，或者' : '可以'}改用「自定义」，只借它的长相。`, undefined, 'face_unavailable');
-        if (simple.agent && simple.agent !== tool.runtime.id) throw new ApiError(422, `这只猫猫用 ${tool.label} 来思考，不能另选；想自己选，请用「自定义」。`, undefined, 'face_tool');
-        runtime = tool.runtime;
+    if (sent && sent.input !== input) {
+      // This key already stands for another request. If that one made its cat, this is not a repeat of it.
+      if (existing) throw different();
+      sent = undefined;
+    }
+    if (!sent && existing) {
+      // No record of the request here (the process restarted since), but the cat its key made exists: creation is not asked
+      // again, and it is not re-resolved against templates and tools that may have changed. What can be told from the cat
+      // itself is compared with the request; a request that asks for something else is a different one.
+      const meta = this.store.bot(existing.id), face = simple.face ?? meta.templateId ?? 'ragdoll';
+      const tool = simple.agent ? (await this.runtimes()).find(r => r.id === simple.agent)?.clientId ?? '' : !custom && simple.face ? faceTools[simple.face as Face].client : undefined;
+      if (existing.name !== name || (simple.face && meta.templateId && meta.templateId !== simple.face) || (tool !== undefined && tool !== existing.clientId)
+        || (about !== undefined && existing.roleDescription !== about) || (temper !== undefined && existing.personality !== temper)
+        || (custom && !about && existing.roleDescription !== defaultRole)) throw different();
+      return keep(existing, face);
+    }
+    if (sent && !existing) {
+      // Nothing was made by the earlier attempt. The tool it was resolved to has to be usable still, or the request is resolved afresh.
+      const tool = (await this.runtimes(true)).find(r => r.id === sent!.tool);
+      if (!tool || runtimeUnavailable(tool)) { this.simpleRequests.delete(key); sent = undefined; }
+    }
+    if (!sent) {
+      // Identical requests that arrive together are resolved once: whichever tool and words that reading found are the request's.
+      const flight = `${key}:${input}`;
+      let resolving = this.simpleResolving.get(flight);
+      if (!resolving) {
+        resolving = this.resolveSimple(name, simple, catId, custom, about, temper, input).finally(() => this.simpleResolving.delete(flight));
+        this.simpleResolving.set(flight, resolving);
       }
-      if (!runtime) throw new ApiError(422, none);
-      const face = simple.face ?? faceOfTool(runtime) ?? 'ragdoll';
-      // Nothing has been asked of native yet: this is a refusal, not an unsure creation, and says so by code.
-      const template = (await this.faceTemplates().catch(() => [])).find(known => known.id === face);
-      if (!template?.color) throw new ApiError(503, '暂时读不到猫猫的资料，这次没有创建，请稍后再试', undefined, 'faces_unavailable');
-      // The cat that is made is the one that was described: a portrait that changed since the screen read it is shown again first.
-      if (!custom && simple.rev && simple.rev !== template.rev) throw new ApiError(409, '这只猫猫的介绍刚刚更新了，请再看一眼后重试', undefined, 'face_changed');
-      const portrait = custom
-        ? { roleDescription: about || defaultRole, personality: temper || defaultPersonality, teamStrengths: about ? clip(about.replace(/\s+/g, ' '), 60) : defaultStrengths }
-        // The engine's template of the same id gives the role, the personality and the strengths, as written upstream.
-        : { roleDescription: template.roleDescription || defaultRole, personality: template.personality || defaultPersonality, teamStrengths: template.teamStrengths || defaultStrengths };
-      sent = { input, face, body: { catId, name, displayName: name, nickname: name, color: template.color, mentionPatterns: [`@${name}`, `@${catId}`],
-        ...portrait, clientId: runtime.clientId, configurationSource: 'native_tool', defaultModel: '' } };
+      const resolved = await resolving, kept = this.simpleRequests.get(key);
+      sent = kept?.input === input ? kept : resolved;
       this.simpleRequests.set(key, sent);
       // Only recent requests can still be retried; the oldest go first.
       for (const old of this.simpleRequests.keys()) { if (this.simpleRequests.size <= 50) break; this.simpleRequests.delete(old); }
     }
-    const face = sent.face, journey = 'clowder-bot-simple';
+    const journey = 'clowder-bot-simple';
     const { cat } = await this.native.request<{ cat: NativeCat }>('/api/cats', { method: 'POST',
       headers: { 'x-cat-cafe-onboarding-journey': journey, 'idempotency-key': `onboarding:${journey}:cat:${key}` },
       body: sent.body }).catch(error => {
-      if (error instanceof ApiError && error.status === 409) throw new ApiError(409, '这次创建和上一次的内容不一样，或者名字已被占用，请重新创建', error.details);
+      if (error instanceof ApiError && error.status === 409) throw different(error.details);
       throw error;
     });
     if (!cat?.id) throw new ApiError(502, '没能确认猫猫是否建好，请刷新后查看');
-    Object.assign(this.store.bot(cat.id), { templateId: face, avatarSeed: `cat:${face}`, ...(timezone ? { timezone } : {}) });
-    this.store.save();
-    return this.withStartingArguments(cat);
+    return keep(cat, sent.face);
+  }
+  /** What a creation request comes to right now: which cat, which tool, which words. Refuses, before native is asked, what cannot be made. */
+  private async resolveSimple(name: string, simple: NonNullable<CreateBot['simple']>, catId: string, custom: boolean, about: string | undefined, temper: string | undefined, input: string) {
+    const runtimes = await this.runtimes(true);
+    const usual = defaultRuntime(runtimes), none = '这台电脑上还没有可以用的助手程序，装好并登录 Claude Code 或 Codex 后再试。';
+    let runtime: NativeRuntime | undefined;
+    if (custom) {
+      // A custom cat only borrows the looks: it thinks with the tool the owner picked, or the usual one.
+      runtime = simple.agent ? runtimes.find(r => r.id === simple.agent) : usual;
+      if (!runtime) throw new ApiError(422, simple.agent ? '找不到选的这个助手程序，请重新选择。' : none);
+      // Said with the tool's name: the first screen has no "Agent" vocabulary.
+      if (runtimeUnavailable(runtime)) throw new ApiError(422, runtime.readiness?.status === 'login_required'
+        ? `${runtime.label} 还没有登录，登录后再试。` : `这台电脑上的 ${runtime.label} 现在用不了，换一个或稍后再试。`);
+    } else {
+      // Picking a face picks that cat, and which tool it thinks with is part of the cat: it is not chosen separately,
+      // and without that tool on this computer the cat cannot be made as it is. No face picked: the cat of the tool
+      // that was asked for, or of the one this computer would use anyway.
+      const asked = simple.agent ? runtimes.find(r => r.id === simple.agent) : usual;
+      const picked: Face | undefined = simple.face as Face | undefined ?? (asked && faceOfTool(asked));
+      if (!picked) throw new ApiError(422, simple.agent ? '找不到选的这个助手程序，请重新选择。' : none);
+      const tool = faceTool(picked, runtimes);
+      if (!tool.runtime) throw new ApiError(422, tool.state === 'login' ? `${tool.reason}，登录后再试。`
+        : `${tool.reason}，所以这只猫猫现在领不了。${tool.state === 'missing' ? '装好并登录后再试，或者' : '可以'}改用「自定义」，只借它的长相。`, undefined, 'face_unavailable');
+      if (simple.agent && simple.agent !== tool.runtime.id) throw new ApiError(422, `这只猫猫用 ${tool.label} 来思考，不能另选；想自己选，请用「自定义」。`, undefined, 'face_tool');
+      runtime = tool.runtime;
+    }
+    const face = simple.face ?? faceOfTool(runtime) ?? 'ragdoll';
+    // Nothing has been asked of native yet: this is a refusal, not an unsure creation, and says so by code.
+    const template = (await this.faceTemplates().catch(() => [])).find(known => known.id === face);
+    if (!template?.color) throw new ApiError(503, '暂时读不到猫猫的资料，这次没有创建，请稍后再试', undefined, 'faces_unavailable');
+    // The cat that is made is the one that was described: a portrait that changed since the screen read it is shown again first.
+    if (!custom && simple.rev && simple.rev !== template.rev) throw new ApiError(409, '这只猫猫的介绍刚刚更新了，请再看一眼后重试', undefined, 'face_changed');
+    const portrait = custom
+      ? { roleDescription: about || defaultRole, personality: temper || defaultPersonality, teamStrengths: about ? clip(about.replace(/\s+/g, ' '), 60) : defaultStrengths }
+      // The engine's template of the same id gives the role, the personality and the strengths, as written upstream.
+      : { roleDescription: template.roleDescription || defaultRole, personality: template.personality || defaultPersonality, teamStrengths: template.teamStrengths || defaultStrengths };
+    return { input, face, tool: runtime.id, body: { catId, name, displayName: name, nickname: name, color: template.color, mentionPatterns: [`@${name}`, `@${catId}`],
+      ...portrait, clientId: runtime.clientId, configurationSource: 'native_tool', defaultModel: '' } as Record<string, unknown> };
   }
   async send(thread: NativeThread, body: { text: string; reply_to?: number; idempotencyKey?: string; attachments?: string[]; expectedThreadId?: string }, directCat?: NativeCat) {
     if (body.expectedThreadId && body.expectedThreadId !== thread.id) throw new ApiError(409, '对话已变化，请核对后重试');

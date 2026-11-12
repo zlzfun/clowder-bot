@@ -100,19 +100,21 @@ export type Face = typeof catFaces[number];
  * Claude, 缅因猫 on Codex, 暹罗猫 on Gemini through AGY, 梵花猫 on Kimi, 狸花猫 and 金渐层 on OpenCode,
  * 孟加拉猫 on Antigravity; 小鲸鱼 is the cat of the DSH runtime). Upstream's GET /api/cat-templates is, in
  * its own words, the soul layer without the client binding, so the pairing is kept here beside the faces
- * (tests/face-tools.test.ts holds it against the pinned upstream file). `runtimes` are the ids the
- * engine's tool detection uses (GET /api/cats/native-runtimes), most preferred first; `label` names the
- * tool where that detection does not list it at all.
+ * (tests/face-tools.test.ts holds it against the pinned upstream file). `client` is the breed's client in
+ * that file; `runtimes` are the ids the engine's tool detection gives the tools of that client
+ * (GET /api/cats/native-runtimes), most preferred first; `label` names the tool where that detection
+ * does not list it at all.
  */
-export const faceTools: Record<Face, { runtimes: string[]; label: string }> = {
-  ragdoll: { runtimes: ['claude'], label: 'Claude Code' }, 'maine-coon': { runtimes: ['codex'], label: 'Codex' },
-  siamese: { runtimes: ['agy-native', 'agy-acp'], label: 'Gemini' }, 'turkish-van': { runtimes: ['kimi'], label: 'Kimi' },
-  dsh: { runtimes: ['dsh'], label: 'DSH' }, 'dragon-li': { runtimes: ['opencode'], label: 'OpenCode' },
-  bengal: { runtimes: ['antigravity'], label: 'Antigravity' }, 'golden-chinchilla': { runtimes: ['opencode'], label: 'OpenCode' },
+export const faceTools: Record<Face, { client?: string; runtimes: string[]; label: string }> = {
+  ragdoll: { client: 'anthropic', runtimes: ['claude'], label: 'Claude Code' }, 'maine-coon': { client: 'openai', runtimes: ['codex'], label: 'Codex' },
+  siamese: { client: 'google', runtimes: ['agy-native', 'agy-acp'], label: 'Gemini' }, 'turkish-van': { client: 'kimi', runtimes: ['kimi'], label: 'Kimi' },
+  dsh: { runtimes: ['dsh'], label: 'DSH' }, 'dragon-li': { client: 'opencode', runtimes: ['opencode'], label: 'OpenCode' },
+  bengal: { client: 'antigravity', runtimes: ['antigravity'], label: 'Antigravity' }, 'golden-chinchilla': { client: 'opencode', runtimes: ['opencode'], label: 'OpenCode' },
 };
 /** The face whose cat thinks with this tool, for a cat made without picking one. */
 export function faceOfTool(runtime: NativeRuntime): Face | undefined {
-  return catFaces.find(face => faceTools[face].runtimes.includes(runtime.id));
+  return catFaces.find(face => faceTools[face].runtimes.includes(runtime.id))
+    ?? (runtime.id.startsWith('acp:') ? catFaces.find(face => faceTools[face].client === runtime.clientId) : undefined);
 }
 export interface FaceTool {
   /** The tool's name: the engine's own label when its detection lists the tool. */
@@ -130,7 +132,10 @@ export interface FaceTool {
  * it is. A tool the app cannot connect yet is said first: installing it would not change that.
  */
 export function faceTool(face: Face, runtimes: NativeRuntime[]): FaceTool {
-  const wanted = faceTools[face], listed = wanted.runtimes.flatMap(id => runtimes.filter(runtime => runtime.id === id));
+  // Its tools as the engine's detection lists them: by their ids and, for a member the engine runs over ACP, by that
+  // member's own entry (`acp:<member>`) with the breed's client — which the detection lists instead of the standalone one.
+  const wanted = faceTools[face], listed = [...wanted.runtimes.flatMap(id => runtimes.filter(runtime => runtime.id === id)),
+    ...runtimes.filter(runtime => !!wanted.client && runtime.clientId === wanted.client && runtime.id.startsWith('acp:'))];
   const usable = listed.find(runtime => !runtimeUnavailable(runtime));
   if (usable) return { label: usable.label, state: usable.readiness?.status === 'configured' ? 'ready' : 'unknown', runtime: usable };
   const adapted = listed.filter(supportsRuntime), label = (adapted[0] ?? listed.find(runtime => runtime.installed) ?? listed[0])?.label ?? wanted.label;
@@ -172,7 +177,8 @@ export async function startSummary(bridge: BotBridge, refresh = false) {
   const line = (value: string | undefined, max: number) => value ? clip(value.replace(/\s+/g, ' '), max) : undefined;
   const faces = catFaces.flatMap(id => {
     const template = templates.find(known => known.id === id);
-    if (!template) return [];
+    // Only what a cat can be made from: a template without its colour pair is refused at creation, so it is not offered.
+    if (!template?.color) return [];
     const [name, nickname, role, personality, strengths] = [line(template.name, 40), line(template.nickname, 40), line(template.roleDescription, 120), line(template.personality, 120), line(template.teamStrengths, 80)];
     // Its tool here: which one, and whether a cat can be made from this face as it is (`usable`); `reason` says why not.
     const tool = faceTool(id, runtimes);

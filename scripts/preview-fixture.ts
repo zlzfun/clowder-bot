@@ -54,12 +54,14 @@ const agentSets: Record<string, NativeRuntime[]> = (() => {
       models: [], command: id, readiness: { status, checkedAt: Date.now(), loginCommand } });
   const set = (codex: any, claude: any, kimi: any = 'not_installed') => [make('codex', 'Codex', 'openai', codex, 'codex login'), make('claude', 'Claude Code', 'anthropic', claude, 'claude auth login'),
     make('kimi', 'Kimi', 'kimi', kimi, 'kimi login')];
-  // The other tools the pinned engine's detection lists (read from the isolated runtime, 2026-11-12); the app cannot connect cats to them yet.
-  const others: NativeRuntime[] = [['dsh', 'DSH', 'acp', 'acp'], ['agy-native', 'AGY Native', 'google', undefined], ['agy-acp', 'AGY 官方 ACP', 'google', undefined], ['pi', 'Pi', 'acp', 'acp']]
-    .map(([id, label, clientId, transport]) => ({ id: id!, label: label!, clientId: clientId!, installed: false, models: [], ...(transport ? { transport } : {}), readiness: { status: 'not_installed' as const, checkedAt: Date.now() } }));
+  // The other tools the pinned engine's detection lists (ids, labels and clients read from the isolated runtime, 2026-11-12); the app
+  // cannot connect cats to them yet. On the showcase's computer the two whose cats are staged as answering (DSH, AGY) are installed.
+  const others = (here: string[]): NativeRuntime[] => [['dsh', 'DSH', 'acp', 'acp'], ['agy-native', 'AGY Native', 'google', undefined], ['agy-acp', 'AGY 官方 ACP', 'google', undefined], ['pi', 'Pi', 'acp', 'acp']]
+    .map(([id, label, clientId, transport]) => ({ id: id!, label: label!, clientId: clientId!, installed: here.includes(id!), models: [], ...(transport ? { transport } : {}),
+      readiness: { status: here.includes(id!) ? 'configured' as const : 'not_installed' as const, checkedAt: Date.now() } }));
   return { ready: set('configured', 'configured'), unknown: set('unknown', 'not_installed'), login: set('login_required', 'not_installed'), none: set('not_installed', 'not_installed'),
     // The showcase's computer: the three tools the app can connect, all logged in, and the engine's list of the rest.
-    showcase: [...set('configured', 'configured', 'configured'), ...others] };
+    showcase: [...set('configured', 'configured', 'configured'), ...others(['dsh', 'agy-native'])] };
 })();
 
 export class PreviewNative extends NativeFixture {

@@ -94,10 +94,10 @@ test('the first screen says what each face is like, from the engine’s own temp
   assert.deepEqual(coon, { id: 'maine-coon', name: '缅因猫', nickname: '砚砚', role: '代码审查专家，擅长安全分析、测试覆盖和代码质量把控', personality: '严谨认真，注重细节，会直言不讳地指出问题', strengths: 'Review、找 bug、coding 落地',
     tool: { label: 'Codex', state: 'ready', usable: true, id: 'codex' } });
   assert.match(rev, /^[0-9a-f]{16}$/); assert.equal(new Set(faces.map((face: any) => face.rev)).size, 8, 'each portrait has its own');
-  // A template the engine does not have is not offered a description; long or multi-line text is one clipped line.
+  // A template the engine does not have is not offered; nor is one without its colour pair, which a creation would refuse. Long or multi-line text is one clipped line.
   const request = r.native.request.bind(r.native);
   r.native.request = (async (path: string, options?: any) => path !== '/api/cat-templates' ? request(path, options)
-    : { templates: [{ id: 'ragdoll', name: '布偶猫', roleDescription: '第一行\n第二行' + '长'.repeat(200), color: { primary: '#888888', secondary: '#eeeeee' } }, { id: 'unknown-breed', name: '别的', roleDescription: 'x', color: {} }], clientDefaults: {} }) as typeof r.native.request;
+    : { templates: [{ id: 'ragdoll', name: '布偶猫', roleDescription: '第一行\n第二行' + '长'.repeat(200), color: { primary: '#888888', secondary: '#eeeeee' } }, { id: 'unknown-breed', name: '别的', roleDescription: 'x', color: {} }, { id: 'maine-coon', name: '缅因猫', roleDescription: '没有颜色', color: { primary: '#111111' } }], clientDefaults: {} }) as typeof r.native.request;
   const some = (await (await r.call('/xbot-api/start')).json()).faces;
   assert.deepEqual(some.map((face: any) => face.id), ['ragdoll']);
   assert.equal(some[0].role.length, 120); assert.ok(some[0].role.startsWith('第一行 第二行')); assert.equal('personality' in some[0], false);
@@ -161,9 +161,13 @@ test('a cat needs only a name: one unpatched native creation with the Agent’s 
   assert.deepEqual({ ...creations()[1]!.body }, { ...sent }, 'byte-for-byte the first request, so native replays it');
   assert.equal(r.native.cats.length, 1);
   assert.equal(edits().length, 1, 'the cat already has its arguments: nothing is written again');
-  // Another request under the same key is native's to refuse; a second cat of the same name is refused before asking.
-  const other = await r.call('/xbot-api/bots', 'POST', { name: '团子', simple: { about: '别的用途' }, idempotencyKey: key });
-  assert.equal(other.status, 409); assert.match((await other.json()).native.code, /member_creation_conflict/);
+  // Another request under the key that made this cat is not a repeat of it — a changed tool included — and is refused without asking native again;
+  // a second cat of the same name is refused before asking.
+  for (const simple of [{ about: '别的用途' }, { agent: 'codex' }, { agent: 'nope' }, { face: 'maine-coon' }]) {
+    const other = await r.call('/xbot-api/bots', 'POST', { name: '团子', simple, idempotencyKey: key });
+    assert.equal(other.status, 409, JSON.stringify(simple)); assert.match((await other.json()).error, /和上一次的内容不一样/);
+  }
+  assert.equal(creations().length, 2);
   const twin = await r.call('/xbot-api/bots', 'POST', { name: '团子', simple: {}, idempotencyKey: randomUUID() });
   assert.equal(twin.status, 409); assert.match((await twin.json()).error, /已经有一只叫这个名字/);
   assert.equal(r.native.cats.length, 1);
@@ -286,6 +290,79 @@ test('the cat that is made is the one that was described, and a repeat reaches n
     assert.equal(said.code, 'faces_unavailable'); assert.match(said.error, /没有创建/);
   }
   assert.equal(creations().length, before);
+});
+
+test('a repeat is answered by what is known: the cat that exists, or the tools as they are now', async t => {
+  const r = await setup(t);
+  const creations = () => r.native.calls.filter(c => c.path === '/api/cats' && c.method === 'POST');
+  const post = async (name: string, simple: unknown, key: string) => { const res = await r.call('/xbot-api/bots', 'POST', { name, simple, idempotencyKey: key }); const said = await res.json(); return [res.status, said.code ?? said.native_id, said.error] as const; };
+  // The adapter restarts: what it kept about requests is gone, the cats and the presentation data are not.
+  const restart = () => { (r.bridge as any).simpleRequests.clear(); };
+  const request = r.native.request.bind(r.native);
+  r.native.runtimes = [runtime('codex', 'openai', 'configured'), runtime('claude', 'anthropic', 'configured')];
+
+  // After a restart the cat this key made is the answer, even though the engine's template and the tools have changed since:
+  // creation is not asked again, and nothing says "not created" or "changed".
+  const key = randomUUID(), faces = (await (await r.call('/xbot-api/start')).json()).faces, rag = faces[0];
+  const [, id] = await post('宪宪', { face: 'ragdoll', rev: rag.rev }, key);
+  restart();
+  r.native.request = (async (path: string, options?: any) => { if (path === '/api/cat-templates') throw new ApiError(503, 'down'); return request(path, options); }) as typeof r.native.request;
+  r.native.runtimes = [runtime('codex', 'openai', 'configured'), runtime('claude', 'anthropic', 'not_installed')];
+  assert.deepEqual((await post('宪宪', { face: 'ragdoll', rev: rag.rev }, key)).slice(0, 2), [201, id]);
+  assert.deepEqual((await post('宪宪', { face: 'ragdoll', rev: rag.rev, agent: 'claude' }, key)).slice(0, 2), [201, id], 'naming its own tool describes the same cat');
+  assert.equal(creations().length, 1);
+  // …but a request that describes another cat is not a repeat: another name, face, tool, or words of the owner's own.
+  for (const [name, simple] of [['宪宪二', { face: 'ragdoll' }], ['宪宪', { face: 'maine-coon' }], ['宪宪', { face: 'ragdoll', agent: 'codex' }], ['宪宪', { face: 'ragdoll', agent: 'nope' }],
+    ['宪宪', { face: 'ragdoll', custom: true }], ['宪宪', { face: 'ragdoll', about: '陪我聊天' }], ['宪宪', { face: 'ragdoll', personality: '话少' }]] as const)
+    assert.deepEqual((await post(name, simple, key)).slice(0, 2), [409, undefined], JSON.stringify([name, simple]));
+  assert.equal(creations().length, 1); assert.equal(r.native.cats.length, 1);
+  r.native.request = request;
+  // A custom cat is recognised by the owner's own words.
+  r.native.runtimes = [runtime('codex', 'openai', 'configured')];
+  const own = randomUUID(), [, poet] = await post('小诗', { face: 'bengal', custom: true, about: '陪我写诗', agent: 'codex' }, own);
+  restart();
+  assert.deepEqual((await post('小诗', { face: 'bengal', custom: true, about: '陪我写诗', agent: 'codex' }, own)).slice(0, 2), [201, poet]);
+  assert.deepEqual((await post('小诗', { face: 'bengal', custom: true, about: '陪我画画', agent: 'codex' }, own)).slice(0, 2), [409, undefined]);
+  assert.deepEqual((await post('小诗', { face: 'bengal' }, own)).slice(0, 2), [409, undefined], 'the template cat of that face is another cat (and its tool is not this one)');
+
+  // Nothing was made the first time (the creation itself did not get through) and the tool is gone since: the repeat is not sent as it was resolved.
+  const unreachable = (down: boolean) => { r.native.request = (async (path: string, options?: any) => {
+    if (down && path === '/api/cats' && options?.method === 'POST') { r.native.calls.push({ path, method: 'POST', body: { ...options.body, headers: options.headers } }); throw new ApiError(502, 'unreachable'); }
+    return request(path, options); }) as typeof r.native.request; };
+  const lost = randomUUID();
+  unreachable(true);
+  assert.equal((await post('砚砚', { face: 'maine-coon' }, lost))[0], 502);
+  unreachable(false);
+  r.native.runtimes = [runtime('codex', 'openai', 'not_installed'), runtime('claude', 'anthropic', 'configured')];
+  const made = creations().length;
+  assert.deepEqual(await post('砚砚', { face: 'maine-coon' }, lost), [422, 'face_unavailable', '这台电脑上还没有装 Codex，所以这只猫猫现在领不了。装好并登录后再试，或者改用「自定义」，只借它的长相。']);
+  assert.equal(creations().length, made, 'nothing is made on a tool that is not here');
+  // …and when the tool is still here, the repeat reaches native exactly as it was first resolved.
+  r.native.runtimes = [runtime('codex', 'openai', 'configured')];
+  const again = randomUUID();
+  unreachable(true);
+  assert.equal((await post('栗子', { face: 'maine-coon' }, again))[0], 502);
+  unreachable(false);
+  // (the engine's template is edited in between: the repeat still carries the words of the first attempt)
+  r.native.request = (async (path: string, options?: any) => { const result: any = await request(path, options);
+    return path === '/api/cat-templates' ? { ...result, templates: result.templates.map((t: any) => ({ ...t, personality: '换了' })) } : result; }) as typeof r.native.request;
+  assert.equal((await post('栗子', { face: 'maine-coon' }, again))[0], 201);
+  r.native.request = request;
+  assert.deepEqual({ ...creations().at(-1)!.body }, { ...creations().at(-2)!.body });
+
+  // The same request twice at once is resolved once: both reach native with the same words, though the tools changed in between.
+  r.native.runtimes = [runtime('codex', 'openai', 'configured'), runtime('claude', 'anthropic', 'configured')];
+  let release!: () => void; const held = new Promise<void>(done => { release = done; });
+  r.native.request = (async (path: string, options?: any) => { if (path === '/api/cat-templates') await held; return request(path, options); }) as typeof r.native.request;
+  const twin = randomUUID(), first = post('年糕', { custom: true }, twin);
+  await new Promise(done => setTimeout(done, 20));
+  r.native.runtimes = [runtime('claude', 'anthropic', 'configured'), runtime('codex', 'openai', 'configured')];   // the usual tool is now the other one
+  const second = post('年糕', { custom: true }, twin);
+  await new Promise(done => setTimeout(done, 20)); release();
+  const both = await Promise.all([first, second]);
+  assert.deepEqual(both.map(answer => answer[0]), [201, 201]); assert.equal(both[0][1], both[1][1]);
+  assert.deepEqual(creations().slice(-2).map(c => c.body.clientId), ['openai', 'openai']);
+  assert.equal(r.native.cats.filter(cat => cat.name === '年糕').length, 1);
 });
 
 test('a new cat whose starting arguments could not be written exists, and the answer says what is missing', async t => {

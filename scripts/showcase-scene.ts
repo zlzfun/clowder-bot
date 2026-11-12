@@ -7,10 +7,16 @@
 //
 // A cat thinks with its template's tool. The three whose tool the app can connect
 // (Claude Code, Codex, Kimi — the showcase's computer has all three) are made
-// through the adapter's own creation, as an owner would make them; the other
-// five are the engine's own members for their breed, as an engine that has them
-// lists them: the app shows and talks to any cat the engine has, it only cannot
-// make new ones on those tools. Groups, read positions, the pin and the uploaded
+// through the adapter's own creation, as an owner would make them. The other
+// five are placed as members the engine itself has — the app shows and talks
+// to any cat the engine has, it only cannot make new ones on those tools. They
+// are stand-ins for the looks of the list, not evidence that those tools run:
+// four copy their breed's default member in the pinned upstream (id, client,
+// model); 鲸鲸 has a template upstream but no breed, so its record is only
+// what a member on the DSH runtime would roughly look like. Their replies are
+// canned like everyone's here, in Claude Code's event shapes; what a reply
+// from those tools looks like in the app has not been seen on a real engine.
+// Groups, read positions, the pin and the uploaded
 // file go through the adapter's routes. What is typed into a staged chat gets
 // that chat's own canned reply (see `live` below), so the ability it shows can be
 // tried, not only looked at. The illustrated guide in showcase/ points at these
@@ -201,10 +207,10 @@ export async function seedShowcase({ native, base }: { native: PreviewNative; ba
   };
 
   // One cat per template, called what the template calls its cat, thinking with the template's own tool.
-  // The engine's member for a breed whose tool the app cannot connect cats to (id, client and model as the pinned
-  // upstream's breed has them): such a cat is made in the engine, and the app lists it and talks to it like any other.
-  const engineMade: Record<string, { id: string; clientId: string; defaultModel: string }> = {
-    siamese: { id: 'gemini', clientId: 'google', defaultModel: 'Gemini 3.1 Pro (High)' }, dsh: { id: 'dsh', clientId: 'acp', defaultModel: '' },
+  // A member the engine has for a cat whose tool the app cannot connect cats to. Four are their breed's default member in
+  // the pinned upstream (id, client, model); upstream has no DSH breed, so 鲸鲸's record is a stand-in (see the header).
+  const engineMade: Record<string, { id: string; clientId: string; defaultModel: string; carrier?: string }> = {
+    siamese: { id: 'gemini', clientId: 'google', defaultModel: 'Gemini 3.1 Pro (High)' }, dsh: { id: 'dsh', clientId: 'acp', defaultModel: '', carrier: 'acp' },
     'dragon-li': { id: 'glm52', clientId: 'opencode', defaultModel: 'zhipu/glm-5.2' }, bengal: { id: 'antigravity', clientId: 'antigravity', defaultModel: 'gemini-3.1-pro' },
     'golden-chinchilla': { id: 'opencode', clientId: 'opencode', defaultModel: 'claude-opus-4-6' } };
   const cats: Record<string, NativeCat> = {}, threads: Record<string, string> = {};
