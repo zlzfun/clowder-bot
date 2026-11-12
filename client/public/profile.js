@@ -293,11 +293,9 @@
   }
 
   function buildCat(sel, key) {
-    // brief*: 说话简短 — On (what is shown: the server's word, or null when not
-    // known), Busy, Hold (a PATCH's answer, see R.briefShown) and Note (the
-    // conversation a change was made in, while the line points at 新对话).
-    const P = { sel, key, data: { name: sel.id }, pinBusy: false, agentSig: null, configSig: null, exec: null,
-      briefOn: null, briefBusy: false, briefHold: null, briefNote: null };
+    // briefOn: what 说话简短 shows (the server's word, or null when not known);
+    // what the two switches are doing is the cat's (saving(key)), not this page's.
+    const P = { sel, key, data: { name: sel.id }, agentSig: null, configSig: null, exec: null, briefOn: null, briefNoted: false };
     const root = node("div", "pf-page pf-cat");
     root.dataset.key = key;
 
@@ -423,81 +421,106 @@
     if (href && P.runtime.getAttribute("href") !== href) P.runtime.setAttribute("href", href);
   }
 
+  // What a cat's two switches are doing, by cat and apart from the drawer's
+  // page: another cat's 资料 can be opened and this one's opened again (a new
+  // page) while a change is on its way. The answer lands here, and whichever
+  // page shows that cat then says it; a second request waits for the first.
+  //   pin:   { busy, want, said: {text, bad} | null }
+  //   brief: { busy, hold: {value, after} | null, note: {thread} | null, said }
+  const saves = new Map();
+  function saving(key) {
+    let st = saves.get(key);
+    if (!st) saves.set(key, (st = { pin: { busy: false, want: false, said: null }, brief: { busy: false, hold: null, note: null, said: null } }));
+    return st;
+  }
+  // The page shown for this cat now, if any (the one drawn last for it).
+  const pageOf = (key) => (S.cat && S.cat.key === key ? S.cat : null);
+  // A section's status line as its cat's state says (rewritten only when it changes).
+  function sayAs(line, said) {
+    const text = said ? said.text : "", bad = !!(said && said.bad);
+    if (line.textContent !== text || line.classList.contains("bad") !== bad || line.hidden !== !text) say(line, text, bad);
+  }
+
   // The switch says what the list says, and only that: while a change is on
   // its way it keeps the confirmed state, is busy and inert (not disabled, so
   // focus stays on it) and the line under 置顶 says what is being saved.
   function paintPin(P) {
-    const name = P.data.name || P.sel.id;
+    const st = saving(P.key).pin, name = P.data.name || P.sel.id;
     const bot = H.cats().find((b) => b && b.name === name);
     const on = bot ? !!bot.pinned : !!P.data.pinned;
     P.pinSwitch.setAttribute("aria-checked", String(on));
-    if (P.pinBusy) { P.pinSwitch.setAttribute("aria-disabled", "true"); P.pinSwitch.setAttribute("aria-busy", "true"); }
+    if (st.busy) { P.pinSwitch.setAttribute("aria-disabled", "true"); P.pinSwitch.setAttribute("aria-busy", "true"); }
     else { P.pinSwitch.removeAttribute("aria-disabled"); P.pinSwitch.removeAttribute("aria-busy"); }
-    setText(P.pinHint, P.pinBusy ? (P.pinWant ? "正在置顶…" : "正在取消置顶…") : "放在列表最上面");
+    setText(P.pinHint, st.busy ? (st.want ? "正在置顶…" : "正在取消置顶…") : "放在列表最上面");
+    sayAs(P.pinLine, st.said);
   }
   async function togglePin(P) {
-    if (P.pinBusy) return;
+    const key = P.key, st = saving(key).pin;
+    if (st.busy) return;
     const name = P.data.name || P.sel.id;
     const next = P.pinSwitch.getAttribute("aria-checked") !== "true";
-    P.pinBusy = true;
-    P.pinWant = next;
-    say(P.pinLine, "");
+    Object.assign(st, { busy: true, want: next, said: null });
     paintPin(P);
     try {
       await H.pin(name, next);
     } catch (err) {
-      say(P.pinLine, (next ? "没能置顶：" : "没能取消置顶：") + reason(err), true);
+      st.said = { text: (next ? "没能置顶：" : "没能取消置顶：") + reason(err), bad: true };
     }
-    P.pinBusy = false;
-    if (S.cat === P) paintPin(P);
+    st.busy = false;
+    const shown = pageOf(key);
+    if (shown) paintPin(shown);
   }
 
   // 说话简短 says what the server confirmed, the same way: the profile's
-  // `concise`, or right after a change the PATCH's own answer (until the
-  // profile catches up, R.briefShown); while a change is on its way it keeps
-  // that state, busy and inert (focus stays), the hint saying it is saving.
+  // `concise`, or after a change the PATCH's own answer until a profile read
+  // asked for after that answer says otherwise (R.briefShown; the shell
+  // numbers its profile reads); while a change is on its way it keeps that
+  // state, busy and inert (focus stays), the hint saying it is saving.
   function paintBrief(P) {
+    const st = saving(P.key).brief;
     const read = typeof P.data.concise === "boolean" ? P.data.concise : null;
-    if (P.briefHold && P.briefHold.data !== P.data) { P.briefHold.data = P.data; P.briefHold.reads++; }
-    const now = R.briefShown(read, P.briefHold);
-    if (!now.keep) P.briefHold = null;
+    const now = R.briefShown(read, st.hold, H.profileAsked ? H.profileAsked(P.data) : 0);
+    if (!now.keep) st.hold = null;
     P.briefOn = now.value;
     P.brief.hidden = now.value === null;
     if (now.value !== null) P.briefSwitch.setAttribute("aria-checked", String(now.value));
-    if (P.briefBusy) { P.briefSwitch.setAttribute("aria-disabled", "true"); P.briefSwitch.setAttribute("aria-busy", "true"); }
+    if (st.busy) { P.briefSwitch.setAttribute("aria-disabled", "true"); P.briefSwitch.setAttribute("aria-busy", "true"); }
     else { P.briefSwitch.removeAttribute("aria-disabled"); P.briefSwitch.removeAttribute("aria-busy"); }
-    setText(P.briefHint, P.briefBusy ? R.BRIEF.saving : R.BRIEF.hint);
+    setText(P.briefHint, st.busy ? R.BRIEF.saving : R.BRIEF.hint);
     // A new conversation was started since the change: it already talks that way.
     const thread = P.data.thread_id ? String(P.data.thread_id) : "";
-    if (P.briefNote && thread && P.briefNote.thread && thread !== P.briefNote.thread) { P.briefNote = null; say(P.briefLine, ""); }
+    if (st.note && thread && st.note.thread && thread !== st.note.thread) st.note = null;
+    if (!st.note) { P.briefNoted = false; sayAs(P.briefLine, st.said); return; }
+    if (P.briefNoted) return;
+    // A change was made: it shows in a new conversation, and 新对话 is one click away.
+    P.briefNoted = true;
+    P.briefLine.replaceChildren(node("span", "", R.BRIEF.applies),
+      button("text-btn pf-link pf-brief-new", R.BRIEF.start, (ev) => H.newConversation(current(P), ev.currentTarget)));
+    P.briefLine.hidden = false;
+    P.briefLine.classList.remove("bad");
+    P.briefLine.setAttribute("role", "status");
   }
   async function toggleBrief(P) {
-    if (P.briefBusy || P.briefOn === null) return;
+    const key = P.key, st = saving(key).brief;
+    if (st.busy || P.briefOn === null) return;
     const name = P.data.name || P.sel.id, was = P.briefOn, next = !was;
     const thread = P.data.thread_id ? String(P.data.thread_id) : "";
-    P.briefBusy = true;
-    P.briefNote = null;
-    say(P.briefLine, "");
+    Object.assign(st, { busy: true, note: null, said: null });
     paintBrief(P);
     try {
       const answer = await H.api("/xbot-api/bots/" + enc(name), { method: "PATCH", body: { concise: next } });
-      // What the server has now, which may differ from what was asked; without
-      // it the next profile read says.
+      // What the server has now, which may differ from what was asked. Reads
+      // asked for from here on say what the cat has after this change; one
+      // already on its way (or the profile read before) may not.
       const value = answer && typeof answer.concise === "boolean" ? answer.concise : null;
-      if (value !== null) P.briefHold = { value, data: P.data, reads: 0 };
-      if (value !== null && value !== was) {
-        P.briefNote = { thread };
-        P.briefLine.replaceChildren(node("span", "", R.BRIEF.applies),
-          button("text-btn pf-link pf-brief-new", R.BRIEF.start, (ev) => H.newConversation(current(P), ev.currentTarget)));
-        P.briefLine.hidden = false;
-        P.briefLine.classList.remove("bad");
-        P.briefLine.setAttribute("role", "status");
-      }
+      if (value !== null) st.hold = { value, after: H.profileReads ? H.profileReads() : 0 };
+      if (value !== null && value !== was) st.note = { thread };
     } catch (err) {
-      say(P.briefLine, R.BRIEF.failed + reason(err), true);
+      st.said = { text: R.BRIEF.failed + reason(err), bad: true };
     }
-    P.briefBusy = false;
-    if (S.cat === P) paintBrief(P);
+    st.busy = false;
+    const shown = pageOf(key);
+    if (shown) paintBrief(shown);
   }
 
   // ------------------------------------------------------------ 成员 (a group)

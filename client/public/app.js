@@ -2193,11 +2193,17 @@
   // request still in flight instead of fetching the same profile twice.
   // A Map, so names like "constructor" are not mistaken for entries.
   const profileRequests = new Map();
+  // Each profile read is numbered when it is asked for: a switch on 资料
+  // (profile.js 说话简短) trusts only reads asked for after its change was answered.
+  let profileAsks = 0;
+  const profileAsked = new WeakMap();
   function fetchBotProfile(name) {
     const live = profileRequests.get(name);
     if (live && !live.done) return live.request;
-    const entry = { done: false };
-    entry.request = api("/xbot-api/bots/" + encodeURIComponent(name)).finally(() => { entry.done = true; });
+    const entry = { done: false }, asked = ++profileAsks;
+    entry.request = api("/xbot-api/bots/" + encodeURIComponent(name))
+      .then((data) => { if (data && typeof data === "object") profileAsked.set(data, asked); return data; })
+      .finally(() => { entry.done = true; });
     profileRequests.set(name, entry);
     return entry.request;
   }
@@ -3114,6 +3120,7 @@
     if (!messages || !messages.length) {
       // No rows: at most the greeting's status line (placeGreeting), never a
       // made-up message. A chat with records but no rows stays blank.
+      state.drawn = null;
       const keep = sendFeedback(inner, messages);
       if (read) placeGreeting(inner, read);
       chatHistory.top(inner); // a page of records with no rows may still have earlier ones
@@ -3144,7 +3151,10 @@
     // Drawn in the engine's order, except that a reply that took in what the
     // owner said after it had begun goes under that message (follows,
     // chat-live-rules.js order()). Every index below is still the row's own.
-    liveRules.order(messages, false).forEach((i) => {
+    // The read position asks what was drawn (displacedBefore, chat-experience.js).
+    const order = liveRules.order(messages, false);
+    state.drawn = { messages, order, group: false };
+    order.forEach((i) => {
       const m = messages[i];
       if (skipMessage(m) || wakeRuns.hidden.has(i)) return;
       // Background turns have no cards in the chat; the header badge lists them.
@@ -3366,6 +3376,7 @@
     const near = state.firstRender || live.following();
     if (!messages || !messages.length) {
       const who = group && group.name;
+      state.drawn = null;
       // Records that show no rows may still have earlier ones (chat-history.js): offer those instead.
       if (!chatHistory.top(inner)) inner.append(emptyState(niceName(who) || "群聊", "还没有消息", who, groupFace(group)));
       const shown = live.commit(inner, sendFeedback(inner, messages));
@@ -3379,7 +3390,9 @@
     let last = "";
     let lastMsg = null;
     // A reply under the follow-ups it took in, as in single chats (follows).
-    for (const m of liveRules.order(messages, true).map((i) => messages[i])) {
+    const order = liveRules.order(messages, true);
+    state.drawn = { messages, order, group: true };
+    for (const m of order.map((i) => messages[i])) {
       const mine = m.kind === "person";
       const text = m.text || "";
       if (!mine && m.kind === "bot" && last && last !== m.sender && mine === false) {
@@ -7546,6 +7559,10 @@
     focusTask: (id) => workspace.focusTask(id),
     // Cats drawn writing in the history (chat-live.js): the line does not repeat 「…正在处理」 for them.
     writing: () => live.writing(),
+    // Replies drawn below a reply although they came before it in the engine's
+    // order (a reply under a follow-up it took in): confirming that reply read
+    // covers them, so they must have been seen too (chat-live-rules.js displaced()).
+    displacedBefore: (id) => (state.drawn && !state.peer ? liveRules.displaced(state.drawn, id) : []),
     // 去确认 finds the request's card in the history (chat-cards.js).
     confirm: (item) => cards.find(item),
     // A confirmed read clears that conversation's dot at once; the next status poll agrees.
@@ -7724,6 +7741,9 @@
     // 新对话 is the header ⋯ menu's own dialog (chat-history.js), opened from 资料.
     newConversation: (sel, opener) => chatHistory.newConversation(sel, opener),
     editProfile: (data) => openProfile(data && data.name ? data : state.panelData || {}),
+    // Profile reads by number (fetchBotProfile): how many were asked for so far, and which one a profile came from.
+    profileReads: () => profileAsks,
+    profileAsked: (data) => (data && typeof data === "object" ? profileAsked.get(data) || 0 : 0),
     pin: async (name, on) => {
       await api("/xbot-api/bots/" + encodeURIComponent(name) + "/pin", { method: "POST", body: { pinned: on } });
       await refreshLists();

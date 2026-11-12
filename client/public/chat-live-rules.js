@@ -247,10 +247,11 @@
     if (!bare || "SILENT".startsWith(bare)) return "";
     for (let i = 0; i < 4; i++) {
       const before = text;
-      // A last line that opens a bracket it has not closed: it may be a signature.
+      // A last line that opens a bracket it has not closed: it may be a
+      // signature (inside a code block it is code, and shows as it comes).
       const cut = text.lastIndexOf("\n") + 1;
       const last = text.slice(cut);
-      if (/^\s{0,3}\[/.test(last) && !last.includes("]")) text = text.slice(0, cut);
+      if (/^\s{0,3}\[/.test(last) && !last.includes("]") && !inFence(text.slice(0, cut))) text = text.slice(0, cut);
       const sig = SIGNATURE.exec(text);
       if (sig && !inFence(text.slice(0, sig.index))) text = text.slice(0, sig.index);
       text = text.replace(/\s+$/, "");
@@ -411,6 +412,21 @@
     });
     return out;
   }
+  // The rows that come before the row with this message ID in the engine's
+  // order but are drawn below it (a reply moved under a later message), the
+  // owner's own messages aside: their IDs. Reading up to that message (the
+  // read position is cumulative) covers them too, so they have to have been
+  // seen as well. drawn: {messages, order, group} as the history was drawn.
+  function displaced(drawn, id) {
+    const list = drawn && Array.isArray(drawn.messages) ? drawn.messages : [], ord = drawn && Array.isArray(drawn.order) ? drawn.order : [];
+    const idOf = (m) => String((m && (drawn.group ? m.id : m.native_message_id || m.id)) || "");
+    const mine = (m) => !!m && (drawn.group ? m.kind === "person" : m.role === "user");
+    const at = list.findIndex((m) => idOf(m) === String(id || ""));
+    if (at < 0 || !id) return [];
+    const pos = new Map(ord.map((i, p) => [i, p]));
+    if (!pos.has(at)) return [];
+    return ord.filter((i) => i < at && pos.get(i) > pos.get(at) && !mine(list[i]) && idOf(list[i])).map((i) => idOf(list[i]));
+  }
 
   // ---- Redraw identity ----
   // A row's drawn markup with the per-drawing SVG ids (clip paths of the cat
@@ -419,8 +435,9 @@
 
   window.ClowderLiveRules = Object.freeze({
     reply, apply, draft, lost, recover, display, leading, middle, drawable, stepWords, phrase, structural, gap, receipt, signature,
-    // The order a conversation's rows are drawn in (a reply under the follow-ups it took in).
-    order,
+    // The order a conversation's rows are drawn in (a reply under the follow-ups it took in),
+    // and the rows drawn below a message although they came before it.
+    order, displaced,
     // A native tool name's everyday kind ("look", "run", … or ""), for the
     // header's shorter words (chat-presence-rules.js).
     verb,

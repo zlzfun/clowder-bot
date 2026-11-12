@@ -16,7 +16,9 @@
 // - Read position: GET never marks anything read. POST <scope>/read confirms
 //   the newest visible cat reply only while the page is visible, the chat is
 //   not covered, that reply is on screen (for a moment) and the open
-//   conversation's thread is the one the reply belongs to. One request at a
+//   conversation's thread is the one the reply belongs to. A reply drawn
+//   below it although it came first (under a follow-up it took in) has to
+//   have been on screen too, since the position covers it. One request at a
 //   time, never twice for the same reply. A refusal (404, 409) is about that
 //   one reply: a newer reply is still confirmed. A late answer for another
 //   conversation or thread changes nothing here.
@@ -204,6 +206,19 @@
   }
 
   // ------------------------------------------------------------- read position
+  // Replies drawn below others that came after them (a reply under a
+  // follow-up it took in) and that have been in sight in this conversation
+  // and thread: page bookkeeping only, never sent anywhere.
+  const viewed = new Set();
+  // The reply is in sight, and every reply drawn below it that came before
+  // it in the engine's order (H.displacedBefore) is or has been too: the
+  // server's read position is cumulative, so confirming this reply confirms
+  // those. One that is not drawn at all has nothing to be seen.
+  function seenThrough(id) {
+    const before = H.displacedBefore ? (H.displacedBefore(id) || []).map(findRow).filter(Boolean) : [];
+    for (const row of before) if (inSight(row)) viewed.add(doneKey(S.key, S.threadId, row.dataset.mid));
+    return inSight(findRow(id)) && before.every((row) => viewed.has(doneKey(S.key, S.threadId, row.dataset.mid)));
+  }
   function target() {
     if (!S.sel || H.peer()) return "";
     return X.readTarget(S.act, {
@@ -211,7 +226,7 @@
       obscured: !!(H.obscured && H.obscured()),
       threadId: S.threadId,
       done: (id) => done.has(doneKey(S.key, S.threadId, id)),
-      seen: (id) => inSight(findRow(id)),
+      seen: seenThrough,
     });
   }
   // Called whenever what is on screen may have changed. Waits a moment with

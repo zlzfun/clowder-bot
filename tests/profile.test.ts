@@ -341,7 +341,7 @@ function drawer(opts: { cats?: Any[]; groups?: Any[]; route?: (path: string, met
   const { doc, window } = env;
   const start = plain(opts.groups ?? [{ id: 'g1', name: '读书会', members: ['快手', '墨点', '年糕'] }]);
   // server: what the adapter holds; groups: the shell's list (state.groups), replaced by every poll.
-  const s: Any = { cats: plain(opts.cats ?? CATS), server: plain(start), groups: plain(start), sel: null, rows: {} };
+  const s: Any = { cats: plain(opts.cats ?? CATS), server: plain(start), groups: plain(start), sel: null, rows: {}, reads: 0, asked: new WeakMap() };
   const calls: Call[] = [], log: string[] = [];
   const api = async (path: string, opt: { method?: string; body?: unknown } = {}) => {
     const call: Call = { path, method: opt.method || 'GET', ...(opt.body === undefined ? {} : { body: plain(opt.body) }) };
@@ -391,6 +391,9 @@ function drawer(opts: { cats?: Any[]; groups?: Any[]; route?: (path: string, met
     runtimeHref: (data: Any) => data.thread_id ? '/runtime.html?thread=' + data.thread_id : '/runtime.html',
     newConversation: (sel: Any, opener: El) => { log.push('new:' + sel.type + ':' + sel.id); s.opener = opener; },
     editProfile: (data: Any) => log.push('edit:' + data.name),
+    // As app.js numbers its profile reads (fetchBotProfile): how many were asked for, and which one a profile came from.
+    profileReads: () => s.reads,
+    profileAsked: (data: Any) => s.asked.get(data) || 0,
     pin: async (name: string, on: boolean) => {
       log.push('pin:' + name + ':' + on);
       if (s.pinGate) await s.pinGate;
@@ -424,6 +427,10 @@ function drawer(opts: { cats?: Any[]; groups?: Any[]; route?: (path: string, met
     elsewhere: (fn: (g: Any) => void, id = 'g1') => fn(s.server.find((x: Any) => x.id === id)),
     layer: () => named(doc.body, 'pf-modal')[0] ?? null,
     writes: () => calls.filter(c => c.method !== 'GET'),
+    // A profile read: asked for now (its number), answered later with what it found.
+    ask: () => ++s.reads,
+    answer: (n: number, data: Any) => { s.asked.set(data, n); return data; },
+    read: (data: Any) => { s.asked.set(data, ++s.reads); return data; },
   };
 }
 const TUANZI = { type: 'bot', id: '快手' };
@@ -555,17 +562,19 @@ test('置顶: the switch says only what the list confirms — while saving it ke
   assert.equal(visibleText(one(page, 'pf-line')), '没能置顶：服务出了点问题，请稍后再试。');
 });
 
-test('说话简短: the rule shows what the server confirmed — the profile\'s word, or right after a change the answer until a read agrees or the second read after it', () => {
+test('说话简短: the rule shows what the server confirmed — the profile\'s word, or after a change the answer, until a read asked for after that answer says otherwise', () => {
   const R = load(RULES).window.ClowderProfileRules;
-  assert.deepEqual(plain(R.briefShown(true, null)), { value: true, keep: false });
-  assert.deepEqual(plain(R.briefShown(undefined, null)), { value: null, keep: false }, 'not read (or an older server): no switch');
-  assert.deepEqual(plain(R.briefShown('yes', null)), { value: null, keep: false });
-  // The answer stands over a read that may have been asked for before the change…
-  assert.deepEqual(plain(R.briefShown(false, { value: true, reads: 1 })), { value: true, keep: true });
-  // …until a read agrees, or the second read after it says otherwise (changed elsewhere).
-  assert.deepEqual(plain(R.briefShown(true, { value: true, reads: 1 })), { value: true, keep: false });
-  assert.deepEqual(plain(R.briefShown(false, { value: true, reads: 2 })), { value: false, keep: false });
-  assert.deepEqual(plain(R.briefShown(undefined, { value: true, reads: 5 })), { value: true, keep: true });
+  assert.deepEqual(plain(R.briefShown(true, null, 3)), { value: true, keep: false });
+  assert.deepEqual(plain(R.briefShown(undefined, null, 3)), { value: null, keep: false }, 'not read (or an older server): no switch');
+  assert.deepEqual(plain(R.briefShown('yes', null, 3)), { value: null, keep: false });
+  // The answer (given when 4 reads had been asked for) stands over every read asked for before it, even one that happens to agree…
+  assert.deepEqual(plain(R.briefShown(false, { value: true, after: 4 }, 4)), { value: true, keep: true });
+  assert.deepEqual(plain(R.briefShown(true, { value: true, after: 4 }, 2)), { value: true, keep: true }, 'agreeing is not enough: it may be from before the change');
+  assert.deepEqual(plain(R.briefShown(false, { value: false, after: 4 }, 0)), { value: false, keep: true });
+  // …and gives way to the first read asked for after it, whatever it says (changed elsewhere since).
+  assert.deepEqual(plain(R.briefShown(true, { value: true, after: 4 }, 5)), { value: true, keep: false });
+  assert.deepEqual(plain(R.briefShown(false, { value: true, after: 4 }, 5)), { value: false, keep: false });
+  assert.deepEqual(plain(R.briefShown(undefined, { value: true, after: 4 }, 9)), { value: true, keep: true }, 'a read that does not say keeps the answer');
   // Its words: what it does, in one line, and nothing technical.
   assert.equal(R.BRIEF.title, '说话简短');
   assert.equal(R.BRIEF.hint, '先说结论，几句话说完；要清单、表格、代码或长文时照给');
@@ -620,16 +629,16 @@ test('说话简短 on 资料: shown once the profile says which way it is; the s
   button(line, '开始新对话').click();
   assert.deepEqual(d.log.at(-1), 'new:bot:快手');
   assert.equal(d.s.opener, button(line, '开始新对话'), 'focus comes back to the link');
-  // A poll that was asked for before the change still says off: the answer stands; a later one that agrees takes over.
+  // A poll that was asked for before the change still says off: the answer stands; one asked for after it takes over.
   d.P.catPage(TUANZI, { ...off });
   assert.equal(sw.getAttribute('aria-checked'), 'true');
-  d.P.catPage(TUANZI, { ...PROFILE, concise: true });
+  d.P.catPage(TUANZI, d.read({ ...PROFILE, concise: true }));
   assert.equal(sw.getAttribute('aria-checked'), 'true');
   // A new conversation: the line has done its job.
-  d.P.catPage(TUANZI, { ...PROFILE, concise: true, thread_id: 'thread-2' });
+  d.P.catPage(TUANZI, d.read({ ...PROFILE, concise: true, thread_id: 'thread-2' }));
   assert.equal(shown(line), false);
   // Changed elsewhere afterwards: the profile says so.
-  d.P.catPage(TUANZI, { ...PROFILE, concise: false, thread_id: 'thread-2' });
+  d.P.catPage(TUANZI, d.read({ ...PROFILE, concise: false, thread_id: 'thread-2' }));
   assert.equal(sw.getAttribute('aria-checked'), 'false');
   // The server answers what the cat has now, which may not be what was asked: that is shown, and nothing changed, so no line.
   answer = () => ({ name: '快手', concise: false });
@@ -652,6 +661,100 @@ test('说话简短 on 资料: shown once the profile says which way it is; the s
   const g = d.show(d.P.groupPage({ type: 'group', id: 'g1' }, d.group()));
   assert.equal(named(g, 'pf-brief').length, 0);
   assert.doesNotMatch(visibleText(g), /说话简短/);
+});
+
+test('说话简短 switched on and off quickly: a profile read asked for between the two saves (or before them) never undoes the latest answer (review item 2)', async () => {
+  const d = drawer({ route: async (path, method, body) => (method === 'PATCH' ? { name: '快手', concise: body.concise } : undefined) });
+  d.s.sel = TUANZI;
+  const page = d.show(d.P.catPage(TUANZI, d.read({ ...PROFILE, concise: false })));
+  const sw = named(page, 'pf-switch')[1]!;
+  sw.click();
+  await settle();
+  assert.equal(sw.getAttribute('aria-checked'), 'true');
+  // A poll leaves now, between the two saves…
+  const between = d.ask();
+  sw.click();
+  await settle();
+  assert.equal(sw.getAttribute('aria-checked'), 'false');
+  assert.deepEqual(d.writes().map((c: Any) => c.body), [{ concise: true }, { concise: false }]);
+  // …and comes back after the second one, saying on: the second answer stands. So does an older cached profile that says off.
+  d.P.catPage(TUANZI, d.answer(between, { ...PROFILE, concise: true }));
+  assert.equal(sw.getAttribute('aria-checked'), 'false');
+  d.P.catPage(TUANZI, { ...PROFILE, concise: true });
+  assert.equal(sw.getAttribute('aria-checked'), 'false');
+  // The first read asked for after it decides from then on.
+  d.P.catPage(TUANZI, d.read({ ...PROFILE, concise: false }));
+  assert.equal(sw.getAttribute('aria-checked'), 'false');
+  d.P.catPage(TUANZI, d.read({ ...PROFILE, concise: true }));
+  assert.equal(sw.getAttribute('aria-checked'), 'true', 'changed elsewhere afterwards: the profile says so');
+});
+
+test('a save on 资料 belongs to its cat, not to the page: open another cat and come back while it is on its way, and the page shown then is busy, sends nothing more, and says how it ended (review item 4)', async () => {
+  const OTHER = { type: 'bot', id: '墨点' };
+  let gate: Promise<void> | null = null, fails = false;
+  const d = drawer({ route: async (path, method, body) => {
+    if (method !== 'PATCH') return undefined;
+    if (gate) await gate;
+    if (fails) throw fail(409, '这只猫猫的资料刚刚被改过了，请再试一次');
+    return { name: '快手', concise: body.concise };
+  } });
+  d.s.sel = TUANZI;
+  const off = d.read({ ...PROFILE, concise: false });
+  let page = d.show(d.P.catPage(TUANZI, off));
+  let open!: () => void;
+  gate = new Promise<void>((r) => { open = r; });
+  named(page, 'pf-switch')[1]!.click();
+  // Another cat, then back: a new page for 快手.
+  d.s.sel = OTHER;
+  d.show(d.P.catPage(OTHER, { name: '墨点', persona: 'x', concise: true }));
+  d.s.sel = TUANZI;
+  const again = d.show(d.P.catPage(TUANZI, off));
+  assert.notEqual(again, page, 'the page was drawn anew');
+  page = again;
+  const sw = named(page, 'pf-switch')[1]!, line = named(page, 'pf-line')[1]!;
+  assert.equal(sw.getAttribute('aria-busy'), 'true', 'still saving');
+  assert.equal(sw.getAttribute('aria-checked'), 'false');
+  assert.equal(named(page, 'pf-row-hint')[1]!.textContent, '正在保存…');
+  sw.click();
+  await settle();
+  assert.equal(d.writes().length, 1, 'no second request while the first is on its way');
+  open();
+  await settle();
+  gate = null;
+  assert.equal(sw.getAttribute('aria-checked'), 'true', 'the answer reaches the page shown now');
+  assert.equal(sw.getAttribute('aria-busy'), null);
+  assert.equal(visibleText(line), '在新对话里生效。开始新对话');
+  // Come back once more: the confirmed answer and the line are still the cat's.
+  d.show(d.P.catPage(OTHER, { name: '墨点', persona: 'x' }));
+  page = d.show(d.P.catPage(TUANZI, off));
+  assert.equal(named(page, 'pf-switch')[1]!.getAttribute('aria-checked'), 'true', 'an older cached profile does not undo it');
+  assert.equal(visibleText(named(page, 'pf-line')[1]!), '在新对话里生效。开始新对话');
+  // A refusal that lands while another cat is shown is said when 快手 is shown again.
+  fails = true;
+  gate = new Promise<void>((r) => { open = r; });
+  named(page, 'pf-switch')[1]!.click();
+  d.show(d.P.catPage(OTHER, { name: '墨点', persona: 'x' }));
+  open();
+  await settle();
+  page = d.show(d.P.catPage(TUANZI, off));
+  assert.equal(named(page, 'pf-switch')[1]!.getAttribute('aria-checked'), 'true');
+  assert.equal(visibleText(named(page, 'pf-line')[1]!), '没能保存：这只猫猫的资料刚刚被改过了，请再试一次');
+  // 置顶 the same way.
+  let pinOpen!: () => void;
+  d.s.pinGate = new Promise<void>((r) => { pinOpen = r; });
+  d.s.pinFails = true;
+  named(page, 'pf-switch')[0]!.click();
+  d.show(d.P.catPage(OTHER, { name: '墨点', persona: 'x' }));
+  page = d.show(d.P.catPage(TUANZI, off));
+  const pin = named(page, 'pf-switch')[0]!;
+  assert.equal(pin.getAttribute('aria-busy'), 'true');
+  assert.equal(named(page, 'pf-row-hint')[0]!.textContent, '正在置顶…');
+  pin.click();
+  assert.deepEqual(d.log.filter((x: string) => x.startsWith('pin:')), ['pin:快手:true'], 'one request at a time');
+  pinOpen();
+  await settle();
+  assert.equal(pin.getAttribute('aria-busy'), null);
+  assert.equal(visibleText(named(page, 'pf-line')[0]!), '没能置顶：服务出了点问题，请稍后再试。');
 });
 
 test('新对话 on 资料 opens the shared dialog (the header ⋯ menu\'s own) for this cat, with focus to come back to the button; the page itself sends nothing', async () => {

@@ -99,10 +99,16 @@ function page(opts: Opts = {}) {
     + ['laterTime', 'addTimeDivider', 'addTimeDividers'].map(take).join('')
     + 'out.groupStart = groupStart; out.timeDivider = timeDivider; out.addTimeDivider = addTimeDivider; out.addTimeDividers = addTimeDividers;', context);
   const live = window.ClowderLive, L = window.ClowderLiveRules, out = context.out;
-  const glides: Array<{ id: string; from: string }> = [];
-  // Layout, for the glide: a row's top is its place among its siblings (40px each), as seen from the scroll box.
-  (El.prototype as Any).getBoundingClientRect = function (this: El) { const p = this.parent; const i = p ? p.kids.indexOf(this) : 0; return { top: i * 40, bottom: i * 40 + 40, height: 40 }; };
-  (El.prototype as Any).animate = function (this: El, frames: Any[]) { glides.push({ id: this.dataset.mid || this.className, from: frames[0].transform }); return {}; };
+  const glides: Array<{ id: string; from: string }> = [], cancels: string[] = [];
+  // Layout, for the glide: a row's top is its place among its siblings (40px each), as seen from the scroll box, moved by
+  // the glide running on it. A glide is caught halfway (until cancelled): the row is seen half its distance from its place.
+  (El.prototype as Any).getBoundingClientRect = function (this: El) { const p = this.parent; const i = p ? p.kids.indexOf(this) : 0; const top = i * 40 + (this._ty || 0); return { top, bottom: top + 40, height: 40 }; };
+  (El.prototype as Any).animate = function (this: El, frames: Any[]) {
+    const id = this.dataset.mid || this.className;
+    glides.push({ id, from: frames[0].transform });
+    this._ty = Number(/translateY\((-?\d+)px\)/.exec(frames[0].transform)![1]) / 2;
+    return { cancel: () => { this._ty = 0; cancels.push(id); }, onfinish: null };
+  };
   live.init({
     thread, render: (parent: El, words: string) => parent.append(words),
     row: (catId: string, time: string) => { const r = h('div', 'msg bot live with-face'); r.dataset.time = time; r.dataset.sender = 'bot:cat:' + catId; r.append(h('div', 'body')); return r; },
@@ -143,7 +149,7 @@ function page(opts: Opts = {}) {
   };
   const seq = () => (thread.children[0] as El).children.map((n: El) => (n.classList.contains('tdiv') ? '[' + text(n) + ']' : n.dataset.mid || n.className));
   const rowOf = (id: string) => (thread.children[0] as El).children.find((n: El) => n.dataset.mid === id)!;
-  return { doc, h, el, live, L, out, thread, draw, seq, rowOf, glides, select: (key: string) => live.select(key), flush: () => { now += 1000; const list = frames; frames = []; list.forEach((fn) => fn()); } };
+  return { doc, h, el, live, L, out, thread, draw, seq, rowOf, glides, cancels, select: (key: string) => live.select(key), flush: () => { now += 1000; const list = frames; frames = []; list.forEach((fn) => fn()); } };
 }
 
 const at = (daysAgo: number, hour: number, minute = 0, second = 0) => { const d = new Date(); d.setDate(d.getDate() - daysAgo); d.setHours(hour, minute, second, 0); return d.toISOString(); };
@@ -274,6 +280,100 @@ test('a group with several cats writing at once: each reply goes under its own f
   assert.deepEqual([x, y].map((n) => n.classList.contains('cont')), [false, false]);
 });
 
+test('a row that changes places keeps the keyboard: a message focused (as a search hit leaves it) and a control inside a moving reply are focused again, without scrolling (review item 3)', () => {
+  const p = page();
+  p.select('group:g');
+  const said = (id: string, sec: number, words: string) => ({ id, kind: 'person', text: words, time: plus(t0, sec * 1000) });
+  const cat = (id: string, catId: string, sec: number, more: Any = {}) => ({ id, kind: 'bot', native_cat_id: catId, text: '', time: plus(t0, sec * 1000), in_progress: true, draft: '在写', ...more });
+  const rows = (yFollows: boolean) => [said('p1', 0, '@宪宪 @砚砚 各看一眼'), cat('x', 'c', 1), cat('y', 'd', 2, yFollows ? { follows: 'p2' } : {}), said('p2', 9, '@砚砚 还有导出')];
+  p.draw(rows(false), { group: true });
+  // The message the owner jumped to has focus; then 砚砚's reply takes it in and the message moves above it.
+  const message = p.rowOf('p2');
+  let how: Any = null;
+  const focus = message.focus.bind(message);
+  message.focus = (opts?: Any) => { how = opts; focus(); };
+  message.focus();
+  p.draw(rows(true), { group: true });
+  assert.deepEqual(p.seq().slice(1), ['p1', 'x', 'p2', 'y']);
+  assert.equal(message.moves > 0, true, 'it was moved');
+  assert.equal(p.doc.activeElement, message, 'and still has focus');
+  assert.deepEqual(plain(how), { preventScroll: true });
+  // A control inside a reply that moves (here 砚砚's, moving back above the message when its follows goes) keeps focus too.
+  const y = p.rowOf('y'), control = p.h('button', 'ck-link');
+  y.find('body')[0]!.append(control);
+  control.focus();
+  p.draw(rows(false), { group: true });
+  assert.deepEqual(p.seq().slice(1), ['p1', 'x', 'y', 'p2']);
+  assert.equal(p.rowOf('y'), y);
+  assert.equal(p.doc.activeElement, control);
+  // Focus outside the history is never taken.
+  const outside = p.h('input', 'composer');
+  p.doc.body.append(outside);
+  outside.focus();
+  p.draw(rows(true), { group: true });
+  assert.equal(p.doc.activeElement, outside);
+  // The usual single chat: the follow-up, said a few seconds after the first message, moves above the reply and now continues
+  // that message, so its row is drawn anew rather than moved: focus goes to the row that took its place.
+  const q = page();
+  q.select('bot:宪宪');
+  const u1 = { ...user(1), time: t0 }, writing = { ...reply(2), native_cat_id: 'c', time: plus(t0, 2000), in_progress: true, draft: '一。' };
+  const asked = { ...user(3), time: plus(t0, 9000) };
+  q.draw([u1, writing, asked]);
+  const before = q.rowOf('u3');
+  before.focus();
+  q.draw([u1, { ...writing, follows: 3 }, asked]);
+  const after = q.rowOf('u3');
+  assert.notEqual(after, before, 'drawn anew (it continues the first message now)');
+  assert.ok(after.classList.contains('cont'));
+  assert.equal(q.doc.activeElement, after, 'focus is on the row that took its place');
+  assert.equal(after.tabIndex, -1);
+});
+
+test('a second reorder while a glide runs starts from where the row is seen: the running glide is cancelled first and the new one has no jump (review item 5)', () => {
+  const p = page();
+  p.select('group:g');
+  const said = (id: string, sec: number) => ({ id, kind: 'person', text: '问' + id, time: plus(t0, sec * 1000) });
+  const cat = (id: string, catId: string, sec: number, more: Any = {}) => ({ id, kind: 'bot', native_cat_id: catId, text: '', time: plus(t0, sec * 1000), in_progress: true, draft: '在写', ...more });
+  p.draw([said('p1', 0), cat('x', 'c', 1), cat('y', 'd', 2), said('p2', 9)], { group: true });
+  p.draw([said('p1', 0), cat('x', 'c', 1), cat('y', 'd', 2, { follows: 'p2' }), said('p2', 9)], { group: true });
+  assert.deepEqual(p.seq().slice(1), ['p1', 'x', 'p2', 'y']);
+  assert.deepEqual(p.glides, [{ id: 'p2', from: 'translateY(40px)' }, { id: 'y', from: 'translateY(-40px)' }]);
+  // Halfway through, 宪宪's reply takes the same message in: p2 is seen 20px below its place and moves again.
+  const message = p.rowOf('p2'), seenAt = message.getBoundingClientRect().top;
+  p.draw([said('p1', 0), cat('x', 'c', 1, { follows: 'p2' }), cat('y', 'd', 2, { follows: 'p2' }), said('p2', 9)], { group: true });
+  assert.deepEqual(p.seq().slice(1), ['p1', 'p2', 'x', 'y']);
+  assert.deepEqual(p.cancels, ['p2'], 'the running glide was cancelled before measuring where it lands');
+  // (right under the owner's first message it is drawn as a continuation: a row of its own replaces the one seen)
+  const now = p.rowOf('p2');
+  assert.notEqual(now, message);
+  const placed = now.parent!.kids.indexOf(now) * 40;
+  const second = p.glides.slice(2);
+  assert.deepEqual(second.find((g) => g.id === 'p2'), { id: 'p2', from: 'translateY(' + (seenAt - placed) + 'px)' }, 'it starts exactly where it was seen');
+  assert.equal(seenAt - placed, 60);
+  assert.deepEqual(second.find((g) => g.id === 'x'), { id: 'x', from: 'translateY(-40px)' });
+});
+
+test('the read position: rows drawn below a message although they came before it in the engine\'s order are named, the owner\'s own aside', () => {
+  const L = rules();
+  const group = [
+    { id: 'p1', kind: 'person' }, { id: 'A', kind: 'bot', follows: 'p2' }, { id: 'B', kind: 'bot' }, { id: 'p2', kind: 'person' },
+  ];
+  const drawn = { messages: group, order: L.order(group, true), group: true };
+  assert.deepEqual(plain(drawn.order.map((i: number) => group[i]!.id)), ['p1', 'B', 'p2', 'A']);
+  assert.deepEqual(plain(L.displaced(drawn, 'B')), ['A'], 'reading B (the newest) covers A, which is drawn below it');
+  assert.deepEqual(plain(L.displaced(drawn, 'A')), []);
+  assert.deepEqual(plain(L.displaced(drawn, 'p2')), ['A']);
+  assert.deepEqual(plain(L.displaced(drawn, 'gone')), []);
+  assert.deepEqual(plain(L.displaced(null, 'B')), []);
+  // Single chats by native message ID; nothing moved, nothing named.
+  const single = [user(1), reply(2, 'a2', { follows: 3 }), reply(3, 'a3'), user(4, 'u3', { seq: 3 })];
+  single[3] = { ...user(3), id: 'u3', native_message_id: 'u3' };
+  const one = { messages: single, order: L.order(single, false), group: false };
+  assert.deepEqual(plain(L.displaced(one, 'a3')), ['a2']);
+  const plainRows = [user(1), reply(2), user(3), reply(4)];
+  assert.deepEqual(plain(L.displaced({ messages: plainRows, order: L.order(plainRows, false), group: false }, 'a4')), []);
+});
+
 test('a follow-up on a page loaded later: the reply moves under it once both are on screen, and the rows above are earlier history that does not rise', () => {
   const p = page();
   p.select('bot:宪宪');
@@ -325,9 +425,13 @@ test('再发一次 and quotes read the engine\'s order: an unfinished reply rese
 
 test('the shell draws both histories in that order, keeps every index the row\'s own, and redraws when a reply in progress gains follows', () => {
   const single = take('renderMessages'), group = take('renderGroup');
-  assert.match(single, /liveRules\.order\(messages, false\)\.forEach\(\(i\) => \{\n\s+const m = messages\[i\];\n\s+if \(skipMessage\(m\) \|\| wakeRuns\.hidden\.has\(i\)\) return;/);
+  assert.match(single, /const order = liveRules\.order\(messages, false\);\n\s+state\.drawn = \{ messages, order, group: false \};\n\s+order\.forEach\(\(i\) => \{\n\s+const m = messages\[i\];\n\s+if \(skipMessage\(m\) \|\| wakeRuns\.hidden\.has\(i\)\) return;/);
   assert.equal((single.match(/messages\.forEach\(/g) || []).length, 1, 'only the pass that finds the latest cards walks the native order');
-  assert.match(group, /for \(const m of liveRules\.order\(messages, true\)\.map\(\(i\) => messages\[i\]\)\) \{/);
+  assert.match(group, /const order = liveRules\.order\(messages, true\);\n\s+state\.drawn = \{ messages, order, group: true \};\n\s+for \(const m of order\.map\(\(i\) => messages\[i\]\)\) \{/);
+  // What was drawn is what the read position asks about (chat-experience.js); an empty history draws nothing to ask about.
+  assert.equal((single.match(/state\.drawn = null;/g) || []).length, 1);
+  assert.equal((group.match(/state\.drawn = null;/g) || []).length, 1);
+  assert.match(app, /displacedBefore: \(id\) => \(state\.drawn && !state\.peer \? liveRules\.displaced\(state\.drawn, id\) : \[\]\),/);
   assert.doesNotMatch(group, /for \(const m of messages\)/);
   // The redraw key of a reply in progress includes follows (its place), not its growing words.
   const out: Any = {};
@@ -370,11 +474,36 @@ test('while a reply streams, the cat\'s own signature between its parts is held 
   assert.equal(L.display('一。\n\n[a.b(c)/x🐾]\n\n二。', 'aXb(c)'), server('一。\n\n[a.b(c)/x🐾]\n\n二。', 'aXb(c)'));
   assert.equal(L.display('一。\n\n[团子二/x🐾]\n\n二。', '团子'), '一。\n\n[团子二/x🐾]\n\n二。');
   assert.equal(L.display('一。\n\n' + sign + '\n\n二。'), '一。\n\n' + sign + '\n\n二。', 'without the speaking cat\'s name nothing in the middle is cut');
-  // Every stage of the stream: a signature the finished reply does not show is never drawn, not even before the words after it arrive.
+  // Every stage of the stream, of every case (kept ones too): what is drawn is what the server would show for the words so far,
+  // except a last line that opens a bracket it has not closed, outside a code block, which waits (it may be a signature being
+  // written). Inside a code block nothing is held back and brought back later: code shows as it comes.
+  const fenced = (text: string) => {
+    let fence = '';
+    for (const row of text.split(/\r?\n/)) {
+      const m = /^[ \t>]*(?:(?:[-+*]|\d+[.)])[ \t]+)?(`{3,}|~{3,})(.*)$/.exec(row);
+      if (!m) continue;
+      if (!fence) { if (m[1]![0] !== '`' || !m[2]!.includes('`')) fence = m[1]!; }
+      else if (m[1]![0] === fence[0] && m[1]!.length >= fence.length && !m[2]!.trim()) fence = '';
+    }
+    return !!fence;
+  };
+  const expected = (arrived: string) => {
+    // Half a CRLF has not made a line break yet.
+    const sofar = arrived.replace(/\r$/, '');
+    const cut = sofar.lastIndexOf('\n') + 1, last = sofar.slice(cut);
+    const waits = /^\s{0,3}\[/.test(last) && !last.includes(']') && !fenced(sofar.slice(0, cut));
+    return server(waits ? sofar.slice(0, cut) : sofar, '快手').replace(/\s+$/, '');
+  };
   for (const content of SERVER_CASES) {
-    if (L.display(content, '快手').includes(sign)) continue;
-    for (let i = 1; i <= content.length; i++) assert.doesNotMatch(L.display(content.slice(0, i), '快手'), /快手\/haiku🐾/, JSON.stringify(content.slice(0, i)));
+    for (let i = 1; i <= content.length; i++) assert.equal(L.display(content.slice(0, i), '快手'), expected(content.slice(0, i)), JSON.stringify(content.slice(0, i)));
+    // A signature the finished reply does not show is never drawn on the way.
+    if (!L.display(content, '快手').includes(sign)) for (let i = 1; i <= content.length; i++) assert.doesNotMatch(L.display(content.slice(0, i), '快手'), /快手\/haiku🐾/);
   }
+  // The two kinds of incomplete line, spelled out: outside a code block it waits; inside one it shows at once and stays.
+  assert.equal(L.display('看：\n\n[快手/hai', '快手'), '看：');
+  assert.equal(L.display('看：\n\n```text\n[快手/hai', '快手'), '看：\n\n```text\n[快手/hai');
+  assert.equal(L.display('看：\n\n```text\n[快手/haiku🐾]', '快手'), '看：\n\n```text\n[快手/haiku🐾]');
+  assert.equal(L.display('看：\n\n```text\n[快手/haiku🐾]\n```', '快手'), '看：\n\n```text\n[快手/haiku🐾]\n```');
   // The first part's signature in the middle, as the engine streams a continued reply (and as the preview's stand-in does).
   const stream = '看了现有的方案。\n\n[宪宪/示例🐾]\n\n导出也看了：可以。';
   assert.equal(L.display(stream, '宪宪'), '看了现有的方案。\n\n导出也看了：可以。');
