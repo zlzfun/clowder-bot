@@ -124,12 +124,13 @@ export function createXbotCoreRouter(bridge: BotBridge) {
     if (input.description !== undefined) update.teamStrengths = input.description;
     // Talking briefly is a sentence in the cat's own personality: put in or taken out, the rest of it untouched.
     if (input.concise !== undefined && input.concise !== speaksBriefly(cat)) update.personality = input.concise ? withChatManner(cat.personality) : withoutChatManner(cat.personality);
-    if (Object.keys(update).length) await native.request(`/api/cats/${encode(cat.id)}`, { method: 'PATCH', body: { ...update, expectedRevision: cat.configurationRevision } });
+    // What native says the member is afterwards is what gets reported, not what was asked for.
+    const updated = Object.keys(update).length ? (await native.request<{ cat?: NativeCat }>(`/api/cats/${encode(cat.id)}`, { method: 'PATCH', body: { ...update, expectedRevision: cat.configurationRevision } })).cat ?? cat : cat;
     const meta = store.bot(cat.id);
     if (input.group !== undefined) meta.folder = input.group;
     if (input.timezone !== undefined) meta.timezone = input.timezone;
     if (input.avatar_seed !== undefined) { meta.avatarSeed = input.avatar_seed; delete meta.avatarData; delete meta.avatarMime; }
-    store.save(); res.json({ name: input.name ?? cat.name, ...(input.concise !== undefined ? { concise: input.concise } : {}) });
+    store.save(); res.json({ name: input.name ?? cat.name, ...(input.concise !== undefined ? { concise: speaksBriefly(updated) } : {}) });
   });
   router.post('/bots/:name/pin', async (req, res) => { const cat = await bot(req.params.name); store.bot(cat.id).pinned = z.object({ pinned: z.boolean() }).parse(req.body).pinned; store.save(); res.json({ status: 'ok' }); });
   router.post('/bots/:name/fork', async (req, res) => {

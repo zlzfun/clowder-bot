@@ -62,7 +62,7 @@ export async function searchMessages(bridge: BotBridge, query: string, limit = 3
       const [thread, page] = await Promise.all([target.chat.type === 'group' ? bridge.thread(target.threadId) : undefined, bridge.messages(target.threadId)]);
       const chat = thread ? { ...target.chat, name: thread.title ?? '群聊' } : target.chat;
       if (page.hasMore) more = true;
-      const replies = new Set(bridge.activity.visibleReplies(target.threadId, page.messages).map(message => message.id));
+      const replies = new Set(bridge.activity.visibleReplies(target.threadId, page.messages, cats).map(message => message.id));
       for (const message of page.messages) {
         // The opening invitation the app sent for the owner is not something the owner said.
         const owner = message.type === 'user' && !bridge.isInvitation(target.threadId, message);

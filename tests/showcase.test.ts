@@ -187,6 +187,15 @@ test('the showcase stages one cat per template, and each chat shows what it is t
   assert.equal(both[1].follows, both[2].seq);
   assert.deepEqual(kinds([both[1]]), ['card', 'checklist', 'card', 'checklist'], 'one reply carries both answers');
   assert.equal(both[1].content.split('看了导出那段').length - 1, 2); assert.doesNotMatch(both[1].content, /🐾/, 'no signature between them');
+  // A tool that cannot take input while it runs: what is said meanwhile gets a reply of its own afterwards, and nothing is moved.
+  assert.equal((await post('/__preview', { append: 'off' })).status, 200);
+  const mark = (await rows('砚砚')).length;
+  assert.equal((await tell('第三件事。')).status, 200);
+  await until('砚砚 has begun again', async () => (await rows('砚砚')).at(-1), row => row.role === 'assistant' && row.in_progress === true);
+  assert.equal((await tell('第四件事。')).status, 200);
+  const apart = await until('砚砚 answers them one after the other', async () => (await rows('砚砚')).slice(mark), tail => tail.length === 4 && tail[3].status === 'completed');
+  assert.deepEqual(apart.map((row: any) => [row.role, 'follows' in row]), [['user', false], ['assistant', false], ['user', false], ['assistant', false]]);
+  assert.equal((await post('/__preview', { append: 'on' })).status, 200);
   assert.equal((await post('/__preview', { speed: 0.02 })).status, 200);
 
   // A message that names no cat is taken the way the engine decides it: by the cat the owner last addressed by name.

@@ -10,6 +10,7 @@
 //   curl -X POST :3230/__preview -H 'Content-Type: application/json' -d '{"agents":"login"}'
 //   …  -d '{"speed":3}'  (slower playback)   -d '{"approvals":"failing"}'  (agreeing fails like a broken store)
 //   …  -d '{"page":12}'  (read conversations 12 messages at a time, to see earlier pages load)
+//   …  -d '{"append":"off"}'  (a cat that is writing does not take in what is said meanwhile; it answers that afterwards)
 //   curl :3230/__preview   → {preview, scene: "plain" | "showcase", staged, zone, plays[], cats[]} (what this is; changes nothing)
 // Typed words steer the canned reply: 长, 文件/查/资料, 慢, 失败, 清单, 选一个, 确认一下, 记住, 提醒/定时;
 // in a group @名字 picks the cat and 大家/@all asks all of them; a message that names no cat is taken, as in the engine,
@@ -76,6 +77,8 @@ export class PreviewNative extends NativeFixture {
   schedules: Array<Record<string, any>> = [];
   /** Conversation notes by thread (GET /api/memory?threadId=). */
   notes = new Map<string, Array<{ key: string; value: string; updatedAt: number }>>();
+  /** Whether a cat that is writing can take in what is said meanwhile (the engine's append); off, such a message gets a reply of its own afterwards. */
+  appendable = true;
   /** A staged scene's own reply for a chat (scripts/showcase-scene.ts); undefined keeps the typed-word replies below. */
   scene?: (threadId: string, cat: NativeCat, text: string) => Script | undefined;
   constructor() { super(); this.runtimes = agentSets.ready!; }
@@ -204,15 +207,24 @@ export class PreviewNative extends NativeFixture {
       list.push(user);
       const entries = targets.map(cat => ({ entryId: 'queue:' + randomBytes(8).toString('hex'), targetCatId: cat.id }));
       this.emit(thread.id, { type: 'queue_updated', action: 'enqueued' });
-      // A cat that is writing a reply here takes the new message into that reply instead of starting another (the engine's
-      // continue_current, recorded as the engine records it: read off the isolated runtime, 2026-11-12). Others start a turn.
+      // A cat that is writing a reply here takes the new message into that reply instead of starting another — the engine's
+      // continue_current, which is what the app sends; recorded as the engine records it (read off the isolated runtime,
+      // 2026-11-12). A message sent as next work, or to a tool that cannot take input while it runs (`appendable` off),
+      // waits for the reply to end and gets a reply of its own. Other cats start a turn.
       user.lifecycle = { kind: 'input', dispatchRefs: [] };
       for (const cat of targets) {
-        const writing = [...this.turns.values()].find(turn => turn.threadId === thread.id && turn.catId === cat.id && !turn.stop && turn.reply);
-        if (!writing) { void this.turn(thread.id, cat, user).catch(error => console.error('[preview]', error)); continue; }
-        (user.lifecycle.dispatchRefs as unknown[]).push({ targetId: cat.id, phase: 'settled', statusMessageId: writing.reply!.id, dispatchedAt: Date.now(), inputRead: { status: 'read', at: Date.now() }, appendAcceptance: 'accepted' });
-        (writing.reply!.lifecycle!.inputMessageIds as string[]).push(user.id);
-        writing.more.push(user);
+        const running = [...this.turns.values()].find(turn => turn.threadId === thread.id && turn.catId === cat.id && !turn.stop);
+        if (!running) { void this.turn(thread.id, cat, user).catch(error => console.error('[preview]', error)); continue; }
+        if (body.messageDisposition !== 'continue_current' || !this.appendable) {
+          void (async () => { while ([...this.turns.values()].includes(running)) await wait(50); await this.turn(thread.id, cat, user); })().catch(error => console.error('[preview]', error));
+          continue;
+        }
+        // Before the reply's record exists the message simply becomes one of its inputs; after, the running reply accepts it.
+        if (running.reply) {
+          (user.lifecycle.dispatchRefs as unknown[]).push({ targetId: cat.id, phase: 'settled', statusMessageId: running.reply.id, dispatchedAt: Date.now(), inputRead: { status: 'read', at: Date.now() }, appendAcceptance: 'accepted' });
+          (running.reply.lifecycle!.inputMessageIds as string[]).push(user.id);
+        }
+        running.more.push(user);
       }
       return done({ status: 'queued', queuePosition: 1, entryId: entries[0]?.entryId, entries, merged: false, userMessageId: user.id, userMessage: { id: user.id, timestamp: user.timestamp } });
     }
@@ -335,10 +347,14 @@ export class PreviewNative extends NativeFixture {
       message.lifecycle = { ...message.lifecycle, kind: 'response', status, invocationId, completedAt: Date.now(), ...(reason ? { reason } : {}) }; delete message.isDraft;
       this.turns.delete(key); this.emit(threadId, { type: 'queue_updated', action: 'completed' });
     };
-    // From here on what the owner says to this cat joins this reply.
-    state.reply = message;
     await wait(120 * this.speed);
     list.push(message);
+    // What was said to this cat before its reply's record existed is simply among the reply's inputs; from here on a message is appended to it.
+    for (const early of state.more) {
+      (message.lifecycle!.inputMessageIds as string[]).push(early.id);
+      (early.lifecycle?.dispatchRefs as unknown[] | undefined)?.push({ targetId: cat.id, phase: 'settled', statusMessageId: message.id, dispatchedAt: Date.now() });
+    }
+    state.reply = message;
     this.emit(threadId, { type: 'queue_updated', action: 'processing' });
     info({ type: 'invocation_created', invocationId }, { messageId: undefined, lifecycleResponseMessageId: message.id });
     await wait(300 * this.speed);
@@ -384,7 +400,8 @@ export class PreviewNative extends NativeFixture {
     let failed: boolean | string = false;
     if (!await answer(first, user)) failed = first.fail || true;
     // What the owner said while this was being written is answered in the same reply, in the order it came.
-    while (!failed && !state.stop && state.more.length) { const next = state.more.shift()!; await answer({ ...this.script(cat, next.content, threadId), fail: false }, next); }
+    // If answering one of them fails, the reply fails.
+    while (!failed && !state.stop && state.more.length) { const next = state.more.shift()!, script = this.script(cat, next.content, threadId); if (!await answer(script, next)) failed = script.fail || true; }
     if (codex) status('done');
     if (state.stop) { message.content = written; settle('canceled'); this.emit(threadId, { type: 'done', ...stamp, isFinal: true, timestamp: Date.now() }, true); return; }
     if (failed) { message.content = ''; settle('failed', typeof failed === 'string' ? failed : undefined); this.emit(threadId, { type: 'error', ...stamp, error: 'preview failure', timestamp: Date.now() }, true); return; }
@@ -421,6 +438,8 @@ runtime.app.post('/__preview', async (req, res) => {
   if (typeof input.agents === 'string') { if (!agentSets[input.agents]) return res.status(400).json({ error: 'agents: ' + Object.keys(agentSets).join(' | ') }); native.runtimes = agentSets[input.agents]!; }
   if (typeof input.speed === 'number' && input.speed > 0 && input.speed <= 20) native.speed = input.speed;
   if (typeof input.approvals === 'string') native.hubFails = input.approvals === 'failing';
+  // {"append": "off"}: a cat that is writing cannot take in what is said meanwhile; that message gets its own reply afterwards. "on" restores it.
+  if (typeof input.append === 'string') native.appendable = input.append !== 'off';
   // {"page": 12}: conversations are read 12 messages at a time, so "earlier messages" can be seen after a few sends; {"page": 0} restores the usual page.
   if (typeof input.page === 'number') native.pageLimit = input.page >= 2 && input.page <= 200 ? Math.floor(input.page) : undefined;
   // {"play": "布偶猫"}: the owner's demo line for that chat is sent through the real adapter, so its staged reply can be watched being written.

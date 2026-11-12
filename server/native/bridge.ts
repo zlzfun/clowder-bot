@@ -64,13 +64,18 @@ const defaultStrengths = '聊天答疑、查资料、写东西、整理文件';
  * conversation starts, so a change shows in conversations started afterwards.
  */
 export const chatManner = '说话像在聊天软件里回消息：先说结论，通常两三句话说完；不用标题、列表、表格和表情符号，不复述问题，不铺垫，不在结尾总结。对方明确要清单、表格、代码或长文时照给；内容确实多时先说要点，问一句要不要展开。';
-/** A personality with that manner added once. */
+/**
+ * A personality with that manner added once, as a paragraph of its own after whatever the personality says:
+ * not a character of the rest is changed, so taking it out again gives back exactly what was there.
+ */
 export function withChatManner(personality: string | undefined): string {
-  const own = (personality ?? '').trim();
-  return own.includes(chatManner) ? own : !own ? chatManner : `${own}${/[。！？.!?；;]$/.test(own) ? '' : '。'}${chatManner}`;
+  const own = personality ?? '';
+  return own.includes(chatManner) ? own : own.trim() ? `${own}\n\n${chatManner}` : chatManner;
 }
-/** …and with it taken out again; what the cat's personality otherwise says stays. */
-export function withoutChatManner(personality: string | undefined): string { return (personality ?? '').replace(chatManner, '').trim(); }
+/** …and with it taken out again, wherever and however often it stands; what the cat's personality otherwise says stays as it is. */
+export function withoutChatManner(personality: string | undefined): string {
+  return (personality ?? '').split(`\n\n${chatManner}`).join('').split(chatManner).join('');
+}
 export const speaksBriefly = (cat: NativeCat) => typeof cat.personality === 'string' && cat.personality.includes(chatManner);
 
 const hex = (value: unknown): value is string => typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value);
@@ -280,17 +285,24 @@ export class BotBridge {
   }
   /**
    * Replies that took in something the owner said after they had begun, by the engine's own record: a response
-   * lists the messages it answers (`lifecycle.inputMessageIds`), and one that was appended to a running reply
+   * lists the messages it answers (`lifecycle.inputMessageIds`), a message that was appended to a running reply
+   * says on its own record that this reply accepted it (`dispatchRefs[].appendAcceptance`), and such a message
    * comes later in the conversation than the reply itself. Maps the reply to the last such message on the page,
    * so a chat can draw the reply under everything it answers. The order of the records is not changed.
    */
   laterInputs(messages: NativeMessage[]): Map<string, string> {
     const place = new Map(messages.map((message, index) => [message.id, index])), later = new Map<string, string>();
+    const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+    // The engine lists a message as an input before the tool has confirmed taking it in (appendAcceptance: pending), and
+    // keeps it listed when that stayed uncertain. Only a message whose own record says this reply accepted it counts.
+    const accepted = (input: NativeMessage, reply: NativeMessage) => (Array.isArray(input.lifecycle?.dispatchRefs) ? input.lifecycle.dispatchRefs as unknown[] : []).map(record)
+      .some(ref => ref.appendAcceptance === 'accepted' && ref.statusMessageId === reply.id && (ref.targetId === undefined || ref.targetId === reply.catId));
     for (const [index, message] of messages.entries()) {
       const inputs = message.type === 'assistant' && Array.isArray(message.lifecycle?.inputMessageIds) ? message.lifecycle.inputMessageIds as unknown[] : [];
-      const last = inputs.filter((id): id is string => typeof id === 'string' && (place.get(id) ?? -1) > index && messages[place.get(id)!]!.type === 'user')
-        .sort((a, b) => place.get(a)! - place.get(b)!).at(-1);
-      if (last) later.set(message.id, last);
+      const last = inputs.filter((id): id is string => typeof id === 'string' && (place.get(id) ?? -1) > index)
+        .map(id => messages[place.get(id)!]!).filter(input => input.type === 'user' && accepted(input, message))
+        .sort((a, b) => place.get(a.id)! - place.get(b.id)!).at(-1);
+      if (last) later.set(message.id, last.id);
     }
     return later;
   }

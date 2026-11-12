@@ -28,14 +28,15 @@ const rank = { approval: 0, failure: 1, running: 2, queued: 3, task: 4 };
 export class Activity {
   constructor(private bridge: BotBridge) {}
   approvals(): Promise<{ items: unknown[] }> { return this.bridge.native.request('/api/approval-hub/pending'); }
-  visibleReplies(threadId: string, messages: NativeMessage[]) {
+  /** The replies a chat shows as such. `cats` gives each speaker's name: what is shown is decided with it, here as in the transcript. */
+  visibleReplies(threadId: string, messages: NativeMessage[], cats: NativeCat[]) {
     const presentation = messagePresentation(messages);
     // Visibility never depends on a leading signature: it is only hidden when words follow it.
     return messages.filter(message => message.catId && message.type === 'assistant' && !message.isDraft
       && !['queued', 'processing', 'canceled', 'cancelled'].includes(message.lifecycle?.status ?? '')
       && presentation.get(message.id) !== 'activity'
       // By what the chat shows: a signed SILENT or a signature alone is no reply; a failure says so in words.
-      && (!!messageDisplayText(message, threadId).trim() || this.bridge.workspaces.messageFiles(threadId, message).length > 0
+      && (!!messageDisplayText(message, threadId, cats.find(cat => cat.id === message.catId)?.name).trim() || this.bridge.workspaces.messageFiles(threadId, message).length > 0
         || (rich => rich.blocks.length > 0 || rich.hidden > 0)(messageBlocks(message))))
       .sort((a, b) => orderTime(a) - orderTime(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   }
@@ -86,7 +87,7 @@ export class Activity {
           }
         } else if (index === 2) {
           if (!Array.isArray(data.messages) || typeof data.hasMore !== 'boolean') throw new Error('messages unavailable');
-          const replies = this.visibleReplies(threadId, data.messages), cursor = this.bridge.store.state.readCursors[threadId];
+          const replies = this.visibleReplies(threadId, data.messages, names), cursor = this.bridge.store.state.readCursors[threadId];
           const unread = replies.filter(message => after(message, cursor));
           view.unread = unread.length;
           const oldest = data.messages[0] as NativeMessage|undefined;
@@ -132,7 +133,7 @@ export class Activity {
   }
   async acknowledge(threadId: string, messageId: string, stillCurrent: () => boolean) {
     await this.bridge.thread(threadId);
-    const message = this.visibleReplies(threadId, await this.bridge.allMessages(threadId)).find(item => item.id === messageId);
+    const message = this.visibleReplies(threadId, await this.bridge.allMessages(threadId), await this.bridge.cats()).find(item => item.id === messageId);
     if (!message) throw new ApiError(404, '这条可见回复不属于当前对话');
     if (!stillCurrent()) throw new ApiError(409, '对话已变化，请刷新后重试');
     if (!Number.isFinite(orderTime(message))) throw new ApiError(502, '消息顺序暂时不可确认');
