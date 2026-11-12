@@ -159,11 +159,22 @@
     return null;
   }
   const loginHelp = (command) => toolHelp({ state: "login", loginCommand: command }).text;
-  // The way forward from a cat that cannot come home as it is: 自定义 takes
-  // only its looks, with a tool that is here (named when there is one).
+  // Why a cat cannot come home as it is, on its card: the server's reason
+  // (one sentence without a stop) and what that means.
+  const why = (tool) => (tool && !tool.usable ? tool.reason + "，所以它现在按原样领不了。" : "");
+  // The one short word a cat's tile carries when its tool is not usable here,
+  // true to the state the server named: an Agent this app cannot connect yet
+  // (nothing to do on this computer), one not installed, one not logged in,
+  // or one that could not be read.
+  const TAGS = Object.freeze({ unsupported: "接不上", missing: "没安装", login: "没登录", unread: "没读到" });
+  const tag = (tool) => (!tool || tool.usable ? "" : TAGS[tool.state] || TAGS.unsupported);
+  // The way on from a cat that cannot come home as it is: 「只借它的长相」
+  // turns to 自定义 with its looks, thinking with an Agent that is here (named
+  // when there is one).
+  const BORROW = "只借它的长相";
   function forward(s) {
     const list = choices(s);
-    return "只借它的长相，用这台电脑上的 " + (list.length === 1 ? list[0].label : "Agent") + " 来思考";
+    return "自定义一只，用这台电脑上的 " + (list.length === 1 ? list[0].label : "Agent") + " 来思考";
   }
   // Sentences said as one, a stop between them unless one is already there.
   const joinSaid = (parts) => parts.filter(Boolean).reduce((all, part) => (!all ? part : all + (/[。！？.!?…]$/u.test(all) ? "" : "。") + part), "");
@@ -189,8 +200,9 @@
     };
   }
   // One calm line, cut at a pause (、，；space) near the end when it is too
-  // long, never mid-way through a word when a pause is close by.
-  const TRAIT_MAX = 40;
+  // long, never mid-way through a word when a pause is close by. The card has
+  // room for about two lines of each (CSS clamps what is left).
+  const TRAIT_MAX = 60;
   function clipLine(value, max) {
     const text = trim(String(value == null ? "" : value).replace(/\s+/g, " "));
     const chars = [...text];
@@ -200,10 +212,10 @@
     if (pause >= cut.length * 0.6) cut = cut.slice(0, pause);
     return cut.replace(/[\s、，,；;。/:：-]+$/u, "") + "…";
   }
-  // What a cat is like, in at most two short lines: its personality, then
-  // what it is good at (its strengths, else its role), in the template's own
-  // words. `said` is the same, as one sentence for a screen reader. null when
-  // the template says neither.
+  // What a cat is like, in at most two short lines for its card: its
+  // personality (in its own words), then what it is good at (its strengths,
+  // else its role), in the template's own words. `said` is the same, as one
+  // sentence for a screen reader. null when the template says neither.
   function trait(face) {
     if (!face || typeof face !== "object") return null;
     const temper = clipLine(face.personality, TRAIT_MAX);
@@ -216,9 +228,16 @@
     const said = lines.length > 1 ? lines[0] + (/[。！？.!?…]$/u.test(lines[0]) ? "" : "。") + lines[1] : lines[0];
     return { lines, said };
   }
-  // A cat of the owner's own: the face only gives its looks (the two lines
-  // below say 可不填 themselves). One line on a phone, too.
-  const OWN_NOTE = "这里只挑它的长相，它做什么、什么性格写在下面。";
+  // 自定义, one of the options beside the cats: a cat of the owner's own. Its
+  // card says whose it is and which looks it has; said once when chosen.
+  const OWN_TITLE = "你自己的猫猫";
+  const OWN_NOTE = "你自己的猫猫：长相随你挑，它做什么、什么性格你来写，都可以不填。";
+  // The row's two groups, in a few plain words: those that can come home as
+  // they are (and 自定义), then those that cannot.
+  const GROUPS = Object.freeze(["现在就能领", "暂时按原样领不了"]);
+  // The name box's placeholder: a cat of the owner's own borrows no template's
+  // name, so its box starts empty and asks for one.
+  const NAME_PLACEHOLDER = "给它起个名字";
 
   // ---- GET /xbot-api/start ----
   const STATES = ["ready", "unknown", "login", "missing"];
@@ -405,8 +424,8 @@
 
   root.ClowderQuickCreateRules = Object.freeze({
     trim, nameProblem, groupNameProblem, groupName, freeName, suggestName, followsFace, NAME_INPUT_MAX, ABOUT_INPUT_MAX, aboutProblem,
-    PERSONALITY_INPUT_MAX, personalityProblem, offer, usable, facesNeed, trait, clipLine, TRAIT_MAX, OWN_NOTE, FACE_CHANGED,
-    toolOf, faceUsable, firstUsable, uses, USES, UNREAD, toolHelp, loginHelp, forward, joinSaid,
+    PERSONALITY_INPUT_MAX, personalityProblem, offer, usable, facesNeed, trait, clipLine, TRAIT_MAX, OWN_TITLE, OWN_NOTE, GROUPS, NAME_PLACEHOLDER, FACE_CHANGED,
+    toolOf, faceUsable, firstUsable, uses, USES, UNREAD, why, tag, TAGS, toolHelp, loginHelp, BORROW, forward, joinSaid,
     start, choices, choiceOf, loginCommand, sameStart, need, TOOL_LINE, unconfirmed,
     catBody, groupBody, fingerprint, MAX_MEMBERS, catError, groupError, startError, createdNotice,
   });

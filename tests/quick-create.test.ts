@@ -136,12 +136,25 @@ function control(root: El, label: string): El {
   assert.ok(target, 'no control for ' + label);
   return target!;
 }
+// A field's own message line (what its input is described by).
+const errOf = (root: El, label: string) => { const input = control(root, label); const err = all(root).find(n => n.id && n.id === input.getAttribute('aria-describedby')); assert.ok(err, 'no message line for ' + label); return err!; };
 const type = (input: El, value: string) => { input.value = value; input.dispatch('input'); };
 const choose = (select: El, value: string) => { select.value = value; select.dispatch('change'); };
-const faces = (root: El) => named(root, 'qc-face');
-const chosen = (root: El) => faces(root).find(f => f.getAttribute('aria-checked') === 'true')?.getAttribute('aria-label') ?? null;
-const face = (root: El, label: string) => { const f = faces(root).find(x => x.getAttribute('aria-label') === label); assert.ok(f, 'no face ' + label); return f!; };
+// The cats to choose from (item 44): named tiles in one radio group, each a cat (its radio named 「宪宪，布偶猫」) or
+// 自定义 (data-own). faces() is the cats only, in the order shown; a face is found by its breed, as before.
+const tiles = (root: El) => named(root, 'qc-face');
+const faces = (root: El) => tiles(root).filter(f => f.dataset.face);
+const breedOf = (f: El) => (f.getAttribute('aria-label') ?? '').split('，').pop()!;
+const chosen = (root: El) => { const f = tiles(root).find(x => x.getAttribute('aria-checked') === 'true'); return f ? (f.dataset.face ? breedOf(f) : '自定义') : null; };
+const face = (root: El, label: string) => { const f = faces(root).find(x => breedOf(x) === label); assert.ok(f, 'no face ' + label); return f!; };
+const ownTile = (root: El) => { const f = tiles(root).find(x => x.dataset.own === 'true' && shown(x)); assert.ok(f, 'no 自定义 tile'); return f!; };
+// 自定义's looks (a radio group of its own on the card): the one chosen, by breed, or null.
+const looksChosen = (root: El) => named(root, 'qc-look').find(n => n.getAttribute('aria-checked') === 'true' && shown(n))?.getAttribute('aria-label') ?? null;
 const visibleText = (root: El): string => root.hidden ? '' : root.kids.map(k => (k instanceof El ? visibleText(k) : k.textContent)).join('');
+// What the chosen cat's card says about the Agent it thinks with (item 44): the mark (its sentence for a screen
+// reader, and the short word when it is not usable), why it cannot come home as it is, and what can be done.
+const mark = (root: El) => { const m = one(root, 'qc-agent'); return shown(m) ? visibleText(m) : ''; };
+const toolSaid = (root: El) => ['qc-agent', 'qc-uses-line', 'qc-uses-more'].map(c => one(root, c)).filter(shown).map(visibleText).join('');
 // The 新建 dialog's 猫猫 | 群聊 switch (item 43): a tab by its label, the panel shown.
 const tabOf = (root: El, label: string) => { const t = all(root).find(n => n.getAttribute('role') === 'tab' && n.textContent === label); assert.ok(t, 'no tab ' + label); return t!; };
 const shownPanel = (root: El) => all(root).filter(n => n.getAttribute('role') === 'tabpanel' && !n.hidden);
@@ -324,12 +337,19 @@ test('which tool a face\'s cat thinks with is read from faces[].tool as the serv
   // A server that names no tools: the usual one, as such a server made every cat.
   const old = R.start(bare(START.unknown));
   assert.deepEqual(plain(R.toolOf(R.offer(old.faces, [{ id: 'dsh', label: '蓝灰短毛猫' }])[0], old)), { label: 'Codex', state: 'unknown', usable: true, id: 'codex', reason: '', loginCommand: 'codex login' });
-  // The way forward names the one tool 自定义 would use, or says this computer's Agents.
-  assert.equal(R.forward(R.start(START.unknown)), '只借它的长相，用这台电脑上的 Codex 来思考');
-  assert.equal(R.forward(R.start(START.ready)), '只借它的长相，用这台电脑上的 Agent 来思考');
+  // The way on is 「只借它的长相」, which makes a cat of the owner's own; it names the one tool 自定义 would use, or says this computer's Agents.
+  assert.equal(R.BORROW, '只借它的长相');
+  assert.equal(R.forward(R.start(START.unknown)), '自定义一只，用这台电脑上的 Codex 来思考');
+  assert.equal(R.forward(R.start(START.ready)), '自定义一只，用这台电脑上的 Agent 来思考');
+  // On the card, why in the server's words; on the tile, one short word true to the state the server named (item 44):
+  // an Agent the app cannot connect (nothing to do here), one not installed, one not logged in, one that could not be read.
+  const [, , siamese, turkishVan] = R.start(START.ready).faces.map((f: Any) => f.tool);
+  assert.equal(R.why(siamese), '这个应用还接不上 Gemini，所以它现在按原样领不了。');
+  assert.equal(R.why(R.start(START.ready).faces[0].tool), '', 'a usable tool needs no why');
+  assert.deepEqual([siamese, turkishVan, maine, R.UNREAD, R.start(START.ready).faces[0].tool, null].map(t => R.tag(t)), ['接不上', '没安装', '没登录', '没读到', '', '']);
   assert.equal(R.loginHelp('codex login'), '在终端里运行下面这行，登录好再点「重新检测」：');
   // Agent is what these programs are called since 2026-11-12 (docs/xbot-frontend.md item 42); the engine's words are not.
-  for (const words of [R.uses(maine).text, R.forward(R.start(START.ready)), R.loginHelp('')]) assert.doesNotMatch(words, /Bot|模型|模板/);
+  for (const words of [R.uses(maine).text, R.forward(R.start(START.ready)), R.loginHelp(''), R.why(maine), ...Object.values(R.TAGS) as string[], ...R.GROUPS, R.OWN_NOTE, R.OWN_TITLE, R.NAME_PLACEHOLDER]) assert.doesNotMatch(words, /Bot|模型|模板/);
   // 重新检测 notices a face's tool changing, even when the tools the app can connect did not.
   const loggedOut = { ...START.ready, faces: START.ready.faces.map((f: Any) => (f.id === 'ragdoll' ? { ...f, tool: { label: 'Claude Code', state: 'login', usable: false, reason: 'Claude Code 还没有登录' } } : f)) };
   assert.equal(R.sameStart(R.start(START.ready), R.start(plain(START.ready))), true);
@@ -394,15 +414,16 @@ test('the first screen: eight faces with the first that can come home chosen, it
   const name = control(stage, '名字');
   assert.equal(name.value, '宪宪');
   assert.equal(p.doc.activeElement, p.doc.body, 'the cats come first; a phone keeps its keyboard down');
-  // Which tool it thinks with is a line of what it is, not a control: no select anywhere.
-  assert.equal(visibleText(one(stage, 'qc-uses-line')), '它用这台电脑上的 Claude Code 来思考');
+  // Which tool it thinks with is a mark on its card, not a control (its sentence for a screen reader): no select anywhere.
+  assert.equal(visibleText(one(stage, 'qc-agent')), '它用这台电脑上的 Claude Code 来思考');
   assert.equal(all(stage).filter(n => n.tagName === 'SELECT' && shown(n)).length, 0);
   assert.equal(shown(one(stage, 'qc-tool')), false, '自定义\'s tool row is not shown for a face\'s own cat');
   assert.equal(shown(one(stage, 'qc-uses-more')), false, 'a confirmed login needs no note');
+  assert.equal(shown(one(stage, 'qc-uses-line')), false, 'nothing in the way: no reason line');
   assert.equal(button(stage, '带它回家').disabled, false);
-  // One radio group, one tab stop.
+  // One radio group, one tab stop: the cats and 自定义 alike.
   assert.equal(one(stage, 'qc-faces').getAttribute('role'), 'radiogroup');
-  assert.deepEqual(faces(stage).map(f => f.tabIndex), [0, -1, -1, -1, -1, -1, -1, -1]);
+  assert.deepEqual(tiles(stage).filter(shown).map(f => f.tabIndex), [0, -1, -1, -1, -1, -1, -1, -1, -1]);
   assert.match(read('client/public/quick-create.css'), /\.main:has\(\.thread-inner\.no-chat\) \.dock \{ display: none; \}/);
 });
 
@@ -415,7 +436,7 @@ test('choosing a face is one click or an arrow key; the name follows it until th
   assert.equal(name.value, '宪宪');
   face(stage, '布偶猫').key('ArrowRight');
   assert.equal(chosen(stage), '缅因猫');
-  assert.equal(p.doc.activeElement.getAttribute('aria-label'), '缅因猫', 'focus moves with the choice');
+  assert.equal(p.doc.activeElement.getAttribute('aria-label'), '砚砚，缅因猫', 'focus moves with the choice; the radio says the name it comes with and its breed');
   face(stage, '缅因猫').key('ArrowLeft');
   face(stage, '布偶猫').key('ArrowLeft');
   assert.equal(chosen(stage), '金渐层', 'wraps round');
@@ -434,7 +455,7 @@ test('a face\'s own cat goes with its own tool: the body carries the face and th
   const p = page();
   const stage = await p.stage();
   face(stage, '缅因猫').click();
-  assert.equal(visibleText(one(stage, 'qc-uses-line')), '它用这台电脑上的 Codex 来思考');
+  assert.equal(mark(stage), '它用这台电脑上的 Codex 来思考');
   assert.equal(control(stage, '名字').value, '砚砚');
   button(stage, '带它回家').click();
   await settle();
@@ -468,12 +489,12 @@ test('a request that may have landed is sent again unchanged under the same key;
   assert.notEqual(third.body.idempotencyKey, first.body.idempotencyKey, 'a different body is a new request');
   const name = control(stage, '名字');
   assert.equal(name.getAttribute('aria-invalid'), 'true');
-  assert.equal(one(stage, 'qc-err').textContent, '已经有一只叫「团子」的猫猫了，换个名字吧');
+  assert.equal(errOf(stage, '名字').textContent, '已经有一只叫「团子」的猫猫了，换个名字吧');
   assert.equal(p.doc.activeElement, name);
   assert.deepEqual(p.opened, []);
   // The owner's own fix goes through.
   type(name, '团子二号');
-  assert.equal(one(stage, 'qc-err').textContent, '', 'typing clears the message');
+  assert.equal(errOf(stage, '名字').textContent, '', 'typing clears the message');
   answer = null;
   go.click();
   await settle();
@@ -486,7 +507,7 @@ test('a name the server would refuse is caught before sending', async () => {
   type(control(stage, '名字'), '团子<1>');
   button(stage, '带它回家').click();
   await settle();
-  assert.equal(one(stage, 'qc-err').textContent, '名字只能用文字、数字、空格和 _ . -');
+  assert.equal(errOf(stage, '名字').textContent, '名字只能用文字、数字、空格和 _ . -');
   assert.equal(p.posts().length, 0);
 });
 
@@ -557,7 +578,7 @@ test('a login that could not be checked is said under the cat\'s tool, with the 
   const p = page({ start: START.unknown });
   const stage = await p.stage();
   assert.equal(chosen(stage), '缅因猫', 'the one cat whose tool is here');
-  assert.equal(visibleText(one(stage, 'qc-uses-line')), '它用这台电脑上的 Codex 来思考');
+  assert.equal(mark(stage), '它用这台电脑上的 Codex 来思考');
   assert.match(visibleText(one(stage, 'qc-uses-more')), /^没能确认 Codex 已经登录。还没登录的话，先在终端里运行：codex login复制$/);
   button(stage, '带它回家').click();
   await settle();
@@ -691,7 +712,7 @@ test('新建猫猫: a small dialog starting in a free name; Escape closes back t
   p.s.cats.push('tuanzi');
   card.dispatch('submit');
   await settle();
-  assert.match(one(card, 'qc-err').textContent, /已经有一只叫「TUANZI」的猫猫了/);
+  assert.match(errOf(card, '名字').textContent, /已经有一只叫「TUANZI」的猫猫了/);
   assert.equal(p.posts().length, 0);
   name.key('Escape');
   assert.equal(p.layer(), null);
@@ -902,7 +923,8 @@ test('the switch: a click or ← → Home End turn the dialog to the other side 
   type(control(card, '群名'), '晨会');
   group.key('ArrowLeft');
   same(p.doc.activeElement, cat, 'back to 猫猫, focus on its tab');
-  assert.equal(chosen(card), '暹罗猫', 'the face picked stays');
+  assert.equal(chosen(card), '自定义', '自定义 stays chosen');
+  assert.equal(looksChosen(card), '暹罗猫', 'with the looks it took from the cat picked before');
   assert.equal(control(card, '名字').value, '小白', 'the name typed stays');
   assert.equal(control(card, '它主要帮你做什么').value, '改简历', '自定义 and its line stay');
   assert.equal(p.calls.filter(c => c.path.startsWith('/xbot-api/start')).length, 1, 'the cat side is read once, not again on return');
@@ -997,7 +1019,7 @@ test('switching sides eases a change of the card\'s height (its top edge stays) 
   assert.equal(tabOf(card, '猫猫').getAttribute('aria-selected'), 'true');
   // The dialog hangs from a fixed line, so neither side nor 自定义 moves its top edge.
   const css = read('client/public/quick-create.css');
-  assert.match(css, /\.qc-modal \{ --qc-top: max\(16px, calc\(\(100vh - 480px\) \/ 2\)\); place-items: start center; padding-top: var\(--qc-top\); \}/);
+  assert.match(css, /\.qc-modal \{ --qc-top: max\(16px, calc\(\(100vh - 600px\) \/ 2\)\); place-items: start center; padding-top: var\(--qc-top\); \}/);
   assert.match(css, /\.qc-card\.qc-easing \{ overflow: hidden; \}/);
   assert.match(css, /\.qc-tab\[aria-selected="true"\] \{ background: var\(--selected\); color: var\(--x-text\); \}/);
 });
@@ -1025,7 +1047,7 @@ test('a cat whose answer was lost can be sent again unchanged after the list has
   const [first, second] = p.posts();
   assert.ok(second, 'the retry reaches the server instead of stopping at the local name check');
   assert.deepEqual(second.body, first.body, 'same key, same body: the server answers with the cat it made');
-  assert.equal(one(stage, 'qc-err').textContent, '');
+  assert.equal(errOf(stage, '名字').textContent, '');
   assert.deepEqual(p.opened, ['宪宪']);
   // A changed request is new, and then the name the list knows is taken.
   const q = page({ route: (path, method, body) => { if (path === '/xbot-api/bots' && method === 'POST') { made.splice(0, Infinity, body.name); throw fail(undefined); } return undefined; }, onRefresh: () => { q.s.cats.splice(0, Infinity, ...made); } });
@@ -1037,7 +1059,7 @@ test('a cat whose answer was lost can be sent again unchanged after the list has
   button(again, '带它回家').click();
   await settle();
   assert.equal(q.posts().length, 1);
-  assert.equal(one(again, 'qc-err').textContent, '已经有一只叫「宪宪」的猫猫了，换个名字吧');
+  assert.equal(errOf(again, '名字').textContent, '已经有一只叫「宪宪」的猫猫了，换个名字吧');
 });
 
 test('switching 自定义\'s tool keeps keyboard focus on the select, so Tab and Escape still work inside the dialog', async () => {
@@ -1106,6 +1128,7 @@ test('the name boxes admit every name the server accepts (64 characters, some ou
   await settle();
   const cat = one(p.layer()!, 'qc-card');
   button(cat, '自定义').click();
+  type(control(cat, '名字'), '小白');
   const about = control(cat, '它主要帮你做什么');
   assert.ok('𠀀'.repeat(2000).length <= about.maxLength);
   type(about, '字'.repeat(2001));
@@ -1288,6 +1311,8 @@ const hint = (root: El) => { const box = one(root, 'qc-trait'); return shown(box
 const voice = (root: El) => { const v = all(root).find(n => has(n, 'qc-sr') && n.getAttribute('role') === 'status'); assert.ok(v, 'no voice'); return v!; };
 const field = (root: El, label: string) => all(root).some(n => n.tagName === 'LABEL' && n.textContent.startsWith(label) && shown(n));
 const presetsOf = (doc: Doc) => vm.runInNewContext(read('client/public/cat-avatars.js') + ';window.ClowderAvatars.presets', { window: {}, document: doc }) as Any[];
+// The card's name line: the name the cat comes with and its breed (for 自定义, whose cat it is).
+const nickOf = (root: El) => { const n = one(root, 'qc-nick'); return [...named(n, 'qc-nick-name'), ...named(n, 'qc-breed')].map(x => x.textContent); };
 
 test('the faces offered are /start\'s faces[], in its order, limited to portraits here; with none, every portrait without words', async () => {
   const { R, doc } = page();
@@ -1329,10 +1354,10 @@ test('the hint is the template\'s own words: its personality, then 擅长 its st
   assert.equal(R.trait({ id: 'x', personality: '热情！', strengths: '画画' }).said, '热情！擅长画画', 'one sentence for a screen reader, no doubled stop');
   for (const empty of [null, {}, { id: 'x', role: '  ' }]) assert.equal(R.trait(empty), null);
   // Too long (the server clips at 120): at most TRAIT_MAX characters, cut at a pause near the end, with an ellipsis.
-  const long = R.trait({ id: 'x', personality: '一二三四五六七八九十，'.repeat(6), strengths: Array.from({ length: 12 }, (_, i) => '本领' + i).join('、') });
+  const long = R.trait({ id: 'x', personality: '一二三四五六七八九十，'.repeat(7), strengths: Array.from({ length: 24 }, (_, i) => '本领' + i).join('、') });
   for (const line of long.lines) assert.ok([...line].length <= R.TRAIT_MAX, line);
   assert.match(long.lines[0], /九十…$/, 'cut where the comma was, the comma dropped');
-  assert.match(long.lines[1], /^擅长本领0、[^、]*、.*本领\d…$/);
+  assert.match(long.lines[1], /^擅长本领0、[^、]*、.*本领\d+…$/);
   assert.equal(R.clipLine(' a  b\n c ', 40), 'a b c');
   assert.equal(R.clipLine('超长'.repeat(30), 10), '超长超长超长超长超…', 'no pause near the end: a plain cut');
   assert.equal(R.clipLine('多专家内部编排、LSP 集成、开源生态、provider-agnostic', 30), '多专家内部编排、LSP 集成、开源生态…', 'not in the middle of a word when a pause is close');
@@ -1362,11 +1387,15 @@ test('a face\'s own cat sends the face alone; 自定义 sends custom and only wh
 test('the first screen offers the server\'s faces and says briefly what the chosen cat is like and what it thinks with; a screen reader hears it once per choice, never for the default', async () => {
   const p = page({ start: await withFaces() });
   const stage = await p.stage();
-  assert.deepEqual(faces(stage).map(f => f.getAttribute('aria-label')), ['布偶猫', '缅因猫', '暹罗猫', '梵花猫', '蓝灰短毛猫', '狸花猫', '孟加拉猫', '金渐层']);
+  // Each tile is named: the name its cat comes with (shown), and its breed (the client's label) for a screen reader too.
+  assert.deepEqual(faces(stage).map(f => f.getAttribute('aria-label')), ['宪宪，布偶猫', '砚砚，缅因猫', '烁烁，暹罗猫', '墨墨，梵花猫', '鲸鲸，蓝灰短毛猫', '小狸花，狸花猫', '斑斑，孟加拉猫', '金哥，金渐层']);
+  assert.deepEqual(faces(stage).map(f => named(f, 'qc-face-name')[0].textContent), ['宪宪', '砚砚', '烁烁', '墨墨', '鲸鲸', '小狸花', '斑斑', '金哥']);
   assert.equal(chosen(stage), '布偶猫');
+  // The chosen one's card: the name it comes with and its breed, its Agent as a mark, its temperament and what it is good at.
+  assert.deepEqual(nickOf(stage), ['宪宪', '布偶猫']);
   assert.deepEqual(hint(stage), ['温柔但有主见，喜欢深入分析问题，写代码快但注重质量', '擅长架构设计、写代码一把好手']);
-  assert.equal(visibleText(one(stage, 'qc-uses-line')), '它用这台电脑上的 Claude Code 来思考');
-  assert.equal(named(stage, 'qc-trait-who').length, 0, 'the stage\'s row has its own captions');
+  assert.equal(mark(stage), '它用这台电脑上的 Claude Code 来思考');
+  assert.ok(all(one(stage, 'qc-hero')).some(n => n.getAttribute('data-cat-id') === 'ragdoll'), 'its portrait on the card');
   assert.equal(one(stage, 'qc-about').classList.contains('described'), true, 'room for two lines, so the form below holds still');
   assert.equal(voice(stage).textContent, '', 'the default is not announced');
   face(stage, '缅因猫').click();
@@ -1386,15 +1415,20 @@ test('the first screen offers the server\'s faces and says briefly what the chos
 
 test('fewer or more faces than eight: the row follows faces[]', async () => {
   const real = await realFaces();
-  // Three faces, in another order: the first whose cat can come home is chosen, not simply the first.
+  // Three faces, in another order: those whose cat can come home first, then 自定义, then those that cannot, each in
+  // the server's order; the first that can come home is chosen, not simply the first.
   const p = page({ start: { ...START.ready, faces: [real[6], real[0], real[2]] } });
   const stage = await p.stage();
-  assert.deepEqual(faces(stage).map(f => f.dataset.face), ['bengal', 'ragdoll', 'siamese']);
+  assert.deepEqual(tiles(stage).filter(shown).map(f => f.dataset.face ?? '自定义'), ['ragdoll', '自定义', 'bengal', 'siamese']);
   assert.equal(chosen(stage), '布偶猫');
   assert.equal(control(stage, '名字').value, '宪宪');
   face(stage, '布偶猫').key('ArrowRight');
+  assert.equal(chosen(stage), '自定义');
+  ownTile(stage).key('ArrowRight');
+  face(stage, '孟加拉猫').key('ArrowRight');
+  assert.equal(chosen(stage), '暹罗猫');
   face(stage, '暹罗猫').key('ArrowRight');
-  assert.equal(chosen(stage), '孟加拉猫', 'arrows wrap within the faces there are');
+  assert.equal(chosen(stage), '布偶猫', 'arrows walk the options in the order shown and wrap within those there are');
   // More than eight (a larger portrait library): every face with a portrait, in faces[] order, one tab stop.
   const many = Array.from({ length: 12 }, (_, i) => ({ id: 'cat' + i, label: '猫' + i, nickname: '小' + i }));
   const q = page({ presets: many, start: { ...START.ready, faces: [...many].reverse().map(c => ({ id: c.id, personality: c.label + '的性格', strengths: '陪伴', tool: { label: 'Codex', state: 'ready', usable: true, id: 'codex' } })) } });
@@ -1413,47 +1447,54 @@ test('fewer or more faces than eight: the row follows faces[]', async () => {
   assert.deepEqual(hint(old), []);
   assert.equal(one(old, 'qc-about').classList.contains('described'), false, 'no empty lines kept');
   assert.equal(named(old, 'qc-face').filter(f => has(f, 'away')).length, 0);
-  assert.equal(visibleText(one(old, 'qc-uses-line')), '它用这台电脑上的 Codex 来思考');
+  assert.equal(mark(old), '它用这台电脑上的 Codex 来思考');
   button(old, '带它回家').click();
   await settle();
   assert.deepEqual(r.posts()[0].body.simple, { face: 'ragdoll' }, 'no rev to send, and no tool (the server takes its usual one)');
 });
 
-test('自定义: a quiet switch makes a cat of the owner\'s own; the row then picks only its looks, two optional lines appear, and switching back and forth loses nothing', async () => {
+test('自定义 is one of the options, a tile like the cats\': chosen, the card becomes the owner\'s own cat (its looks, two optional lines, its Agent), and moving between it and a cat loses nothing', async () => {
   const p = page({ start: await withFaces() });
   const stage = await p.stage();
-  const mode = button(stage, '自定义');
-  assert.equal(mode.getAttribute('aria-pressed'), 'false');
+  const own = ownTile(stage), row = one(stage, 'qc-faces');
+  assert.ok(row.contains(own) && own.getAttribute('role') === 'radio', 'a radio of the same group as the cats');
+  assert.equal(own.getAttribute('aria-checked'), 'false');
   assert.equal(field(stage, '它主要帮你做什么') || field(stage, '它的性格'), false, 'not offered for a face\'s own cat');
   face(stage, '暹罗猫').click();
   type(control(stage, '名字'), '小烁');
-  mode.focus();
-  mode.click();
-  assert.equal(mode.getAttribute('aria-pressed'), 'true');
-  assert.equal(p.doc.activeElement, mode, 'focus stays on the switch');
-  assert.deepEqual(hint(stage), [p.R.OWN_NOTE], 'the face is only its looks here');
+  own.click();
+  assert.equal(chosen(stage), '自定义');
+  assert.equal(face(stage, '暹罗猫').getAttribute('aria-checked'), 'false', 'one choice in one group');
+  assert.equal(p.doc.activeElement, own, 'focus stays on the choice');
+  assert.deepEqual(nickOf(stage), [p.R.OWN_TITLE], 'the card is the owner\'s own cat');
+  assert.equal(looksChosen(stage), '暹罗猫', 'untouched, its looks are those of the cat on screen');
+  assert.deepEqual(hint(stage), [], 'no template\'s words');
+  assert.equal(mark(stage), '', 'nor a template\'s Agent: its own is chosen on the card');
   assert.equal(voice(stage).textContent, p.R.OWN_NOTE);
-  assert.equal(one(stage, 'qc-faces').getAttribute('aria-label'), '选它的长相');
+  assert.equal(row.getAttribute('aria-label'), '选一只猫猫', 'the row is still the cats and 自定义');
   const about = control(stage, '它主要帮你做什么'), temper = control(stage, '它的性格');
   assert.equal(about.placeholder, '比如：帮我改简历、陪我练口语');
   type(about, ' 帮我整理读书笔记 ');
   type(temper, '话不多');
-  mode.click();
-  assert.equal(mode.getAttribute('aria-pressed'), 'false');
-  assert.deepEqual(hint(stage), ['热血奔放，善于用视觉语言表达想法，表达力是全队最强的', '擅长审美、前端设计风格、打破常规']);
-  assert.equal(voice(stage).textContent, '热血奔放，善于用视觉语言表达想法，表达力是全队最强的。擅长审美、前端设计风格、打破常规。它要用 Gemini 来思考。这个应用还接不上 Gemini，所以它现在按原样领不了。点「自定义」可以只借它的长相，用这台电脑上的 Agent 来思考', 'back: what this cat is like, what it needs and the way on, said again');
-  assert.equal(one(stage, 'qc-faces').getAttribute('aria-label'), '选一只猫猫');
-  assert.equal(shown(about), false);
+  face(stage, '暹罗猫').click();
   assert.equal(chosen(stage), '暹罗猫');
+  assert.deepEqual(hint(stage), ['热血奔放，善于用视觉语言表达想法，表达力是全队最强的', '擅长审美、前端设计风格、打破常规']);
+  assert.equal(voice(stage).textContent, '热血奔放，善于用视觉语言表达想法，表达力是全队最强的。擅长审美、前端设计风格、打破常规。它要用 Gemini 来思考。这个应用还接不上 Gemini，所以它现在按原样领不了。点「只借它的长相」，可以自定义一只，用这台电脑上的 Agent 来思考', 'back: what this cat is like, what it needs and the way on, said again');
+  assert.equal(shown(about), false);
   assert.equal(control(stage, '名字').value, '小烁');
-  mode.click();
+  own.click();
   assert.equal(about.value, ' 帮我整理读书笔记 ');
   assert.equal(temper.value, '话不多');
-  // Picking a look in 自定义 adds nothing to what the radio itself says.
-  face(stage, '暹罗猫').key('ArrowLeft');
-  assert.equal(chosen(stage), '缅因猫');
-  assert.deepEqual(hint(stage), [p.R.OWN_NOTE]);
-  assert.equal(voice(stage).textContent, '');
+  // Its looks: a radio group of their own, every face (none is unavailable as a look), one always chosen; picking one adds nothing to what the radio itself says.
+  const looks = one(stage, 'qc-looks');
+  assert.equal(looks.getAttribute('role'), 'radiogroup');
+  assert.equal(named(looks, 'qc-look').length, 8);
+  assert.equal(named(looks, 'qc-look').filter(n => n.tabIndex === 0).length, 1, 'one Tab stop');
+  const said = voice(stage).textContent;
+  named(looks, 'qc-look').find(n => n.getAttribute('aria-label') === '暹罗猫')!.key('ArrowLeft');
+  assert.equal(looksChosen(stage), '缅因猫');
+  assert.equal(voice(stage).textContent, said);
+  assert.deepEqual(nickOf(stage), [p.R.OWN_TITLE]);
   // A personality the server would refuse is caught before sending.
   type(temper, '字'.repeat(501));
   button(stage, '带它回家').click();
@@ -1481,14 +1522,15 @@ test('a lost answer is retried with the identical body under its own key, after 
     },
   });
   const stage = await p.stage();
-  const go = button(stage, '带它回家'), mode = button(stage, '自定义');
+  const go = button(stage, '带它回家'), own = ownTile(stage), cat = face(stage, '布偶猫');
   go.click(); await settle(); // the face's own cat, unsure: key A
-  mode.click(); mode.click(); // there and back, nothing sent
+  own.click(); cat.click(); // there and back, nothing sent
   go.click(); await settle(); // the same body: key A again
-  mode.click();
+  own.click();
+  type(control(stage, '名字'), '宪宪'); // 自定义 borrows no name: the owner writes one (the cat's own here, so only 自定义 differs)
   go.click(); await settle(); // 自定义: another request, refused (no cat made, its key dropped)
   go.click(); await settle(); // the same 自定义 body after a refusal: a new request, unsure
-  mode.click();
+  cat.click();
   lose = false;
   go.click(); await settle(); // the face's own cat again: still key A, and it lands
   const [a1, a2, c1, c2, a3] = p.posts().map(c => c.body);
@@ -1501,33 +1543,35 @@ test('a lost answer is retried with the identical body under its own key, after 
   assert.deepEqual(p.opened, ['宪宪']);
 });
 
-test('新建猫猫 has the same faces, hint and 自定义: the hint names the cat, the optional lines only with 自定义, focus in order, Escape from the switch', async () => {
+test('新建猫猫 has the same cats, card and 自定义: the card names the cat and its breed, the optional lines only with 自定义, focus in order, Escape from 自定义', async () => {
   const p = page({ cats: ['团子'], start: await withFaces() });
   p.opener.focus();
   p.Q.openCat({ opener: p.opener });
   await settle();
   const card = one(p.layer()!, 'qc-card');
   assert.equal(p.doc.activeElement, control(card, '名字'), 'the dialog still starts in the name');
-  // The dialog's row has no captions: the first line names the cat (the client's label).
-  assert.deepEqual(hint(card), ['布偶猫温柔但有主见，喜欢深入分析问题，写代码快但注重质量', '擅长架构设计、写代码一把好手']);
+  // The card names the cat: the name it comes with, and its breed (the client's label).
+  assert.deepEqual(nickOf(card), ['宪宪', '布偶猫']);
+  assert.deepEqual(hint(card), ['温柔但有主见，喜欢深入分析问题，写代码快但注重质量', '擅长架构设计、写代码一把好手']);
   face(card, '蓝灰短毛猫').click();
-  assert.equal(one(card, 'qc-trait-who').textContent, '蓝灰短毛猫', 'never upstream\'s 小鲸鱼');
-  assert.equal(field(card, '它主要帮你做什么'), false, 'the optional line belongs to 自定义 now');
-  const mode = button(card, '自定义');
-  mode.click();
-  assert.deepEqual(hint(card), [p.R.OWN_NOTE]);
+  assert.deepEqual(nickOf(card), ['鲸鲸', '蓝灰短毛猫'], 'never upstream\'s 小鲸鱼');
+  assert.equal(field(card, '它主要帮你做什么'), false, 'the optional line belongs to 自定义');
+  const own = ownTile(card);
+  own.click();
+  assert.deepEqual(nickOf(card), [p.R.OWN_TITLE]);
   assert.equal(field(card, '它主要帮你做什么') && field(card, '它的性格'), true);
-  // Focus order (what Tab walks through): the selected side of the switch (item 43), the row, 自定义, the name, the two lines, the tool, 更多设置, 取消, 创建.
+  // Focus order (what Tab walks through): the selected side of the switch (item 43), the row (one stop: 自定义), its looks
+  // (one stop), the two lines, the tool, the name at the panel's foot, 更多设置, 取消, 创建.
   const stops = all(card).filter(n => ['BUTTON', 'INPUT', 'SELECT'].includes(n.tagName) && shown(n) && n.tabIndex >= 0 && !n.disabled);
   const name = (n: El) => n.getAttribute('aria-label') || all(card).find(l => l.tagName === 'LABEL' && l.htmlFor === n.id)?.textContent || n.textContent;
-  assert.deepEqual(stops.map(name), ['猫猫', '蓝灰短毛猫', '自定义', '名字', '它主要帮你做什么可不填', '它的性格可不填', '用哪个 Agent 思考', '更多设置', '取消', '创建']);
-  mode.focus();
-  mode.key('Escape');
+  assert.deepEqual(stops.map(name), ['猫猫', '自定义', '蓝灰短毛猫', '它主要帮你做什么可不填', '它的性格可不填', '用哪个 Agent 思考', '名字', '更多设置', '取消', '创建']);
+  own.focus();
+  own.key('Escape');
   assert.equal(p.layer(), null);
   assert.equal(p.doc.activeElement, p.opener);
 });
 
-test('blocked or still reading: no hint and no switch; 自定义 and its lines come back after a 422 and 重新检测', async () => {
+test('blocked or still reading: no card and no 自定义; 自定义, its looks and its lines come back after a 422 and 重新检测', async () => {
   const real = await realFaces();
   let refuse = true;
   const p = page({
@@ -1540,19 +1584,23 @@ test('blocked or still reading: no hint and no switch; 自定义 and its lines c
   const stage = await p.stage();
   face(stage, '梵花猫').click();
   button(stage, '自定义').click();
+  type(control(stage, '名字'), '小墨');
   type(control(stage, '它的性格'), '慢悠悠');
   button(stage, '带它回家').click();
   await settle();
   assert.equal(shown(one(stage, 'qc-need')), true);
   assert.equal(shown(one(stage, 'qc-about')), false, 'blocked: the row is only a picture, nothing to choose or describe');
   assert.equal(faces(stage).length, 8, 'the row stays the server\'s faces');
+  assert.equal(tiles(stage).filter(shown).length, 8, 'no 自定义 while nothing can be made');
+  assert.equal(chosen(stage), null);
   p.s.start = { ...START.ready, faces: real };
   button(stage, '重新检测').click();
   await settle();
-  assert.equal(chosen(stage), '梵花猫');
-  assert.equal(button(stage, '自定义').getAttribute('aria-pressed'), 'true');
+  assert.equal(chosen(stage), '自定义');
+  assert.equal(looksChosen(stage), '梵花猫');
   assert.equal(control(stage, '它的性格').value, '慢悠悠');
-  assert.deepEqual(hint(stage), [p.R.OWN_NOTE]);
+  assert.equal(control(stage, '名字').value, '小墨');
+  assert.deepEqual(nickOf(stage), [p.R.OWN_TITLE]);
   button(stage, '带它回家').click();
   await settle();
   assert.deepEqual(p.posts().at(-1)!.body.simple, { face: 'turkish-van', custom: true, personality: '慢悠悠', agent: 'codex' });
@@ -1570,18 +1618,26 @@ test('自定义 or its lines count as a draft when the first cat arrives from el
   button(stage, '自定义').click();
   p.doc.focused = null;
   assert.equal(p.Q.release(stage, ['团子']), false, '自定义 chosen');
-  const q = page({ start: await withFaces() });
+  // 自定义 the form chose by itself (no face's cat can come home) is not a draft; a line written there is, and so are looks picked.
+  const nothing = { ...START.unknown, faces: START.unknown.faces.filter((f: Any) => f.id !== 'maine-coon') };
+  const q = page({ start: nothing });
   const typed = await q.stage();
-  button(typed, '自定义').click();
-  type(control(typed, '它主要帮你做什么'), '陪我练口语');
-  button(typed, '自定义').click();
+  assert.equal(chosen(typed), '自定义');
   q.doc.focused = null;
-  assert.equal(q.Q.release(typed, ['团子']), false, 'a line written, then hidden, is still the owner\'s');
+  assert.equal(q.Q.release(typed, ['团子']), true, 'chosen by the form, not the owner');
+  type(control(typed, '它主要帮你做什么'), '陪我练口语');
+  q.doc.focused = null;
+  assert.equal(q.Q.release(typed, ['团子']), false, 'a line written is the owner\'s');
+  const l = page({ start: nothing });
+  const looks = await l.stage();
+  named(looks, 'qc-look').find(n => n.getAttribute('aria-label') === '暹罗猫')!.click();
+  l.doc.focused = null;
+  assert.equal(l.Q.release(looks, ['团子']), false, 'looks picked');
   const r = page({ start: await withFaces() });
   assert.equal(r.Q.release(await r.stage(), ['团子']), true, 'untouched');
 });
 
-test('switching 自定义 glides the re-centred stage from where it was; at once under reduced motion', async () => {
+test('moving to 自定义 or back glides the re-centred stage from where it was; at once under reduced motion', async () => {
   const p = page({ start: await withFaces() });
   const stage = await p.stage();
   const root = stage.closest('SECTION')!;
@@ -1589,29 +1645,33 @@ test('switching 自定义 glides the re-centred stage from where it was; at once
   root.animate = (frames: Any, options: Any) => { glides.push({ frames, options }); return { finished: Promise.resolve() }; };
   // Where the stage is before the change, then after it re-centred.
   const tops = (...values: number[]) => { root.getBoundingClientRect = () => ({ left: 0, top: values.shift() ?? 0, width: 800, height: 500 }); };
-  const mode = button(stage, '自定义');
   tops(240, 160); // the form grew, so the centred stage moved up 80 px
-  mode.click();
+  ownTile(stage).click();
   assert.deepEqual(plain(glides), [{ frames: [{ transform: 'translateY(80px)' }, { transform: 'none' }], options: { duration: 180, easing: 'ease-out' } }]);
   p.window.matchMedia = (q: string) => ({ matches: q === '(prefers-reduced-motion: reduce)' });
   tops(160, 240);
-  mode.click();
+  face(stage, '布偶猫').click();
   assert.equal(glides.length, 1, 'no glide under reduced motion');
-  assert.equal(mode.getAttribute('aria-pressed'), 'false');
+  assert.equal(chosen(stage), '布偶猫');
 });
 
-test('the row wraps for any number of faces, the hint keeps to two lines (three on a phone), and its motion stops under reduced motion', () => {
+test('the tiles wrap for any number of faces, the card keeps each line of words to two, the panel goes under the cats when narrow, and motion stops under reduced motion', () => {
   const css = read('client/public/quick-create.css').replace(/\/\*[\s\S]*?\*\//g, '');
-  const phone = /@media \(max-width: 560px\) \{([\s\S]*?)\n\}/.exec(css)![1];
+  const narrow = /@container \(max-width: 639px\) \{([\s\S]*?)\n\}/.exec(css)![1];
   const still = /@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?)\n\}/.exec(css)![1];
-  assert.match(css, /\.qc-faces \{ display: flex; flex-wrap: wrap; justify-content: center;/, 'no fixed number of columns');
+  assert.match(css, /\.qc-group \{ display: flex; flex-wrap: wrap;/, 'no fixed number of columns');
   assert.doesNotMatch(css, /repeat\(8/);
-  assert.match(css, /\.qc-face \{\s*flex: 0 0 12\.5%;/);
-  assert.match(phone, /\.qc-face \{ flex-basis: 25%; \}/);
-  assert.match(css, /\.qc-trait-line \{[^}]*overflow: hidden; text-overflow: ellipsis; white-space: nowrap;/, 'one line each, cut with an ellipsis');
-  assert.match(phone, /\.qc-trait-line:first-child \{[^}]*-webkit-line-clamp: 2;[^}]*\}/, 'the personality may take two lines on a phone');
+  assert.match(css, /\.qc-face \{\s*flex: 0 0 72px;/);
+  assert.match(css, /\.qc-flow \{[^}]*container-type: inline-size;/, 'the layout follows the room the flow has (the stage or the dialog)');
+  assert.match(css, /\.qc-meet \{ display: grid; grid-template-columns: 300px minmax\(0, 1fr\);/, 'the cats beside the panel');
+  assert.match(narrow, /\.qc-meet \{ display: flex; flex-direction: column;/, 'the panel under the cats when narrow');
+  assert.match(narrow, /\.qc-face \{ flex-basis: calc\(25% - 3px\);/);
+  assert.match(css, /\.qc-trait-line \{[^}]*-webkit-line-clamp: 2; overflow: hidden;/, 'two lines each, cut off beyond');
   assert.match(still, /\.qc-trait-line/);
   assert.match(still, /\.qc-own:not\(\[hidden\]\)/);
+  // A new portrait steps onto the cushion with the existing rise; still when reduced.
+  assert.match(css, /\.qc-hero-pic > svg \{[^}]*animation: rise 180ms ease-out;/);
+  assert.match(still, /\.qc-hero-pic > svg/);
   // The new motion: the existing keyframes, 180 ms.
   assert.match(css, /\.qc-trait-line \{[^}]*animation: fade 180ms ease-out;/);
   assert.match(css, /\.qc-own:not\(\[hidden\]\) \{ animation: rise 180ms ease-out; \}/);
@@ -1693,6 +1753,7 @@ test('review fixes: creating from a face sends the rev of the portrait whose hin
   const q = page({ start: { ...START.ready, faces: real } });
   const custom = await q.stage();
   button(custom, '自定义').click();
+  type(control(custom, '名字'), '小白');
   button(custom, '带它回家').click();
   await settle();
   assert.deepEqual(q.posts()[0].body.simple, { face: 'ragdoll', custom: true, agent: 'claude' });
@@ -1745,6 +1806,7 @@ test('review fixes: faces_unavailable is said plainly — nothing was made — w
   const p = page({ route });
   const stage = await p.stage();
   button(stage, '自定义').click(); // a custom cat needs the template's colour too
+  type(control(stage, '名字'), '小白');
   e.readable = false;
   button(stage, '带它回家').click();
   await settle();
@@ -1762,7 +1824,7 @@ test('review fixes: faces_unavailable is said plainly — nothing was made — w
   button(stage, '重新检测').click();
   await settle();
   assert.equal(shown(one(stage, 'qc-fields')), true);
-  assert.equal(button(stage, '自定义').getAttribute('aria-pressed'), 'true', '自定义 is still on');
+  assert.equal(chosen(stage), '自定义', '自定义 is still chosen');
   assert.equal(p.doc.activeElement, control(stage, '名字'));
   button(stage, '带它回家').click();
   await settle();
@@ -1846,110 +1908,137 @@ test('review fixes: a re-read that keeps the tool and the chosen face but brings
 // template; a template whose tool is not on this computer cannot be used as it is. faces[].tool says it
 // (docs/xbot-api.md「开箱即用」); POST /xbot-api/bots binds a face's own tool and refuses one that is not
 // usable here (422 face_unavailable) or another one (422 face_tool).
-const awayFaces = (root: El) => faces(root).filter(f => has(f, 'away')).map(f => f.getAttribute('aria-label'));
+const awayFaces = (root: El) => faces(root).filter(f => has(f, 'away')).map(breedOf);
 const idOf = (root: El, cls: string) => one(root, cls).id;
 
-test('a face whose cat cannot come home as it is is still offered, quieter, and says why before anything is filled in; 带它回家 is not offered for it; 自定义 is the way forward right there', async () => {
+test('a cat whose own Agent is not usable here reads so at a glance: in a group of its own after those that can come home, with a word true to its state and the reason as its description; chosen, its card says why, 带它回家 sends nothing, and 「只借它的长相」 is the way on', async () => {
   const p = page();
   const stage = await p.stage();
-  // The row: the faces whose tool is not usable here sit back, each saying why as its tooltip (its description).
+  // Before any hover or choice: those that can come home, 自定义, then, under their own words, those that cannot.
+  assert.deepEqual(tiles(stage).filter(shown).map(f => f.dataset.face ?? '自定义'), ['ragdoll', 'maine-coon', '自定义', 'siamese', 'turkish-van', 'dsh', 'dragon-li', 'bengal', 'golden-chinchilla']);
   assert.deepEqual(awayFaces(stage), ['暹罗猫', '梵花猫', '蓝灰短毛猫', '狸花猫', '孟加拉猫', '金渐层']);
-  assert.equal(face(stage, '梵花猫').getAttribute('title'), '梵花猫：这台电脑上还没有装 Kimi');
-  assert.equal(face(stage, '布偶猫').getAttribute('title'), null);
+  assert.equal(has(one(stage, 'qc-faces'), 'split'), true, 'two groups, each under its few words');
+  assert.deepEqual(named(stage, 'qc-group-head').map(n => n.textContent), ['现在就能领', '暂时按原样领不了']);
+  assert.deepEqual(named(stage, 'qc-group').map(g => faces(g).map(breedOf)), [['布偶猫', '缅因猫'], ['暹罗猫', '梵花猫', '蓝灰短毛猫', '狸花猫', '孟加拉猫', '金渐层']]);
+  // Each one's word says no more than the server did: an Agent the app cannot connect, one not installed.
+  const word = (label: string) => named(face(stage, label), 'qc-face-tag').filter(shown).map(n => n.textContent).join('');
+  assert.deepEqual(['暹罗猫', '梵花猫', '布偶猫'].map(word), ['接不上', '没安装', '']);
+  const kimi = face(stage, '梵花猫');
+  assert.equal(all(stage).find(n => n.id === kimi.getAttribute('aria-describedby'))?.textContent, '暂时按原样领不了：这台电脑上还没有装 Kimi', 'its reason, in the server\'s words, as its description');
+  assert.equal(face(stage, '布偶猫').getAttribute('aria-describedby'), null);
+  assert.equal(kimi.getAttribute('title'), null, 'not a hover title: it is there to be seen');
   assert.equal(face(stage, '暹罗猫').disabled, false, 'still a cat to choose: its looks can be borrowed');
-  assert.equal(one(stage, 'qc-about').classList.contains('mixed'), true, 'room kept for the longer line, so the form holds still');
+  assert.equal(one(stage, 'qc-about').classList.contains('mixed'), true, 'room kept for the reason and the way on, so the name holds still');
   face(stage, '梵花猫').click();
+  assert.equal(mark(stage), '它要用 Kimi 来思考，没安装');
   const line = one(stage, 'qc-uses-line');
-  assert.equal(visibleText(line), '它要用 Kimi 来思考。这台电脑上还没有装 Kimi，所以它现在按原样领不了。');
-  assert.equal(line.classList.contains('away'), true);
+  assert.equal(visibleText(line), '这台电脑上还没有装 Kimi，所以它现在按原样领不了。');
+  assert.equal(has(one(stage, 'qc-about'), 'away'), true, 'its cushion empty and outlined');
   const go = all(stage).find(n => has(n, 'qc-go'))!;
   assert.equal(go.getAttribute('aria-disabled'), 'true', 'not available, but still focusable');
   assert.equal(go.disabled, false);
   assert.equal(go.getAttribute('aria-describedby'), line.id, 'a screen reader finds why on the button itself');
-  const mode = button(stage, '自定义');
-  assert.equal(mode.classList.contains('ahead'), true, 'the quiet switch steps up: it is the way forward now');
-  assert.equal(visibleText(one(stage, 'qc-ahead')), '只借它的长相，用这台电脑上的 Agent 来思考');
-  assert.equal(mode.getAttribute('aria-describedby'), idOf(stage, 'qc-ahead'));
-  assert.equal(voice(stage).textContent, '细心务实，保留自己的判断，愿意把事情接住做完。擅长编码、文档、验收。它要用 Kimi 来思考。这台电脑上还没有装 Kimi，所以它现在按原样领不了。点「自定义」可以只借它的长相，用这台电脑上的 Agent 来思考');
-  // Enter in the name field presses 带它回家: nothing is sent, and focus goes to the way forward.
+  const borrow = button(stage, '只借它的长相');
+  assert.equal(visibleText(one(stage, 'qc-ahead')), '自定义一只，用这台电脑上的 Agent 来思考');
+  assert.equal(borrow.getAttribute('aria-describedby'), idOf(stage, 'qc-ahead'));
+  assert.equal(voice(stage).textContent, '细心务实，保留自己的判断，愿意把事情接住做完。擅长编码、文档、验收。它要用 Kimi 来思考。这台电脑上还没有装 Kimi，所以它现在按原样领不了。点「只借它的长相」，可以自定义一只，用这台电脑上的 Agent 来思考');
+  // Enter in the name field presses 带它回家: nothing is sent, and focus goes to the way on.
   const name = control(stage, '名字');
   name.focus();
   name.key('Enter');
   await settle();
   assert.equal(p.posts().length, 0);
-  assert.equal(p.doc.activeElement === mode, true);
+  assert.equal(p.doc.activeElement === borrow, true);
   // So does pressing it.
   go.focus();
   go.click();
   await settle();
   assert.equal(p.posts().length, 0);
-  assert.equal(p.doc.activeElement === mode, true);
-  // 自定义: every face is only a look now, so none sits back; the tool is chosen here; the cat can be made.
-  mode.click();
-  assert.deepEqual(awayFaces(stage), []);
-  assert.equal(shown(one(stage, 'qc-uses')), false);
-  assert.equal(shown(one(stage, 'qc-ahead')), false);
+  assert.equal(p.doc.activeElement === borrow, true);
+  // 「只借它的长相」: 自定义 with its looks, in one step; focus on those looks; said once.
+  borrow.click();
+  assert.equal(chosen(stage), '自定义');
+  assert.equal(looksChosen(stage), '梵花猫');
+  assert.equal(p.doc.activeElement.getAttribute('aria-label'), '梵花猫', 'focus on the looks it took');
+  assert.equal(voice(stage).textContent, p.R.OWN_NOTE);
+  assert.deepEqual(awayFaces(stage), ['暹罗猫', '梵花猫', '蓝灰短毛猫', '狸花猫', '孟加拉猫', '金渐层'], 'the row still says which cats cannot come home as they are');
+  assert.equal(named(stage, 'qc-look').filter(n => has(n, 'away')).length, 0, 'as a look, every face is eligible');
+  assert.equal(shown(line), false);
+  assert.equal(shown(one(stage, 'qc-forward')), false);
   assert.equal(go.getAttribute('aria-disabled'), null);
   assert.equal(go.getAttribute('aria-describedby'), null);
-  assert.equal(chosen(stage), '梵花猫', 'the face picked stays');
-  assert.equal(control(stage, '名字').value, '墨墨');
+  assert.equal(control(stage, '名字').value, '', '自定义 borrows no template\'s name');
+  assert.equal(control(stage, '名字').placeholder, '给它起个名字');
   const select = one(stage, 'qc-tool-line').querySelectorAll('select')[0];
   assert.deepEqual(select.children.map(o => o.value), ['codex', 'claude']);
   assert.equal(select.value, 'codex', 'its own tool is not here: the usual one');
+  type(control(stage, '名字'), '小墨');
   go.click();
   await settle();
   assert.deepEqual(p.posts()[0].body.simple, { face: 'turkish-van', custom: true, agent: 'codex' });
-  assert.deepEqual(p.opened, ['墨墨']);
+  assert.deepEqual(p.opened, ['小墨']);
 });
 
-test('the dialog says the same: a quieter face, why under its hint, 创建 not available, 自定义 beside the reason, focus in order', async () => {
+test('the dialog says the same: the marked tile, why on its card, 创建 not available, 「只借它的长相」 beside the reason, focus in order', async () => {
   const p = page({ cats: ['团子'] });
   p.opener.focus();
   p.Q.openCat({ opener: p.opener });
   await settle();
   const card = one(p.layer()!, 'qc-card');
   assert.equal(chosen(card), '布偶猫');
-  assert.equal(visibleText(one(card, 'qc-uses-line')), '它用这台电脑上的 Claude Code 来思考');
+  assert.equal(mark(card), '它用这台电脑上的 Claude Code 来思考');
   assert.equal(all(card).filter(n => n.tagName === 'SELECT' && shown(n)).length, 0, 'no tool to pick for a face\'s own cat');
   face(card, '暹罗猫').click();
-  assert.deepEqual(hint(card), ['暹罗猫热血奔放，善于用视觉语言表达想法，表达力是全队最强的', '擅长审美、前端设计风格、打破常规']);
-  assert.equal(visibleText(one(card, 'qc-uses-line')), '它要用 Gemini 来思考。这个应用还接不上 Gemini，所以它现在按原样领不了。');
+  assert.deepEqual(nickOf(card), ['烁烁', '暹罗猫']);
+  assert.deepEqual(hint(card), ['热血奔放，善于用视觉语言表达想法，表达力是全队最强的', '擅长审美、前端设计风格、打破常规']);
+  assert.equal(mark(card), '它要用 Gemini 来思考，接不上');
+  assert.equal(visibleText(one(card, 'qc-uses-line')), '这个应用还接不上 Gemini，所以它现在按原样领不了。');
+  assert.equal(shown(one(card, 'qc-uses-more')), false, 'nothing to install or log in on this computer: nothing to re-detect');
   const go = all(card).find(n => n.tagName === 'BUTTON' && n.type === 'submit')!;
   assert.equal(go.getAttribute('aria-disabled'), 'true');
   assert.equal(go.getAttribute('aria-describedby'), idOf(card, 'qc-uses-line'));
-  // What Tab walks through: the switch's selected side (item 43), the row, 自定义 (the way forward), the name, 更多设置, 取消, and 创建 —
-  // reachable, saying it is not available and why.
+  // What Tab walks through: the switch's selected side (item 43), the row, 「只借它的长相」 (the way on), the name, 更多设置, 取消, and
+  // 创建 — reachable, saying it is not available and why.
   const stops = all(card).filter(n => ['BUTTON', 'INPUT', 'SELECT'].includes(n.tagName) && shown(n) && n.tabIndex >= 0 && !n.disabled);
   const name = (n: El) => n.getAttribute('aria-label') || all(card).find(l => l.tagName === 'LABEL' && l.htmlFor === n.id)?.textContent || n.textContent;
-  assert.deepEqual(stops.map(name), ['猫猫', '暹罗猫', '自定义', '名字', '更多设置', '取消', '创建']);
+  assert.deepEqual(stops.map(name), ['猫猫', '烁烁，暹罗猫', '只借它的长相', '名字', '更多设置', '取消', '创建']);
   control(card, '名字').key('Enter');
   await settle();
   assert.equal(p.posts().length, 0);
-  assert.equal(p.doc.activeElement === button(card, '自定义'), true, 'Enter in the name takes the owner to 自定义');
-  // Back to a cat that can come home: 创建 again, nothing left over.
+  assert.equal(p.doc.activeElement === button(card, '只借它的长相'), true, 'Enter in the name takes the owner to the way on');
+  // Back to a cat that can come home (walking past 自定义): 创建 again, nothing left over.
   face(card, '暹罗猫').key('ArrowLeft');
+  assert.equal(chosen(card), '自定义');
+  ownTile(card).key('ArrowLeft');
   assert.equal(chosen(card), '缅因猫');
   assert.equal(go.getAttribute('aria-disabled'), null);
-  assert.equal(shown(one(card, 'qc-ahead')), false);
-  assert.equal(button(card, '自定义').classList.contains('ahead'), false);
+  assert.equal(shown(one(card, 'qc-forward')), false);
+  assert.equal(shown(one(card, 'qc-uses-line')), false);
   card.dispatch('submit');
   await settle();
   assert.deepEqual(p.posts()[0].body.simple, { face: 'maine-coon', rev: START.ready.faces[1].rev });
 });
 
-test('with no face whose cat can come home but a tool that is here, the form starts in 自定义 by itself (not counted as the owner\'s draft); one tool is named, not offered as a select', async () => {
+test('with no face whose cat can come home but a tool that is here, 自定义 is what the form presents first (not counted as the owner\'s draft), every cat marked as it is; one tool is named, not offered as a select', async () => {
   const start = { ...START.unknown, faces: START.unknown.faces.filter((f: Any) => f.id !== 'maine-coon') };
   const p = page({ start });
   const stage = await p.stage();
-  assert.equal(button(stage, '自定义').getAttribute('aria-pressed'), 'true');
-  assert.equal(chosen(stage), '布偶猫', 'the first face, for its looks');
-  assert.deepEqual(awayFaces(stage), []);
-  assert.deepEqual(hint(stage), [p.R.OWN_NOTE]);
+  assert.equal(chosen(stage), '自定义');
+  assert.deepEqual(tiles(stage).filter(shown).map(f => f.dataset.face ?? '自定义'), ['自定义', 'ragdoll', 'siamese', 'turkish-van', 'dsh', 'dragon-li', 'bengal', 'golden-chinchilla']);
+  assert.deepEqual(awayFaces(stage), ['布偶猫', '暹罗猫', '梵花猫', '蓝灰短毛猫', '狸花猫', '孟加拉猫', '金渐层']);
+  assert.equal(looksChosen(stage), '布偶猫', 'the first face, for its looks');
+  assert.deepEqual(nickOf(stage), [p.R.OWN_TITLE]);
+  assert.equal(control(stage, '名字').value, '', 'no template\'s name');
   assert.equal(visibleText(one(stage, 'qc-tool-line')), '它会用这台电脑上的 Codex 来思考', 'one tool: said, not a select');
   assert.equal(all(stage).filter(n => n.tagName === 'SELECT').length, 0);
   assert.equal(button(stage, '带它回家').disabled, false);
   p.doc.focused = null;
   assert.equal(p.Q.release(stage, ['团子']), true, 'the form chose 自定义, not the owner: an untouched stage');
+  button(stage, '带它回家').click();
+  await settle();
+  assert.equal(p.posts().length, 0, 'a cat of the owner\'s own needs a name of the owner\'s');
+  assert.equal(errOf(stage, '名字').textContent, '给它起个名字吧');
+  type(control(stage, '名字'), '小白');
   button(stage, '带它回家').click();
   await settle();
   assert.deepEqual(p.posts()[0].body.simple, { face: 'ragdoll', custom: true, agent: 'codex' });
@@ -1959,24 +2048,24 @@ test('自定义\'s tool: the cat on screen\'s own when it is here, so turning �
   let lose = true;
   const p = page({ start: START.three, route: (path, method) => { if (path === '/xbot-api/bots' && method === 'POST' && lose) throw fail(undefined, '连不上 clowder-bot'); return undefined; } });
   const stage = await p.stage();
-  const mode = button(stage, '自定义'), go = button(stage, '带它回家');
+  const own = ownTile(stage), go = button(stage, '带它回家');
   const select = () => one(stage, 'qc-tool-line').querySelectorAll('select')[0];
+  const look = (label: string) => named(stage, 'qc-look').find(n => n.getAttribute('aria-label') === label)!;
   face(stage, '梵花猫').click();
-  assert.equal(visibleText(one(stage, 'qc-uses-line')), '它用这台电脑上的 Kimi 来思考');
-  mode.click();
+  assert.equal(mark(stage), '它用这台电脑上的 Kimi 来思考');
+  own.click();
   assert.deepEqual(select().children.map(o => o.value), ['codex', 'claude', 'kimi']);
   assert.equal(select().value, 'kimi', 'the tool 梵花猫 was shown with');
-  // Untouched, it follows the cat on screen the next time 自定义 is turned on.
-  mode.click();
-  face(stage, '梵花猫').key('Home');
-  mode.click();
+  // Untouched, it follows the cat on screen the next time 自定义 is chosen.
+  face(stage, '布偶猫').click();
+  own.click();
   assert.equal(select().value, 'claude');
+  type(control(stage, '名字'), '小白');
   go.click(); await settle(); // custom, claude: unsure, key A
   choose(select(), 'codex');
-  mode.click(); mode.click(); // there and back: the pick stays
-  face(stage, '布偶猫').key('ArrowRight');
-  face(stage, '缅因猫').key('ArrowLeft'); // the same face again
-  assert.equal(select().value, 'codex', 'the owner\'s pick stays, whatever face');
+  face(stage, '布偶猫').click(); own.click(); // there and back: the pick stays
+  look('缅因猫').click(); look('布偶猫').click(); // other looks and back
+  assert.equal(select().value, 'codex', 'the owner\'s pick stays, whatever looks');
   go.click(); await settle(); // custom, codex: another request
   choose(select(), 'claude');
   lose = false;
@@ -1989,15 +2078,15 @@ test('自定义\'s tool: the cat on screen\'s own when it is here, so turning �
   // The template's own cat never carries 自定义's tool.
   const q = page({ start: START.three });
   const other = await q.stage();
-  button(other, '自定义').click();
+  ownTile(other).click();
   choose(one(other, 'qc-tool-line').querySelectorAll('select')[0], 'kimi');
-  button(other, '自定义').click();
+  face(other, '布偶猫').click();
   button(other, '带它回家').click();
   await settle();
   assert.deepEqual(q.posts()[0].body.simple, { face: 'ragdoll', rev: START.three.faces[0].rev });
 });
 
-test('face_unavailable: the server\'s sentence, /start read again and the screen repainted; the request leaves no key; 自定义 is where focus goes, or 带它回家 again when the tool came back', async () => {
+test('face_unavailable: the server\'s sentence, /start read again and the screen repainted; the request leaves no key; 「只借它的长相」 is where focus goes, or 带它回家 again when the tool came back', async () => {
   // The screen read 布偶猫 as usable; Claude Code was signed out before the click.
   const signedOut = (await summary(computer('configured', 'login_required'))).faces;
   const { e, route } = engine(START.ready.faces);
@@ -2010,10 +2099,11 @@ test('face_unavailable: the server\'s sentence, /start read again and the screen
   assert.deepEqual(p.calls.map(c => c.method + ' ' + c.path), ['GET /xbot-api/start', 'POST /xbot-api/bots', 'GET /xbot-api/start']);
   assert.equal(visibleText(one(stage, 'qc-error')), 'Claude Code 还没有登录，所以这只猫猫现在领不了。可以改用「自定义」，只借它的长相。');
   assert.equal(chosen(stage), '布偶猫', 'the owner\'s cat stays on screen, as it is now');
-  assert.match(visibleText(one(stage, 'qc-uses')), /^它要用 Claude Code 来思考。Claude Code 还没有登录，所以它现在按原样领不了。在终端里运行下面这行，登录好再点「重新检测」：claude auth login复制重新检测$/);
+  assert.match(toolSaid(stage), /^它要用 Claude Code 来思考，没登录Claude Code 还没有登录，所以它现在按原样领不了。在终端里运行下面这行，登录好再点「重新检测」：claude auth login复制重新检测$/);
+  assert.deepEqual(named(face(stage, '布偶猫'), 'qc-face-tag').map(n => n.textContent), ['没登录'], 'its tile says so too, now');
   const go = all(stage).find(n => has(n, 'qc-go'))!;
   assert.equal(go.getAttribute('aria-disabled'), 'true');
-  assert.equal(p.doc.activeElement === button(stage, '自定义'), true);
+  assert.equal(p.doc.activeElement === button(stage, '只借它的长相'), true);
   assert.equal(p.refreshed, 0, 'nothing was made: not an unsure creation');
   // Signed in again; the owner presses 重新检测 beside the login, and the cat can come home.
   e.faces = START.ready.faces;
@@ -2022,11 +2112,11 @@ test('face_unavailable: the server\'s sentence, /start read again and the screen
   again.click();
   await settle();
   assert.equal(p.calls.at(-1)!.path, '/xbot-api/start?refresh=1');
-  assert.equal(visibleText(one(stage, 'qc-uses-line')), '它用这台电脑上的 Claude Code 来思考');
+  assert.equal(mark(stage), '它用这台电脑上的 Claude Code 来思考');
   assert.equal(go.getAttribute('aria-disabled'), null);
   assert.equal(shown(one(stage, 'qc-uses-more')), false, 'no login left to do');
   assert.equal(shown(one(stage, 'qc-error')), false, 'the refusal no longer holds, so it is gone');
-  assert.equal(shown(one(stage, 'qc-ahead')), false);
+  assert.equal(shown(one(stage, 'qc-forward')), false);
   assert.equal(p.doc.activeElement === go, true, 'the button that went away hands focus on to what can be done now');
   assert.match(voice(stage).textContent, /它用这台电脑上的 Claude Code 来思考$/, 'said once: the owner asked');
   go.click();
@@ -2051,9 +2141,9 @@ test('a login beside a face: 重新检测 says plainly when nothing changed and 
   const stage = await p.stage();
   assert.equal(chosen(stage), '布偶猫');
   face(stage, '缅因猫').click();
-  const uses = one(stage, 'qc-uses');
-  assert.match(visibleText(uses), /^它要用 Codex 来思考。Codex 还没有登录，所以它现在按原样领不了。在终端里运行下面这行，登录好再点「重新检测」：codex login复制重新检测$/);
-  assert.equal(visibleText(one(stage, 'qc-ahead')), '只借它的长相，用这台电脑上的 Claude Code 来思考', 'one tool here: named');
+  const uses = one(stage, 'qc-uses-more');
+  assert.match(toolSaid(stage), /^它要用 Codex 来思考，没登录Codex 还没有登录，所以它现在按原样领不了。在终端里运行下面这行，登录好再点「重新检测」：codex login复制重新检测$/);
+  assert.equal(visibleText(one(stage, 'qc-ahead')), '自定义一只，用这台电脑上的 Claude Code 来思考', 'one tool here: named');
   button(uses, '复制').click();
   await settle();
   assert.deepEqual(p.copied, ['codex login']);
@@ -2076,16 +2166,19 @@ test('a login beside a face: 重新检测 says plainly when nothing changed and 
   assert.equal(R.catError(fail(422, '请先在本机 Agent 中完成登录'), '宪宪', 'Claude Code').kind, 'blocked', 'a 422 without the code is still what blocks every tool');
 });
 
-test('the quieter faces and the tool line keep to the tokens: smaller and paler, an outlined cushion, motion stilled when reduced; the one select is 自定义\'s', () => {
+test('a cat that cannot come home as it is is marked by a word in a dashed outline, not by colour or size alone; dashed means "not as it is" on its card too; all from the tokens, motion stilled when reduced; the one select is 自定义\'s', () => {
   const css = read('client/public/quick-create.css').replace(/\/\*[\s\S]*?\*\//g, '');
   const still = /@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?)\n\}/.exec(css)![1];
-  assert.match(css, /\.qc-face\.away \.qc-portrait \{ transform: scale\(\.6\); opacity: \.44;/, 'further back and paler: told apart by size, not only colour');
-  assert.match(css, /\.qc-face\.away\[aria-checked="true"\] \.qc-portrait::before \{ background: transparent; border: 1\.5px dashed var\(--x-faint\); \}/, 'chosen, it sits on an empty, outlined cushion');
-  assert.match(css, /\.qc-about\.mixed \.qc-tail \{ min-height: calc\(40px \+ 28px \+ var\(--x-s1\)\); \}/, 'room for a two-line tool line, left below 自定义');
+  assert.match(css, /\.qc-face-tag \{[^}]*border: 1px dashed var\(--x-faint\);[^}]*color: var\(--x-muted\);/, 'the word, in a dashed pill');
+  assert.doesNotMatch(css, /\.qc-face\.away \.qc-portrait \{[^}]*transform/, 'not smaller: the same tile as the others');
+  assert.match(css, /\.qc-faces:not\(\.split\) \.qc-group-head \{ display: none; \}/, 'the groups\' words only when there are two groups');
+  assert.match(css, /\.qc-about\.away \.qc-hero::before \{ background: transparent; border: 1\.5px dashed var\(--x-faint\); \}/, 'chosen, it sits on an empty, outlined cushion');
+  assert.match(css, /\.qc-agent\.away \{ background: transparent; border: 1px dashed var\(--x-faint\); \}/, 'and its Agent mark is outlined');
+  assert.match(css, /\.qc-side:has\(> \.qc-about\.mixed\) \{ min-height: 384px; \}/, 'room kept for the reason and the way on while some cat cannot come home');
   assert.match(css, /\.qc-flow \.primary\[aria-disabled="true"\],[^{]*\{\s*background: var\(--fill\); color: var\(--muted\);/, 'drawn as the original disabled .primary');
   assert.match(css, /\.qc-uses-text \{ animation: fade 180ms ease-out; \}/);
-  assert.match(still, /\.qc-uses-text, \.qc-ahead/);
-  assert.match(css, /\.qc-mode\.ahead \{ background: var\(--x-fill-1\);/);
+  assert.match(still, /\.qc-uses-text, \.qc-nick, \.qc-forward/);
+  assert.match(css, /\.qc-borrow \{[^}]*background: var\(--primary\); color: var\(--primary-text\);/, 'the way on is a button of its own');
   const js = read('client/public/quick-create.js');
   assert.equal((js.match(/node\("select"/g) || []).length, 1);
   assert.match(js, /own\.append\(aboutF\.box, temperF\.box, tool\.element\);/, 'the select lives in 自定义');
@@ -2101,14 +2194,16 @@ test('review: 自定义 turned on by the form is chosen only when the form is fi
     return undefined;
   } });
   const stage = await p.stage();
-  assert.equal(button(stage, '自定义').getAttribute('aria-pressed'), 'true');
+  assert.equal(chosen(stage), '自定义');
+  type(control(stage, '名字'), '小墨');
   type(control(stage, '它主要帮你做什么'), '帮我整理读书笔记');
   type(control(stage, '它的性格'), '话不多');
   // A refusal reads /start again, and now Kimi is here: 梵花猫 could come home as it is.
   button(stage, '带它回家').click();
   await settle();
   assert.equal(p.calls.filter(c => c.path.startsWith('/xbot-api/start')).length, 2);
-  assert.equal(button(stage, '自定义').getAttribute('aria-pressed'), 'true', 'still 自定义');
+  assert.equal(chosen(stage), '自定义', 'still 自定义');
+  assert.equal(control(stage, '名字').value, '小墨');
   assert.equal(control(stage, '它主要帮你做什么').value, '帮我整理读书笔记');
   button(stage, '带它回家').click();
   await settle();
@@ -2122,8 +2217,8 @@ test('review: 自定义 turned on by the form is chosen only when the form is fi
   q.s.start = only(START.three);
   button(blocked, '重新检测').click();
   await settle();
-  assert.equal(button(blocked, '自定义').getAttribute('aria-pressed'), 'false');
-  assert.equal(visibleText(one(blocked, 'qc-uses-line')), '它用这台电脑上的 Kimi 来思考');
+  assert.equal(chosen(blocked), '梵花猫');
+  assert.equal(mark(blocked), '它用这台电脑上的 Kimi 来思考');
 });
 
 test('review: in an answer that names faces\' tools, a face whose tool is missing or unreadable is not known — not creatable as it is, said plainly, 自定义 remains', async () => {
@@ -2131,8 +2226,10 @@ test('review: in an answer that names faces\' tools, a face whose tool is missin
   const p = page({ start });
   const stage = await p.stage();
   assert.deepEqual(awayFaces(stage), ['暹罗猫', '蓝灰短毛猫', '狸花猫', '孟加拉猫', '金渐层']);
-  assert.equal(face(stage, '暹罗猫').getAttribute('title'), '暹罗猫：没能读到它用什么思考');
+  assert.deepEqual(named(face(stage, '暹罗猫'), 'qc-face-tag').map(n => n.textContent), ['没读到'], 'its word: what could not be read, not a guess');
+  assert.equal(all(stage).find(n => n.id === face(stage, '暹罗猫').getAttribute('aria-describedby'))?.textContent, '暂时按原样领不了：没能读到它用什么思考');
   face(stage, '暹罗猫').click();
+  assert.equal(mark(stage), '', 'no Agent named: none to mark');
   assert.equal(visibleText(one(stage, 'qc-uses-line')), '没能读到它用什么思考，所以它现在按原样领不了。');
   assert.equal(named(one(stage, 'qc-uses-line'), 'qc-uses-text')[0].children.filter(n => n.tagName === 'B').length, 0, 'no tool name to set apart');
   assert.equal(shown(one(stage, 'qc-uses-more')), false, 'nothing to install or log in: nothing to re-detect');
@@ -2143,7 +2240,8 @@ test('review: in an answer that names faces\' tools, a face whose tool is missin
   assert.equal(p.posts().length, 0, 'never sent as a template the server would refuse');
   face(stage, '蓝灰短毛猫').click();
   assert.equal(visibleText(one(stage, 'qc-uses-line')), '没能读到它用什么思考，所以它现在按原样领不了。', 'a malformed tool reads the same');
-  button(stage, '自定义').click();
+  button(stage, '只借它的长相').click();
+  type(control(stage, '名字'), '小鲸');
   go.click();
   await settle();
   assert.deepEqual(p.posts()[0].body.simple, { face: 'dsh', custom: true, agent: 'codex' });
@@ -2157,8 +2255,8 @@ test('review: a face whose tool is not installed offers 重新检测 too; the fa
   assert.equal(shown(one(stage, 'qc-uses-more')), false);
   face(stage, '梵花猫').click();
   type(control(stage, '名字'), '小墨');
-  const uses = one(stage, 'qc-uses');
-  assert.equal(visibleText(uses), '它要用 Kimi 来思考。这台电脑上还没有装 Kimi，所以它现在按原样领不了。装好 Kimi 并登录，再点「重新检测」。重新检测');
+  const uses = one(stage, 'qc-uses-more');
+  assert.equal(toolSaid(stage), '它要用 Kimi 来思考，没安装这台电脑上还没有装 Kimi，所以它现在按原样领不了。装好 Kimi 并登录，再点「重新检测」。重新检测');
   // Nothing changed yet: said plainly, focus kept.
   const again = button(uses, '重新检测');
   again.focus();
@@ -2171,14 +2269,15 @@ test('review: a face whose tool is not installed offers 重新检测 too; the fa
   p.s.start = await summary(computer('configured', 'configured', 'login_required'));
   again.click();
   await settle();
-  assert.match(visibleText(one(stage, 'qc-uses')), /^它要用 Kimi 来思考。Kimi 还没有登录，所以它现在按原样领不了。在终端里运行下面这行，登录好再点「重新检测」：kimi login复制重新检测检测结果有变化。$/);
-  const next = button(one(stage, 'qc-uses'), '重新检测');
+  assert.match(toolSaid(stage), /^它要用 Kimi 来思考，没登录Kimi 还没有登录，所以它现在按原样领不了。在终端里运行下面这行，登录好再点「重新检测」：kimi login复制重新检测检测结果有变化。$/);
+  assert.deepEqual(named(face(stage, '梵花猫'), 'qc-face-tag').map(n => n.textContent), ['没登录'], 'its tile\'s word follows the state');
+  const next = button(one(stage, 'qc-uses-more'), '重新检测');
   assert.equal(p.doc.activeElement === next, true, 'the button that was replaced hands focus to its successor');
   // Logged in: the cat can come home, nothing typed was lost.
   p.s.start = START.three;
   next.click();
   await settle();
-  assert.equal(visibleText(one(stage, 'qc-uses-line')), '它用这台电脑上的 Kimi 来思考');
+  assert.equal(mark(stage), '它用这台电脑上的 Kimi 来思考');
   assert.equal(shown(one(stage, 'qc-uses-more')), false);
   assert.equal(chosen(stage), '梵花猫');
   assert.equal(control(stage, '名字').value, '小墨');
@@ -2246,12 +2345,12 @@ test('review: the two 409s by code — name_taken marks the name; request_change
     await settle();
     if (i === 0) {
       assert.equal(name.getAttribute('aria-invalid'), 'true');
-      assert.equal(one(stage, 'qc-err').textContent, '已经有一只叫「宪宪」的猫猫了，换个名字吧');
+      assert.equal(errOf(stage, '名字').textContent, '已经有一只叫「宪宪」的猫猫了，换个名字吧');
       assert.equal(shown(one(stage, 'qc-error')), false);
       assert.equal(p.doc.activeElement === name, true);
     } else {
       assert.equal(name.getAttribute('aria-invalid'), null, 'not blamed on the name');
-      assert.equal(one(stage, 'qc-err').textContent, '');
+      assert.equal(errOf(stage, '名字').textContent, '');
       assert.equal(visibleText(one(stage, 'qc-error')), i === 1 ? '这次创建和上一次的内容不一样，或者名字已被占用，请重新创建。' : '这个请求和别的请求冲突了。');
       assert.equal(p.doc.activeElement === go, true);
       assert.equal(p.refreshed, i === 1 ? 1 : 0, 'request_changed reads the list again (it may know the name now)');
@@ -2265,14 +2364,152 @@ test('review: the two 409s by code — name_taken marks the name; request_change
   }
 });
 
-test('review: while some face is unusable the room for a two-line tool line sits below 自定义, inside the tail with the tool line', async () => {
+test('review: the card\'s tail holds the reason, what to do, the quiet note and the way on, and is there only when one of them is; while some cat cannot come home the panel keeps room for it, with the name at its foot', async () => {
   const p = page({ cats: ['团子'] });
   p.Q.openCat({ opener: p.opener });
   await settle();
   const card = one(p.layer()!, 'qc-card');
   const tail = one(card, 'qc-tail');
-  assert.deepEqual(tail.children.map(n => n.className.split(' ')[0]), ['qc-uses', 'qc-fresh', 'qc-modeline'], 'the tool line, its note and 自定义, in that order');
+  assert.deepEqual(tail.children.map(n => n.className.split(' ')[0]), ['qc-uses-line', 'qc-uses-more', 'qc-fresh', 'qc-forward'], 'why, what can be done, the quiet note and the way on, in that order');
+  assert.equal(shown(tail), false, 'a cat that can come home: nothing in it, no empty row in the card');
   assert.equal(one(card, 'qc-about').classList.contains('mixed'), true);
+  face(card, '暹罗猫').click();
+  assert.equal(shown(tail), true);
   const css = read('client/public/quick-create.css').replace(/\/\*[\s\S]*?\*\//g, '');
-  assert.doesNotMatch(css, /\.qc-uses-line \{[^}]*min-height/, 'no blank line kept between the tool line and 自定义');
+  assert.match(css, /\.qc-fields \{ margin-top: auto;/, 'the name at the panel\'s foot, wherever the card ends');
+  assert.doesNotMatch(css, /\.qc-uses-line \{[^}]*min-height/, 'no blank line kept inside the card');
+});
+
+// ---------------------------------------------------------------- meeting a cat (2026-11-12, item 44)
+// The owner, looking at the 新建 dialog's 猫猫 side: 「新建猫猫的页面有待提升；当前显得平铺直叙、缺乏特点和设计。
+// 自定义应该作为一个和其它猫猫并列的选项。我注意到当前，本机不具备的猫置灰；但是其实这不是很明显。」 The cats are
+// named tiles in one radio group with 自定义 among them; a cat that cannot come home as it is sits in a group of
+// its own, carrying a word; the chosen one has a card. Requests, keys and refusals are as before.
+test('item 44: 自定义 is one radio of the same group as the cats — one Tab stop for all, reached and left by the same arrows, Home and End, in the order shown — first run and dialog', async () => {
+  for (const where of ['stage', 'dialog'] as const) {
+    const p = page({ cats: where === 'dialog' ? ['团子'] : [] });
+    let root: El;
+    if (where === 'stage') root = await p.stage();
+    else { p.Q.openCat({ opener: p.opener }); await settle(); root = one(p.layer()!, 'qc-card'); }
+    const row = one(root, 'qc-faces'), shownTiles = () => tiles(root).filter(shown);
+    assert.equal(row.getAttribute('role'), 'radiogroup', where);
+    assert.ok(shownTiles().every(t => t.getAttribute('role') === 'radio' && row.contains(t)), where + ': every tile a radio of the one group');
+    assert.equal(shownTiles().filter(t => t.tabIndex === 0).length, 1, where + ': one Tab stop');
+    face(root, '缅因猫').key('ArrowRight');
+    assert.equal(chosen(root), '自定义', where + ': next after the cats that can come home');
+    same(p.doc.activeElement, ownTile(root), where + ': focus moves with the choice');
+    assert.deepEqual(shownTiles().map(t => t.tabIndex), [-1, -1, 0, -1, -1, -1, -1, -1, -1], where + ': the one Tab stop is the choice');
+    ownTile(root).key('ArrowDown');
+    assert.equal(chosen(root), '暹罗猫', where + ': then the first that cannot');
+    face(root, '暹罗猫').key('ArrowUp');
+    assert.equal(chosen(root), '自定义');
+    ownTile(root).key('End');
+    assert.equal(chosen(root), '金渐层');
+    face(root, '金渐层').key('Home');
+    assert.equal(chosen(root), '布偶猫');
+    face(root, '布偶猫').key('ArrowLeft');
+    assert.equal(chosen(root), '金渐层', where + ': wraps round');
+    assert.equal(p.posts().length, 0, 'choosing sends nothing');
+  }
+});
+
+test('item 44: 自定义 always sends a face — the looks chosen on its card, kept while the form is open, the cat on screen\'s while untouched; other looks are another request, the same looks the same key', async () => {
+  let lose = true;
+  const p = page({ route: (path, method) => { if (path === '/xbot-api/bots' && method === 'POST' && lose) throw fail(undefined, '连不上 clowder-bot'); return undefined; } });
+  const stage = await p.stage();
+  const own = ownTile(stage), go = button(stage, '带它回家');
+  const look = (label: string) => named(stage, 'qc-look').find(n => n.getAttribute('aria-label') === label)!;
+  const hero = () => all(one(stage, 'qc-hero')).map(n => n.getAttribute('data-cat-id')).filter(Boolean);
+  // Untouched, the looks follow the cat on screen each time 自定义 is chosen; the card shows them.
+  face(stage, '缅因猫').click(); own.click();
+  assert.equal(looksChosen(stage), '缅因猫');
+  face(stage, '暹罗猫').click(); own.click();
+  assert.equal(looksChosen(stage), '暹罗猫', 'a cat that cannot come home lends its looks all the same');
+  assert.deepEqual(hero(), ['siamese']);
+  // Picked by the owner (a click, or the arrows of their own group), they stay whatever cat is looked at in between.
+  look('暹罗猫').key('ArrowRight');
+  assert.equal(looksChosen(stage), '梵花猫');
+  assert.equal(p.doc.activeElement.getAttribute('aria-label'), '梵花猫');
+  assert.deepEqual(hero(), ['turkish-van']);
+  assert.equal(one(stage, 'qc-looks-head').textContent, '长相：梵花猫');
+  face(stage, '布偶猫').click(); own.click();
+  assert.equal(looksChosen(stage), '梵花猫', 'kept');
+  type(control(stage, '名字'), '小墨');
+  go.click(); await settle(); // looks 梵花猫: unsure, key A
+  look('梵花猫').key('End');
+  assert.equal(looksChosen(stage), '金渐层');
+  go.click(); await settle(); // other looks: another request
+  look('梵花猫').click();
+  lose = false;
+  go.click(); await settle(); // 梵花猫 again: key A, and it lands
+  const [a, b, c] = p.posts().map(x => x.body);
+  assert.deepEqual(a.simple, { face: 'turkish-van', custom: true, agent: 'claude' }, 'the looks picked; the tool of the cat on screen when 自定义 was chosen');
+  assert.deepEqual(b.simple, { face: 'golden-chinchilla', custom: true, agent: 'claude' });
+  assert.notEqual(b.idempotencyKey, a.idempotencyKey, 'other looks: another request');
+  assert.deepEqual(c, a, 'the same looks again: the same request, under its key');
+  assert.deepEqual(p.opened, ['小墨']);
+  // Never a custom body without a face, however 自定义 was reached: its tile, 「只借它的长相」, or the form choosing it.
+  const nothing = { ...START.unknown, faces: START.unknown.faces.filter((f: Any) => f.id !== 'maine-coon') };
+  for (const how of ['tile', 'borrow', 'form'] as const) {
+    const q = page({ start: how === 'form' ? nothing : START.ready });
+    const s = await q.stage();
+    if (how === 'tile') ownTile(s).click();
+    if (how === 'borrow') { face(s, '孟加拉猫').click(); button(s, '只借它的长相').click(); }
+    type(control(s, '名字'), '小白');
+    button(s, '带它回家').click();
+    await settle();
+    const [post] = q.posts();
+    assert.ok(post && post.body.simple.custom === true && typeof post.body.simple.face === 'string' && post.body.simple.face, how + ': a face, always');
+    assert.equal(post.body.simple.face, { tile: 'ragdoll', borrow: 'bengal', form: 'ragdoll' }[how], how);
+  }
+});
+
+test('item 44: 自定义 borrows no template\'s name — its box empties and asks for one; a name the owner typed is never overwritten, either way; on a cat again, the cat\'s name comes back', async () => {
+  const p = page({ cats: ['宪宪'] });
+  p.Q.openCat({ opener: p.opener });
+  await settle();
+  const card = one(p.layer()!, 'qc-card');
+  const name = control(card, '名字');
+  assert.equal(name.value, '宪宪 2', 'the cat\'s own name, made free');
+  ownTile(card).click();
+  assert.equal(name.value, '');
+  assert.equal(name.placeholder, '给它起个名字');
+  face(card, '缅因猫').click();
+  assert.equal(name.value, '砚砚', 'a cat again: its name follows');
+  ownTile(card).click();
+  type(name, '小白');
+  face(card, '布偶猫').click();
+  assert.equal(name.value, '小白', 'typed in 自定义, kept on a cat');
+  ownTile(card).click();
+  assert.equal(name.value, '小白', 'and back');
+  type(name, '');
+  face(card, '布偶猫').click();
+  assert.equal(name.value, '宪宪 2', 'emptied, it follows the cat again');
+  type(name, '团团');
+  ownTile(card).click();
+  assert.equal(name.value, '团团', 'typed on a cat, kept in 自定义');
+  // The voice: once per choice the owner makes, none for the name filling itself in.
+  assert.equal(voice(card).textContent, p.R.OWN_NOTE);
+});
+
+test('item 44: one face to twelve — one face is its tile and 自定义, without groups; twelve, some of which cannot come home, sort into the two groups in the server\'s order and are walked in that order', async () => {
+  const real = await realFaces();
+  const p = page({ start: { ...START.ready, faces: [real[1]] } });
+  const stage = await p.stage();
+  assert.deepEqual(tiles(stage).filter(shown).map(f => f.dataset.face ?? '自定义'), ['maine-coon', '自定义']);
+  assert.equal(has(one(stage, 'qc-faces'), 'split'), false, 'one group: no words over it');
+  assert.equal(one(stage, 'qc-about').classList.contains('mixed'), false, 'no room kept for a reason no cat needs');
+  // Twelve (a larger portrait library), every other one's Agent not connectable here.
+  const many = Array.from({ length: 12 }, (_, i) => ({ id: 'cat' + i, label: '猫' + i, nickname: '小' + i }));
+  const toolAt = (i: number) => (i % 2 ? { label: 'Pi', state: 'unsupported', usable: false, reason: '这个应用还接不上 Pi' } : { label: 'Codex', state: 'ready', usable: true, id: 'codex' });
+  const q = page({ presets: many, start: { ...START.ready, faces: many.map((c, i) => ({ id: c.id, personality: c.label + '的性格', tool: toolAt(i) })) } });
+  const row = await q.stage();
+  assert.deepEqual(named(row, 'qc-group').map(g => tiles(g).filter(shown).map(f => f.dataset.face ?? '自定义')),
+    [['cat0', 'cat2', 'cat4', 'cat6', 'cat8', 'cat10', '自定义'], ['cat1', 'cat3', 'cat5', 'cat7', 'cat9', 'cat11']]);
+  assert.equal(tiles(row).filter(f => shown(f) && f.tabIndex === 0).length, 1);
+  face(row, '猫10').key('ArrowRight');
+  assert.equal(chosen(row), '自定义');
+  ownTile(row).key('ArrowRight');
+  assert.equal(chosen(row), '猫1');
+  assert.deepEqual(named(face(row, '猫1'), 'qc-face-tag').map(n => n.textContent), ['接不上']);
 });

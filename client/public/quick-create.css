@@ -1,15 +1,25 @@
-/* 开箱即用 (quick-create.js): the first-run 「领一只猫猫回家」 stage (faces
-   with a short hint of what each cat is like, and 自定义), the no-chat line,
-   and the 新建 dialog (猫猫 | 群聊). Loaded after every other style. Only existing tokens (--x-*, the app.css aliases, the motion
-   durations and the panel's easing curve); no new colors, fonts or keyframes:
-   the original .empty, .modal/.modal-card, .field, .primary, .secondary,
-   .text-btn and the clay portraits carry the look. */
+/* 开箱即用 (quick-create.js): the first-run 「领一只猫猫回家」 stage, the
+   no-chat line, and the 新建 dialog (猫猫 | 群聊). Loaded after every other
+   style. Only existing tokens (--x-*, the app.css aliases, the motion
+   durations and curves); no new colors, fonts or keyframes: the original
+   .empty, .modal/.modal-card, .field, .primary, .secondary, .text-btn and the
+   clay portraits carry the look.
+   Meeting a cat (item 44), the same on the stage and in the dialog: at the
+   left the cats to choose from, named tiles in one radio group — those that
+   can come home as they are, 自定义 (a tile of the same kind, our own
+   drawing), then, under a few plain words, those that cannot, each with a
+   dashed word saying why; at the right one panel for the chosen one: its
+   portrait sitting on a cushion, the name it comes with, its breed, the Agent
+   it thinks with as a small mark, its temperament in its own words, and at
+   the panel's foot the name it will have (and, on the stage, 带它回家). Below
+   a width of 640px the panel goes under the cats. Dashed means "not as it is"
+   throughout: the word on a tile, the Agent mark, the empty cushion. */
 
 /* No chat open: the composer would send nowhere, so it is not shown. */
 .main:has(.thread-inner.no-chat) .dock { display: none; }
 
 /* ---- the stage ---- */
-/* The eight cats get a wider column than a conversation's reading measure. */
+/* The cats and the panel get a wider column than a conversation's reading measure. */
 .thread-inner.no-chat { width: min(840px, 100% - 64px); }
 .thread-inner > .qc-stage { margin: auto; }
 .qc-stage {
@@ -27,99 +37,131 @@
 }
 .qc-arrived .text-btn { min-height: 26px; font-size: 13px; font-weight: 560; color: var(--x-text); background: var(--x-fill-1); }
 .qc-arrived .text-btn:hover { background: var(--x-fill-2); }
-.qc-flow { width: 100%; display: flex; flex-direction: column; align-items: center; }
-.qc-flow:focus { outline: none; }
-.qc-fields { width: 100%; display: flex; flex-direction: column; align-items: center; }
-.qc-stage .qc-faces { margin-top: var(--x-s8); }
+.qc-stage .qc-flow { margin-top: var(--x-s8); }
 
-/* ---- the faces: the chosen cat steps forward onto a cushion ----
-   As many as the server offers (faces[] in /start): eight to a row, four on a
-   phone; fewer sit centred at the same size, more wrap onto a centred row. */
-.qc-faces { display: flex; flex-wrap: wrap; justify-content: center; width: 100%; }
+/* ---- the composition: the cats | the chosen one's panel ---- */
+.qc-flow { width: 100%; container-type: inline-size; text-align: left; }
+.qc-flow:focus { outline: none; }
+.qc-meet { display: grid; grid-template-columns: 300px minmax(0, 1fr); column-gap: var(--x-s8); align-items: stretch; }
+.qc-side {
+  min-width: 0; display: flex; flex-direction: column; align-items: stretch;
+  padding: var(--x-s6); border-radius: 16px; background: var(--x-fill-1);
+}
+/* While some cat cannot come home as it is, the panel keeps room for its
+   reason and the way on, so the name at its foot holds still from one cat to
+   the next. */
+.qc-side:has(> .qc-about.mixed) { min-height: 384px; }
+.qc-fields { margin-top: auto; display: flex; flex-direction: column; align-items: stretch; }
+
+/* ---- the cats to choose from: named tiles in one radio group ----
+   Two groups when some cat cannot come home as it is (those that can, and
+   自定义; then those that cannot), each under its few words; one quiet group
+   while nothing can be chosen. As many tiles as the server offers: they wrap. */
+.qc-faces { display: flex; flex-direction: column; gap: var(--x-s5); min-width: 0; }
+.qc-group { display: flex; flex-wrap: wrap; align-content: flex-start; gap: var(--x-s1); min-width: 0; }
+.qc-group-head {
+  flex: 0 0 100%; margin: 0; padding: 0 var(--x-s1) 2px;
+  font-size: var(--x-fs-cap); font-weight: 560; line-height: 16px; letter-spacing: .02em; color: var(--x-muted);
+}
+.qc-faces:not(.split) .qc-group-head { display: none; }
 .qc-face {
-  flex: 0 0 12.5%;
-  position: relative; min-width: 0; padding: 0; border: 0; border-radius: var(--x-r-card);
+  flex: 0 0 72px;
+  position: relative; min-width: 0; padding: 6px 2px 7px; border: 0; border-radius: var(--x-r-card);
   display: flex; flex-direction: column; align-items: center; gap: 2px;
-  background: transparent; color: var(--x-muted); cursor: pointer; -webkit-tap-highlight-color: transparent;
+  background: transparent; color: var(--x-text-2); cursor: pointer; -webkit-tap-highlight-color: transparent;
+  transition: background 160ms ease-out, color 160ms ease-out;
 }
 .qc-face:disabled { cursor: default; }
-.qc-face:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.qc-face:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .qc-portrait {
-  position: relative; display: block; width: 100%; aspect-ratio: 1;
-  transform: scale(.72); opacity: .74; filter: saturate(.6);
-  transition: transform var(--dur-pop) cubic-bezier(0.2, 0.75, 0.3, 1), opacity var(--dur-pop) ease-out, filter var(--dur-pop) ease-out;
-}
-.qc-portrait::before {
-  content: ""; position: absolute; inset: 10% 8% 2%; border-radius: 50%;
-  background: var(--x-fill-1); opacity: 0; transform: scale(.86);
-  transition: transform var(--dur-pop) cubic-bezier(0.2, 0.75, 0.3, 1), opacity var(--dur-pop) ease-out;
+  position: relative; display: block; width: 52px; height: 52px;
+  transform: scale(.9);
+  transition: transform var(--dur-pop) var(--ease-spring), opacity var(--dur-pop) ease-out, filter var(--dur-pop) ease-out;
 }
 .qc-portrait > svg { position: relative; display: block; width: 100%; height: 100%; }
-.qc-face[aria-checked="true"] .qc-portrait { transform: none; opacity: 1; filter: none; }
-.qc-face[aria-checked="true"] .qc-portrait::before { transform: none; opacity: 1; }
 .qc-face-name {
-  height: 18px; font-size: var(--x-fs-sm); line-height: 18px; white-space: nowrap;
-  color: var(--x-text-2); opacity: 0; transition: opacity var(--dur-pop) ease-out;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--x-fs-sm); line-height: 18px;
 }
-.qc-face[aria-checked="true"] .qc-face-name { opacity: 1; }
+/* The chosen tile is filled as a selected row is, and its cat steps forward. */
+.qc-face[aria-checked="true"] { background: var(--selected); color: var(--x-text); }
+.qc-face[aria-checked="true"] .qc-portrait { transform: none; }
+.qc-face[aria-checked="true"] .qc-face-name { font-weight: 600; }
 @media (hover: hover) {
-  .qc-face:not(:disabled):hover .qc-portrait { opacity: .94; filter: none; }
-  .qc-face:not(:disabled)[aria-checked="false"]:hover .qc-portrait { transform: scale(.78); }
+  .qc-face:not(:disabled)[aria-checked="false"]:hover { background: var(--hover); color: var(--x-text); }
+  .qc-face:not(:disabled)[aria-checked="false"]:hover .qc-portrait { transform: scale(.96); }
 }
-.qc-face:not(:disabled)[aria-checked="true"]:active .qc-portrait { transform: scale(var(--press-scale)); }
-/* The dialog's row is smaller, so the resting cats sit back less. */
-.qc-faces.compact .qc-face[aria-checked="false"] .qc-portrait { transform: scale(.8); }
-@media (hover: hover) {
-  .qc-faces.compact .qc-face:not(:disabled)[aria-checked="false"]:hover .qc-portrait { transform: scale(.86); }
-}
+.qc-face:not(:disabled):active .qc-portrait { transform: scale(var(--press-scale)); }
 /* Nothing chosen (still reading, or blocked): the row is only a picture. */
 .qc-faces.rest .qc-portrait { opacity: .62; }
-.qc-faces.rest .qc-face-name { display: none; }
-/* A face whose cat cannot come home as it is (its tool is not usable here; a
-   face's own cat only — in 自定义 every face is only a look, so none is
-   marked): it sits further back and paler, and chosen it steps forward only
-   part way, onto an empty dashed cushion. Still there, not broken; its size
-   and the cushion's outline tell it apart, not its colour. */
-.qc-face.away .qc-portrait { transform: scale(.6); opacity: .44; filter: saturate(.3); }
-.qc-faces.compact .qc-face.away[aria-checked="false"] .qc-portrait { transform: scale(.66); }
-.qc-face.away[aria-checked="true"] .qc-portrait { transform: scale(.88); opacity: .8; filter: saturate(.55); }
-.qc-face.away[aria-checked="true"] .qc-portrait::before { background: transparent; border: 1.5px dashed var(--x-faint); }
-.qc-face.away:not(:disabled)[aria-checked="true"]:active .qc-portrait { transform: scale(.85); }
-@media (hover: hover) {
-  .qc-face.away:not(:disabled)[aria-checked="false"]:hover .qc-portrait { transform: scale(.66); opacity: .64; filter: saturate(.45); }
-  .qc-faces.compact .qc-face.away:not(:disabled)[aria-checked="false"]:hover .qc-portrait { transform: scale(.72); }
+.qc-faces.rest .qc-face-name { opacity: .7; }
+/* A cat whose own Agent is not usable here: in the later group, quieter, and
+   carrying its word (接不上, 没安装, 没登录, 没读到) in a dashed pill — told
+   apart by the word and the outline, not by colour or size. */
+.qc-face.away .qc-portrait { opacity: .5; filter: saturate(.45); }
+.qc-face.away[aria-checked="true"] .qc-portrait { opacity: .92; filter: saturate(.8); }
+.qc-face-tag {
+  display: block; max-width: 100%; margin-top: 1px; padding: 0 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  border: 1px dashed var(--x-faint); border-radius: var(--x-r-pill);
+  font-size: 11px; line-height: 15px; color: var(--x-muted);
 }
+.qc-face.away[aria-checked="true"] .qc-face-tag { color: var(--x-text-2); }
+/* 自定义's own picture: a cat's dashed outline still to be filled in, and a plus. */
+.qc-own-pic { display: block; width: 100%; height: 100%; color: var(--x-muted); }
+.qc-own-head { fill: var(--x-fill-1); stroke: currentColor; stroke-width: 1.7; stroke-dasharray: 3.2 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.qc-own-dot { fill: currentColor; }
+.qc-own-plus { fill: none; stroke: var(--x-card); stroke-width: 1.8; stroke-linecap: round; }
+.qc-face.own[aria-checked="true"] .qc-own-pic { color: var(--x-text-2); }
+.qc-face.own[aria-checked="true"] .qc-own-head { fill: var(--x-card); }
 
-/* ---- what the chosen cat is like, and 自定义 ----
-   A hint, not a spec sheet: the template's personality, then what it is good
-   at, one line each (personality may take two on a phone), cut with an
-   ellipsis. Two lines stay reserved whenever faces have words, so the form
-   below holds still from one cat to the next and 自定义 stays put. */
-.qc-about { width: min(480px, 100%); margin-top: var(--x-s3); display: flex; flex-direction: column; align-items: center; gap: var(--x-s1); }
-.qc-trait { width: 100%; margin: 0; font-size: 13px; line-height: 20px; color: var(--x-muted); }
-.qc-about.described .qc-trait { min-height: 40px; }
-.qc-trait-line { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; animation: fade 180ms ease-out; }
+/* ---- the chosen one's card, at the top of the panel ----
+   Its portrait sits on a cushion at the left; the name it comes with and its
+   breed, the Agent mark, then its temperament in its own words and what it is
+   good at. Under them, for a cat that cannot come home as it is: why (the
+   server's words), what can be done and 「只借它的长相」. For 自定义: the
+   owner's own cat, its looks to pick, two optional lines and its Agent. */
+.qc-about {
+  position: relative; min-width: 0;
+  display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "hero who" "hero trait" "tail tail" "own own";
+  grid-template-rows: auto 1fr auto auto; column-gap: var(--x-s6); align-content: start;
+}
+.qc-hero { grid-area: hero; position: relative; width: 104px; height: 104px; align-self: start; margin-left: -4px; }
+/* The cushion: a soft oval the cat sits on. Empty and outlined when the cat cannot come home as it is. */
+.qc-hero::before {
+  content: ""; position: absolute; left: 3%; right: 3%; bottom: 1%; height: 30%; border-radius: 50%;
+  background: var(--x-fill-3); transition: background 160ms ease-out;
+}
+.qc-about.away .qc-hero::before { background: transparent; border: 1.5px dashed var(--x-faint); }
+.qc-hero-pic { position: relative; display: block; width: 100%; height: 100%; }
+.qc-hero-pic > svg { display: block; width: 100%; height: 100%; animation: rise 180ms ease-out; }
+.qc-who { grid-area: who; min-width: 0; align-self: end; padding-top: var(--x-s2); }
+.qc-nick { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--x-s3); animation: fade 180ms ease-out; }
+.qc-nick-name { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--x-fs-greet); font-weight: 640; line-height: 1.35; letter-spacing: -0.01em; color: var(--x-text); }
+.qc-breed { font-size: var(--x-fs-sm); line-height: 1.5; color: var(--x-muted); }
+/* The Agent it thinks with: a small mark (its sentence is there for a screen reader). */
+.qc-agent {
+  display: inline-flex; align-items: center; gap: 5px; max-width: 100%; margin: var(--x-s2) 0 0; padding: 0 10px 0 8px; height: 24px;
+  border: 1px solid transparent; border-radius: var(--x-r-pill); background: var(--x-card);
+  font-size: var(--x-fs-sm); line-height: 1; color: var(--x-text-2); white-space: nowrap;
+}
+.qc-agent b { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; color: var(--x-text); }
+.qc-spark { flex: none; width: 11px; height: 11px; fill: var(--x-muted); }
+.qc-agent.away { background: transparent; border: 1px dashed var(--x-faint); }
+.qc-agent.away b { color: var(--x-text-2); }
+.qc-agent-tag { flex: none; color: var(--x-muted); }
+.qc-agent-tag::before { content: "·"; margin-right: 5px; }
+/* Its temperament in its own words (quoted), then what it is good at. */
+.qc-trait { grid-area: trait; margin: var(--x-s3) 0 0; display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 13px; line-height: 20px; color: var(--x-muted); }
+.qc-trait-line { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; animation: fade 180ms ease-out; }
 .qc-trait-line:first-child { color: var(--x-text-2); }
-.qc-trait.own .qc-trait-line { color: var(--x-muted); }
-.qc-trait-who { margin-right: var(--x-s2); font-weight: 600; color: var(--x-text); }
-/* Which tool the chosen cat thinks with, under its hint: part of the cat, so a
-   line of its description, not a control. The tool's name is set apart like
-   the cat's. A tool that is not usable here: what it needs and why, a shade
-   stronger (it decides what can be done), and, for a login, the command and
-   重新检测. While any face's cat cannot come home as it is, the tool line,
-   its note and 自定义 (the tail) keep room for a two-line tool line; the room
-   left over sits below 自定义, not between the lines, so a one-line tool line
-   reads as part of the hint and the form still holds still between cats. */
-.qc-tail { width: 100%; display: flex; flex-direction: column; align-items: center; gap: var(--x-s1); }
-.qc-about.mixed .qc-tail { min-height: calc(40px + 28px + var(--x-s1)); }
-.qc-uses { width: 100%; }
-.qc-uses-line { margin: 0; font-size: 13px; line-height: 20px; color: var(--x-muted); }
+.qc-trait-line:first-child:not(:only-child)::before { content: "「"; margin-left: -.5em; }
+.qc-trait-line:first-child:not(:only-child)::after { content: "」"; }
+/* Why it cannot come home as it is, what can be done, and the way on. */
+.qc-tail { grid-area: tail; min-width: 0; margin-top: var(--x-s5); display: flex; flex-direction: column; align-items: flex-start; gap: var(--x-s3); }
+.qc-uses-line { margin: 0; font-size: 13px; line-height: 20px; color: var(--x-text-2); }
 .qc-uses-text { animation: fade 180ms ease-out; }
-.qc-uses-line b { font-weight: 560; color: var(--x-text-2); white-space: nowrap; }
-.qc-uses-line.away { color: var(--x-text-2); }
-.qc-uses-line.away b { color: var(--x-text); }
 .qc-uses-more {
-  margin-top: var(--x-s2); display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--x-s2);
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--x-s2);
   font-size: var(--x-fs-sm); line-height: 1.6; color: var(--x-muted);
 }
 .qc-check { display: inline-flex; align-items: center; gap: var(--x-s1); min-height: 26px; padding: 0 10px; font-size: var(--x-fs-sm); color: var(--x-text-2); }
@@ -129,37 +171,47 @@
 .qc-uses-note:empty { display: none; }
 /* The portrait changed since the screen read it: a quiet line beside the new words. */
 .qc-fresh { margin: 0; font-size: var(--x-fs-sm); line-height: 1.5; color: var(--x-text-2); animation: fade 180ms ease-out; }
-/* 自定义, and beside it, while the chosen cat cannot come home as it is, what
-   it does then: the way forward, so the switch steps up from quiet to a chip. */
-.qc-modeline { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--x-s1) var(--x-s2); }
-.qc-ahead { font-size: var(--x-fs-sm); line-height: 1.5; color: var(--x-muted); animation: fade 180ms ease-out; }
-.qc-mode.ahead { background: var(--x-fill-1); color: var(--x-text); font-weight: 560; }
-.qc-mode.ahead:hover { background: var(--x-fill-2); color: var(--x-text); }
-.qc-mode { display: inline-flex; align-items: center; gap: var(--x-s1); min-height: 28px; padding: 0 10px; font-size: var(--x-fs-sm); color: var(--x-muted); }
-.qc-mode .icon { width: 13px; height: 13px; flex: none; }
-.qc-mode[aria-pressed="true"] { background: var(--x-fill-1); color: var(--x-text-2); }
-.qc-mode[aria-pressed="true"]:hover { background: var(--x-fill-2); color: var(--x-text); }
-.qc-mode:disabled { cursor: default; opacity: .6; }
-.qc-mode:disabled:hover { background: transparent; color: var(--x-muted); }
-.qc-mode[aria-pressed="true"]:disabled:hover { background: var(--x-fill-1); color: var(--x-text-2); }
-/* 自定义's two optional lines appear under the name. */
-.qc-own { width: 100%; display: flex; flex-direction: column; align-items: center; }
-.qc-own:not([hidden]) { animation: rise 180ms ease-out; }
-.qc-stage .qc-ownbox { margin-top: var(--x-s5); }
-.qc-input.qc-free { font-weight: 400; }
-
-/* ---- name, action, tool ---- */
-.qc-namebox { width: min(320px, 100%); margin-top: var(--x-s7); display: flex; flex-direction: column; gap: var(--x-s2); }
-.qc-label { font-size: var(--x-fs-sm); color: var(--x-muted); }
-.qc-input {
-  width: 100%; min-height: 44px; padding: 8px 14px; border: 0; border-radius: var(--x-r-card);
-  background: var(--fill); color: var(--text); font-size: 16px; font-weight: 560; text-align: center;
+/* 「只借它的长相」: the way on, a button of its own beside what it does. */
+.qc-forward { display: flex; flex-wrap: wrap; align-items: center; gap: var(--x-s1) var(--x-s3); animation: fade 180ms ease-out; }
+.qc-borrow {
+  display: inline-flex; align-items: center; gap: var(--x-s2); min-height: 30px; padding: 0 14px 0 12px;
+  border: 0; border-radius: var(--x-r-pill); background: var(--primary); color: var(--primary-text);
+  font-size: 13px; font-weight: 560; cursor: pointer; transition: background 160ms ease-out;
 }
-.qc-input::placeholder { color: var(--muted); font-weight: 400; }
+.qc-borrow:hover { background: var(--primary-hover); }
+.qc-borrow:active:not(:disabled) { transform: scale(var(--press-scale)); }
+.qc-borrow:disabled { cursor: default; opacity: .6; }
+.qc-borrow:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.qc-borrow .icon { width: 13px; height: 13px; flex: none; }
+.qc-ahead { font-size: var(--x-fs-sm); line-height: 1.5; color: var(--x-muted); }
+/* 自定义's card: its looks beside the portrait, the two lines and its Agent under it. */
+.qc-looksbox { grid-area: trait; min-width: 0; margin-top: var(--x-s3); }
+.qc-looks-head { margin: 0 0 var(--x-s1); font-size: var(--x-fs-cap); font-weight: 560; letter-spacing: .02em; color: var(--x-muted); }
+.qc-looks { display: flex; flex-wrap: wrap; gap: 2px; }
+.qc-look {
+  width: 40px; height: 40px; padding: 3px; border: 0; border-radius: 10px; background: transparent; cursor: pointer;
+  transition: background 160ms ease-out;
+}
+.qc-look:disabled { cursor: default; }
+.qc-look-pic { display: block; width: 100%; height: 100%; }
+.qc-look-pic > svg { display: block; width: 100%; height: 100%; }
+.qc-look[aria-checked="true"] { background: var(--selected); }
+@media (hover: hover) { .qc-look:not(:disabled)[aria-checked="false"]:hover { background: var(--hover); } }
+.qc-look:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.qc-own { grid-area: own; min-width: 0; display: flex; flex-direction: column; align-items: stretch; margin-top: var(--x-s2); }
+.qc-own:not([hidden]) { animation: rise 180ms ease-out; }
+
+/* ---- the fields on the panel: the name at its foot, 自定义's two lines ---- */
+.qc-side .field.qc-field { margin: var(--x-s4) 0 0; }
+.qc-fields .field.qc-field { margin-top: var(--x-s5); }
+.qc-side .field input { background: var(--x-card); }
+.qc-side .field input:focus { background: var(--x-card); box-shadow: inset 0 0 0 1px var(--x-fill-3); }
+.qc-opt { margin-left: var(--x-s2); font-size: var(--x-fs-cap); color: var(--x-faint); }
 .qc-flow [aria-invalid="true"], .qc-card [aria-invalid="true"] { outline: 2px solid var(--x-danger); outline-offset: -2px; }
 .qc-err { margin: 0; font-size: var(--x-fs-sm); line-height: 1.5; color: var(--x-danger); }
 .qc-err:empty { display: none; }
-.qc-go { width: min(320px, 100%); min-height: 44px; margin-top: var(--x-s5); border-radius: var(--x-r-card); font-size: 15px; }
+/* 带它回家, at the panel's foot on the stage. */
+.qc-go { min-height: 44px; margin-top: var(--x-s5); border-radius: var(--x-r-card); font-size: 15px; }
 /* 创建 / 带它回家 for a cat that cannot come home as it is: still focusable
    (aria-disabled, so its reason is read on it), drawn as the original
    .primary:disabled. */
@@ -167,13 +219,14 @@
 .qc-card .primary[aria-disabled="true"], .qc-card .primary[aria-disabled="true"]:hover, .qc-card .primary[aria-disabled="true"]:active {
   background: var(--fill); color: var(--muted); opacity: 1; cursor: default;
 }
-.qc-error { max-width: 440px; margin: var(--x-s3) 0 0; font-size: var(--x-fs-sm); line-height: 1.5; color: var(--x-danger); }
-.qc-tool { max-width: 440px; margin-top: var(--x-s6); }
+.qc-flow .qc-side .primary[aria-disabled="true"] { background: var(--x-fill-2); }
+.qc-error { margin: var(--x-s3) 0 0; font-size: var(--x-fs-sm); line-height: 1.5; color: var(--x-danger); }
+.qc-tool { margin-top: var(--x-s4); }
 .qc-tool-line { margin: 0; font-size: 13px; line-height: 1.7; color: var(--x-muted); }
 .qc-tool-line b { font-weight: 560; color: var(--x-text-2); }
 .qc-tool-note {
   margin: var(--x-s2) 0 0; font-size: var(--x-fs-sm); line-height: 1.6; color: var(--x-muted);
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--x-s2);
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--x-s2);
 }
 /* The tool switch is a quiet chip, a native select underneath. */
 .qc-pick {
@@ -182,7 +235,7 @@
 }
 .qc-pick select {
   appearance: none; -webkit-appearance: none; margin: 0 2px; padding: 1px 21px 1px 8px;
-  border: 0; border-radius: var(--x-r-xs); background: var(--x-fill-1); color: var(--x-text-2);
+  border: 0; border-radius: var(--x-r-xs); background: var(--x-card); color: var(--x-text-2);
   font: inherit; font-weight: 560; cursor: pointer; transition: background 160ms ease-out;
 }
 .qc-pick select:hover:not(:disabled) { background: var(--x-fill-2); }
@@ -194,10 +247,10 @@
 }
 
 /* A native login command, copyable. */
-.qc-cmds { display: flex; flex-direction: column; align-items: center; gap: var(--x-s2); }
+.qc-cmds { display: flex; flex-direction: column; align-items: flex-start; gap: var(--x-s2); }
 .qc-cmd {
   display: inline-flex; align-items: center; gap: var(--x-s3); max-width: 100%;
-  padding: 4px 4px 4px 12px; border-radius: var(--x-r-sm); background: var(--x-fill-1);
+  padding: 4px 4px 4px 12px; border-radius: var(--x-r-sm); background: var(--x-card);
 }
 .qc-cmd-for { flex: none; font-size: var(--x-fs-sm); color: var(--x-muted); }
 .qc-cmd code {
@@ -212,8 +265,8 @@
 .qc-copy:hover { background: var(--x-fill-3); }
 .qc-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
 
-/* What is in the way, and 重新检测. */
-.qc-need { width: min(440px, 100%); margin-top: var(--x-s7); display: flex; flex-direction: column; align-items: center; gap: var(--x-s3); }
+/* What is in the way, and 重新检测 (in the panel, beside the cats as a picture). */
+.qc-need { display: flex; flex-direction: column; align-items: flex-start; gap: var(--x-s3); }
 .qc-need h3 { margin: 0; font-size: 16px; font-weight: 620; line-height: 1.4; color: var(--x-text); }
 /* Focus lands on the title when the form gives way to this panel (it is not a control). */
 .qc-need h3:focus { outline: none; }
@@ -223,10 +276,10 @@
 .qc-again .icon { width: 15px; height: 15px; }
 .qc-again[aria-disabled="true"] { cursor: default; opacity: .7; }
 .qc-need > .qc-note { min-height: 20px; font-size: var(--x-fs-sm); line-height: 20px; }
-.qc-wait { min-height: 22px; margin: var(--x-s7) 0 0; font-size: var(--x-fs-sm); line-height: 22px; color: var(--x-muted); }
+.qc-wait { min-height: 22px; margin: 0; font-size: var(--x-fs-sm); line-height: 22px; color: var(--x-muted); }
 .qc-wait-text { animation: fade 160ms ease-out 300ms both; }
 .qc-retry { font-size: var(--x-fs-sm); }
-.qc-later { margin-top: var(--x-s7); width: 100%; display: flex; flex-direction: column; align-items: center; gap: var(--x-s3); }
+.qc-later { display: flex; flex-direction: column; align-items: stretch; gap: var(--x-s3); }
 .qc-later p { margin: 0; font-size: 14px; line-height: 1.6; color: var(--x-text-2); }
 
 /* Cats, but no chat open (on .empty); the list is a drawer on a phone. */
@@ -235,12 +288,13 @@
 
 /* ---- the 新建 dialog, on the original modal card ----
    It hangs from a fixed line (where a usual card would sit centred), so
-   switching 猫猫 | 群聊 or opening 自定义 never moves its top edge; a change
-   of height is eased (quick-create.js) with the card clipped meanwhile. */
-.qc-modal { --qc-top: max(16px, calc((100vh - 480px) / 2)); place-items: start center; padding-top: var(--qc-top); }
-@supports (height: 100dvh) { .qc-modal { --qc-top: max(16px, calc((100dvh - 480px) / 2)); } }
-.qc-modal .modal-card { width: min(480px, 100%); max-height: min(720px, calc(100vh - var(--qc-top) - 16px)); overscroll-behavior: contain; }
-@supports (height: 100dvh) { .qc-modal .modal-card { max-height: min(720px, calc(100dvh - var(--qc-top) - 16px)); } }
+   switching 猫猫 | 群聊, another cat or 自定义 never moves its top edge; a
+   change of height is eased (quick-create.js) with the card clipped meanwhile.
+   Wide enough for the cats beside the chosen one's panel. */
+.qc-modal { --qc-top: max(16px, calc((100vh - 600px) / 2)); place-items: start center; padding-top: var(--qc-top); }
+@supports (height: 100dvh) { .qc-modal { --qc-top: max(16px, calc((100dvh - 600px) / 2)); } }
+.qc-modal .modal-card { width: min(720px, 100%); max-height: min(760px, calc(100vh - var(--qc-top) - 16px)); overscroll-behavior: contain; }
+@supports (height: 100dvh) { .qc-modal .modal-card { max-height: min(760px, calc(100dvh - var(--qc-top) - 16px)); } }
 .qc-card:focus { outline: none; }
 .qc-card.qc-easing { overflow: hidden; }
 /* 新建, and beside it the switch: a quiet segmented pill, the side shown filled as a selected row is. */
@@ -257,28 +311,15 @@
 .qc-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .qc-tab[aria-disabled="true"] { cursor: default; }
 .qc-tab[aria-disabled="true"]:not([aria-selected="true"]):hover { color: var(--x-muted); }
-.qc-card .qc-flow, .qc-card .qc-fields { align-items: stretch; }
-.qc-card .qc-faces { margin-top: var(--x-s3); }
-/* The dialog reads left to right: the hint under the row, 自定义 at the edge like 更多设置. */
-.qc-card .qc-about { width: 100%; margin-top: var(--x-s2); align-items: flex-start; }
-.qc-card .qc-uses-more, .qc-card .qc-modeline { justify-content: flex-start; }
-.qc-card .qc-tail { align-items: flex-start; }
-.qc-card .qc-own { align-items: stretch; }
-.qc-card .field.qc-field { margin: var(--x-s5) 0 0; }
-.qc-opt { margin-left: var(--x-s2); font-size: var(--x-fs-cap); color: var(--x-faint); }
-.qc-card .qc-tool { max-width: none; margin-top: var(--x-s5); }
-.qc-card .qc-tool-note { justify-content: flex-start; }
+.qc-card .qc-flow { margin-top: var(--x-s6); }
 .qc-card .qc-error { max-width: none; }
-.qc-card .qc-wait { margin-top: var(--x-s5); }
-.qc-card .qc-need { width: 100%; margin-top: var(--x-s5); align-items: flex-start; text-align: left; }
-.qc-card .qc-need .qc-cmds { align-items: flex-start; }
-.qc-card .qc-later { align-items: flex-start; }
-.qc-card .modal-actions { align-items: center; }
+.qc-card .modal-actions { align-items: center; margin-top: var(--x-s7); }
 .qc-more { margin-right: auto; min-height: 32px; padding: 0 10px; font-size: 13px; }
 .qc-lead { margin: var(--x-s3) 0 0; font-size: 14px; line-height: 1.6; color: var(--x-muted); }
 
 /* 新建群聊: cats as face chips; a picked chip turns primary like .choice-opt. */
 .qc-members-set { min-width: 0; min-inline-size: 0; margin: var(--x-s3) 0 0; padding: 0; border: 0; }
+.qc-card .qc-members-set { margin-top: var(--x-s6); }
 .qc-legend { padding: 0; margin-bottom: var(--x-s3); font-size: 13px; color: var(--muted); }
 .qc-members { display: flex; flex-wrap: wrap; gap: var(--x-s2); max-height: 216px; overflow: auto; padding: 2px; }
 .qc-chip {
@@ -297,27 +338,42 @@
 .qc-hint { margin: var(--x-s3) 0 0; font-size: var(--x-fs-sm); line-height: 1.5; color: var(--x-muted); }
 .qc-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 
-/* The portrait gliding from the picker to the chat header. */
+/* The portrait gliding from the panel to the chat header. */
 .qc-ghost { position: fixed; z-index: 70; pointer-events: none; transform-origin: 0 0; will-change: transform; }
 .qc-ghost > svg { display: block; width: 100%; height: 100%; }
 
+/* Narrower than 640px (a phone, a narrow window): the cats, then the panel
+   under them. The cats sit above the panel, so a taller card (a cat that
+   cannot come home as it is) only moves what is below it; no room is kept. */
+@container (max-width: 639px) {
+  .qc-meet { display: flex; flex-direction: column; align-items: stretch; row-gap: var(--x-s5); }
+  .qc-faces { gap: var(--x-s4); }
+  .qc-face { flex-basis: calc(25% - 3px); padding: 5px 2px 6px; }
+  .qc-portrait { width: 48px; height: 48px; }
+  .qc-side { padding: var(--x-s5) var(--x-s5) var(--x-s5) var(--x-s4); }
+  .qc-side:has(> .qc-about.mixed) { min-height: 0; }
+  .qc-about { column-gap: var(--x-s4); }
+  .qc-hero { width: 80px; height: 80px; }
+  .qc-tail { margin-top: var(--x-s4); }
+  .qc-fields .field.qc-field { margin-top: var(--x-s4); }
+}
 @media (max-width: 560px) {
   .thread-inner.no-chat { width: calc(100% - 32px); }
+  /* On a phone the stage starts at the top: the cats first, the panel under them. */
+  .thread-inner > .qc-stage { margin: 0 auto auto; }
+  .qc-stage { padding: var(--x-s6) 0 var(--x-s8); }
   .qc-title { font-size: var(--x-fs-greet); }
-  .qc-faces { row-gap: var(--x-s1); }
-  .qc-face { flex-basis: 25%; }
-  .qc-stage .qc-faces { margin-top: var(--x-s7); }
-  .qc-faces.compact { width: min(100%, 280px); margin-inline: auto; }
+  .qc-stage .qc-flow { margin-top: var(--x-s6); }
+  .qc-modal { --qc-top: max(16px, calc((100vh - 800px) / 2)); }
+  @supports (height: 100dvh) { .qc-modal { --qc-top: max(16px, calc((100dvh - 800px) / 2)); } }
   .qc-modal .modal-card { padding: var(--x-s7); }
   .qc-tab { height: 38px; }
-  /* At most three lines on a phone: the personality may wrap once, which in
-     the narrower dialog it usually does, so three lines stay free there. */
-  .qc-trait-line:first-child { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; }
-  .qc-card .qc-about.described .qc-trait { min-height: 60px; }
-  /* The second row's (empty) caption space already parts the hint from the faces. */
-  .qc-stage .qc-about { margin-top: var(--x-s1); }
+  /* 44px to touch on a phone. */
+  .qc-look { width: 44px; height: 44px; }
+  .qc-borrow, .qc-check, .qc-copy { min-height: 44px; }
+  .qc-side .field input { min-height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .qc-portrait, .qc-portrait::before, .qc-face-name, .qc-stage.leaving > * { transition: none; }
-  .qc-stage, .qc-wait-text, .qc-trait-line, .qc-uses-text, .qc-ahead, .qc-fresh, .qc-own:not([hidden]) { animation: none; }
+  .qc-face, .qc-portrait, .qc-look, .qc-hero::before, .qc-stage.leaving > * { transition: none; }
+  .qc-stage, .qc-wait-text, .qc-trait-line, .qc-uses-text, .qc-nick, .qc-forward, .qc-fresh, .qc-hero-pic > svg, .qc-own:not([hidden]) { animation: none; }
 }
