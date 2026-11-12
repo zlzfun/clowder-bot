@@ -89,7 +89,16 @@ class El {
     const ev = this.dispatch('click');
     if (!ev.defaultPrevented && this.tagName === 'BUTTON' && this.type === 'submit') this.closest('FORM')?.dispatch('submit');
   }
-  key(key: string, more: Record<string, unknown> = {}) { return this.dispatch('keydown', { key, ...more }); }
+  key(key: string, more: Record<string, unknown> = {}) {
+    const ev = this.dispatch('keydown', { key, ...more });
+    // As a browser does (implicit submission): Enter in a text field presses its form's default button, the
+    // first submit button, unless that button is disabled (click() does nothing then).
+    if (key === 'Enter' && !ev.defaultPrevented && this.tagName === 'INPUT') {
+      const form = this.closest('FORM'), main = form && all(form).find(n => n.tagName === 'BUTTON' && n.type === 'submit');
+      if (main) main.click();
+    }
+    return ev;
+  }
   closest(tag: string): El | null { for (let n: El | null = this; n; n = n.parent) if (n.tagName === tag) return n; return null; }
   focus() { if (this.isConnected && !this.disabled) this.doc.focused = this; }
   select() { this.selected++; }
@@ -297,8 +306,8 @@ test('which tool a face\'s cat thinks with is read from faces[].tool as the serv
   assert.equal(R.start(START.unknown).faces.find((f: Any) => f.id === 'maine-coon').tool.state, 'unknown');
   // Read defensively: a tool without a name is none; usable only when the server says so; the reason keeps no stop and never goes missing.
   const read = (t: unknown) => R.start({ ...START.ready, faces: [{ id: 'dsh', tool: t }] }).faces[0].tool ?? null;
-  assert.equal(read({ usable: true }), null);
-  assert.equal(read('Codex'), null);
+  assert.deepEqual(plain(read({ usable: true })), plain(R.UNREAD), 'in an answer of this shape, an unreadable tool is not known, never the usual one');
+  assert.deepEqual(plain(read('Codex')), plain(R.UNREAD));
   assert.deepEqual(plain(read({ label: ' Pi ', usable: 'yes', state: 'ready', reason: '接不上。' })), { label: 'Pi', state: 'unsupported', usable: false, id: '', reason: '接不上', loginCommand: '' });
   assert.equal(read({ label: 'Pi', usable: false, state: 'missing' }).reason, 'Pi 现在用不了');
   assert.equal(read({ label: 'Codex', usable: true, state: 'login', id: 'codex' }).state, 'unknown', 'usable, so never a login; never called ready either');
@@ -354,7 +363,7 @@ test('a face\'s own cat sends no tool (it has its own), 自定义 sends the tool
   const custom = plain(R.catBody({ name: ' 小白 ', face: 'bengal', agent: 'claude', custom: true }));
   assert.equal(R.fingerprint(custom), R.fingerprint({ simple: { agent: 'claude', custom: true, face: 'bengal' }, name: '小白' }), 'key order does not make a new request');
   assert.notEqual(R.fingerprint(custom), R.fingerprint(R.catBody({ name: '小白', face: 'bengal', agent: 'codex', custom: true })), 'another tool is another request');
-  assert.deepEqual(plain(R.catError(fail(409, '已经有一只叫这个名字的猫猫了'), '小白')), { kind: 'name', text: '已经有一只叫「小白」的猫猫了，换个名字吧' });
+  assert.deepEqual(plain(R.catError(fail(409, '已经有一只叫这个名字的猫猫了', 'name_taken'), '小白')), { kind: 'name', text: '已经有一只叫「小白」的猫猫了，换个名字吧' });
   assert.equal(R.catError(fail(422, '请先在本机 Agent 中完成登录'), '小白', 'Codex').text, '刚才没能建好：Codex 现在用不了。', 'the adapter\'s word "Agent" is not shown');
   for (const err of [fail(undefined, '连不上 clowder-bot'), fail(502, '服务出了点问题，请稍后再试。')]) assert.equal(R.catError(err, 'x').kind, 'unsure');
   assert.equal(R.catError(fail(400, 'name: 找不到这个 Bot')).text, '没能建好，请检查名字后再试。');
@@ -440,7 +449,7 @@ test('a request that may have landed is sent again unchanged under the same key;
   const [first, second] = p.posts();
   assert.deepEqual(second.body, first.body, 'same key, same body');
   type(control(stage, '名字'), '团子');
-  answer = () => { throw fail(409, '已经有一只叫这个名字的猫猫了'); };
+  answer = () => { throw fail(409, '已经有一只叫这个名字的猫猫了', 'name_taken'); };
   go.click();
   await settle();
   const third = p.posts()[2];
@@ -688,8 +697,7 @@ test('新建猫猫 sends the face, the name, and with 自定义 the optional lin
   // The optional line belongs to 自定义 now (2026-11-12): a face's own cat does not offer it.
   button(card, '自定义').click();
   type(control(card, '它主要帮你做什么'), '  帮我改简历 ');
-  control(card, '名字').key('Enter');
-  card.dispatch('submit'); // Enter in a field submits the form
+  control(card, '名字').key('Enter'); // Enter in a field presses 创建
   card.dispatch('submit'); // a second press while saving does nothing
   await settle();
   assert.equal(p.posts().length, 1);
@@ -1282,7 +1290,7 @@ test('a lost answer is retried with the identical body under its own key, after 
     start: await withFaces(),
     route: (path, method, body) => {
       if (path !== '/xbot-api/bots' || method !== 'POST') return undefined;
-      if (body.simple.custom && refuseCustom) { refuseCustom = false; throw fail(409, '已经有一只叫这个名字的猫猫了'); }
+      if (body.simple.custom && refuseCustom) { refuseCustom = false; throw fail(409, '已经有一只叫这个名字的猫猫了', 'name_taken'); }
       if (lose) throw fail(undefined, '连不上 clowder-bot');
       return undefined;
     },
@@ -1464,7 +1472,7 @@ test('review fixes (rules): a face\'s own cat carries the rev it showed and a cu
   assert.notEqual(R.fingerprint(own), R.fingerprint(R.catBody({ name: '砚砚', face: 'maine-coon', rev: 'ffffffffffffffff', agent: 'codex' })), 'another portrait is another request');
   // The code decides, not the status.
   assert.deepEqual(plain(R.catError(fail(409, '这只猫猫的介绍刚刚更新了，请再看一眼后重试', 'face_changed'), '砚砚')), { kind: 'changed', text: R.FACE_CHANGED });
-  assert.equal(R.catError(fail(409, '已经有一只叫这个名字的猫猫了'), '砚砚').kind, 'name', 'a 409 without the code is still the name');
+  assert.equal(R.catError(fail(409, '已经有一只叫这个名字的猫猫了', 'name_taken'), '砚砚').kind, 'name');
   const gone = R.catError(fail(503, '暂时读不到猫猫的资料，这次没有创建，请稍后再试', 'faces_unavailable'), '砚砚');
   assert.deepEqual(plain(gone), { kind: 'unavailable', text: '刚才没能读到猫猫的资料，这次没有建。' });
   assert.equal(R.catError(fail(503, '服务出了点问题'), '砚砚').kind, 'unsure', 'a 503 without the code stays unsure');
@@ -1670,15 +1678,24 @@ test('a face whose cat cannot come home as it is is still offered, quieter, and 
   assert.equal(visibleText(line), '它要用 Kimi 来思考。这台电脑上还没有装 Kimi，所以它现在按原样领不了。');
   assert.equal(line.classList.contains('away'), true);
   const go = all(stage).find(n => has(n, 'qc-go'))!;
-  assert.equal(go.disabled, true);
+  assert.equal(go.getAttribute('aria-disabled'), 'true', 'not available, but still focusable');
+  assert.equal(go.disabled, false);
   assert.equal(go.getAttribute('aria-describedby'), line.id, 'a screen reader finds why on the button itself');
   const mode = button(stage, '自定义');
   assert.equal(mode.classList.contains('ahead'), true, 'the quiet switch steps up: it is the way forward now');
   assert.equal(visibleText(one(stage, 'qc-ahead')), '只借它的长相，用这台电脑上的工具来思考');
   assert.equal(mode.getAttribute('aria-describedby'), idOf(stage, 'qc-ahead'));
   assert.equal(voice(stage).textContent, '细心务实，保留自己的判断，愿意把事情接住做完。擅长编码、文档、验收。它要用 Kimi 来思考。这台电脑上还没有装 Kimi，所以它现在按原样领不了。点「自定义」可以只借它的长相，用这台电脑上的工具来思考');
-  // Enter (the form submitted anyway) sends nothing and points at the way forward.
-  one(stage, 'qc-flow').dispatch('submit');
+  // Enter in the name field presses 带它回家: nothing is sent, and focus goes to the way forward.
+  const name = control(stage, '名字');
+  name.focus();
+  name.key('Enter');
+  await settle();
+  assert.equal(p.posts().length, 0);
+  assert.equal(p.doc.activeElement === mode, true);
+  // So does pressing it.
+  go.focus();
+  go.click();
   await settle();
   assert.equal(p.posts().length, 0);
   assert.equal(p.doc.activeElement === mode, true);
@@ -1687,7 +1704,7 @@ test('a face whose cat cannot come home as it is is still offered, quieter, and 
   assert.deepEqual(awayFaces(stage), []);
   assert.equal(shown(one(stage, 'qc-uses')), false);
   assert.equal(shown(one(stage, 'qc-ahead')), false);
-  assert.equal(go.disabled, false);
+  assert.equal(go.getAttribute('aria-disabled'), null);
   assert.equal(go.getAttribute('aria-describedby'), null);
   assert.equal(chosen(stage), '梵花猫', 'the face picked stays');
   assert.equal(control(stage, '名字').value, '墨墨');
@@ -1713,19 +1730,20 @@ test('the dialog says the same: a quieter face, why under its hint, 创建 not a
   assert.deepEqual(hint(card), ['暹罗猫热血奔放，善于用视觉语言表达想法，表达力是全队最强的', '擅长审美、前端设计风格、打破常规']);
   assert.equal(visibleText(one(card, 'qc-uses-line')), '它要用 Gemini 来思考。这个应用还接不上 Gemini，所以它现在按原样领不了。');
   const go = all(card).find(n => n.tagName === 'BUTTON' && n.type === 'submit')!;
-  assert.equal(go.disabled, true);
+  assert.equal(go.getAttribute('aria-disabled'), 'true');
   assert.equal(go.getAttribute('aria-describedby'), idOf(card, 'qc-uses-line'));
-  // What Tab walks through: the row, 自定义 (the way forward), the name, 更多设置, 取消 (创建 is not available).
+  // What Tab walks through: the row, 自定义 (the way forward), the name, 更多设置, 取消, and 创建 — reachable, saying it is not available and why.
   const stops = all(card).filter(n => ['BUTTON', 'INPUT', 'SELECT'].includes(n.tagName) && shown(n) && n.tabIndex >= 0 && !n.disabled);
   const name = (n: El) => n.getAttribute('aria-label') || all(card).find(l => l.tagName === 'LABEL' && l.htmlFor === n.id)?.textContent || n.textContent;
-  assert.deepEqual(stops.map(name), ['暹罗猫', '自定义', '名字', '更多设置', '取消']);
-  card.dispatch('submit');
+  assert.deepEqual(stops.map(name), ['暹罗猫', '自定义', '名字', '更多设置', '取消', '创建']);
+  control(card, '名字').key('Enter');
   await settle();
   assert.equal(p.posts().length, 0);
+  assert.equal(p.doc.activeElement === button(card, '自定义'), true, 'Enter in the name takes the owner to 自定义');
   // Back to a cat that can come home: 创建 again, nothing left over.
   face(card, '暹罗猫').key('ArrowLeft');
   assert.equal(chosen(card), '缅因猫');
-  assert.equal(go.disabled, false);
+  assert.equal(go.getAttribute('aria-disabled'), null);
   assert.equal(shown(one(card, 'qc-ahead')), false);
   assert.equal(button(card, '自定义').classList.contains('ahead'), false);
   card.dispatch('submit');
@@ -1808,7 +1826,7 @@ test('face_unavailable: the server\'s sentence, /start read again and the screen
   assert.equal(chosen(stage), '布偶猫', 'the owner\'s cat stays on screen, as it is now');
   assert.match(visibleText(one(stage, 'qc-uses')), /^它要用 Claude Code 来思考。Claude Code 还没有登录，所以它现在按原样领不了。在终端里运行下面这行，登录好再点「重新检测」：claude auth login复制重新检测$/);
   const go = all(stage).find(n => has(n, 'qc-go'))!;
-  assert.equal(go.disabled, true);
+  assert.equal(go.getAttribute('aria-disabled'), 'true');
   assert.equal(p.doc.activeElement === button(stage, '自定义'), true);
   assert.equal(p.refreshed, 0, 'nothing was made: not an unsure creation');
   // Signed in again; the owner presses 重新检测 beside the login, and the cat can come home.
@@ -1819,7 +1837,10 @@ test('face_unavailable: the server\'s sentence, /start read again and the screen
   await settle();
   assert.equal(p.calls.at(-1)!.path, '/xbot-api/start?refresh=1');
   assert.equal(visibleText(one(stage, 'qc-uses-line')), '它用这台电脑上的 Claude Code 来思考');
-  assert.equal(go.disabled, false);
+  assert.equal(go.getAttribute('aria-disabled'), null);
+  assert.equal(shown(one(stage, 'qc-uses-more')), false, 'no login left to do');
+  assert.equal(shown(one(stage, 'qc-error')), false, 'the refusal no longer holds, so it is gone');
+  assert.equal(shown(one(stage, 'qc-ahead')), false);
   assert.equal(p.doc.activeElement === go, true, 'the button that went away hands focus on to what can be done now');
   assert.match(voice(stage).textContent, /它用这台电脑上的 Claude Code 来思考$/, 'said once: the owner asked');
   go.click();
@@ -1874,11 +1895,198 @@ test('the quieter faces and the tool line keep to the tokens: smaller and paler,
   const still = /@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?)\n\}/.exec(css)![1];
   assert.match(css, /\.qc-face\.away \.qc-portrait \{ transform: scale\(\.6\); opacity: \.44;/, 'further back and paler: told apart by size, not only colour');
   assert.match(css, /\.qc-face\.away\[aria-checked="true"\] \.qc-portrait::before \{ background: transparent; border: 1\.5px dashed var\(--x-faint\); \}/, 'chosen, it sits on an empty, outlined cushion');
-  assert.match(css, /\.qc-about\.mixed \.qc-uses-line \{ min-height: 40px; \}/);
+  assert.match(css, /\.qc-about\.mixed \.qc-tail \{ min-height: calc\(40px \+ 28px \+ var\(--x-s1\)\); \}/, 'room for a two-line tool line, left below 自定义');
+  assert.match(css, /\.qc-flow \.primary\[aria-disabled="true"\],[^{]*\{\s*background: var\(--fill\); color: var\(--muted\);/, 'drawn as the original disabled .primary');
   assert.match(css, /\.qc-uses-text \{ animation: fade 180ms ease-out; \}/);
   assert.match(still, /\.qc-uses-text, \.qc-ahead/);
   assert.match(css, /\.qc-mode\.ahead \{ background: var\(--x-fill-1\);/);
   const js = read('client/public/quick-create.js');
   assert.equal((js.match(/node\("select"/g) || []).length, 1);
   assert.match(js, /own\.append\(aboutF\.box, temperF\.box, tool\.element\);/, 'the select lives in 自定义');
+});
+
+// ---------------------------------------------------------------- review fixes of item 37 (2026-11-12)
+test('review: 自定义 turned on by the form is chosen only when the form is first presented; a later /start that makes a face usable never turns the owner\'s draft into a template', async () => {
+  // Only 梵花猫 is offered and Kimi is not here: the form opens in 自定义.
+  const only = (start: Any) => ({ ...start, faces: start.faces.filter((f: Any) => f.id === 'turkish-van') });
+  let refuse = true;
+  const p = page({ start: only(START.ready), route: (path, method) => {
+    if (path === '/xbot-api/bots' && method === 'POST' && refuse) { refuse = false; p.s.start = only(START.three); throw fail(422, 'Codex 现在用不了'); }
+    return undefined;
+  } });
+  const stage = await p.stage();
+  assert.equal(button(stage, '自定义').getAttribute('aria-pressed'), 'true');
+  type(control(stage, '它主要帮你做什么'), '帮我整理读书笔记');
+  type(control(stage, '它的性格'), '话不多');
+  // A refusal reads /start again, and now Kimi is here: 梵花猫 could come home as it is.
+  button(stage, '带它回家').click();
+  await settle();
+  assert.equal(p.calls.filter(c => c.path.startsWith('/xbot-api/start')).length, 2);
+  assert.equal(button(stage, '自定义').getAttribute('aria-pressed'), 'true', 'still 自定义');
+  assert.equal(control(stage, '它主要帮你做什么').value, '帮我整理读书笔记');
+  button(stage, '带它回家').click();
+  await settle();
+  assert.deepEqual(p.posts().map(c => c.body.simple), [
+    { face: 'turkish-van', custom: true, about: '帮我整理读书笔记', personality: '话不多', agent: 'codex' },
+    { face: 'turkish-van', custom: true, about: '帮我整理读书笔记', personality: '话不多', agent: 'codex' },
+  ], 'the owner\'s words go with the next try');
+  // Before the form is first presented, the mode still follows: blocked first, then 重新检测 with a usable face — the face's own cat.
+  const q = page({ start: START.none });
+  const blocked = await q.stage();
+  q.s.start = only(START.three);
+  button(blocked, '重新检测').click();
+  await settle();
+  assert.equal(button(blocked, '自定义').getAttribute('aria-pressed'), 'false');
+  assert.equal(visibleText(one(blocked, 'qc-uses-line')), '它用这台电脑上的 Kimi 来思考');
+});
+
+test('review: in an answer that names faces\' tools, a face whose tool is missing or unreadable is not known — not creatable as it is, said plainly, 自定义 remains', async () => {
+  const start = { ...START.three, faces: START.three.faces.map((f: Any) => (f.id === 'siamese' ? (({ tool: _t, ...rest }) => rest)(f) : f.id === 'dsh' ? { ...f, tool: { usable: true } } : f)) };
+  const p = page({ start });
+  const stage = await p.stage();
+  assert.deepEqual(awayFaces(stage), ['暹罗猫', '蓝灰短毛猫', '狸花猫', '孟加拉猫', '金渐层']);
+  assert.equal(face(stage, '暹罗猫').getAttribute('title'), '暹罗猫：没能读到它用什么思考');
+  face(stage, '暹罗猫').click();
+  assert.equal(visibleText(one(stage, 'qc-uses-line')), '没能读到它用什么思考，所以它现在按原样领不了。');
+  assert.equal(named(one(stage, 'qc-uses-line'), 'qc-uses-text')[0].children.filter(n => n.tagName === 'B').length, 0, 'no tool name to set apart');
+  assert.equal(shown(one(stage, 'qc-uses-more')), false, 'nothing to install or log in: nothing to re-detect');
+  const go = all(stage).find(n => has(n, 'qc-go'))!;
+  assert.equal(go.getAttribute('aria-disabled'), 'true');
+  control(stage, '名字').key('Enter');
+  await settle();
+  assert.equal(p.posts().length, 0, 'never sent as a template the server would refuse');
+  face(stage, '蓝灰短毛猫').click();
+  assert.equal(visibleText(one(stage, 'qc-uses-line')), '没能读到它用什么思考，所以它现在按原样领不了。', 'a malformed tool reads the same');
+  button(stage, '自定义').click();
+  go.click();
+  await settle();
+  assert.deepEqual(p.posts()[0].body.simple, { face: 'dsh', custom: true, agent: 'codex' });
+});
+
+test('review: a face whose tool is not installed offers 重新检测 too; the face and everything typed stay; missing → login → ready', async () => {
+  const p = page();
+  const stage = await p.stage();
+  // A tool the app cannot connect yet has nothing to re-detect: installing it would not change that.
+  face(stage, '暹罗猫').click();
+  assert.equal(shown(one(stage, 'qc-uses-more')), false);
+  face(stage, '梵花猫').click();
+  type(control(stage, '名字'), '小墨');
+  const uses = one(stage, 'qc-uses');
+  assert.equal(visibleText(uses), '它要用 Kimi 来思考。这台电脑上还没有装 Kimi，所以它现在按原样领不了。装好 Kimi 并登录，再点「重新检测」。重新检测');
+  // Nothing changed yet: said plainly, focus kept.
+  const again = button(uses, '重新检测');
+  again.focus();
+  again.click();
+  await settle();
+  assert.equal(p.calls.at(-1)!.path, '/xbot-api/start?refresh=1');
+  assert.equal(visibleText(one(stage, 'qc-uses-note')), '重新检测过了，还是没找到 Kimi。');
+  assert.equal(p.doc.activeElement === again, true);
+  // Installed, not logged in: the login help and its command; focus goes to the new 重新检测.
+  p.s.start = await summary(computer('configured', 'configured', 'login_required'));
+  again.click();
+  await settle();
+  assert.match(visibleText(one(stage, 'qc-uses')), /^它要用 Kimi 来思考。Kimi 还没有登录，所以它现在按原样领不了。在终端里运行下面这行，登录好再点「重新检测」：kimi login复制重新检测检测结果有变化。$/);
+  const next = button(one(stage, 'qc-uses'), '重新检测');
+  assert.equal(p.doc.activeElement === next, true, 'the button that was replaced hands focus to its successor');
+  // Logged in: the cat can come home, nothing typed was lost.
+  p.s.start = START.three;
+  next.click();
+  await settle();
+  assert.equal(visibleText(one(stage, 'qc-uses-line')), '它用这台电脑上的 Kimi 来思考');
+  assert.equal(shown(one(stage, 'qc-uses-more')), false);
+  assert.equal(chosen(stage), '梵花猫');
+  assert.equal(control(stage, '名字').value, '小墨');
+  const go = all(stage).find(n => has(n, 'qc-go'))!;
+  assert.equal(go.getAttribute('aria-disabled'), null);
+  assert.equal(p.doc.activeElement === go, true);
+  assert.match(voice(stage).textContent, /它用这台电脑上的 Kimi 来思考$/);
+  go.click();
+  await settle();
+  assert.deepEqual(p.posts()[0].body, { name: '小墨', simple: { face: 'turkish-van', rev: START.three.faces[3].rev }, idempotencyKey: p.posts()[0].body.idempotencyKey });
+});
+
+test('review: when face_unavailable leaves no usable tool at all, the form gives way to the blocked view and focus goes to its title — first run and dialog; picking another cat puts a refusal away', async () => {
+  for (const where of ['stage', 'dialog'] as const) {
+    let refuse = true;
+    const p = page({ cats: where === 'dialog' ? ['团子'] : [], route: (path, method) => {
+      if (path === '/xbot-api/bots' && method === 'POST' && refuse) { refuse = false; p.s.start = START.none; throw fail(422, 'Claude Code 还没有登录，登录后再试。', 'face_unavailable'); }
+      return undefined;
+    } });
+    let root: El;
+    if (where === 'stage') root = await p.stage();
+    else { p.Q.openCat({ opener: p.opener }); await settle(); root = one(p.layer()!, 'qc-card'); }
+    const name = control(root, '名字');
+    name.focus();
+    name.key('Enter');
+    await settle();
+    const need = one(root, 'qc-need');
+    assert.equal(shown(need), true, where);
+    assert.equal(shown(one(root, 'qc-fields')), false, where);
+    assert.equal(p.doc.activeElement.tagName, 'H3', where + ': focus is not left on the hidden name');
+    assert.equal(p.doc.activeElement.textContent, '还差一步：装好 Claude Code 或 Codex', where);
+    assert.equal(p.doc.activeElement.tabIndex, -1, 'a title to land on, not a stop for Tab');
+    assert.equal(visibleText(one(need, 'qc-note')), 'Claude Code 还没有登录，登录后再试。', where + ': what happened, said there');
+  }
+  // Still able to choose: the refusal stays while it holds, and goes once another cat is picked.
+  const signedOut = (await summary(computer('configured', 'login_required'))).faces;
+  const { e, route } = engine(START.ready.faces);
+  const q = page({ route });
+  const stage = await q.stage();
+  e.faces = signedOut;
+  button(stage, '带它回家').click();
+  await settle();
+  assert.equal(shown(one(stage, 'qc-error')), true);
+  face(stage, '布偶猫').key('ArrowRight');
+  assert.equal(shown(one(stage, 'qc-error')), false, 'about 布偶猫, not about 缅因猫');
+});
+
+test('review: the two 409s by code — name_taken marks the name; request_changed says the server\'s sentence without blaming the name and the next try is new; a 409 with neither code is said as it came', async () => {
+  const conflicts: Array<() => never> = [
+    () => { throw fail(409, '已经有一只叫这个名字的猫猫了', 'name_taken'); },
+    () => { throw fail(409, '这次创建和上一次的内容不一样，或者名字已被占用，请重新创建', 'request_changed'); },
+    () => { throw fail(409, '这个请求和别的请求冲突了'); },
+  ];
+  const { R } = page();
+  assert.deepEqual(plain(R.catError(fail(409, 'x', 'name_taken'), '宪宪')), { kind: 'name', text: '已经有一只叫「宪宪」的猫猫了，换个名字吧' });
+  assert.deepEqual(plain(R.catError(fail(409, '这次创建和上一次的内容不一样，或者名字已被占用，请重新创建', 'request_changed'), '宪宪')), { kind: 'changedRequest', text: '这次创建和上一次的内容不一样，或者名字已被占用，请重新创建。' });
+  assert.deepEqual(plain(R.catError(fail(409, '这个请求和别的请求冲突了'), '宪宪')), { kind: 'form', text: '这个请求和别的请求冲突了。' });
+  assert.equal(R.catError(fail(409, 'Bot conflict'), '宪宪').text, '没能建好，请稍后再试。', 'never the adapter\'s words');
+  for (const [i, conflict] of conflicts.entries()) {
+    let next: (() => never) | null = conflict;
+    const p = page({ route: (path, method) => { if (path === '/xbot-api/bots' && method === 'POST' && next) { const n = next; next = null; n(); } return undefined; } });
+    const stage = await p.stage();
+    const go = button(stage, '带它回家'), name = control(stage, '名字');
+    go.click();
+    await settle();
+    if (i === 0) {
+      assert.equal(name.getAttribute('aria-invalid'), 'true');
+      assert.equal(one(stage, 'qc-err').textContent, '已经有一只叫「宪宪」的猫猫了，换个名字吧');
+      assert.equal(shown(one(stage, 'qc-error')), false);
+      assert.equal(p.doc.activeElement === name, true);
+    } else {
+      assert.equal(name.getAttribute('aria-invalid'), null, 'not blamed on the name');
+      assert.equal(one(stage, 'qc-err').textContent, '');
+      assert.equal(visibleText(one(stage, 'qc-error')), i === 1 ? '这次创建和上一次的内容不一样，或者名字已被占用，请重新创建。' : '这个请求和别的请求冲突了。');
+      assert.equal(p.doc.activeElement === go, true);
+      assert.equal(p.refreshed, i === 1 ? 1 : 0, 'request_changed reads the list again (it may know the name now)');
+      go.click();
+      await settle();
+      const [first, second] = p.posts().map(c => c.body);
+      assert.deepEqual(second.simple, first.simple);
+      assert.notEqual(second.idempotencyKey, first.idempotencyKey, 'a refused request leaves no key behind');
+      assert.deepEqual(p.opened, ['宪宪']);
+    }
+  }
+});
+
+test('review: while some face is unusable the room for a two-line tool line sits below 自定义, inside the tail with the tool line', async () => {
+  const p = page({ cats: ['团子'] });
+  p.Q.openCat({ opener: p.opener });
+  await settle();
+  const card = one(p.layer()!, 'qc-card');
+  const tail = one(card, 'qc-tail');
+  assert.deepEqual(tail.children.map(n => n.className.split(' ')[0]), ['qc-uses', 'qc-fresh', 'qc-modeline'], 'the tool line, its note and 自定义, in that order');
+  assert.equal(one(card, 'qc-about').classList.contains('mixed'), true);
+  const css = read('client/public/quick-create.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.doesNotMatch(css, /\.qc-uses-line \{[^}]*min-height/, 'no blank line kept between the tool line and 自定义');
 });

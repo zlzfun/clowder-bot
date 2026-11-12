@@ -114,9 +114,12 @@
   // ---- which tool a face's cat thinks with ----
   // That is part of the cat (its template), not something picked beside it
   // (the owner, 2026-11-12). faces[].tool: {label, state, usable, id?,
-  // reason?, loginCommand?}. A face whose tool the server did not name (a
-  // server older than faces[].tool, or none at all) is made with the usual
-  // tool, as such servers did. null while nothing can be made.
+  // reason?, loginCommand?}. In an answer of that shape, a face whose tool is
+  // missing or cannot be read is "not known" (UNREAD): not creatable as it is,
+  // and said so plainly. Only an answer of the older shape — no face carries
+  // `tool` at all, or no faces — is made with the usual tool, as such servers
+  // did. null while nothing can be made.
+  const UNREAD = Object.freeze({ label: "", state: "unread", usable: false, id: "", reason: "没能读到它用什么思考", loginCommand: "" });
   function toolOf(face, s) {
     if (face && face.tool) return face.tool;
     if (!s || !s.ready) return null;
@@ -138,11 +141,22 @@
   function uses(tool) {
     if (!tool) return null;
     if (tool.usable) return { usable: true, label: tool.label, before: USES[0], after: USES[1], text: USES[0] + tool.label + USES[1] };
+    if (!tool.label) { const text = tool.reason + "，所以它现在按原样领不了。"; return { usable: false, label: "", before: text, after: "", text }; }
     const after = " 来思考。" + tool.reason + "，所以它现在按原样领不了。";
     return { usable: false, label: tool.label, before: "它要用 ", after, text: "它要用 " + tool.label + after };
   }
-  // A tool that needs a login: what to do, as item 28 says it for the blocked screen.
-  const loginHelp = (command) => (command ? "在终端里运行下面这行，登录好再点「重新检测」：" : "登录好再点「重新检测」。");
+  // What the owner can do about a tool that is not usable here, as item 28
+  // says it for the blocked screen, with 重新检测 beside it: log in, or
+  // install (and log in). A tool the app cannot connect yet has nothing to
+  // re-detect: installing it would not change that (null).
+  function toolHelp(tool) {
+    if (!tool || tool.usable) return null;
+    if (tool.state === "login") return { text: tool.loginCommand ? "在终端里运行下面这行，登录好再点「重新检测」：" : "登录好再点「重新检测」。", command: tool.loginCommand,
+      unchanged: "重新检测过了，还是没检测到登录。" };
+    if (tool.state === "missing") return { text: "装好 " + tool.label + " 并登录，再点「重新检测」。", command: "", unchanged: "重新检测过了，还是没找到 " + tool.label + "。" };
+    return null;
+  }
+  const loginHelp = (command) => toolHelp({ state: "login", loginCommand: command }).text;
   // The way forward from a cat that cannot come home as it is: 自定义 takes
   // only its looks, with a tool that is here (named when there is one).
   function forward(s) {
@@ -229,13 +243,16 @@
     const ready = raw.ready === true && !!chosen;
     // faces[]: {id, rev, name?, nickname?, role?, personality?, strengths?,
     // tool}; [] when the templates could not be read; null when the server
-    // sends no faces at all.
+    // sends no faces at all. When any face carries `tool`, the answer has
+    // that shape, and a face whose tool is missing or malformed is UNREAD;
+    // when none does, it is the older shape (no tool on any face).
+    const toolShaped = Array.isArray(raw.faces) && raw.faces.some((f) => f && typeof f === "object" && "tool" in f);
     const faces = !Array.isArray(raw.faces) ? null : raw.faces
       .filter((f) => f && typeof f.id === "string" && f.id)
       .map((f) => {
         const face = { id: f.id };
         for (const k of ["rev", "name", "nickname", "role", "personality", "strengths"]) if (typeof f[k] === "string" && trim(f[k])) face[k] = trim(f[k]);
-        const tool = faceTool(f.tool);
+        const tool = faceTool(f.tool) || (toolShaped ? UNREAD : null);
         if (tool) face.tool = tool;
         return face;
       });
@@ -334,10 +351,10 @@
 
   // ---- answers ----
   const MAX_MEMBERS = 10;
-  // A failed POST /xbot-api/bots: which part of the form answers it. A key is
-  // only reused for the identical body, so a 409 here is the name. No status
-  // or a 5xx is unsure: the cat may exist, and the same request again returns
-  // it rather than a second one.
+  // A failed POST /xbot-api/bots: which part of the form answers it. A 409 is
+  // the name only when the server says so (name_taken). No status or a 5xx is
+  // unsure: the cat may exist, and the same request again returns it rather
+  // than a second one.
   // Two refusals the server names by code, before it asks the engine for
   // anything (so neither is unsure, and neither is the name): face_changed —
   // the portrait changed since the screen read it, so the screen reads it
@@ -353,11 +370,15 @@
     const status = err && err.status, message = String((err && err.message) || ""), code = err && err.code;
     if (code === "face_changed") return { kind: "changed", text: FACE_CHANGED };
     if (code === "faces_unavailable") return { kind: "unavailable", text: "刚才没能读到猫猫的资料，这次没有建。" };
-    if (code === "face_unavailable" || code === "face_tool") {
-      const said = message.replace(/\s+/g, " ").trim();
-      return { kind: "face", text: plain(said) ? said + (/[。！？]$/u.test(said) ? "" : "。") : "刚才没能建好：" + (trim(tool) || "这个工具") + " 现在用不了。" };
-    }
-    if (status === 409) return { kind: "name", text: trim(name) ? "已经有一只叫「" + trim(name) + "」的猫猫了，换个名字吧" : "已经有一只叫这个名字的猫猫了，换个名字吧" };
+    const said = message.replace(/\s+/g, " ").trim(), sentence = plain(said) ? said + (/[。！？]$/u.test(said) ? "" : "。") : "";
+    if (code === "face_unavailable" || code === "face_tool") return { kind: "face", text: sentence || "刚才没能建好：" + (trim(tool) || "这个工具") + " 现在用不了。" };
+    // The two 409s, told apart by code: the name is taken (said on the name),
+    // or this key already stood for another request (the server's sentence,
+    // not blamed on the name; the next attempt is a new request). A 409 with
+    // neither code is said as the server said it, without guessing.
+    if (code === "name_taken") return { kind: "name", text: trim(name) ? "已经有一只叫「" + trim(name) + "」的猫猫了，换个名字吧" : "已经有一只叫这个名字的猫猫了，换个名字吧" };
+    if (code === "request_changed") return { kind: "changedRequest", text: sentence || "这次创建和上一次的内容不一样，没有建，请重新创建。" };
+    if (status === 409) return { kind: "form", text: sentence || "没能建好，请稍后再试。" };
     if (status === 422) return { kind: "blocked", text: "刚才没能建好：" + (trim(tool) || "这个工具") + " 现在用不了。" };
     if (!status || status >= 500) return { kind: "unsure", text: "没能确认猫猫建好没有。不改内容再点一次就好，不会多出一只。" };
     return { kind: "form", text: plain(message) ? message : "没能建好，请检查名字后再试。" };
@@ -383,7 +404,7 @@
   root.ClowderQuickCreateRules = Object.freeze({
     trim, nameProblem, groupNameProblem, groupName, freeName, suggestName, followsFace, NAME_INPUT_MAX, ABOUT_INPUT_MAX, aboutProblem,
     PERSONALITY_INPUT_MAX, personalityProblem, offer, usable, facesNeed, trait, clipLine, TRAIT_MAX, OWN_NOTE, FACE_CHANGED,
-    toolOf, faceUsable, firstUsable, uses, USES, loginHelp, forward, joinSaid,
+    toolOf, faceUsable, firstUsable, uses, USES, UNREAD, toolHelp, loginHelp, forward, joinSaid,
     start, choices, choiceOf, loginCommand, sameStart, need, TOOL_LINE, unconfirmed,
     catBody, groupBody, fingerprint, MAX_MEMBERS, catError, groupError, startError, createdNotice,
   });
