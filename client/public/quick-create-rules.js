@@ -75,18 +75,13 @@
   }
 
   // ---- faces ----
-  // The face that goes with a tool, as the adapter picks one when none is sent
-  // (Claude Code → 布偶猫, Codex → 缅因猫, Kimi → 梵花猫); otherwise the first.
-  const TOOL_FACE = Object.freeze({ claude: "ragdoll", codex: "maine-coon", kimi: "turkish-van" });
-  function defaultFace(toolId, faces) {
-    const list = faces || [];
-    const own = TOOL_FACE[toolId];
-    return own && list.includes(own) ? own : list[0] || null;
-  }
-  // A face's preset nickname (cat-avatars.js), made free among the taken names.
-  function suggestName(faceId, presets, taken) {
-    const preset = (presets || []).find((p) => p && p.id === faceId);
-    return preset ? freeName(preset.nickname, taken) : "";
+  // The name a face's cat comes with, made free among the taken names: the
+  // template's own nickname (faces[] in /start: 宪宪, 砚砚…), else the
+  // portrait library's (cat-avatars.js). `list` is the offered faces (or the
+  // presets): anything with an id and a nickname.
+  function suggestName(faceId, list, taken) {
+    const face = (list || []).find((p) => p && p.id === faceId);
+    return face && face.nickname ? freeName(face.nickname, taken) : "";
   }
   // The name box follows the chosen face until the owner types a name of their
   // own; emptied again, it follows once more.
@@ -101,7 +96,9 @@
   // read) every portrait is offered without words, and a cat of the owner's own
   // can still be made.
   // Each offered face keeps its `rev` (which version of the portrait the hint
-  // shows), sent back with a creation from that face.
+  // shows), sent back with a creation from that face, the name its cat comes
+  // with (`nickname`) and the tool it thinks with (`tool`, see toolOf; null
+  // when the server did not say).
   function offer(faces, presets) {
     const own = new Map((presets || []).filter((p) => p && p.id).map((p) => [p.id, p]));
     const out = [], seen = new Set();
@@ -109,10 +106,51 @@
       const p = face && own.get(face.id);
       if (!p || seen.has(p.id)) continue;
       seen.add(p.id);
-      out.push({ id: p.id, label: p.label, rev: face.rev || "", hint: trait(face) });
+      out.push({ id: p.id, label: p.label, rev: face.rev || "", hint: trait(face), nickname: face.nickname || p.nickname || "", tool: face.tool || null });
     }
-    return out.length ? out : [...own.values()].map((p) => ({ id: p.id, label: p.label, rev: "", hint: null }));
+    return out.length ? out : [...own.values()].map((p) => ({ id: p.id, label: p.label, rev: "", hint: null, nickname: p.nickname || "", tool: null }));
   }
+
+  // ---- which tool a face's cat thinks with ----
+  // That is part of the cat (its template), not something picked beside it
+  // (the owner, 2026-11-12). faces[].tool: {label, state, usable, id?,
+  // reason?, loginCommand?}. A face whose tool the server did not name (a
+  // server older than faces[].tool, or none at all) is made with the usual
+  // tool, as such servers did. null while nothing can be made.
+  function toolOf(face, s) {
+    if (face && face.tool) return face.tool;
+    if (!s || !s.ready) return null;
+    return { label: s.agent.label, state: s.agent.confirmed ? "ready" : "unknown", usable: true, id: s.agent.id, reason: "", loginCommand: loginCommand(s, s.agent.id) };
+  }
+  const faceUsable = (face, s) => { const t = toolOf(face, s); return !!(t && t.usable); };
+  // The face chosen for the owner: the first whose cat can be brought home as
+  // it is. null when none can (then only 自定义 makes a cat).
+  function firstUsable(offered, s) {
+    const face = (offered || []).find((f) => faceUsable(f, s));
+    return face ? face.id : null;
+  }
+  // What the hint says about the tool. One that is here: 「它用这台电脑上的
+  // Claude Code 来思考」. One that is not: what it needs and why that is not
+  // here, in the server's words (`reason`, one sentence without a stop), and
+  // that this cat cannot come home as it is. `before` + `label` + `after` is
+  // `text` (the label is set apart on screen).
+  const USES = Object.freeze(["它用这台电脑上的 ", " 来思考"]);
+  function uses(tool) {
+    if (!tool) return null;
+    if (tool.usable) return { usable: true, label: tool.label, before: USES[0], after: USES[1], text: USES[0] + tool.label + USES[1] };
+    const after = " 来思考。" + tool.reason + "，所以它现在按原样领不了。";
+    return { usable: false, label: tool.label, before: "它要用 ", after, text: "它要用 " + tool.label + after };
+  }
+  // A tool that needs a login: what to do, as item 28 says it for the blocked screen.
+  const loginHelp = (command) => (command ? "在终端里运行下面这行，登录好再点「重新检测」：" : "登录好再点「重新检测」。");
+  // The way forward from a cat that cannot come home as it is: 自定义 takes
+  // only its looks, with a tool that is here (named when there is one).
+  function forward(s) {
+    const list = choices(s);
+    return "只借它的长相，用这台电脑上的" + (list.length === 1 ? " " + list[0].label + " " : "工具") + "来思考";
+  }
+  // Sentences said as one, a stop between them unless one is already there.
+  const joinSaid = (parts) => parts.filter(Boolean).reduce((all, part) => (!all ? part : all + (/[。！？.!?…]$/u.test(all) ? "" : "。") + part), "");
   // Whether a cat can be made at all. The server needs a face's template even
   // for a custom cat (its colour), so when /start says it read none this
   // client can draw (faces is []), creation would only be refused: the
@@ -168,6 +206,19 @@
 
   // ---- GET /xbot-api/start ----
   const STATES = ["ready", "unknown", "login", "missing"];
+  // A face's tool, read defensively. `usable` is the server's word for
+  // "a cat can be made from this face as it is"; anything else is not usable
+  // and says why (`reason`, without its stop; a plain fallback when missing).
+  function faceTool(t) {
+    if (!t || typeof t !== "object") return null;
+    const label = trim(t.label);
+    if (!label) return null;
+    const usable = t.usable === true;
+    const state = usable ? (t.state === "ready" ? "ready" : "unknown")
+      : ["login", "missing", "unsupported"].includes(t.state) ? t.state : "unsupported";
+    const reason = usable ? "" : trim(t.reason).replace(/[。.\s]+$/u, "") || label + " 现在用不了";
+    return { label, state, usable, id: usable && typeof t.id === "string" ? trim(t.id) : "", reason, loginCommand: trim(t.loginCommand) };
+  }
   function start(raw) {
     raw = raw && typeof raw === "object" ? raw : {};
     const agents = (Array.isArray(raw.agents) ? raw.agents : [])
@@ -176,13 +227,16 @@
     const chosen = raw.agent && typeof raw.agent.id === "string" && raw.agent.id
       ? { id: raw.agent.id, label: trim(raw.agent.label) || raw.agent.id, confirmed: raw.agent.confirmed === true } : null;
     const ready = raw.ready === true && !!chosen;
-    // faces[]: {id, rev, name?, role?, personality?, strengths?}; [] when the
-    // templates could not be read; null when the server sends no faces at all.
+    // faces[]: {id, rev, name?, nickname?, role?, personality?, strengths?,
+    // tool}; [] when the templates could not be read; null when the server
+    // sends no faces at all.
     const faces = !Array.isArray(raw.faces) ? null : raw.faces
       .filter((f) => f && typeof f.id === "string" && f.id)
       .map((f) => {
         const face = { id: f.id };
-        for (const k of ["rev", "name", "role", "personality", "strengths"]) if (typeof f[k] === "string" && trim(f[k])) face[k] = trim(f[k]);
+        for (const k of ["rev", "name", "nickname", "role", "personality", "strengths"]) if (typeof f[k] === "string" && trim(f[k])) face[k] = trim(f[k]);
+        const tool = faceTool(f.tool);
+        if (tool) face.tool = tool;
         return face;
       });
     return {
@@ -192,9 +246,10 @@
       agents, faces,
     };
   }
-  // The tools a new cat may think with: the server's choice first, then every
-  // other one the adapter accepts now (logged in, or installed with a login it
-  // could not check). Tools that need a login or are missing are not offered.
+  // The tools a cat of the owner's own (自定义) may think with: the server's
+  // choice first, then every other one the adapter accepts now (logged in, or
+  // installed with a login it could not check). Tools that need a login or are
+  // missing are not offered. A face's own cat has its own tool (toolOf).
   function choices(s) {
     if (!s || !s.ready) return [];
     const out = [{ id: s.agent.id, label: s.agent.label, confirmed: s.agent.confirmed }];
@@ -206,10 +261,11 @@
   }
   const choiceOf = (s, id) => choices(s).find((c) => c.id === id) || null;
   const loginCommand = (s, id) => ((s && s.agents.find((a) => a.id === id)) || {}).loginCommand || "";
-  // Re-detecting changed nothing the owner could see (the tools, and which faces could be read).
+  // Re-detecting changed nothing the owner could see (the tools, which faces
+  // could be read, and what each face's tool is like here).
   function sameStart(a, b) {
     const sig = (s) => [s.ready, s.blocked, s.agent && s.agent.id, s.agent && s.agent.confirmed, ...s.agents.map((x) => x.id + ":" + x.state),
-      s.faces ? "faces:" + s.faces.map((f) => f.id).join(",") : "faces?"].join("|");
+      s.faces ? "faces:" + s.faces.map((f) => f.id + (f.tool ? ":" + f.tool.label + ":" + f.tool.state + ":" + f.tool.usable : "")).join(",") : "faces?"].join("|");
     return !!a && !!b && sig(a) === sig(b);
   }
   const joinOr = (labels) => (labels.length <= 1 ? labels[0] || "" : labels.slice(0, -1).join("、") + " 或 " + labels[labels.length - 1]);
@@ -236,7 +292,8 @@
       unchanged: "重新检测过了，还是没找到能用的。",
     };
   }
-  // 「它会用这台电脑上的 X 来思考」 goes around the tool's name.
+  // 自定义's tool row: 「它会用这台电脑上的 X 来思考」 goes around the tool's
+  // name (or its select).
   const TOOL_LINE = Object.freeze(["它会用这台电脑上的 ", " 来思考"]);
   // Installed, but its login could not be checked: say so, never "ready".
   function unconfirmed(label, command) {
@@ -244,13 +301,14 @@
   }
 
   // ---- request bodies ----
-  // The tool shown is always sent, so a retry is the same request. A face's
-  // own cat sends only the face: words of the owner's own would silently make
-  // it custom on the server, so they go only with `custom: true`, and then
-  // only what was written (empty is a plain helper). A face's own cat carries
-  // the `rev` of the portrait the owner was shown, so the server makes that
-  // cat or says it changed (face_changed); a custom cat takes only the looks
-  // and has no portrait to compare.
+  // A face's own cat sends only the face: its tool is part of it (the server
+  // binds the face's own and refuses another, face_tool), and words of the
+  // owner's own would silently make it custom on the server, so they go only
+  // with `custom: true`, and then only what was written (empty is a plain
+  // helper). A face's own cat carries the `rev` of the portrait the owner was
+  // shown, so the server makes that cat or says it changed (face_changed); a
+  // custom cat takes only the looks and has no portrait to compare. A custom
+  // cat always sends the tool shown, so a retry is the same request.
   function catBody({ name, face, rev, agent, custom, about, personality }) {
     const simple = {};
     if (face) simple.face = face;
@@ -260,8 +318,8 @@
       const what = trim(about), temper = trim(personality);
       if (what) simple.about = what;
       if (temper) simple.personality = temper;
+      if (agent) simple.agent = agent;
     }
-    if (agent) simple.agent = agent;
     return { name: trim(name), simple };
   }
   function groupBody(members, name) {
@@ -285,11 +343,20 @@
   // the portrait changed since the screen read it, so the screen reads it
   // again and the owner has another look; faces_unavailable — the cats'
   // details could not be read, so nothing was made.
+  // Two more, also before anything is made: face_unavailable — this face's
+  // tool cannot be used here (the screen may have shown it as it was before),
+  // and face_tool — another tool was sent for a face's own cat. Both are said
+  // in the server's own sentence (it says what would help), and the screen
+  // reads /start again.
   const FACE_CHANGED = "这只猫猫的介绍刚刚更新了，再看一眼，合适就再点一次。";
   function catError(err, name, tool) {
     const status = err && err.status, message = String((err && err.message) || ""), code = err && err.code;
     if (code === "face_changed") return { kind: "changed", text: FACE_CHANGED };
     if (code === "faces_unavailable") return { kind: "unavailable", text: "刚才没能读到猫猫的资料，这次没有建。" };
+    if (code === "face_unavailable" || code === "face_tool") {
+      const said = message.replace(/\s+/g, " ").trim();
+      return { kind: "face", text: plain(said) ? said + (/[。！？]$/u.test(said) ? "" : "。") : "刚才没能建好：" + (trim(tool) || "这个工具") + " 现在用不了。" };
+    }
     if (status === 409) return { kind: "name", text: trim(name) ? "已经有一只叫「" + trim(name) + "」的猫猫了，换个名字吧" : "已经有一只叫这个名字的猫猫了，换个名字吧" };
     if (status === 422) return { kind: "blocked", text: "刚才没能建好：" + (trim(tool) || "这个工具") + " 现在用不了。" };
     if (!status || status >= 500) return { kind: "unsure", text: "没能确认猫猫建好没有。不改内容再点一次就好，不会多出一只。" };
@@ -314,8 +381,9 @@
   const startError = (err) => (plain(err && err.message) ? String(err.message) : "没能读取这台电脑的情况");
 
   root.ClowderQuickCreateRules = Object.freeze({
-    trim, nameProblem, groupNameProblem, groupName, freeName, defaultFace, suggestName, followsFace, NAME_INPUT_MAX, ABOUT_INPUT_MAX, aboutProblem,
+    trim, nameProblem, groupNameProblem, groupName, freeName, suggestName, followsFace, NAME_INPUT_MAX, ABOUT_INPUT_MAX, aboutProblem,
     PERSONALITY_INPUT_MAX, personalityProblem, offer, usable, facesNeed, trait, clipLine, TRAIT_MAX, OWN_NOTE, FACE_CHANGED,
+    toolOf, faceUsable, firstUsable, uses, USES, loginHelp, forward, joinSaid,
     start, choices, choiceOf, loginCommand, sameStart, need, TOOL_LINE, unconfirmed,
     catBody, groupBody, fingerprint, MAX_MEMBERS, catError, groupError, startError, createdNotice,
   });
