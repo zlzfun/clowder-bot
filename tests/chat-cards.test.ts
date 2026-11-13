@@ -707,9 +707,15 @@ test('a multiple choice toggles in pick order up to max and sends once; a confir
   const box = () => p.row('m-pick').querySelector('.ask')!;
   const opt = (label: string) => all(box()).find(e => e.tagName === 'BUTTON' && e.textContent.endsWith(label))!;
   assert.equal(button(box(), '确认选择').getAttribute('aria-disabled'), 'true');
+  // Item 46: the limit is told to a screen reader until it is reached, then shown, when the rest turn unavailable.
+  const limit = () => box().querySelector('.approval-timer')!;
+  assert.equal(limit().textContent, '最多选 2 项');
+  assert.ok(limit().classList.contains('visually-hidden'), 'nothing picked: not on screen');
   opt('书').click();
+  assert.ok(limit().classList.contains('visually-hidden'), 'one of two: still not on screen (确认选择（1） counts)');
   opt('水').click();
   assert.equal(opt('伞').getAttribute('aria-disabled'), 'true', 'max reached');
+  assert.ok(!limit().classList.contains('visually-hidden'), 'the limit reached: shown, the reason the third is unavailable');
   assert.equal(opt('书').getAttribute('aria-pressed'), 'true');
   button(box(), '确认选择（2）').click();
   assert.equal(p.sends[0].text, '我选了：书, 水（要带的）');

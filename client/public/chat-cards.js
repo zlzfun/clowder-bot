@@ -592,7 +592,10 @@
       card.append(list);
       if (multiple) {
         const row = node("div", "approval-actions ck-confirm");
-        if (b.max) row.append(node("span", "approval-timer", "最多选 " + b.max + " 项"));
+        // The limit is said on screen once it is reached, when the other
+        // options turn unavailable and need a reason; before that it is for a
+        // screen reader only, and 确认选择（n） counts the picks (item 46).
+        if (b.max) row.append(node("span", "approval-timer" + (v.full ? "" : " visually-hidden"), "最多选 " + b.max + " 项"));
         const n = v.picks.length;
         const go = button("primary", null, () => choose(key, fact, p.picks.slice()), "submit");
         if (v.busy) { go.append(icon("spinner", "approval-spinner"), document.createTextNode("正在发送…")); go.setAttribute("aria-busy", "true"); }

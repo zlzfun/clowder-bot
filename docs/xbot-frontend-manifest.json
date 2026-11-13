@@ -846,8 +846,8 @@
     {
       "target": "client/public/chat-cards.js",
       "description": "window.ClowderCards: request cards drawn at their message and answered in place (POST <scope>/approvals/:id), a cat's card / checklist / choices / diff blocks (picks sent through the normal send path, then POST …/blocks/:id/answer), the ending line with 详情 and 再发一次, receipt and refusal notices; interactive cards fill stable frames after ClowderLive.commit so unchanged rows keep their element Item 38 review: 再发一次 sends each of those as the ordinary message it was, one after the server took the one before, and says how many went if one was not taken.",
-      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 确认与提醒 (docs/xbot-frontend.md item 32; docs/chat-experience-api.md 「等你确认的事」「卡片、清单与选项」, docs/chat-live-api.md)",
-      "sha256": "4a7e10ac2cf3992d83fa19816c3f8185b1020d51b923799028fe6b9c5cc6448a"
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 确认与提醒 (docs/xbot-frontend.md item 32; docs/chat-experience-api.md 「等你确认的事」「卡片、清单与选项」, docs/chat-live-api.md); the layout explains, not captions, on every other screen (docs/xbot-frontend.md item 46) by local Claude Code (claude-opus-5-5) on 2026-11-13",
+      "sha256": "05d7a265c13d428ef950c00fc39b14b8705c19e04f458dae91cf38b2b9bfe139"
     },
     {
       "target": "client/public/chat-cards.css",
