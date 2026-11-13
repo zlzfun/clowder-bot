@@ -88,8 +88,8 @@
     }
     return svg;
   }
-  // 自定义's picture: a cat's outline still to be filled in (dashed, no face:
-  // it is nobody yet), with a small plus. Not a clay cat pretending.
+  // 自定义's picture: a cat's outline still to be filled in (no face: it is
+  // nobody yet), with a small plus. Not a clay cat pretending.
   const ownPicture = () => draw("0 0 48 48", "qc-own-pic", [
     ["path", { class: "qc-own-head", d: "M9 25C9 19 10 14 11.5 9.5L18.5 15C21.5 14 26.5 14 29.5 15L36.5 9.5C38 14 39 19 39 25C39 33.5 32.5 39.5 24 39.5S9 33.5 9 25Z" }],
     ["circle", { class: "qc-own-dot", cx: "36.5", cy: "36.5", r: "7" }],
@@ -308,11 +308,13 @@
     };
   }
 
-  // A native login command, copyable (the terminal is where it runs).
+  // A native login command, copyable. The chip itself says where it runs: a
+  // terminal's prompt mark before the command (no sentence on screen; the
+  // card's and the blocked screen's words for a screen reader say it too).
   function commandChip(command, label) {
     const chip = node("span", "qc-cmd");
     if (label) chip.append(node("span", "qc-cmd-for", label));
-    chip.append(node("code", "", command));
+    chip.append(hooks().icon("terminal"), node("code", "", command));
     const copy = button("qc-copy", "复制");
     copy.setAttribute("aria-label", "复制 " + command);
     let timer = 0;
@@ -506,34 +508,38 @@
     // A labelled text box (the original .field) with its own message line: the
     // name under the card, and the two optional lines of 自定义. Their place
     // and placeholder say what they are, so the label is for a screen reader
-    // only (quiet).
-    function field(label, { max, placeholder = "", quiet = false }) {
+    // only (quiet). Which must be filled is told to a screen reader too, never
+    // shown: the name is aria-required; an optional line is described as such.
+    function field(label, { max, placeholder = "", quiet = false, required = false, optional = "" }) {
       const box = node("div", "field qc-field");
       const lab = node("label", quiet ? "qc-sr" : "", label), input = node("input", ""), err = node("p", "qc-err");
       input.type = "text"; input.maxLength = max; input.autocomplete = "off";
       if (placeholder) input.placeholder = placeholder;
       input.id = uid("field"); lab.htmlFor = input.id;
       err.id = uid("err"); err.setAttribute("role", "alert");
-      input.setAttribute("aria-describedby", err.id);
+      if (required) input.setAttribute("aria-required", "true");
+      const note = optional ? node("span", "qc-sr", optional) : null;
+      if (note) note.id = uid("opt");
+      input.setAttribute("aria-describedby", note ? note.id + " " + err.id : err.id);
       const mark = (text) => {
         err.textContent = text || "";
         if (text) input.setAttribute("aria-invalid", "true"); else input.removeAttribute("aria-invalid");
       };
       input.addEventListener("input", () => { mark(""); showError(""); });
-      box.append(lab, input, err);
+      box.append(lab, input, ...(note ? [note] : []), err);
       return { box, input, mark };
     }
     // The real limit (64 characters) is the rules'; the box only stops a runaway paste.
     // A cat of the owner's own does not borrow a template's name: its box starts empty, this placeholder asking for one.
-    const nameF = field("名字", { max: R.NAME_INPUT_MAX, placeholder: R.NAME_PLACEHOLDER, quiet: true }), nameIn = nameF.input;
+    const nameF = field("名字", { max: R.NAME_INPUT_MAX, placeholder: R.NAME_PLACEHOLDER, quiet: true, required: true }), nameIn = nameF.input;
     nameIn.spellcheck = false;
     // The owner's own name, from the moment they write one, until they empty the box.
     nameIn.addEventListener("input", () => { typed = !!R.trim(nameIn.value); });
     // 自定义: what it is for (simple.about) and what it is like
     // (simple.personality), both optional: the question each answers is its
     // placeholder; and which tool it thinks with.
-    const aboutF = field(R.ABOUT_ASK, { max: R.ABOUT_INPUT_MAX, placeholder: R.ABOUT_ASK, quiet: true });
-    const temperF = field(R.PERSONALITY_ASK, { max: R.PERSONALITY_INPUT_MAX, placeholder: R.PERSONALITY_ASK, quiet: true });
+    const aboutF = field(R.ABOUT_ASK, { max: R.ABOUT_INPUT_MAX, placeholder: R.ABOUT_ASK, quiet: true, optional: R.OPTIONAL_SAID });
+    const temperF = field(R.PERSONALITY_ASK, { max: R.PERSONALITY_INPUT_MAX, placeholder: R.PERSONALITY_ASK, quiet: true, optional: R.OPTIONAL_SAID });
     const tool = toolLine((id) => {
       agent = id;
       toolPicked = true;
@@ -842,6 +848,9 @@
     // (after face_changed: the portrait the owner saw is out of date).
     function apply(next, how) {
       const before = s, wasReady = !fields.hidden && !!(before && before.ready), wasStuck = wasReady && stuck(before);
+      // What the card showed of the chosen cat's tool (its name, state, whether it can come home, its command):
+      // 重新检测 is answered by whether that changed, not by whatever else on the computer did.
+      const toolBefore = wasReady && !custom && chosenFace() ? R.toolOf(chosenFace(), before) : undefined;
       s = next;
       offerFaces(R.offer(next.faces, presets()));
       // Blocked: no usable tool, or (just as final) no cat's details to make one from.
@@ -892,10 +901,12 @@
         say(R.FACE_CHANGED + (custom ? "" : spoken()));
         go.focus();
       } else if (how === "refresh" && wasReady) {
-        // 重新检测 beside a login: said plainly when nothing changed (on screen too: nothing else moved); a change
-        // shows itself on the card (the mark, the command), so only a screen reader is told; a cat that can come
-        // home now is said once.
-        const help = R.toolHelp(R.toolOf(chosenFace(), next)), same = R.sameStart(before, next);
+        // 重新检测 beside a login or an install: when nothing the owner can see of the chosen cat's tool changed,
+        // that is said, on screen too (even if something else on the computer changed); a change shows itself on
+        // the card (the mark, the command, the group), so only a screen reader is told; a cat that can come home
+        // now is said once.
+        const toolNow = R.toolOf(chosenFace(), next), help = R.toolHelp(toolNow);
+        const same = toolBefore !== undefined ? R.sameTool(toolBefore, toolNow) : R.sameStart(before, next);
         checkNote.textContent = same ? (help ? help.unchanged : "重新检测过了，没有变化。") : "检测结果有变化。";
         checkNote.classList.toggle("qc-sr", !same);
         // The cat can come home now: a refusal about its tool no longer holds, and the new state is said once.
@@ -907,6 +918,7 @@
     function paintNeed(next, said) {
       const copy = needOf(next), refocus = needBox.contains(document.activeElement);
       const cmds = node("div", "qc-cmds");
+      if (copy.run) cmds.append(node("span", "qc-sr", copy.run));
       for (const c of copy.commands) cmds.append(commandChip(c.command, copy.commands.length > 1 ? c.label : ""));
       cmds.hidden = !copy.commands.length;
       const label = node("span", "", "重新检测"), again = button("secondary qc-again");
@@ -1388,14 +1400,18 @@
         chips.append(chip);
         return cb;
       });
-      // 群名: once two cats are picked, the name the group gets unless one is typed stands in the field.
+      // 群名: once two cats are picked, the name the group gets unless one is typed stands in the field. That it
+      // may stay empty, and what an unnamed group is called, is its description (for a screen reader; not shown).
       const nameBox = node("div", "field qc-field"), lab = node("label", ""), nameIn = node("input", ""), nameErr = node("p", "qc-err");
+      const nameNote = node("span", "qc-sr", R.GROUP_NAME_SAID);
       lab.append("群名");
       nameIn.type = "text"; nameIn.maxLength = R.NAME_INPUT_MAX; nameIn.autocomplete = "off";
       nameIn.id = uid("group-name"); lab.htmlFor = nameIn.id;
+      nameNote.id = uid("opt"); nameErr.id = uid("err");
+      nameIn.setAttribute("aria-describedby", nameNote.id + " " + nameErr.id);
       nameErr.setAttribute("role", "alert");
       nameIn.addEventListener("input", () => { nameErr.textContent = ""; nameIn.removeAttribute("aria-invalid"); showError(""); });
-      nameBox.append(lab, nameIn, nameErr);
+      nameBox.append(lab, nameIn, nameNote, nameErr);
       const error = node("p", "qc-error");
       error.setAttribute("role", "alert");
       error.hidden = true;

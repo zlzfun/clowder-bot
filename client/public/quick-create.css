@@ -281,12 +281,14 @@
   -webkit-mask: var(--qc-chev) center / 10px no-repeat; mask: var(--qc-chev) center / 10px no-repeat;
 }
 
-/* A native login command, copyable. */
+/* A native login command, copyable. A terminal's prompt mark before it says
+   where it runs (item 45: the chip says it, not a sentence). */
 .qc-cmds { display: flex; flex-direction: column; align-items: flex-start; gap: var(--x-s2); }
 .qc-cmd {
   display: inline-flex; align-items: center; gap: var(--x-s3); max-width: 100%;
-  padding: 4px 4px 4px 12px; border-radius: var(--x-r-sm); background: var(--x-card);
+  padding: 4px 4px 4px 10px; border-radius: var(--x-r-sm); background: var(--x-card);
 }
+.qc-cmd > .icon { flex: none; width: 15px; height: 15px; margin-right: -3px; color: var(--x-muted); }
 .qc-cmd-for { flex: none; font-size: var(--x-fs-sm); color: var(--x-muted); }
 .qc-cmd code {
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

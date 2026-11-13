@@ -242,6 +242,11 @@
   // (and its name), with nothing beside it.
   const ABOUT_ASK = "它主要帮你做什么";
   const PERSONALITY_ASK = "它的性格";
+  // Which boxes may stay empty, told to a screen reader only (a description;
+  // the name, which must be filled, is aria-required). On screen an empty
+  // line costs nothing, and the group name's grey text is the real default.
+  const OPTIONAL_SAID = "可不填";
+  const GROUP_NAME_SAID = "可不填，不填就用成员的名字";
 
   // ---- GET /xbot-api/start ----
   const STATES = ["ready", "unknown", "login", "missing"];
@@ -303,6 +308,12 @@
   }
   const choiceOf = (s, id) => choices(s).find((c) => c.id === id) || null;
   const loginCommand = (s, id) => ((s && s.agents.find((a) => a.id === id)) || {}).loginCommand || "";
+  // Whether a cat's card would show its tool the same: its name, its state,
+  // whether it can come home (which group its tile is in) and its command.
+  const sameTool = (a, b) => {
+    const sig = (t) => (t ? [t.label, t.state, !!t.usable, t.loginCommand || ""].join("|") : "");
+    return sig(a) === sig(b);
+  };
   // Re-detecting changed nothing the owner could see (the tools, which faces
   // could be read, and what each face's tool is like here).
   function sameStart(a, b) {
@@ -313,7 +324,8 @@
   const joinOr = (labels) => (labels.length <= 1 ? labels[0] || "" : labels.slice(0, -1).join("、") + " 或 " + labels[labels.length - 1]);
 
   // What stands in the way, in everyday words, with the native login commands
-  // (重新检测 is the button under it: the words do not point at it).
+  // (重新检测 is the button under it, and each command chip carries a
+  // terminal's mark: the words point at neither).
   function need(s) {
     const tools = s && s.blocked === "login_required" ? s.agents.filter((a) => a.state === "login") : [];
     if (tools.length) {
@@ -321,9 +333,10 @@
       return {
         kind: "login",
         title: "还差一步：登录 " + names,
-        body: "猫猫要借这台电脑上的 " + names + " 来思考，可" + (tools.length > 1 ? "它们都" : "它") + "还没登录。"
-          + (tools.some((a) => a.loginCommand) ? "在终端里运行" + (tools.length > 1 ? "其中一行" : "下面这行") + "：" : ""),
+        body: "猫猫要借这台电脑上的 " + names + " 来思考，可" + (tools.length > 1 ? "它们都" : "它") + "还没登录。",
         commands: tools.filter((a) => a.loginCommand).map((a) => ({ label: a.label, command: a.loginCommand })),
+        // Said before the commands (a screen reader); on screen each chip's terminal mark says it.
+        run: tools.some((a) => a.loginCommand) ? "在终端里运行" + (tools.length > 1 ? "其中一行" : "下面这行") + "：" : "",
         unchanged: "重新检测过了，还是没检测到登录。",
       };
     }
@@ -430,7 +443,8 @@
   root.ClowderQuickCreateRules = Object.freeze({
     trim, nameProblem, groupNameProblem, groupName, freeName, suggestName, NAME_INPUT_MAX, ABOUT_INPUT_MAX, aboutProblem,
     PERSONALITY_INPUT_MAX, personalityProblem, offer, usable, facesNeed, trait, clipLine, TRAIT_MAX, OWN_NOTE, NAME_PLACEHOLDER, ABOUT_ASK, PERSONALITY_ASK, FACE_CHANGED,
-    toolOf, faceUsable, firstUsable, uses, USES, UNREAD, why, tag, TAGS, toolHelp, loginHelp, BORROW, BORROW_SAID, forward, joinSaid,
+    toolOf, faceUsable, firstUsable, uses, USES, UNREAD, why, tag, TAGS, toolHelp, loginHelp, BORROW, BORROW_SAID, forward, joinSaid, sameTool,
+    OPTIONAL_SAID, GROUP_NAME_SAID,
     start, choices, choiceOf, loginCommand, sameStart, need, TOOL_LINE, unconfirmed,
     catBody, groupBody, fingerprint, MAX_MEMBERS, catError, groupError, startError, createdNotice,
   });

@@ -361,8 +361,12 @@ test('which tool a face\'s cat thinks with is read from faces[].tool as the serv
   assert.equal(R.loginHelp(''), '登录后再重新检测');
   // Agent is what these programs are called since 2026-11-12 (docs/xbot-frontend.md item 42); the engine's words are not.
   for (const words of [R.uses(maine).text, R.forward(R.start(START.ready)), R.loginHelp(''), R.why(maine), ...Object.values(R.TAGS) as string[], R.BORROW_SAID, R.OWN_NOTE, R.ABOUT_ASK, R.PERSONALITY_ASK, R.NAME_PLACEHOLDER]) assert.doesNotMatch(words, /Bot|模型|模板/);
-  // The words the owner found too machine-made (2026-11-13) are gone from the rules (item 45).
-  for (const file of ['client/public/quick-create-rules.js', 'client/public/quick-create.js']) assert.doesNotMatch(readFileSync(new URL('../' + file, import.meta.url), 'utf8'), /现在就能领|按原样领不了|接不上|只借它的长相|你自己的猫猫|可不填|比如：/, file);
+  // The words the owner found too machine-made (2026-11-13) are gone from the rules (item 45). 可不填 is only ever said:
+  // the two descriptions a screen reader hears on the optional boxes (review r14), never shown.
+  for (const file of ['client/public/quick-create-rules.js', 'client/public/quick-create.js']) assert.doesNotMatch(readFileSync(new URL('../' + file, import.meta.url), 'utf8'), /现在就能领|按原样领不了|接不上|只借它的长相|你自己的猫猫|比如：/, file);
+  assert.deepEqual([R.OPTIONAL_SAID, R.GROUP_NAME_SAID], ['可不填', '可不填，不填就用成员的名字']);
+  assert.equal((readFileSync(new URL('../client/public/quick-create-rules.js', import.meta.url), 'utf8').match(/可不填/g) || []).length, 2, 'the two constants');
+  assert.equal((readFileSync(new URL('../client/public/quick-create.js', import.meta.url), 'utf8').match(/可不填/g) || []).length, 0);
   // 重新检测 notices a face's tool changing, even when the tools the app can connect did not.
   const loggedOut = { ...START.ready, faces: START.ready.faces.map((f: Any) => (f.id === 'ragdoll' ? { ...f, tool: { label: 'Claude Code', state: 'login', usable: false, reason: 'Claude Code 还没有登录' } } : f)) };
   assert.equal(R.sameStart(R.start(START.ready), R.start(plain(START.ready))), true);
@@ -389,7 +393,10 @@ test('/start is read as it is: only usable tools are offered, an unchecked login
   assert.deepEqual(plain(none.commands), []);
   for (const copy of [login, both, none]) assert.doesNotMatch(JSON.stringify(plain(copy)), /Agent|Bot|模型/);
   // Why and what to do, without pointing at 重新检测: the button is right under the words (item 45).
-  assert.equal(login.body, '猫猫要借这台电脑上的 Codex 来思考，可它还没登录。在终端里运行下面这行：');
+  assert.equal(login.body, '猫猫要借这台电脑上的 Codex 来思考，可它还没登录。');
+  assert.equal(login.run, '在终端里运行下面这行：', 'said before the commands; on screen each chip\'s terminal mark says it');
+  assert.equal(both.run, '在终端里运行其中一行：');
+  assert.equal(none.run ?? '', '', 'nothing to run');
   assert.equal(none.body, '猫猫要借这台电脑上的 Claude Code 或 Codex 来思考，装好其中一个并登录。');
   for (const copy of [login, both, none]) assert.doesNotMatch(copy.body, /重新检测/);
   assert.equal(R.sameStart(R.start(START.login), R.start(plain(START.login))), true);
@@ -2758,4 +2765,135 @@ test('item 45: everything seen on the 新建 surface — the cats\' names, the c
   // 群聊: the cats as chips, what 创建 still needs, the name's box.
   tabOf(card, '群聊').click();
   assert.equal(seenText(card), '新建猫猫群聊' + '团子栗子' + '至少选 2 只' + '群名' + '取消创建');
+});
+
+// ---------------------------------------------------------------- review of item 45 (2026-11-13)
+// A command chip says where it runs by its look: a terminal's mark right before the command.
+const terminalMarked = (chip: El) => {
+  const at = chip.children.findIndex(n => n.tagName === 'CODE');
+  return at > 0 && chip.children[at - 1].dataset.icon === 'terminal';
+};
+
+test('review r14: every command chip carries a terminal\'s mark — a login on a cat\'s card, an unconfirmed login on a card and in 自定义, the blocked screen with one command or two — and the sentence stays for a screen reader only', async () => {
+  // A cat whose Agent needs a login.
+  const p = page({ start: START.codexLogin });
+  const stage = await p.stage();
+  face(stage, '缅因猫').click();
+  const chips = named(one(stage, 'qc-uses-more'), 'qc-cmd');
+  assert.equal(chips.length, 1);
+  assert.equal(terminalMarked(chips[0]), true, 'a login on the card');
+  assert.match(visibleText(one(stage, 'qc-uses-more')), /^在终端里运行这行命令登录，再重新检测codex login/, 'said');
+  assert.equal(seenText(one(stage, 'qc-uses-more')), 'codex login复制重新检测', 'not shown');
+  // A login that could not be checked: on the cat's card, and in 自定义's Agent.
+  const q = page({ start: START.unknown });
+  const unsure = await q.stage();
+  assert.equal(named(one(unsure, 'qc-uses-more'), 'qc-cmd').every(terminalMarked), true, 'an unconfirmed login on the card');
+  ownTile(unsure).click();
+  const ownChips = named(one(unsure, 'qc-tool-note'), 'qc-cmd');
+  assert.equal(ownChips.length, 1);
+  assert.equal(terminalMarked(ownChips[0]), true, 'an unconfirmed login in 自定义');
+  // The blocked screen: its sentence no longer says 在终端里运行 on screen; the chips do, and a screen reader still hears it.
+  for (const [start, commands, said] of [
+    [START.login, 1, '在终端里运行下面这行：'],
+    [{ ...START.login, agents: [tool('codex', 'Codex', 'login', 'codex login'), tool('claude', 'Claude Code', 'login', 'claude auth login')] }, 2, '在终端里运行其中一行：'],
+  ] as const) {
+    const r = page({ start });
+    const blocked = await r.stage();
+    const need = one(blocked, 'qc-need');
+    const cmds = named(need, 'qc-cmd');
+    assert.equal(cmds.length, commands);
+    assert.equal(cmds.every(terminalMarked), true, commands + ' command(s) on the blocked screen');
+    assert.ok(visibleText(need).includes(said), 'said before the commands');
+    assert.equal(seenText(need).includes('在终端'), false, 'not shown: the mark says it');
+  }
+  // In the dialog's blocked view too (the same chip).
+  const d = page({ cats: ['团子'], start: START.login });
+  d.Q.openCat({ opener: d.opener });
+  await settle();
+  assert.equal(named(one(d.layer()!, 'qc-card'), 'qc-cmd').every(terminalMarked), true);
+  assert.ok(named(one(d.layer()!, 'qc-card'), 'qc-cmd').length > 0);
+  assert.match(read('client/public/quick-create.js'), /chip\.append\(hooks\(\)\.icon\("terminal"\), node\("code", "", command\)\);/, 'one chip, one mark, wherever a command is shown');
+  assert.match(read('client/public/quick-create.css'), /\.qc-cmd > \.icon \{ flex: none; width: 15px; height: 15px;[^}]*color: var\(--x-muted\); \}/, 'drawn quietly, as a prompt before the command');
+});
+
+test('review r14: which boxes must be filled is told to a screen reader, never shown — the name is aria-required, 自定义\'s two lines are described as optional (also when the form presents 自定义 by itself), the group name as optional with what an unnamed group is called', async () => {
+  const describedBy = (root: El, input: El) => (input.getAttribute('aria-describedby') ?? '').split(' ').filter(Boolean).map(id => all(root).find(n => n.id === id)!);
+  const optional = (root: El, input: El) => describedBy(root, input).filter(n => has(n, 'qc-sr')).map(n => n.textContent).join('');
+  // 自定义 chosen by the owner, on the first screen.
+  const p = page();
+  const stage = await p.stage();
+  assert.equal(control(stage, '名字').getAttribute('aria-required'), 'true');
+  ownTile(stage).click();
+  const check = (root: El) => {
+    const name = control(root, '名字'), about = control(root, '它主要帮你做什么'), temper = control(root, '它的性格');
+    assert.equal(name.getAttribute('aria-required'), 'true', 'the name must be filled');
+    assert.equal(optional(root, name), '', 'and is not described as optional');
+    for (const input of [about, temper]) {
+      assert.equal(input.getAttribute('aria-required'), null);
+      assert.equal(optional(root, input), '可不填', 'described as optional');
+      assert.equal(describedBy(root, input).some(n => has(n, 'qc-err')), true, 'its message line still describes it');
+    }
+    assert.equal(seenText(root).includes('可不填'), false, 'nothing of it on screen');
+  };
+  check(stage);
+  // 自定义 presented by the form itself (no cat can come home as it is): the polite line about 自定义 never ran, the
+  // descriptions are there all the same.
+  const q = page({ start: { ...START.unknown, faces: START.unknown.faces.filter((f: Any) => f.id !== 'maine-coon') } });
+  const auto = await q.stage();
+  assert.equal(chosen(auto), '自定义');
+  assert.equal(voice(auto).textContent, '', 'nothing was announced');
+  check(auto);
+  // The dialog: the same.
+  const d = page({ cats: ['团子', '栗子'] });
+  d.Q.openCat({ opener: d.opener });
+  await settle();
+  const card = one(d.layer()!, 'qc-card');
+  ownTile(card).click();
+  check(card);
+  // 群聊: the group name may stay empty, and an unnamed group takes its members' names — said, not shown.
+  tabOf(card, '群聊').click();
+  const group = control(card, '群名');
+  assert.equal(group.getAttribute('aria-required'), null);
+  assert.equal(optional(card, group), '可不填，不填就用成员的名字');
+  assert.equal(describedBy(card, group).some(n => has(n, 'qc-err')), true);
+  assert.equal(seenText(card).includes('可不填'), false);
+  // Its message line is still the one that speaks up.
+  const boxes = all(card).filter(n => n.tagName === 'INPUT' && n.type === 'checkbox');
+  for (const b of boxes) { b.checked = true; b.dispatch('change'); }
+  type(group, '读书<会>');
+  card.dispatch('submit');
+  await settle();
+  assert.equal(describedBy(card, group).find(n => has(n, 'qc-err'))!.textContent, '群名里不能有 < > 这类符号');
+});
+
+test('review r14: 重新检测 is answered by what the owner can see of the chosen cat — unchanged there, its unchanged line is shown although another Agent changed; changed there, the card itself is the answer', async () => {
+  const p = page();
+  const stage = await p.stage();
+  face(stage, '梵花猫').click(); // Kimi 未安装
+  // Meanwhile Codex went from confirmed to unconfirmed; Kimi is still not installed.
+  const codexUnsure = await summary(computer('unknown', 'configured'));
+  assert.equal(p.R.sameStart(p.R.start(START.ready), p.R.start(codexUnsure)), false, 'the computer changed, so the whole answer differs');
+  p.s.start = codexUnsure;
+  const again = button(one(stage, 'qc-uses-more'), '重新检测');
+  again.focus();
+  again.click();
+  await settle();
+  const note = one(stage, 'qc-uses-note');
+  assert.equal(visibleText(note), '重新检测过了，还是没找到 Kimi。');
+  assert.equal(seenText(note), '重新检测过了，还是没找到 Kimi。', 'shown: nothing about 墨墨 changed on screen, so the click needs an answer');
+  assert.equal(mark(stage), 'Kimi未安装');
+  assert.equal(p.doc.activeElement === again, true);
+  // Now Kimi is installed but not logged in: the mark and the command change, and that is the answer.
+  p.s.start = await summary(computer('unknown', 'configured', 'login_required'));
+  again.click();
+  await settle();
+  assert.equal(mark(stage), 'Kimi未登录');
+  assert.equal(visibleText(one(stage, 'qc-uses-note')), '检测结果有变化。');
+  assert.equal(seenText(one(stage, 'qc-uses-note')), '', 'said only: the card shows the change');
+  // The rule: the same name, state, usability and command.
+  const { R } = p;
+  const kimi = (start: Any) => R.toolOf(R.start(start).faces.find((f: Any) => f.id === 'turkish-van'), R.start(start));
+  assert.equal(R.sameTool(kimi(START.ready), kimi(codexUnsure)), true);
+  assert.equal(R.sameTool(kimi(START.ready), kimi(START.three)), false);
+  assert.equal(R.sameTool(null, null), true);
 });
