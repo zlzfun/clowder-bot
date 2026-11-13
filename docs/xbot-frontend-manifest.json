@@ -815,7 +815,7 @@
       "target": "client/public/profile.css",
       "description": "资料页与群 styles: the head's accent wash (the cat's own colour mixed down with color-mix, lighter in dark), the in-place group name, the 置顶 row with the existing devices switch, 新对话 (its note gone, item 46), the quiet rule, the 高级 fold, the action chips, the member list with the armed 移出 under 添加猫猫 at the right (the heading and the how-to-talk line gone, item 46), 恢复默认猫猫 at the right end of 编辑资料's face row, dialogs on the original modal card, 定时's page inset and the brand mark in 关于 and the sign-in card; existing tokens and app.css's rise only, reduced motion respected, original CSS unchanged",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 资料页与群 (docs/xbot-frontend.md item 31; docs/xbot-api.md group PATCH/DELETE); the layout explains, not captions, on every other screen (docs/xbot-frontend.md item 46) by local Claude Code (claude-opus-5-5) on 2026-11-13",
-      "sha256": "da3f9c5b03e1224f066cd40cb689e08675ccebff584bf182b003ed2960bf67c1"
+      "sha256": "8f36fe518b194d471ac35e254a30217a4e7e5cdb35127e7f0dabb85c25dedcf5"
     },
     {
       "target": "client/public/mention-rules.js",

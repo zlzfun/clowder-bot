@@ -1298,6 +1298,10 @@ test('item 46: the drawer\'s dialogs and 高级 say once what the layout cannot 
   assert.doesNotMatch(app, /section\("基本"/);
   assert.match(app, /grid\.setAttribute\("role", "group"\);\n\s+grid\.setAttribute\("aria-label", "选择猫猫"\);/);
   assert.doesNotMatch(app, /el\("span", "muted", "选择猫猫"\)/);
+  // Review r15: the row over the face grid takes room only when 恢复默认猫猫 is in it.
+  const pcss = read('client/public/profile.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.match(pcss, /\.avatar-row:empty \{ display: none; \}\n\.avatar-row:empty \+ \.avatar-grid \{ margin-top: var\(--x-s6\); \}/);
+  assert.match(app, /row\.replaceChildren\(\);\n[^\n]*\n\s+if \(custom \|\| [^\n]*\) row\.append\(clear\);/, 'the row holds nothing but that button');
   assert.match(app, /\{ name: "name", label: "名字" \},\n\s+\{ name: "role", label: "它负责什么", multiline: true \},\n\s+\{ name: "group", label: "分组" \},/);
   assert.doesNotMatch(app, /比如：审稿员|分组（可不填）|现在没有排队的任务。|还没有结束的任务。|现在没有在跑的任务。/);
   assert.match(app, /"现在没有在跑或排队的任务。"/, 'with both live sections hidden, the one statement of the state stays');

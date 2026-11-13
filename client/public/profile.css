@@ -122,8 +122,11 @@ p.pf-line.bad, .psec p.pf-line.bad { color: var(--x-danger); }
 .ghost.pf-out:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
 
 /* 编辑资料: the row over the face grid holds only 恢复默认猫猫 now (its label
-   is gone, item 46); the button keeps its place at the right end. */
+   is gone, item 46); the button keeps its place at the right end, and with
+   no button the row takes no room (review r15). */
 .avatar-row { justify-content: flex-end; }
+.avatar-row:empty { display: none; }
+.avatar-row:empty + .avatar-grid { margin-top: var(--x-s6); }
 
 /* ---- dialogs ---- */
 .pf-modal .modal-card { width: min(440px, 100%); max-height: min(88vh, 640px); max-height: min(88dvh, 640px); overscroll-behavior: contain; }
