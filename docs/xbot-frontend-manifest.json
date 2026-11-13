@@ -27,7 +27,7 @@
       "file": "app.js",
       "target": "client/public/app.js",
       "sourceSha256": "1248f793493826bf044359c71e7d8772ccc3472d6021d6abb979dff9b6cb29bc",
-      "sha256": "805b9ba00cbba02a7c704a0c3bdc67a6563b34177c654e2f23041fb305b6993b",
+      "sha256": "da7c009566106f54c25e8a0fb5a6e0fb3a9e77fcc73a26e275325c06d8ce9bb5",
       "unchanged": false
     },
     {
@@ -808,7 +808,7 @@
       "target": "client/public/profile.js",
       "description": "The drawer's identity head (a cat's portrait on a quiet wash of its own native colour; a group's face, its name edited in place with Enter/Esc and 「N 只猫猫」), the cat 资料 page (职责 or the way to write one, 置顶 as a switch, 新对话 via POST /xbot-api/bots/:name/new with what happens to the conversation and an attachment confirmation, workspace.js's 历史对话, one folded 高级 drawn on first open with the shell's Agent row, 模型与画像, task and run cards, 导出对话 / 复制 ID / 运行面板, 删除猫猫 last), the group 成员 page (faces and names, 添加猫猫 as face chips, 移出 with a second click within three seconds while two stay, PATCH /xbot-api/groups/:id {add}/{remove} with the answered roster shown and the freshest record read before an edit, a 409 shown as the server says and nothing stopped, the how-to-talk line, 高级 with task cards, 删除群聊 with DELETE after a confirmation that the history is kept) and a group row's menu (改名, 删除群聊; arrows, Home/End, Esc, focus back to the row by the group's id); pages kept per chat across repaints and acting for the current selection, the pin switch showing only the confirmed state (busy while saving), one dialog at a time with Escape and Tab kept inside even while busy and the page behind inert Item 38 (2026-11-12): a 说话简短 switch under 置顶 bound to `concise` (PATCH /xbot-api/bots/:name {concise}): hidden until known, busy while saving, the answer shown, 「在新对话里生效。」 with 「开始新对话」 after a change, 「没能保存：…」 on failure; no switch for groups. Item 38 review: what 置顶 and 说话简短 are saving, and how it ended, is kept by cat apart from the page, so a drawer reopened for the cat mid-save shows it and sends nothing more. Item 39 (2026-11-12): the 说话简短 switch removed (its row, the line under it, paintBrief/toggleBrief and its share of the per-cat state; no request carries concise any more): 资料 is again 职责, 置顶, 对话, 高级, 删除猫猫, and 置顶 keeps its confirmed state, busy state, failure line and per-cat state.",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 资料页与群 (docs/xbot-frontend.md item 31; docs/xbot-api.md group PATCH/DELETE); the layout explains, not captions, on every other screen (docs/xbot-frontend.md item 46) by local Claude Code (claude-opus-5-5) on 2026-11-13",
-      "sha256": "3a91c90544cf7daf8baaae7c06fb1eb7dceb4693b0ef09c8f5a3b1b87e6ddae4"
+      "sha256": "d5e97f183e65bd2dae574cf6a765c31006958177e959b241a0785a59635bc04c"
     },
     {
       "target": "client/public/profile.css",
@@ -826,7 +826,7 @@
       "target": "client/public/mention.js",
       "description": "The group composer's @ list above the composer: this group's members and 「全体」 (its hint @ 群里每一只 visually hidden, item 46), ↑/↓, Enter/Tab to insert, Esc to dismiss until another @, click or tap to insert without losing the caret, IME compositions left alone, listbox/option roles with aria-activedescendant; before a key or click picks it reads the draft, caret and members again (undo, a member who left), changes the composer makes by itself refresh it, and a send (Enter or Ctrl/⌘+Enter) closes it; the edit goes through the composer's own render and undo history; nothing in single chats; the text is sent as typed",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 资料页与群 (docs/xbot-frontend.md item 31; docs/xbot-api.md group PATCH/DELETE); the layout explains, not captions, on every other screen (docs/xbot-frontend.md item 46) by local Claude Code (claude-opus-5-5) on 2026-11-13",
-      "sha256": "0f6cbffaec9f04d9ef42ea9f656b0b05fc4fbb23d17a25a44714084187fe2e9c"
+      "sha256": "a58a28b2106320eb5010a5370d92cf55e20160b73c97a856d5198410f9de0b17"
     },
     {
       "target": "client/public/mention.css",

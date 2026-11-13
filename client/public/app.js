@@ -3793,6 +3793,14 @@
     return node;
   }
 
+  // A printed name keeps its full name as a tooltip, shown only while it is
+  // cut short (placeTip measures it at hover time; review r15).
+  function clipTip(node, text) {
+    node.dataset.tip = text;
+    node.dataset.tipOnly = "clipped";
+    return node;
+  }
+
   // A face drawn beside its printed name (a list row, the @ list, the drawer):
   // no tooltip repeating the name (item 46).
   function untipped(av) {
@@ -3808,7 +3816,7 @@
     if (unread) av.append(el("i", "unread"));
     const body = el("span", "item-body");
     const line = el("span", "name-line");
-    line.append(el("span", "name", label || niceName(name)));
+    line.append(clipTip(el("span", "name", label || niceName(name)), label || niceName(name)));
     if (primary) {
       line.append(primaryMark());
     }
@@ -4026,7 +4034,7 @@
       if (!pinActive && (!!b.unread || (b.notes || 0) > 0 || unreadOf(stStatus.map[b.name]) > 0)) av.append(el("i", "unread"));
       // A pinned bot shows its name under the face; the primary bot keeps its pin.
       const label = el("span", "pin-name");
-      label.append(el("span", "pin-label", niceName(b.name)));
+      label.append(clipTip(el("span", "pin-label", niceName(b.name)), niceName(b.name)));
       if (b.primary) label.append(primaryMark());
       btn.append(av, label);
       btn.addEventListener("click", () => pickBot(b.name));
@@ -7142,6 +7150,8 @@
     if (!text || (host.getAttribute("aria-expanded") === "true" && host !== $("head-chip"))) { hideTip(); return; }
     // A label the full sidebar shows already (应用) is a tooltip only in the rail.
     if (host.dataset.tipOnly === "rail" && !host.closest(".sidebar.rail")) { hideTip(); return; }
+    // A printed name: its tooltip only while it is cut short (review r15).
+    if (host.dataset.tipOnly === "clipped" && !(host.scrollWidth > host.clientWidth)) { hideTip(); return; }
     tipEl.textContent = text;
     tipEl.hidden = false;
     const r = host.getBoundingClientRect();

@@ -543,6 +543,9 @@
     const sig = m.known ? H.catFaceSig(m.name) : "unknown";
     if (row.faceSig !== sig) { row.faceSig = sig; row.face.replaceChildren(m.known ? H.catFace(m.name, "") : H.unknownFace()); }
     setText(row.name, m.known ? m.name : "已不在的猫猫");
+    // The full name on hover only while the printed one is cut short (review r15).
+    row.name.dataset.tip = row.name.textContent;
+    row.name.dataset.tipOnly = "clipped";
     row.li.classList.toggle("gone", !m.known);
     const can = m.known && R.canRemove(P.group, H.cats(), m.name);
     row.out.hidden = !can;

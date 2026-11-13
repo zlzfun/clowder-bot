@@ -1077,7 +1077,7 @@ function sidebar() {
   const state: Any = { bots: [], groups: [], folders: [], others: null, sel: null, peer: null, preview: {}, listSig: '' };
   const stStatus: Any = { map: {}, groups: {} };
   const out: Any = {};
-  const code = ['el', 'spinIcon', 'workText', 'stDesc', 'attentionLine', 'groupDesc', 'paintStatus', 'railTip', 'listButton', 'sectionLabel', 'botRow', 'renderLists', 'pickBot', 'pickGroup', 'closeDrawer', 'syncBackdrop'].map(take).join('');
+  const code = ['el', 'spinIcon', 'workText', 'stDesc', 'attentionLine', 'groupDesc', 'paintStatus', 'railTip', 'clipTip', 'listButton', 'sectionLabel', 'botRow', 'renderLists', 'pickBot', 'pickGroup', 'closeDrawer', 'syncBackdrop'].map(take).join('');
   vm.runInNewContext(code + unreadOf[0] + 'out.renderLists = renderLists; out.paintStatus = paintStatus;', {
     out, state, stStatus, Node: El, experienceRules: rules(),
     document: { createElement: (tag: string) => doc.createElement(tag), querySelectorAll: (sel: string) => doc.body.querySelectorAll(sel) },
@@ -1158,11 +1158,42 @@ test('item 46: the list says no more than the layout cannot — the groups follo
     const row = s.find(sel);
     assert.equal(row.dataset.tipOnly, 'rail', sel + ': the name beside the face is not repeated as a tooltip in the full sidebar');
     assert.equal(row.querySelector('.avatar')!.dataset.tipOnly, 'rail', sel + ': nor on its face');
+    // Review r15: the printed name keeps its full name, shown only while it is cut short (measured at hover).
+    const printed = row.querySelector('.name')!;
+    assert.deepEqual([printed.dataset.tip, printed.dataset.tipOnly], [printed.textContent, 'clipped'], sel);
   }
   // No groups, no gap.
   s.state.groups = [];
   s.status();
   assert.equal(s.side.querySelector('.group-label'), null);
+});
+
+test('review r15: a printed name shows its full name on hover only while it is cut short — a long name gets the tooltip, a short one does not; a name in the rail keeps its own', () => {
+  const app = read('client/public/app.js');
+  const take = (name: string) => new RegExp(`\\n {2}function ${name}\\([^)]*\\) \\{\\n[\\s\\S]*?\\n {2}\\}\\n`).exec(app)![0];
+  const tip: Any = { hidden: true, textContent: '', style: {}, offsetWidth: 80, offsetHeight: 20 };
+  const out: Any = {};
+  vm.runInNewContext(take('hideTip') + take('placeTip') + 'out.place = placeTip;', {
+    out, tipEl: tip, tipTimer: 0, tipHost: null, $: () => null, window: { innerWidth: 1440, innerHeight: 900, clearTimeout() {} },
+  });
+  const host = (text: string, scrollWidth: number, clientWidth: number, only = 'clipped', rail = false): Any => ({
+    dataset: { tip: text, tipOnly: only }, scrollWidth, clientWidth,
+    getAttribute: (k: string) => (k === 'data-tip' ? text : null),
+    closest: (sel: string) => (rail && sel === '.sidebar.rail' ? {} : null),
+    getBoundingClientRect: () => ({ left: 20, right: 80, top: 100, bottom: 116, width: 60, height: 16 }),
+  });
+  out.place(host('喵喵喵喵喵喵喵喵喵喵大橘猫', 168, 60));
+  assert.deepEqual([tip.hidden, tip.textContent], [false, '喵喵喵喵喵喵喵喵喵喵大橘猫'], 'cut short: the full name');
+  out.place(host('宪宪', 28, 28));
+  assert.equal(tip.hidden, true, 'printed in full: no tooltip repeating it');
+  // A row's own tooltip stays rail-only, as in item 46.
+  out.place(host('宪宪', 0, 0, 'rail', false));
+  assert.equal(tip.hidden, true);
+  out.place(host('宪宪', 0, 0, 'rail', true));
+  assert.deepEqual([tip.hidden, tip.textContent], [false, '宪宪']);
+  // Wired for the pinned cats too (their names have 60px).
+  assert.match(app, /label\.append\(clipTip\(el\("span", "pin-label", niceName\(b\.name\)\), niceName\(b\.name\)\)\);/);
+  assert.match(app, /if \(host\.dataset\.tipOnly === "clipped" && !\(host\.scrollWidth > host\.clientWidth\)\) \{ hideTip\(\); return; \}/);
 });
 
 // ---------------------------------------------------------------- wiring

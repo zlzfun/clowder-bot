@@ -747,6 +747,8 @@ test('成员: faces and names, 移出 only while two would stay, a second click 
   assert.ok(one(page, 'pf-sec-head').firstChild!.classList.contains('visually-hidden'));
   assert.equal(seenText(one(page, 'pf-sec-head')), '添加猫猫');
   assert.deepEqual(named(page, 'pf-member-name').map(n => n.textContent), ['快手', '墨点', '年糕']);
+  // Review r15: each printed name keeps its full name, shown on hover only while it is cut short.
+  assert.deepEqual(named(page, 'pf-member-name').map(n => [n.dataset.tip, n.dataset.tipOnly]), [['快手', 'clipped'], ['墨点', 'clipped'], ['年糕', 'clipped']]);
   assert.deepEqual(named(page, 'pf-member-face').map(n => n.firstChild!.dataset.cat), ['快手', '墨点', '年糕']);
   assert.equal(named(page, 'pf-hint').length, 0, 'no sentence on how to talk in a group');
   const out = named(page, 'pf-out')[1];
@@ -1062,6 +1064,8 @@ test('@ in a group lists its members and 全体; ↑/↓ move, Enter inserts @�
   // Item 46: on screen 全体 is its name under its people mark; what it does is told to a screen reader (the option's own text).
   assert.deepEqual(c.list()!.children.map(o => seenText(o)), ['快手', '墨点', '全体']);
   assert.ok(named(c.list()!, 'mx-hint')[0]!.classList.contains('visually-hidden'));
+  // Review r15: a member's printed name keeps its full name for when it is cut short.
+  assert.deepEqual(named(c.list()!, 'mx-name').map(n => [n.dataset.tip, n.dataset.tipOnly]), [['快手', 'clipped'], ['墨点', 'clipped'], [undefined, undefined]]);
   assert.match(read('client/public/app.js'), /face: \(name\) => untipped\(avatar\(name, paintOf\(name\), "xs"\)\),\n\s+members: \(\) => \{/, 'the faces beside the names carry no tooltip of the name');
   assert.equal(c.list()!.getAttribute('role'), 'listbox');
   assert.equal(c.input.getAttribute('aria-controls'), c.list()!.id);
