@@ -6,7 +6,7 @@ import { defaultRuntime, faceOfTool, faceTool, faceTools, memberCliArgs, runtime
 import { approvalReceipt, approvalReceiptText, messageDisplayText, messagePresentation, replyEnding, replyInProgress, rosterRefusals, scheduledReminder } from './message-presentation.js';
 import { avatarBreed, type CatConfig, type SourceTemplate } from './cat-templates.js';
 import { clip } from './text.js';
-import { messageBlocks, type ApprovalDecision } from './blocks.js';
+import { cardReceipts, messageBlocks, type ApprovalDecision } from './blocks.js';
 import { Workspaces } from '../workspaces.js';
 import { NativeFiles } from './files.js';
 import { Activity } from './activity.js';
@@ -172,10 +172,12 @@ export class BotBridge {
     let lastUser: string | undefined, previous: string | undefined;
     // A cat that was addressed but does not belong to this conversation: said once by name (see rosterRefusals).
     const refusals = rosterRefusals(page.messages, id => cats.find(cat => cat.id === id)?.name, false);
-    const decided = this.decisions(page.messages), later = this.laterInputs(page.messages);
+    const decided = this.decisions(page.messages), later = this.laterInputs(page.messages), onCards = this.receiptsOnCards(page.messages);
     for (const { message, ...presentation } of this.presentMessages(page.messages, cats)) {
       if (message.type === 'user' && message.id === source) continue;
       if (refusals.get(message.id) === null) continue;
+      // Its request card, on this page, already says how it was answered.
+      if (onCards.has(message.id)) continue;
       const seq = this.store.sequence(thread.id, message.id), receipt = approvalReceipt(message);
       // A reminder that came due is a quiet line in the chat's words; the cat's own reply follows it.
       const reminder = scheduledReminder(message);
@@ -295,6 +297,24 @@ export class BotBridge {
   /** How the requests for confirmation on this page were answered, from the engine's own receipts. */
   decisions(messages: NativeMessage[]): ApprovalDecision[] {
     return messages.map(approvalReceipt).filter((receipt): receipt is ApprovalDecision => !!receipt);
+  }
+  /**
+   * The receipts on this page whose request card is on it too and takes its state from them. That card says how it was
+   * answered (已记住这个偏好 · …), so the receipt is not drawn under it as a line saying the same once more. A receipt
+   * whose card is on another page, or sits inside a folded execution record, keeps its line: there it is the only word
+   * of the outcome. Display only: the native record of the receipt is untouched.
+   */
+  receiptsOnCards(messages: NativeMessage[]): Set<string> {
+    const receipts = new Map<ApprovalDecision, string>(), said = new Set<string>();
+    for (const message of messages) { const receipt = approvalReceipt(message); if (receipt) receipts.set(receipt, message.id); }
+    if (!receipts.size) return said;
+    // In page order, as decisions() gives them: a card takes the first receipt that answers it.
+    const decided = [...receipts.keys()], kinds = messagePresentation(messages);
+    for (const message of messages) {
+      if (message.type === 'user' || kinds.get(message.id) !== 'message') continue;
+      for (const receipt of cardReceipts(message, decided)) said.add(receipts.get(receipt)!);
+    }
+    return said;
   }
   presentMessages(messages: NativeMessage[], cats: NativeCat[]) {
     const kinds = messagePresentation(messages);

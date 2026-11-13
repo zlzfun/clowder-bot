@@ -155,7 +155,7 @@ test('group replies retain failed and file-only messages without showing silent 
   r.native.messages.set(group.id,[r.reply('silent',1000,'SILENT'),{...r.reply('failed',1100,''),lifecycle:{kind:'response',status:'failed'}},
     {...r.reply('file',1200,'SILENT'),contentBlocks:[{type:'file',fileName:'report.txt',url:'/uploads/report.txt'}]}]);
   const page=await(await r.call(`/groups/${group.id}`)).json();assert.deepEqual(page.messages.map((m:any)=>m.id),['failed','file']);
-  assert.match(page.messages[0].text,/没完成/);assert.equal(page.messages[1].text,'');assert.equal(page.messages[1].attachments.length,1);
+  assert.equal(page.messages[0].text,'这次没完成');assert.equal(page.messages[1].text,'');assert.equal(page.messages[1].attachments.length,1);
   const activity=await r.bridge.activity.read(group.id);assert.equal(activity.unread,2);assert.equal(activity.latestMessageId,'file');
 });
 

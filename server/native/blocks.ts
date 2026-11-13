@@ -66,6 +66,23 @@ export interface ApprovalDecision { proposalId: string; producerId: string; stat
  * from a receipt for the same request by the same producer and, when the
  * receipt names the card's message, for this message.
  */
+const answers = (receipt: ApprovalDecision, proposal: string, producerId: unknown, messageId: string) =>
+  receipt.proposalId === proposal && receipt.producerId === producerId && (receipt.cardMessageId === undefined || receipt.cardMessageId === messageId);
+/**
+ * The receipts, among `decided`, that this message's request cards take their state from (the same rule and the same
+ * cards as messageBlocks). Such a card says how it was answered, so the receipt need not be said again as a line.
+ */
+export function cardReceipts(message: NativeMessage, decided: ApprovalDecision[]): ApprovalDecision[] {
+  const raw = record(message.extra?.rich).blocks, used: ApprovalDecision[] = [];
+  for (const entry of Array.isArray(raw) ? raw.slice(0, 50) : []) {
+    const block = record(entry);
+    if (!text(block.id, 200) || block.kind !== 'card' || !text(block.title, 300)) continue;
+    const approval = record(record(block.meta).approval), proposal = text(approval.canonicalProposalId, 200);
+    const receipt = proposal ? decided.find(item => answers(item, proposal, approval.producerId, message.id)) : undefined;
+    if (receipt) used.push(receipt);
+  }
+  return used;
+}
 export function messageBlocks(message: NativeMessage, decided: ApprovalDecision[] = []): { blocks: ChatBlock[]; hidden: number } {
   const raw = record(message.extra?.rich).blocks, blocks: ChatBlock[] = [];
   let hidden = 0;
@@ -75,8 +92,7 @@ export function messageBlocks(message: NativeMessage, decided: ApprovalDecision[
     if (block.kind === 'file') continue;
     if (block.kind === 'card' && text(block.title, 300)) {
       const approval = record(record(block.meta).approval), proposal = text(approval.canonicalProposalId, 200);
-      const state = proposal ? decided.find(receipt => receipt.proposalId === proposal && receipt.producerId === approval.producerId
-        && (receipt.cardMessageId === undefined || receipt.cardMessageId === message.id))?.state : undefined;
+      const state = proposal ? decided.find(receipt => answers(receipt, proposal, approval.producerId, message.id))?.state : undefined;
       const fields = (Array.isArray(block.fields) ? block.fields : []).map(record)
         .filter(field => typeof field.label === 'string' && typeof field.value === 'string').slice(0, 20)
         .map(field => ({ label: clip(field.label as string, 80), value: clip(field.value as string, 400) }));

@@ -98,8 +98,10 @@ export function messageDisplayText(message: NativeMessage, threadId: string, cat
   const content = message.type === 'assistant' && text.trim() === 'SILENT' ? '' : text;
   if (content || replyInProgress(message)) return content;
   if (['canceled', 'cancelled'].includes(message.lifecycle?.status ?? '')) return '已停止';
-  if (message.lifecycle?.status === 'interrupted') return '中途被打断，没有写完';
-  return message.lifecycle?.status === 'failed' ? '这次没完成，请查看详情' : '';
+  // The same words the chat puts under such a reply (chat-cards-rules.js ENDED): a list row, a search hit and a
+  // notification show this text alone, where there is no 详情 to look at.
+  if (message.lifecycle?.status === 'interrupted') return '中途被打断';
+  return message.lifecycle?.status === 'failed' ? '这次没完成' : '';
 }
 
 /**
