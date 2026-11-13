@@ -706,11 +706,11 @@ test('a ?thread= link opens that conversation, and a missing one is named instea
   assert.equal(plainPage.page.error.hidden, true);
 });
 
-test('with no conversation yet, the Task block says what it waits for', async () => {
+test('with no conversation yet, the panel says there is none and the Task block waits empty (item 46: no sentence explaining the page)', async () => {
   const { page, requests } = panel({ ...nativePanel, '/native-api/api/threads': { threads: [] } });
   await settle();
-  assert.equal(page.tasks.textContent, '选择会话后显示它的原生任务。');
-  assert.match(page.thread.textContent, /还没有会话/);
+  assert.equal(page.tasks.textContent, '');
+  assert.equal(page.thread.textContent, '还没有会话。');
   assert.ok(!requests.some(r => r.url.includes('/api/tasks')));
 });
 
@@ -722,5 +722,11 @@ test('the runtime page loads the Task block before runtime.js, under the convers
   const at = (id: string) => section.indexOf(`id="${id}"`);
   assert.ok(at('threads') >= 0 && at('threads') < at('tasks') && at('tasks') < at('thread'));
   assert.match(section, /<h3>原生任务<\/h3>/);
-  assert.match(section, /后台执行完成不等于任务完成，没有后台执行记录也不代表空闲/);
+  // Item 46: no paragraph of caveats under the heading; each is said on the task where it applies (runtime-tasks.js).
+  assert.doesNotMatch(html, /这里直接读取|任务、负责成员和后台执行都以|Bot 的执行者请在|原生记忆按知识集合/);
+  const tasks = read('client/public/runtime-tasks.js');
+  assert.match(tasks, /没有后台执行记录，不代表空闲。/);
+  assert.match(tasks, /后台执行完成不等于任务完成/);
+  assert.match(tasks, /只解除禁止：不会自动重新开始执行，也不会撤回已经产生的外部影响。/);
+  assert.match(html, /<section><h2>原生长期记忆<\/h2><p>群成员限制不等于长期记忆或文件权限隔离。<\/p>/, 'the one caveat a technical reader needs stays');
 });

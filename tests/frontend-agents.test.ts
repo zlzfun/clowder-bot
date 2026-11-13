@@ -340,6 +340,8 @@ test('settings lists local Agents by installation, one real status line each and
   const { host, levels, calls, mounted } = await settingsPane();
   await mounted;
   assert.deepEqual(named(host, 'setsec').map(s => s.children[0].textContent), ['已安装', '未安装']);
+  // Item 46: the two groups are set apart by a gap and each row's own state; their headings are for a screen reader only.
+  assert.ok(named(host, 'setsec').every(s => s.children[0].className === 'visually-hidden'));
   const rows = rowsOf(host);
   assert.deepEqual(rows.map(nameOf), ['Codex', 'Claude Code', 'Kimi', 'Gemini', 'Pi']);
   assert.deepEqual(rows.map(hintOf), [

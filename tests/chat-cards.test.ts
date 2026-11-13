@@ -878,6 +878,13 @@ test('the switch asks the browser only when turned on, says plainly when it refu
   const p = b.tab();
   assert.equal(p.toggle.getAttribute('aria-checked'), 'false');
   assert.match(p.pane.textContent, /桌面通知/);
+  // Item 46: the row names itself (no 通知 heading); when it reminds is the switch's description, for a screen reader.
+  assert.equal(p.pane.querySelectorAll('h4').length, 0);
+  const hint = p.pane.querySelector('.hint')!;
+  assert.equal(hint.id, 'ck-notify-hint');
+  assert.ok(hint.classList.contains('visually-hidden'));
+  assert.equal(hint.textContent, '猫猫回复了，或有事等你确认时提醒你。正在看的聊天不提醒，没有声音。');
+  assert.match(p.toggle.getAttribute('aria-describedby')!, /ck-notify-hint/);
   p.toggle.click();
   await settle();
   assert.equal(b.asked(), 1);

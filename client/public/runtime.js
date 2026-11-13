@@ -66,7 +66,7 @@ async function interaction(id, target) {
 async function approvals() {
   const pending = await api('/api/approval-hub/pending');
   $('approvals').replaceChildren();
-  if (!pending.items.length) $('approvals').append(node('p', '当前没有待审批事项。会话中的提问会显示在下方。'));
+  if (!pending.items.length) $('approvals').append(node('p', '当前没有待审批事项。'));
   for (const item of pending.items) {
     if (item.sourceFeatureId === 'F306') { await interaction(item.proposalId, $('approvals')); continue; }
     const box = node('article', undefined, 'card'); box.append(node('h3', item.summary), node('p', item.sourceFeatureId + ' · ' + item.requesterCatId), details('查看审批详情', item.detail));
@@ -88,7 +88,7 @@ function tasks(id, current) {
 }
 async function thread() {
   const id = $('threads').value, current = ++revision;
-  if (!id) { $('tasks').replaceChildren(node('p', '选择会话后显示它的原生任务。', 'muted')); $('thread').replaceChildren(node('p', '还没有会话。创建 Bot 并打开聊天后，会话会出现在这里。')); return; }
+  if (!id) { $('tasks').replaceChildren(); $('thread').replaceChildren(node('p', '还没有会话。')); return; }
   const taskView = tasks(id, current);
   const [queue, sessions, messages] = await Promise.all([api(`/api/threads/${enc(id)}/queue`), api(`/api/threads/${enc(id)}/sessions`), api(`/api/messages?threadId=${enc(id)}&limit=200`)]);
   if (current !== revision) return;

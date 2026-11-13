@@ -153,7 +153,7 @@
       "file": "index.html",
       "target": "client/index.html",
       "sourceSha256": "a4160c18e23489fbc6a9e21fe494e1ac52840a67b2e138997400a0b42835b556",
-      "sha256": "8048c64dbddf1ffbb8fd4c0e0b84f560ecd66a33c98718f963097fd969d720e2",
+      "sha256": "7c389b6022a2f489e282194868ed81ad08d0e8b6a2ae8c6fbbc70c9e5c1583b0",
       "unchanged": false
     },
     {
@@ -569,8 +569,9 @@
     },
     {
       "target": "client/public/runtime.html",
-      "description": "Native runtime management surface; native Task block under the conversation selector",
-      "sha256": "b55cc4f61de5ff74092a3399fa308431940a4565e07c2024cdfc3a17bb402e9a"
+      "description": "Native runtime management surface; native Task block under the conversation selector; since item 46 no paragraphs explaining the page (the per-task caveats stay where they apply), only the memory caveat for a technical reader",
+      "sha256": "3d5b5feefd8af02660810c9bf06289af4db122caa2bb6482c46a63df22626f9c",
+      "attribution": "the layout explains, not captions, on every other screen (docs/xbot-frontend.md item 46) by local Claude Code (claude-opus-5-5) on 2026-11-13"
     },
     {
       "target": "client/public/runtime.css",
@@ -579,8 +580,9 @@
     },
     {
       "target": "client/public/runtime.js",
-      "description": "Native queue, session, approval and memory adapters; runtimes and accounts shown read-only; views load and fail independently; a ?thread= link selects that conversation on the first read and names a missing one instead of replacing it silently",
-      "sha256": "4d705ed364da0a0797ab9c326e552c5764d6bce046b1ab0f2c6dda90d81e4efe"
+      "description": "Native queue, session, approval and memory adapters; runtimes and accounts shown read-only; views load and fail independently; empty states say only that there is none (item 46); a ?thread= link selects that conversation on the first read and names a missing one instead of replacing it silently",
+      "sha256": "8f0420fe22dcac3d9b235728631f595d2759ee572fa72253c271e08f519378cd",
+      "attribution": "the layout explains, not captions, on every other screen (docs/xbot-frontend.md item 46) by local Claude Code (claude-opus-5-5) on 2026-11-13"
     },
     {
       "target": "client/public/runtime-tasks.js",
@@ -589,8 +591,9 @@
     },
     {
       "target": "client/public/agents.js",
-      "description": "Local Agent access: settings list grouped by installation with search and one status line per Agent, per-Agent detail level (status, Bots, defaults, folded detection evidence) wired to the settings bar via onLevel; Bot Agent trigger and switch dialog that names only the carrier, model or effort a switch really clears (new-cat Agent choice moved to cat-templates.js); item 42 (2026-11-12): these programs are called Agents again (设置 → Agents, 搜索 Agent, Agent ID, 更换 Agent, 改用这个 Agent, Agents 设置…), and a server reason is no longer hidden only for naming an Agent (Bot, 模型, 原生, 会话 still hide it)",
-      "sha256": "789aed7b3b16ebccee516755cd8adef27d8d51a1565b3a37358530ac5da591f7"
+      "description": "Local Agent access: settings list grouped by installation (the groups set apart by a gap, their headings for a screen reader only since item 46) with search and one status line per Agent, per-Agent detail level (status, Bots, defaults, folded detection evidence) wired to the settings bar via onLevel; Bot Agent trigger and switch dialog that names only the carrier, model or effort a switch really clears (new-cat Agent choice moved to cat-templates.js); item 42 (2026-11-12): these programs are called Agents again (设置 → Agents, 搜索 Agent, Agent ID, 更换 Agent, 改用这个 Agent, Agents 设置…), and a server reason is no longer hidden only for naming an Agent (Bot, 模型, 原生, 会话 still hide it)",
+      "sha256": "4784a2948f62f0889b2da95ffb767a0c9898aecea192a372dd37c2505a999bb4",
+      "attribution": "the layout explains, not captions, on every other screen (docs/xbot-frontend.md item 46) by local Claude Code (claude-opus-5-5) on 2026-11-13"
     },
     {
       "target": "client/public/agents.css",
@@ -863,9 +866,9 @@
     },
     {
       "target": "client/public/chat-notify.js",
-      "description": "window.ClowderNotify: one switch in 设置 → 通用 that asks for the browser's permission and says when it refused or is unsupported (remembered in localStorage), and silent notifications from the polled status that focus the tab and open the chat; never touches the document title",
-      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 确认与提醒 (docs/xbot-frontend.md item 32; docs/chat-experience-api.md 「等你确认的事」「卡片、清单与选项」, docs/chat-live-api.md)",
-      "sha256": "db8216004f6762768b7c84223415fee94ae2626358eb150d6d5842c84a6c8da9"
+      "description": "window.ClowderNotify: one switch in 设置 → 通用 (no heading over it; when it reminds is its description for a screen reader, item 46) that asks for the browser's permission and says when it refused or is unsupported (remembered in localStorage), and silent notifications from the polled status that focus the tab and open the chat; never touches the document title",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 确认与提醒 (docs/xbot-frontend.md item 32; docs/chat-experience-api.md 「等你确认的事」「卡片、清单与选项」, docs/chat-live-api.md); the layout explains, not captions, on every other screen (docs/xbot-frontend.md item 46) by local Claude Code (claude-opus-5-5) on 2026-11-13",
+      "sha256": "103d1c5c528a301c04087cf5c084071142a5f9963067e49cbfdfd824cab85ab3"
     },
     {
       "target": "client/public/chat-presence-rules.js",

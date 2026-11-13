@@ -1245,6 +1245,19 @@ test('说话简短 left nothing behind in the app (item 39): no script or style 
   assert.match(app, /const entry = \{ done: false \};\n\s+entry\.request = api\("\/xbot-api\/bots\/" \+ encodeURIComponent\(name\)\)\.finally\(\(\) => \{ entry\.done = true; \}\);/);
 });
 
+test('item 46: 设置 says each thing once — 通用 has no 外观 heading over 主题, 关于 shows the version once (the row that copies it), 运行面板 without the line describing it (its heading says technical, its icon says new tab), no footnote about where the version comes from', () => {
+  const html = read('client/index.html');
+  const general = /<div class="setpane" data-spane="general">([\s\S]*?)\n   <\/div>\n   <div class="setpane" data-spane="persona">/.exec(html)![1]!;
+  assert.doesNotMatch(general, /<h4>/);
+  assert.match(general, /<b>主题<\/b>/);
+  const about = /<div class="setpane" data-spane="about">([\s\S]*?)\n   <\/div>\n   <\/div>/.exec(html)![1]!;
+  assert.equal((about.match(/data-settings-version/g) || []).length, 1, 'once: the 版本 row, the button that copies it');
+  assert.match(about, /<h3>clowder-bot<\/h3><\/div><\/div>/);
+  assert.match(about, /<span class="tx"><b>运行面板<\/b><\/span>/);
+  assert.match(about, /<h4>技术详情<\/h4>/);
+  assert.doesNotMatch(about, /在新标签页打开|版本来自|setfoot/);
+});
+
 test('the app\'s own mark: the cat-eared speech bubble replaces the upstream X in the icons, 关于 and the sign-in card', () => {
   const html = read('client/index.html'), svg = read('client/public/favicon.svg');
   assert.match(html, /<div class="aboutlogo"><img class="mark" src="\/brand-mark-256\.png" alt="" width="48" height="48">/);

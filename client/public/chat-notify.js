@@ -58,18 +58,19 @@
   }
 
   // ---------------------------------------------------------------- 通用
-  // One row in 设置 → 通用: the switch, a short line, and what happened.
+  // One row in 设置 → 通用: the switch, and what happened. The row names
+  // itself (no 通知 heading over it); when it reminds is the switch's
+  // description, for a screen reader (item 46).
   function mount() {
     const pane = document.querySelector('[data-spane="general"]');
     if (!pane || UI.row) return;
     const sec = node("div", "setsec ck-notify");
-    sec.append(node("h4", "", "通知"));
     const rows = node("div", "setrows");
     const row = node("div", "setrow");
     const tx = node("div", "tx");
     const title = node("b", "", "桌面通知");
     title.id = "ck-notify-title";
-    const hint = node("div", "hint", "猫猫回复了，或有事等你确认时提醒你。正在看的聊天不提醒，没有声音。");
+    const hint = node("div", "hint visually-hidden", "猫猫回复了，或有事等你确认时提醒你。正在看的聊天不提醒，没有声音。");
     hint.id = "ck-notify-hint";
     tx.append(title, hint);
     const toggle = node("button", "g7-switch");
