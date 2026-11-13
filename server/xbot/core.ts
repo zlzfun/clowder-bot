@@ -82,11 +82,12 @@ export function createXbotCoreRouter(bridge: BotBridge) {
     const first = page.messages[0];
     // A cat that was addressed but is not in this group: said once by name instead of the engine's raw refusal lines.
     const refusals = rosterRefusals(page.messages, id => cats.find(cat => cat.id === id)?.name, true), decided = bridge.decisions(page.messages);
-    const later = bridge.laterInputs(page.messages);
+    // A receipt whose request card on this page already says how it was answered is not drawn as a line as well.
+    const later = bridge.laterInputs(page.messages), onCards = bridge.receiptsOnCards(page.messages);
     res.json({ group: bridge.groupItem(thread, cats), hasMore: page.hasMore,
       // The cursor for the page before this one, as the single-chat transcript gives it.
       before: first ? `${first.timelineOrderAt ?? first.timestamp}:${first.id}` : null,
-      messages: bridge.presentMessages(page.messages.filter(m => refusals.get(m.id) !== null), cats).map(({ message: m, name, ...presentation }) => {
+      messages: bridge.presentMessages(page.messages.filter(m => refusals.get(m.id) !== null && !onCards.has(m.id)), cats).map(({ message: m, name, ...presentation }) => {
         const rich = m.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(m, decided), receipt = approvalReceipt(m);
         const reminder = scheduledReminder(m);
         const refusal = refusals.get(m.id) ?? (receipt ? approvalReceiptText(receipt) : reminder ? `提醒：${reminder}` : undefined);

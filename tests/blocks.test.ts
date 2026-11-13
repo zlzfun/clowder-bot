@@ -160,7 +160,7 @@ test('an answered choice is recorded on the native block, only for a choice in t
   assert.deepEqual(patches.slice(1).map(patch => [patch.body.blockId, patch.body.selectedIds]), [['one', ['b']], ['many', ['a', 'c']], ['sure', ['__cancel__']]]);
 });
 
-test('the engine’s receipt for an answered request reads as a plain line and marks the request card', async t => {
+test('the engine’s receipt for an answered request marks the request card, and is a plain line only where no card says it', async t => {
   const r = await setup(t);
   // Trimmed from a real conversation: the request card message, then the hub's receipt after the owner agreed.
   const receipt = (id: string, proposal: string, producerId: string, resolution: string): NativeMessage => ({ id, type: 'connector', catId: null, timestamp: 3000,
@@ -180,13 +180,24 @@ test('the engine’s receipt for an answered request reads as a plain line and m
   assert.deepEqual(['card', 'card2', 'card3', 'card4', 'card5', 'card6'].map(id => [of(id).blocks[0].approval.id, of(id).blocks[0].approval.state ?? null]),
     [['p1', 'approved'], ['p2', 'rejected'], ['p3', 'closed'], ['p4', null], ['p5', null], ['p6', null]]);
   assert.deepEqual([of('card').blocks[0].approval.kind, of('card2').blocks[0].approval.kind], ['preference', 'schedule'], 'a settled card still says what was asked');
-  assert.deepEqual(['r1', 'r2', 'r3', 'other'].map(id => [of(id).content, of(id).notice ?? false]),
-    [['已记住这个偏好。', true], ['定时没有改动。', true], ['这件事已经结束。', true], ['别的连接器消息', false]]);
-  assert.match(of('r1').native.content, /审批结果/, 'the native record keeps the engine’s wording');
+  // The card on the page says how it was answered: its receipt is not a line under it saying the same.
+  assert.deepEqual(['r1', 'r2', 'r3'].map(id => of(id) ?? null), [null, null, null]);
+  // A receipt that settles no card here keeps its line; another connector's message is no notice.
+  assert.deepEqual(['r5', 'r6', 'other'].map(id => [of(id).content, of(id).notice ?? false]),
+    [['定时已按你的确认处理。', true], ['已记住这个偏好。', true], ['别的连接器消息', false]]);
+  assert.match(of('r6').native.content, /审批结果/, 'the native record keeps the engine’s wording');
+  // The cards are on another page (or gone): the receipts are then the only word of the outcome, in the chat's words.
+  r.native.messages.set(r.thread.id, [receipt('r1', 'p1', 'F221', 'accepted'), receipt('r2', 'p2', 'F139', 'rejected'), receipt('r3', 'p3', 'F999', 'expired')]);
+  const alone = (await (await r.call('/bots/Ada/transcript')).json()).messages.filter((m: any) => m.id);
+  assert.deepEqual(alone.map((m: any) => [m.id, m.content, m.notice ?? false]),
+    [['r1', '已记住这个偏好。', true], ['r2', '定时没有改动。', true], ['r3', '这件事已经结束。', true]]);
   // The same in a group.
   await r.bridge.createBot({ name: 'Bob' });
   const group = await (await r.call('/groups', 'POST', { members: ['Ada', 'Bob'] })).json();
   r.native.messages.set(group.id, [request('card', 'p1'), receipt('r1', 'p1', 'F221', 'accepted')]);
   const page = await (await r.call(`/groups/${group.id}`)).json();
-  assert.deepEqual(page.messages.map((m: any) => [m.id, m.blocks?.[0]?.approval ?? null, m.notice ? m.text : null]), [['card', { id: 'p1', kind: 'preference', title: '想记住你的一个偏好', body: '偏好简短', state: 'approved' }, null], ['r1', null, '已记住这个偏好。']]);
+  assert.deepEqual(page.messages.map((m: any) => [m.id, m.blocks?.[0]?.approval ?? null, m.notice ? m.text : null]), [['card', { id: 'p1', kind: 'preference', title: '想记住你的一个偏好', body: '偏好简短', state: 'approved' }, null]]);
+  r.native.messages.set(group.id, [receipt('r1', 'p1', 'F221', 'accepted')]);
+  const lone = await (await r.call(`/groups/${group.id}`)).json();
+  assert.deepEqual(lone.messages.map((m: any) => [m.id, m.notice ? m.text : null]), [['r1', '已记住这个偏好。']]);
 });
