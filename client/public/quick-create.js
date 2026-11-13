@@ -1160,7 +1160,8 @@
   function noChat() {
     const h = hooks();
     const box = node("div", "empty qc-none");
-    box.append(node("h2", "", "选一个聊天"), node("p", "", "从列表里选一只猫猫或一个群聊。"), button("secondary qc-list", "打开列表", () => h.showList()));
+    // The heading is the next step; the list beside it (or 打开列表 on a phone) is where (item 46).
+    box.append(node("h2", "", "选一个聊天"), button("secondary qc-list", "打开列表", () => h.showList()));
     return box;
   }
 

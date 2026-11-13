@@ -113,8 +113,10 @@
     const first = a.items.find((i) => i.kind === top) || null;
     const n = a.counts[top], text = itemText(first);
     let head = lead(top, n), label = text;
-    // One run or one queued message: its own label says who and what.
-    if ((top === "running" || top === "queued") && n === 1 && text) { head = text; label = ""; }
+    // One run or one queued message: its own label says who and what. One
+    // failure too: its label (「团子这次没完成」) already says it failed, so the
+    // kind word 「失败」 is not put before it (item 46); it keeps the colour.
+    if ((top === "running" || top === "queued" || top === "failure") && n === 1 && text) { head = text; label = ""; }
     else if ((top === "running" || top === "queued") && n > 1) label = "";
     return {
       kind: top, lead: head, label, rest, partial,

@@ -2975,7 +2975,7 @@
     if (m.native_message_id || m.id) row.dataset.mid = String(m.native_message_id || m.id);
     if (m.time) row.dataset.time = String(m.time);
     row.dataset.sender = who.key;
-    if (!cont) row.append(speakerFace(who));
+    if (!cont) row.append(headFace(who));
     const body = el("div", "body");
     if (!cont) body.append(speakerHead(who, m.time));
     const replyTo = say ? say.replyTo : m.reply_to;
@@ -3022,7 +3022,7 @@
     if (who) row.dataset.sender = who.key;
     const body = el("div", "body");
     if (who && !cont) {
-      row.append(speakerFace(who));
+      row.append(headFace(who));
       body.append(speakerHead(who, m.time));
     }
     row.append(body);
@@ -3082,8 +3082,15 @@
     const name = el("div", "who");
     name.append(el("span", "", who.name));
     if (time) name.append(el("time", "", when(time)));
-    setTip(name, who.name);
     return name;
+  }
+
+  // The face beside a message's name line: the name is printed there, so it
+  // is not a tooltip as well (item 46).
+  function headFace(who) {
+    const av = speakerFace(who);
+    setTip(av, "");
+    return av;
   }
 
   // An execution record (presentation_kind "activity") in its writer's name.
@@ -3429,7 +3436,7 @@
         bindMessageMenu(row, m, text);
         row.append(wrap);
       } else {
-        if (!row.classList.contains("cont")) row.append(speakerFace(speaker));
+        if (!row.classList.contains("cont")) row.append(headFace(speaker));
         const body = el("div", "body");
         if (!row.classList.contains("cont")) body.append(speakerHead(speaker, m.time));
         const said = cards.words(m, isSilent(text) ? "" : text);
@@ -4105,7 +4112,8 @@
       if (titleAv) setTip(titleAv, "");
     }
     titleEl.replaceChildren(...(titleAv ? [titleAv] : []), el("span", "title-name", shown));
-    setTip(titleEl, slug && slug !== shown ? slug : "");
+    // A cat's own name when it is shown differently; never a group's thread ID (item 46).
+    setTip(titleEl, !group && slug && slug !== shown ? slug : "");
     $("head-chip").disabled = !state.sel;
     // With the unread total in front, from the status poll (chat-list.js).
     chatList.title(shown + " · clowder-bot");

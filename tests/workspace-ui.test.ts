@@ -1647,7 +1647,7 @@ test('a cat\'s SILENT is never shown as words: a bare one is not drawn, one that
   const out: Any = {};
   vm.runInNewContext(helpers[0] + bubble[0] + 'out.isSilent = isSilent; out.silentOnly = silentOnly; out.botBubble = botBubble;', {
     out, el, state: { sel: null }, EMPTY_REPLY: '（空回复）',
-    speakerFace: () => ({ face: true }), speakerHead: () => ({ head: true }), quoteBlock: () => ({ quote: true }),
+    speakerFace: () => ({ face: true }), headFace: () => ({ face: true }), speakerHead: () => ({ head: true }), quoteBlock: () => ({ quote: true }),
     pastedURLs: (_sel: unknown, images: string[] | undefined) => images || [],
     gallery: (list: string[]) => ({ gallery: list }),
     appendBotContent: (body: Node, text: string) => body.append({ said: text }),

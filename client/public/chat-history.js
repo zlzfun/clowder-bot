@@ -140,7 +140,7 @@
       b.type = "button";
       b.addEventListener("click", () => load());
       row.append(node("span", "", "没能加载更早的消息" + (v.error ? "：" + v.error : "")), b);
-    } else row.append(node("span", "", "没有更早的消息了"));
+    } else row.append(node("span", "visually-hidden", "没有更早的消息了")); // the oldest day separator on top says it (item 46)
   }
   // true when a row was drawn: an empty view then has earlier records to offer.
   function top(inner) {

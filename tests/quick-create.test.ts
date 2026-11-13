@@ -709,10 +709,10 @@ test('the shell says a held notice once, when that cat\'s chat is actually open,
   assert.doesNotMatch(app, /quietNote\(created\.notice\)/);
 });
 
-test('the no-chat line speaks of 猫猫 and the list, and opens the list', () => {
+test('the no-chat line is the next step and the way to the list (item 46: no sentence repeating the heading), and opens the list', () => {
   const p = page({ cats: ['团子'] });
   const view = p.paint(p.Q.noChat());
-  assert.equal(visibleText(view), '选一个聊天从列表里选一只猫猫或一个群聊。打开列表');
+  assert.equal(visibleText(view), '选一个聊天打开列表');
   assert.doesNotMatch(visibleText(view), /左边|Bot/);
   button(view, '打开列表').click();
   assert.equal(p.lists, 1);

@@ -320,7 +320,12 @@ test('the status line leads with what waits for the owner and keeps every concur
   assert.equal(line.partial, false);
   // A failure outranks a run; the run keeps its count.
   const failed = X.line(X.activity(activity({ items: [{ id: 'f', kind: 'failure', label: '执行失败' }, { id: 'r', kind: 'running', label: '在写' }], counts: { failure: 1, running: 1 } })));
-  assert.deepEqual([failed.lead, plain(failed.rest)], ['失败', ['处理中 1']]);
+  // Item 46: one failure leads with its own label, which already says it failed (not 「失败 执行失败」); it keeps its kind (the colour).
+  assert.deepEqual([failed.lead, failed.label, failed.kind, plain(failed.rest)], ['执行失败', '', 'failure', ['处理中 1']]);
+  const bare = X.line(X.activity(activity({ items: [{ id: 'f', kind: 'failure' }], counts: { failure: 1 } })));
+  assert.deepEqual([bare.lead, bare.label], ['失败', ''], 'a failure without words of its own still says 失败');
+  const twoFailed = X.line(X.activity(activity({ items: [{ id: 'f', kind: 'failure', label: '宪宪这次没完成' }, { id: 'g', kind: 'failure', label: '砚砚这次没完成' }], counts: { failure: 2 } })));
+  assert.deepEqual([twoFailed.lead, twoFailed.label], ['2 项失败', '宪宪这次没完成'], 'two are counted, the first named');
   // One run says who and what in its own words; several are counted.
   const one = X.line(X.activity(activity({ items: [{ id: 'r', kind: 'running', label: '宪宪正在处理', catId: 'cat-a' }] })));
   assert.deepEqual([one.lead, one.label, one.catId], ['宪宪正在处理', '', 'cat-a']);
@@ -429,7 +434,9 @@ test('concurrent approvals: the line leads with both, keeps the other counts, st
   assert.equal(strip.querySelector('.cx-row')!.getAttribute('aria-expanded'), 'true');
   const items = list.querySelectorAll('.cx-item');
   assert.deepEqual(items.map(i => i.dataset.kind), ['approval', 'approval', 'running', 'queued', 'task', 'task']);
-  assert.match(textOf(list), /另有 1 项没有列出，任务的全部内容在「任务」页。/, 'a count beyond the list is never dropped');
+  // Item 46: no pointer to a 「任务」 page, which is gone (tasks live under 资料 › 高级).
+  assert.match(textOf(list), /另有 1 项没有列出。/, 'a count beyond the list is never dropped');
+  assert.doesNotMatch(textOf(list), /「任务」页/);
   assert.equal(all(list).filter(e => /^查看其余/.test(e.textContent)).length, 0, 'six rows fit: nothing to open');
   // An approval points at its message and at the existing approval controls; nothing approves here.
   const first = items[0];

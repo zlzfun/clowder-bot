@@ -367,7 +367,7 @@
     }
     // Counted by the server without a row of its own: said, never dropped.
     const more = total(a) - all.length;
-    if (more > 0) list.append(note("另有 " + more + " 项没有列出" + (a.counts.task ? "，任务的全部内容在「任务」页。" : "。"), "cx-more"));
+    if (more > 0) list.append(note("另有 " + more + " 项没有列出。", "cx-more"));
     if (S.state === "error") list.append(failure("状态没能刷新：" + S.error + (a ? "。下面是上次读到的结果，可能已经变化。" : "。"), () => loadActivity()));
     else if (a && a.readStatus !== "ready") {
       const p = failure("部分状态暂时读不到，这里不代表已经空闲或全部完成。", () => loadActivity());
