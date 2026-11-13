@@ -158,9 +158,9 @@ try {
   if (wanted('list')) await shoot('list', async page => around(page, ['#pin-row', '#roster'], 12, { x0: 0, x1: 280, y0: (await page.locator('#pin-row').boundingBox()).y - 6 }));
 
   // 打开就能聊: 新建 (the round ＋ at the top of the sidebar) opens the dialog on its 猫猫 side: the cats at the left
-  // (those that can come home, 自定义, then those that cannot, each with its word), a cat whose Agent is here picked
-  // (梵花猫, Kimi) with its card at the right, a name typed; then, cropped to that card, a cat whose Agent the app
-  // cannot connect yet (暹罗猫): why it cannot come home as it is, and 「只借它的长相」.
+  // (those that can come home and 自定义, then, set apart, smaller and over dashed cushions, those that cannot), a cat
+  // whose Agent is here picked (梵花猫, Kimi) with its card at the right, a name typed; then, cropped to that card, a cat
+  // whose Agent the app cannot connect (暹罗猫): its Agent mark saying 暂不支持, and the one way on, 自定义.
   if (wanted('new-cat')) {
     await both(async (page) => {
       await page.locator('#side-new').click();
@@ -171,7 +171,8 @@ try {
     });
     await shoot('new-cat', page => around(page, ['.qc-card'], 0));
     await both(async (page) => { await page.locator('.qc-card .qc-face[data-face="siamese"]').click(); await page.waitForTimeout(400); });
-    await shoot('new-cat-away', page => around(page, ['.qc-card .qc-about'], 16));
+    // Cropped above the name box (the card's own edge, without a sliver of the field under it).
+    await shoot('new-cat-away', async page => around(page, ['.qc-card .qc-about'], 16, { y1: (await page.locator('.qc-card').getByLabel('名字', { exact: true }).boundingBox()).y - 4 }));
     await both(page => page.locator('.qc-card').getByRole('button', { name: '取消', exact: true }).click());
   }
 

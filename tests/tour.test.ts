@@ -91,11 +91,14 @@ test('the cats are called by their names wherever the page shows or says one; on
     assert.match(said, /其它模型/, where);
   }
   assert.match(start, /宪宪用 Claude Code，砚砚用 Codex，墨墨用 Kimi，别的猫用其它模型/);
-  // A cat whose tool is not here cannot come home as it is; 「只借它的长相」 is the way on, and 自定义 is one of the
-  // options beside the cats (docs/xbot-frontend.md item 44) — said once, in 打开就能聊.
+  // A cat whose Agent is not usable here cannot come home as it is: the layout says so (set apart, smaller, a dashed
+  // cushion), its Agent mark names why, its card's 自定义 is the way on, and 自定义 is one of the options beside the
+  // cats (docs/xbot-frontend.md items 44, 45) — said once, in 打开就能聊, without the words the owner found machine-made.
   const prose = words.replace(/\salt="[^"]*"/g, '');
-  assert.equal((html.replace(/\salt="[^"]*"/g, '').match(/按原样领不了/g) || []).length, 1);
-  assert.match(start.replace(/\salt="[^"]*"/g, ''), /按原样领不了[^<]*「只借它的长相」[^<]*「自定义」也是其中一个选项/);
+  assert.equal((html.replace(/\salt="[^"]*"/g, '').match(/现在领不了/g) || []).length, 1);
+  assert.match(start.replace(/\salt="[^"]*"/g, ''), /现在领不了：它排在后面，小一号，脚下一圈虚线[^<]*「暂不支持」「未安装」或「未登录」[^<]*「自定义」按钮[^<]*「自定义」也是其中一个选项/);
+  assert.doesNotMatch(html, /现在就能领|按原样领不了|接不上|只借它的长相/, 'not in the prose, nor in a picture\'s description');
+  assert.doesNotMatch(read('README.md'), /现在就能领|按原样领不了|接不上|只借它的长相/);
   assert.doesNotMatch(start.replace(/\salt="[^"]*"/g, ''), /点「自定义」/, '自定义 is not a switch to press');
   assert.ok(prose.length > 0);
   // 关于示例: the showcase's computer has the three tools the app can connect; the other five are placed for the list, not seen running.

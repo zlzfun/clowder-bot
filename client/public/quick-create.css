@@ -4,16 +4,18 @@
    durations and curves); no new colors, fonts or keyframes: the original
    .empty, .modal/.modal-card, .field, .primary, .secondary, .text-btn and the
    clay portraits carry the look.
-   Meeting a cat (item 44), the same on the stage and in the dialog: at the
-   left the cats to choose from, named tiles in one radio group — those that
-   can come home as they are, 自定义 (a tile of the same kind, our own
-   drawing), then, under a few plain words, those that cannot, each with a
-   dashed word saying why; at the right one panel for the chosen one: its
-   portrait sitting on a cushion, the name it comes with, its breed, the Agent
-   it thinks with as a small mark, its temperament in its own words, and at
-   the panel's foot the name it will have (and, on the stage, 带它回家). Below
-   a width of 640px the panel goes under the cats. Dashed means "not as it is"
-   throughout: the word on a tile, the Agent mark, the empty cushion. */
+   Meeting a cat (items 44, 45), the same on the stage and in the dialog: at
+   the left the cats to choose from, named tiles in one radio group — those
+   that can come home as they are, each on a cushion, and 自定义 (a tile of
+   the same kind, our own drawing), then, set apart, smaller and quieter, those
+   that cannot, each over an empty dashed cushion; at the right one panel for
+   the chosen one: its portrait sitting on a cushion, the name it comes with,
+   its breed, the Agent it thinks with as a small mark, its temperament in its
+   own words, and under them the name it will have (and, on the stage,
+   带它回家). Below a width of 640px the panel goes under the cats. The layout
+   explains, not labels (item 45): no headings, no words on tiles, no helper
+   sentences. Dashed means "not as it is" throughout: the empty cushion under a
+   tile and on the card, the Agent mark. */
 
 /* No chat open: the composer would send nowhere, so it is not shown. */
 .main:has(.thread-inner.no-chat) .dock { display: none; }
@@ -29,7 +31,6 @@
 }
 .qc-stage.leaving > * { opacity: 0; transition: opacity 120ms ease-out; }
 .qc-title { margin: 0; font-size: var(--x-fs-h); font-weight: 640; line-height: 1.3; letter-spacing: -0.015em; color: var(--x-text); }
-.qc-sub { margin: var(--x-s2) 0 0; font-size: 14px; line-height: 1.6; color: var(--x-muted); }
 /* A cat arrived from elsewhere while the stage holds a draft: a quiet line and a way to it. */
 .qc-arrived {
   margin: var(--x-s3) 0 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--x-s1);
@@ -55,16 +56,15 @@
 .qc-fields { display: flex; flex-direction: column; align-items: stretch; }
 
 /* ---- the cats to choose from: named tiles in one radio group ----
-   Two groups when some cat cannot come home as it is (those that can, and
-   自定义; then those that cannot), each under its few words; one quiet group
-   while nothing can be chosen. As many tiles as the server offers: they wrap. */
-.qc-faces { display: flex; flex-direction: column; gap: var(--x-s4); min-width: 0; }
+   The layout says which cats can come home (item 45: no heading, no word on a
+   tile). Those that can, and 自定义, come first, full size, each cat sitting
+   on a cushion; then, set apart by space, those that cannot: smaller, quieter,
+   each over an empty dashed cushion — told apart by place, size and outline,
+   not by colour or paleness alone (several cats are grey by nature). One quiet
+   group, no cushions, while nothing can be chosen. As many tiles as the server
+   offers: they wrap. */
+.qc-faces { display: flex; flex-direction: column; gap: var(--x-s6); min-width: 0; }
 .qc-group { display: flex; flex-wrap: wrap; align-content: flex-start; gap: var(--x-s1); min-width: 0; }
-.qc-group-head {
-  flex: 0 0 100%; margin: 0; padding: 0 var(--x-s1) 2px;
-  font-size: var(--x-fs-cap); font-weight: 560; line-height: 16px; letter-spacing: .02em; color: var(--x-muted);
-}
-.qc-faces:not(.split) .qc-group-head { display: none; }
 .qc-face {
   flex: 0 0 calc(25% - 3px);
   position: relative; min-width: 0; padding: 5px 2px 6px; border: 0; border-radius: var(--x-r-card);
@@ -79,6 +79,11 @@
   transform: scale(.9);
   transition: transform var(--dur-pop) var(--ease-spring), opacity var(--dur-pop) ease-out, filter var(--dur-pop) ease-out;
 }
+/* The cushion each cat sits on (as on its card): solid for a cat that can come home. */
+.qc-portrait::before {
+  content: ""; position: absolute; left: 6%; right: 6%; bottom: 0; height: 30%; border-radius: 50%;
+  background: var(--x-fill-2); transition: background 160ms ease-out;
+}
 .qc-portrait > svg { position: relative; display: block; width: 100%; height: 100%; }
 .qc-face-name {
   max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -87,6 +92,7 @@
 /* The chosen tile is filled as a selected row is, and its cat steps forward. */
 .qc-face[aria-checked="true"] { background: var(--selected); color: var(--x-text); }
 .qc-face[aria-checked="true"] .qc-portrait { transform: none; }
+.qc-face[aria-checked="true"] .qc-portrait::before { background: var(--x-card); }
 .qc-face[aria-checked="true"] .qc-face-name { font-weight: 600; }
 @media (hover: hover) {
   .qc-face:not(:disabled)[aria-checked="false"]:hover { background: var(--hover); color: var(--x-text); }
@@ -95,21 +101,24 @@
 .qc-face:not(:disabled):active .qc-portrait { transform: scale(var(--press-scale)); }
 /* Nothing chosen (still reading, or blocked): the row is only a picture. */
 .qc-faces.rest .qc-portrait { opacity: .62; }
+.qc-faces.rest .qc-portrait::before { display: none; }
 .qc-faces.rest .qc-face-name { opacity: .7; }
-/* A cat whose own Agent is not usable here: in the later group, quieter, and
-   carrying its word (接不上, 没安装, 没登录, 没读到) in a dashed pill — told
-   apart by the word and the outline, not by colour or size. */
-.qc-face.away .qc-portrait { opacity: .5; filter: saturate(.45); }
-.qc-face.away[aria-checked="true"] .qc-portrait { opacity: .92; filter: saturate(.8); }
-.qc-face-tag {
-  display: block; max-width: 100%; margin-top: 1px; padding: 0 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  border: 1px dashed var(--x-faint); border-radius: var(--x-r-pill);
-  font-size: 11px; line-height: 15px; color: var(--x-muted);
-}
-.qc-face.away[aria-checked="true"] .qc-face-tag { color: var(--x-text-2); }
-/* 自定义's own picture: a cat's dashed outline still to be filled in, and a plus. */
-.qc-own-pic { display: block; width: 100%; height: 100%; color: var(--x-muted); }
-.qc-own-head { fill: var(--x-fill-1); stroke: currentColor; stroke-width: 1.7; stroke-dasharray: 3.2 2.6; stroke-linecap: round; stroke-linejoin: round; }
+/* A cat that cannot come home as it is (its Agent is not usable here): in the
+   group set apart after the others, a smaller tile, quieter, over an empty
+   dashed cushion — the same dashed outline its card and its Agent mark show
+   when it is chosen. Why is said to a screen reader (its description). */
+.qc-group.later .qc-face { flex-basis: calc((100% - 5 * var(--x-s1)) / 6); padding: 4px 1px 5px; color: var(--x-muted); }
+.qc-group.later .qc-portrait { width: 38px; height: 38px; }
+.qc-group.later .qc-face-name { font-size: var(--x-fs-cap); line-height: 16px; }
+.qc-face.away .qc-portrait { opacity: .62; filter: saturate(.5); }
+.qc-face.away .qc-portrait::before { background: transparent; border: 1.2px dashed var(--x-faint); }
+.qc-face.away[aria-checked="true"] { color: var(--x-text); }
+.qc-face.away[aria-checked="true"] .qc-portrait { opacity: 1; filter: none; }
+.qc-face.away[aria-checked="true"] .qc-portrait::before { background: transparent; border-color: var(--x-text-2); }
+/* 自定义's own picture: a cat's outline with nothing in it yet (no face: it
+   is nobody until the owner says), and a plus; it sits on a cushion too. */
+.qc-own-pic { position: relative; display: block; width: 100%; height: 100%; color: var(--x-muted); }
+.qc-own-head { fill: var(--x-fill-1); stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .qc-own-dot { fill: currentColor; }
 .qc-own-plus { fill: none; stroke: var(--x-card); stroke-width: 1.8; stroke-linecap: round; }
 .qc-face.own[aria-checked="true"] .qc-own-pic { color: var(--x-text-2); }
@@ -118,9 +127,10 @@
 /* ---- the chosen one's card, at the top of the panel ----
    Its portrait sits on a cushion at the left; the name it comes with and its
    breed, the Agent mark, then its temperament in its own words and what it is
-   good at. Under them, for a cat that cannot come home as it is: why (the
-   server's words), what can be done and 「只借它的长相」. For 自定义: the
-   owner's own cat, its looks to pick, two optional lines and its Agent. */
+   good at. Under them, for a cat that cannot come home as it is: what can be
+   done (a login's command, 重新检测) and 自定义 — why is the Agent mark's one
+   word. For 自定义: its Agent where a cat's mark is, its looks to pick, and
+   two lines whose placeholders ask the questions. */
 .qc-about {
   position: relative; min-width: 0;
   display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "hero who" "hero trait" "tail tail" "own own";
@@ -157,10 +167,9 @@
 .qc-trait-line:first-child { color: var(--x-text-2); }
 .qc-trait-line:first-child:not(:only-child)::before { content: "「"; margin-left: -.5em; }
 .qc-trait-line:first-child:not(:only-child)::after { content: "」"; }
-/* Why it cannot come home as it is, what can be done, and the way on. */
+/* What can be done (a login's command, 重新检测) and the way on; why is the
+   Agent mark's one word, the sentence only said. */
 .qc-tail { grid-area: tail; min-width: 0; margin-top: var(--x-s4); display: flex; flex-direction: column; align-items: flex-start; gap: var(--x-s3); }
-.qc-uses-line { margin: 0; font-size: 13px; line-height: 20px; color: var(--x-text-2); text-wrap: pretty; }
-.qc-uses-text { animation: fade 180ms ease-out; }
 .qc-uses-more {
   display: flex; flex-wrap: wrap; align-items: center; gap: var(--x-s2);
   font-size: var(--x-fs-sm); line-height: 1.6; color: var(--x-muted);
@@ -172,7 +181,7 @@
 .qc-uses-note:empty { display: none; }
 /* The portrait changed since the screen read it: a quiet line beside the new words. */
 .qc-fresh { margin: 0; font-size: var(--x-fs-sm); line-height: 1.5; color: var(--x-text-2); animation: fade 180ms ease-out; }
-/* 「只借它的长相」: the way on, a button of its own beside what it does. */
+/* The way on: one button, 自定义 (it takes the cat's looks along). */
 .qc-forward { display: flex; flex-wrap: wrap; align-items: center; gap: var(--x-s1) var(--x-s3); animation: fade 180ms ease-out; }
 .qc-borrow {
   display: inline-flex; align-items: center; gap: var(--x-s2); min-height: 30px; padding: 0 14px 0 12px;
@@ -184,10 +193,8 @@
 .qc-borrow:disabled { cursor: default; opacity: .6; }
 .qc-borrow:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .qc-borrow .icon { width: 13px; height: 13px; flex: none; }
-.qc-ahead { font-size: var(--x-fs-sm); line-height: 1.5; color: var(--x-muted); }
-/* 自定义's card: its looks beside the portrait, the two lines and its Agent under it. */
+/* 自定义's card: its Agent where a cat's mark is, its looks beside the portrait, the two lines under them. */
 .qc-looksbox { grid-area: trait; min-width: 0; margin-top: var(--x-s3); }
-.qc-looks-head { margin: 0 0 var(--x-s1); font-size: var(--x-fs-cap); font-weight: 560; letter-spacing: .02em; color: var(--x-muted); }
 .qc-looks { display: flex; flex-wrap: wrap; gap: 2px; }
 .qc-look {
   width: 40px; height: 40px; padding: 3px; border: 0; border-radius: 10px; background: transparent; cursor: pointer;
@@ -207,7 +214,6 @@
 .qc-fields .field.qc-field { margin-top: var(--x-s4); }
 .qc-side .field input { background: var(--x-card); }
 .qc-side .field input:focus { background: var(--x-card); box-shadow: inset 0 0 0 1px var(--x-fill-3); }
-.qc-opt { margin-left: var(--x-s2); font-size: var(--x-fs-cap); color: var(--x-faint); }
 .qc-flow [aria-invalid="true"], .qc-card [aria-invalid="true"] { outline: 2px solid var(--x-danger); outline-offset: -2px; }
 .qc-err { margin: 0; font-size: var(--x-fs-sm); line-height: 1.5; color: var(--x-danger); }
 .qc-err:empty { display: none; }
@@ -222,12 +228,15 @@
    come home, or 自定义, may make the panel taller — eased in the dialog,
    glided on the stage. The tiles are sized so that, in the usual mixes, the
    two columns end on about the same line: four to a row beside the stage's
-   taller panel (it holds 带它回家), five to a row in the dialog. */
+   taller panel (it holds 带它回家), five to a row in the dialog; the smaller
+   tiles of the cats that cannot come home, six to a row. */
 @container (min-width: 640px) {
   .qc-meet { display: grid; grid-template-columns: 300px minmax(0, 1fr); column-gap: var(--x-s8); align-items: start; }
-  .qc-faces { gap: var(--x-s6); }
+  .qc-faces { gap: var(--x-s7); }
   .qc-face { flex-basis: 72px; padding: 6px 2px 7px; }
   .qc-portrait { width: 52px; height: 52px; }
+  .qc-group.later .qc-face { flex-basis: 46px; }
+  .qc-group.later .qc-portrait { width: 38px; height: 38px; }
   .qc-side { padding: var(--x-s6); }
   .qc-about { column-gap: var(--x-s6); }
   .qc-hero { width: 120px; height: 120px; }
@@ -238,6 +247,8 @@
   .qc-card .qc-meet { grid-template-columns: 326px minmax(0, 1fr); }
   .qc-card .qc-face { flex-basis: 62px; padding: 7px 2px 8px; }
   .qc-card .qc-portrait { width: 50px; height: 50px; }
+  .qc-card .qc-group.later .qc-face { flex-basis: 50px; padding: 5px 1px 6px; }
+  .qc-card .qc-group.later .qc-portrait { width: 38px; height: 38px; }
   .qc-card .qc-hero { width: 108px; height: 108px; }
 }
 /* 创建 / 带它回家 for a cat that cannot come home as it is: still focusable
@@ -249,37 +260,35 @@
 }
 .qc-flow .qc-side .primary[aria-disabled="true"] { background: var(--x-fill-2); }
 .qc-error { margin: var(--x-s3) 0 0; font-size: var(--x-fs-sm); line-height: 1.5; color: var(--x-danger); }
-.qc-tool { margin-top: var(--x-s4); }
-.qc-tool-line { margin: 0; font-size: 13px; line-height: 1.7; color: var(--x-muted); }
-.qc-tool-line b { font-weight: 560; color: var(--x-text-2); }
-.qc-tool-note {
-  margin: var(--x-s2) 0 0; font-size: var(--x-fs-sm); line-height: 1.6; color: var(--x-muted);
-  display: flex; flex-wrap: wrap; align-items: center; gap: var(--x-s2);
-}
-/* The tool switch is a quiet chip, a native select underneath. */
+/* 自定义's Agent: the same mark as a cat's, with a native select inside it when there is a choice. */
+.qc-tool-line { margin: 0; }
+.qc-tool-note { margin: var(--x-s2) 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--x-s2); }
 .qc-pick {
-  position: relative; display: inline-flex; vertical-align: baseline;
+  position: relative;
   --qc-chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
+.qc-pick.choose { padding-right: 24px; transition: background 160ms ease-out; }
+.qc-pick.choose:hover { background: var(--x-fill-2); }
+.qc-pick.choose:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
 .qc-pick select {
-  appearance: none; -webkit-appearance: none; margin: 0 2px; padding: 1px 21px 1px 8px;
-  border: 0; border-radius: var(--x-r-xs); background: var(--x-card); color: var(--x-text-2);
-  font: inherit; font-weight: 560; cursor: pointer; transition: background 160ms ease-out;
+  appearance: none; -webkit-appearance: none; margin: 0; padding: 0; height: 22px; outline: none;
+  border: 0; background: transparent; color: var(--x-text); font: inherit; font-weight: 600; cursor: pointer;
 }
-.qc-pick select:hover:not(:disabled) { background: var(--x-fill-2); }
 .qc-pick select:disabled { cursor: default; }
-.qc-pick::after {
-  content: ""; position: absolute; right: 8px; top: 50%; width: 10px; height: 10px; margin-top: -5px;
+.qc-pick.choose::after {
+  content: ""; position: absolute; right: 9px; top: 50%; width: 10px; height: 10px; margin-top: -5px;
   background: var(--x-muted); pointer-events: none;
   -webkit-mask: var(--qc-chev) center / 10px no-repeat; mask: var(--qc-chev) center / 10px no-repeat;
 }
 
-/* A native login command, copyable. */
+/* A native login command, copyable. A terminal's prompt mark before it says
+   where it runs (item 45: the chip says it, not a sentence). */
 .qc-cmds { display: flex; flex-direction: column; align-items: flex-start; gap: var(--x-s2); }
 .qc-cmd {
   display: inline-flex; align-items: center; gap: var(--x-s3); max-width: 100%;
-  padding: 4px 4px 4px 12px; border-radius: var(--x-r-sm); background: var(--x-card);
+  padding: 4px 4px 4px 10px; border-radius: var(--x-r-sm); background: var(--x-card);
 }
+.qc-cmd > .icon { flex: none; width: 15px; height: 15px; margin-right: -3px; color: var(--x-muted); }
 .qc-cmd-for { flex: none; font-size: var(--x-fs-sm); color: var(--x-muted); }
 .qc-cmd code {
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -399,6 +408,6 @@
   .qc-side .field input { min-height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .qc-face, .qc-portrait, .qc-look, .qc-hero::before, .qc-stage.leaving > * { transition: none; }
-  .qc-stage, .qc-wait-text, .qc-trait-line, .qc-uses-text, .qc-nick, .qc-forward, .qc-fresh, .qc-hero-pic > svg, .qc-own:not([hidden]) { animation: none; }
+  .qc-face, .qc-portrait, .qc-portrait::before, .qc-look, .qc-pick, .qc-hero::before, .qc-stage.leaving > * { transition: none; }
+  .qc-stage, .qc-wait-text, .qc-trait-line, .qc-nick, .qc-forward, .qc-fresh, .qc-hero-pic > svg, .qc-own:not([hidden]) { animation: none; }
 }

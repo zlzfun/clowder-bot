@@ -2,12 +2,15 @@
 // through init(). Three views:
 //   stage()     no cats yet: 「领一只猫猫回家」 — the cats to choose from as
 //               named tiles (those that can come home as they are, 自定义 for
-//               a cat of the owner's own, then, under a few plain words, those
+//               a cat of the owner's own, then, set apart and smaller, those
 //               that cannot), and the chosen one's card: its portrait on a
 //               cushion, the name it comes with, its breed, its temperament in
 //               its own words, what it is good at and the Agent it thinks with
-//               (or why it cannot come home as it is, and the way on); keep or
-//               change its name, 带它回家 (docs/xbot-frontend.md item 44);
+//               (with its state in one word when it cannot come home as it is,
+//               and the way on); keep or change its name, 带它回家
+//               (docs/xbot-frontend.md items 44, 45: the layout explains, so
+//               no headings, tags or helper sentences on screen; a screen
+//               reader hears names, descriptions and one sentence per choice);
 //   noChat()    cats, but no chat open: one line (and 打开列表 on a phone);
 //   the 新建 dialog (openCat() on its 猫猫 side, openGroup() on its 群聊
 //               side; item 43): one window titled 新建 with a 猫猫 | 群聊
@@ -85,8 +88,8 @@
     }
     return svg;
   }
-  // 自定义's picture: a cat's outline still to be filled in (dashed, no face:
-  // it is nobody yet), with a small plus. Not a clay cat pretending.
+  // 自定义's picture: a cat's outline still to be filled in (no face: it is
+  // nobody yet), with a small plus. Not a clay cat pretending.
   const ownPicture = () => draw("0 0 48 48", "qc-own-pic", [
     ["path", { class: "qc-own-head", d: "M9 25C9 19 10 14 11.5 9.5L18.5 15C21.5 14 26.5 14 29.5 15L36.5 9.5C38 14 39 19 39 25C39 33.5 32.5 39.5 24 39.5S9 33.5 9 25Z" }],
     ["circle", { class: "qc-own-dot", cx: "36.5", cy: "36.5", r: "7" }],
@@ -111,28 +114,22 @@
   // named tile (its portrait, the name its cat comes with; breed and name are
   // the radio's name), and 自定义, a tile of the same kind for a cat of the
   // owner's own. While the form can be used (own(true)), the faces whose own
-  // cat can come home as it is come first, then 自定义, then, under a few
-  // plain words, those that cannot (mark()): each says in one short word why
-  // (接不上, 没安装, 没登录, 没读到), and the server's reason is its
-  // description, so it reads at a glance, before any hover or choice. While
-  // nothing can be chosen (still reading, or blocked) every face sits in one
-  // quiet row without 自定义, and the row is only a picture. Which faces, and
-  // how many, is the server's (faces[] in /start): offer() redraws the tiles
-  // when that changes; they wrap as the space allows.
+  // cat can come home as it is come first, then 自定义, then, set apart, the
+  // ones that cannot (mark()): smaller, quieter, each on an empty dashed
+  // cushion — the layout says it, no heading and no word on a tile (item 45);
+  // a screen reader hears why as each one's description. While nothing can be
+  // chosen (still reading, or blocked) every face sits in one quiet group
+  // without 自定义, and the row is only a picture. Which faces, and how many,
+  // is the server's (faces[] in /start): offer() redraws the tiles when that
+  // changes; they wrap as the space allows.
   const OWN = Symbol("own");
   function lineup({ compact, onPick }) {
     const box = node("div", "qc-faces" + (compact ? " compact" : ""));
     box.setAttribute("role", "radiogroup");
     box.setAttribute("aria-label", "选一只猫猫");
-    // The two groups, each under its few words (shown only when there are two;
-    // a radio's own description says it for a screen reader, so they are not read).
-    const groups = R.GROUPS.map((words, i) => {
-      const g = node("div", "qc-group" + (i ? " later" : "")), head = node("p", "qc-group-head", words);
-      head.setAttribute("aria-hidden", "true");
-      g.append(head);
-      return { g, head };
-    });
-    box.append(groups[0].g, groups[1].g);
+    // Two groups, set apart by space and by how their tiles are drawn: the cats that can come home (and 自定义), then those that cannot.
+    const groups = [node("div", "qc-group"), node("div", "qc-group later")];
+    box.append(...groups);
     let current = null, on = false, items = [], offered = "", away = null, ownOn = false, order = [], arranged = "";
     function keys(b, key) {
       b.addEventListener("click", () => { if (on) choose(key); });
@@ -152,14 +149,12 @@
       const pic = node("span", "qc-portrait");
       pic.setAttribute("aria-hidden", "true");
       pic.append(portrait(p.id));
-      const name = node("span", "qc-face-name", nick || p.label), tag = node("span", "qc-face-tag"), why = node("span", "qc-sr");
+      const name = node("span", "qc-face-name", nick || p.label), why = node("span", "qc-sr");
       name.setAttribute("aria-hidden", "true");
-      tag.setAttribute("aria-hidden", "true");
-      tag.hidden = true;
       why.id = uid("why");
-      b.append(pic, name, tag, why);
+      b.append(pic, name, why);
       keys(b, p.id);
-      return { key: p.id, id: p.id, b, pic, tag, why };
+      return { key: p.id, id: p.id, b, pic, why };
     }
     const own = (() => {
       const b = node("button", "qc-face own");
@@ -189,20 +184,18 @@
       arranged = sig;
       // Moving a focused tile drops its focus: put it back.
       const here = box.contains(document.activeElement) ? document.activeElement : null;
-      groups[0].g.replaceChildren(groups[0].head, ...first.map((it) => it.b), own.b);
-      groups[1].g.replaceChildren(groups[1].head, ...later.map((it) => it.b));
-      groups[1].g.hidden = !later.length;
+      groups[0].replaceChildren(...first.map((it) => it.b), own.b);
+      groups[1].replaceChildren(...later.map((it) => it.b));
+      groups[1].hidden = !later.length;
       if (here && here.isConnected && document.activeElement !== here) here.focus();
     }
-    // away: face id → {why, tag} for the faces whose cat cannot come home as it is; null for none.
+    // away: face id → why its cat cannot come home as it is (said, as its description); null for none.
     function mark(next) {
       away = next;
       for (const it of items) {
         const one = away ? away.get(it.id) : null;
         it.b.classList.toggle("away", !!one);
-        it.tag.textContent = one ? one.tag : "";
-        it.tag.hidden = !one;
-        it.why.textContent = one ? R.GROUPS[1] + "：" + one.why : "";
+        it.why.textContent = one || "";
         if (one) it.b.setAttribute("aria-describedby", it.why.id);
         else it.b.removeAttribute("aria-describedby");
       }
@@ -315,11 +308,13 @@
     };
   }
 
-  // A native login command, copyable (the terminal is where it runs).
+  // A native login command, copyable. The chip itself says where it runs: a
+  // terminal's prompt mark before the command (no sentence on screen; the
+  // card's and the blocked screen's words for a screen reader say it too).
   function commandChip(command, label) {
     const chip = node("span", "qc-cmd");
     if (label) chip.append(node("span", "qc-cmd-for", label));
-    chip.append(node("code", "", command));
+    chip.append(hooks().icon("terminal"), node("code", "", command));
     const copy = button("qc-copy", "复制");
     copy.setAttribute("aria-label", "复制 " + command);
     let timer = 0;
@@ -357,9 +352,12 @@
       line.replaceChildren();
       select = null;
       offered = next;
-      line.append(R.TOOL_LINE[0]);
+      // On screen, the Agent's mark where a cat's would be: its name (a select when there is a choice), and
+      // 未确认登录 when its login could not be checked; the sentence around it is for a screen reader.
+      line.append(node("span", "qc-sr", R.TOOL_LINE[0]));
+      const chip = node("span", "qc-agent qc-pick" + (list.length > 1 ? " choose" : ""));
+      chip.append(spark());
       if (list.length > 1) {
-        const pick = node("span", "qc-pick");
         select = node("select", "");
         select.setAttribute("aria-label", "用哪个 Agent 思考");
         for (const c of list) {
@@ -369,19 +367,21 @@
         }
         select.value = chosen.id;
         select.addEventListener("change", () => onChange(select.value));
-        pick.append(select);
-        line.append(pick);
-      } else line.append(node("b", "", chosen.label));
-      line.append(R.TOOL_LINE[1]);
+        chip.append(select);
+      } else {
+        chip.append(node("b", "", chosen.label));
+        // Said as 「它会用这台电脑上的 Codex 来思考，未确认登录」: the sentence ends before the word.
+        if (!chosen.confirmed) chip.append(node("span", "qc-sr", R.TOOL_LINE[1] + "，"), node("span", "qc-agent-tag", R.TAGS.unknown));
+      }
+      line.append(chip);
+      if (select || chosen.confirmed) line.append(node("span", "qc-sr", R.TOOL_LINE[1]));
       if (refocus && select) select.focus();
     }
+    // A login that could not be checked: its command, copyable (the sentence is for a screen reader).
     function paintNote(s, chosen) {
-      note.hidden = chosen.confirmed;
-      if (!chosen.confirmed) {
-        const command = R.loginCommand(s, chosen.id);
-        note.append(R.unconfirmed(chosen.label, command));
-        if (command) note.append(commandChip(command));
-      }
+      const command = chosen.confirmed ? "" : R.loginCommand(s, chosen.id);
+      note.hidden = !command;
+      if (command) note.append(node("span", "qc-sr", R.unconfirmed(chosen.label, command)), commandChip(command));
     }
     return { element: box, render, disable: (value) => { if (select) select.disabled = value; } };
   }
@@ -393,9 +393,9 @@
   // template of that id, faces[] in /start). The chosen one has a card: its
   // portrait on a cushion, the name it comes with and its breed, the Agent it
   // thinks with as a small mark, its temperament in its own words and what it
-  // is good at — or, when its tool is not usable here, why this cat cannot
-  // come home as it is (the server's words), what can be done about it, and
-  // the way on: 「只借它的长相」 turns to 自定义 with its looks already chosen
+  // is good at — and, when its tool is not usable here, the mark's one word
+  // for why, what can be done about it (a command, 重新检测), and the way on:
+  // a button 自定义 turns to 自定义 with its looks already chosen
   // (创建 / 带它回家 is not offered for it). 自定义 is one of the options, a
   // tile like the cats': chosen, the card becomes the owner's own cat — its
   // looks (any face), what it is for, what it is like and the Agent it thinks
@@ -453,15 +453,19 @@
     hero.setAttribute("aria-hidden", "true");
     hero.append(heroPic);
     // The name it comes with, its breed, and the Agent it thinks with (part of
-    // the cat, nothing to pick: a small mark, its sentence for a screen reader).
+    // the cat, nothing to pick: a small mark — its name and, when it is not
+    // usable here, its state in one word — and its sentence for a screen reader).
+    // For 自定义 the same place holds the Agent it will think with (toolLine).
     const who = node("div", "qc-who"), nick = node("p", "qc-nick"), agentMark = node("p", "qc-agent");
     agentMark.hidden = true;
     who.append(nick, agentMark);
     // Its temperament in its own words, then what it is good at.
     const trait = node("p", "qc-trait");
-    // Under them, for a cat that cannot come home as it is: why (the server's
-    // reason), what can be done about it, and the way on.
-    const usesLine = node("p", "qc-uses-line"), usesMore = node("div", "qc-uses-more");
+    // Under them, for a cat that cannot come home as it is: what can be done
+    // about it (a login's command, 重新检测) and the way on. Why is the Agent
+    // mark's one word on screen; the full sentence (the server's reason) is
+    // said, as 创建's description (usesLine, for a screen reader only).
+    const usesLine = node("p", "qc-uses-line qc-sr"), usesMore = node("div", "qc-uses-more");
     usesLine.id = uid("uses");
     usesLine.hidden = true;
     usesMore.hidden = true;
@@ -472,23 +476,25 @@
     // (face_changed): the card now shows the new words; have a look.
     const fresh = node("p", "qc-fresh");
     fresh.hidden = true;
-    // The way on from a cat that cannot come home as it is: 自定义 with its looks.
-    const forward = node("div", "qc-forward"), borrow = button("qc-borrow", null, () => borrowLooks()), ahead = node("span", "qc-ahead");
+    // The way on from a cat that cannot come home as it is: one button, 自定义, which takes its looks along
+    // (its name says so to a screen reader; which Agent it would think with is its description).
+    const forward = node("div", "qc-forward"), borrow = button("qc-borrow", null, () => borrowLooks()), ahead = node("span", "qc-ahead qc-sr");
     borrow.append(h.icon("pencil"), node("span", "", R.BORROW));
+    borrow.setAttribute("aria-label", R.BORROW_SAID);
     ahead.id = uid("ahead");
     borrow.setAttribute("aria-describedby", ahead.id);
     forward.append(borrow, ahead);
     forward.hidden = true;
     const tail = node("div", "qc-tail");
     tail.append(usesLine, usesMore, fresh, forward);
-    // 自定义: its looks beside the portrait; what it is for, what it is like
-    // and the Agent it thinks with under them. Hidden, never removed, while a
-    // cat is chosen, so moving back and forth loses nothing.
-    const looksBox = node("div", "qc-looksbox"), looksHead = node("p", "qc-looks-head", "长相");
-    looksHead.setAttribute("aria-hidden", "true");
+    // 自定义: its Agent where a cat's mark is, its looks beside the portrait
+    // (the big portrait shows the one chosen), what it is for and what it is
+    // like under them. Hidden, never removed, while a cat is chosen, so moving
+    // back and forth loses nothing.
+    const looksBox = node("div", "qc-looksbox");
     const looksRow = looksPicker((id) => { looks = id; looksTouched = true; paintAbout(); });
     looksRow.offer(offered);
-    looksBox.append(looksHead, looksRow.element);
+    looksBox.append(looksRow.element);
     looksBox.hidden = true;
     const own = node("div", "qc-own");
     own.hidden = true;
@@ -500,41 +506,51 @@
 
     const fields = node("div", "qc-fields");
     // A labelled text box (the original .field) with its own message line: the
-    // name at the panel's foot, and the two optional lines of 自定义.
-    function field(label, { max, optional = false, placeholder = "" }) {
+    // name under the card, and the two optional lines of 自定义. Their place
+    // and placeholder say what they are, so the label is for a screen reader
+    // only (quiet). Which must be filled is told to a screen reader too, never
+    // shown: the name is aria-required; an optional line is described as such.
+    function field(label, { max, placeholder = "", quiet = false, required = false, optional = "" }) {
       const box = node("div", "field qc-field");
-      const lab = node("label", "", label), input = node("input", ""), err = node("p", "qc-err");
-      if (optional) lab.append(node("span", "qc-opt", "可不填"));
+      const lab = node("label", quiet ? "qc-sr" : "", label), input = node("input", ""), err = node("p", "qc-err");
       input.type = "text"; input.maxLength = max; input.autocomplete = "off";
       if (placeholder) input.placeholder = placeholder;
       input.id = uid("field"); lab.htmlFor = input.id;
       err.id = uid("err"); err.setAttribute("role", "alert");
-      input.setAttribute("aria-describedby", err.id);
+      if (required) input.setAttribute("aria-required", "true");
+      const note = optional ? node("span", "qc-sr", optional) : null;
+      if (note) note.id = uid("opt");
+      input.setAttribute("aria-describedby", note ? note.id + " " + err.id : err.id);
       const mark = (text) => {
         err.textContent = text || "";
         if (text) input.setAttribute("aria-invalid", "true"); else input.removeAttribute("aria-invalid");
       };
       input.addEventListener("input", () => { mark(""); showError(""); });
-      box.append(lab, input, err);
+      box.append(lab, input, ...(note ? [note] : []), err);
       return { box, input, mark };
     }
     // The real limit (64 characters) is the rules'; the box only stops a runaway paste.
     // A cat of the owner's own does not borrow a template's name: its box starts empty, this placeholder asking for one.
-    const nameF = field("名字", { max: R.NAME_INPUT_MAX, placeholder: R.NAME_PLACEHOLDER }), nameIn = nameF.input;
+    const nameF = field("名字", { max: R.NAME_INPUT_MAX, placeholder: R.NAME_PLACEHOLDER, quiet: true, required: true }), nameIn = nameF.input;
     nameIn.spellcheck = false;
     // The owner's own name, from the moment they write one, until they empty the box.
     nameIn.addEventListener("input", () => { typed = !!R.trim(nameIn.value); });
-    // 自定义: what it is for (simple.about), what it is like
-    // (simple.personality), both optional, and which tool it thinks with.
-    const aboutF = field("它主要帮你做什么", { max: R.ABOUT_INPUT_MAX, optional: true, placeholder: "比如：帮我改简历、陪我练口语" });
-    const temperF = field("它的性格", { max: R.PERSONALITY_INPUT_MAX, optional: true, placeholder: "比如：话不多，做事靠谱" });
+    // 自定义: what it is for (simple.about) and what it is like
+    // (simple.personality), both optional: the question each answers is its
+    // placeholder; and which tool it thinks with.
+    const aboutF = field(R.ABOUT_ASK, { max: R.ABOUT_INPUT_MAX, placeholder: R.ABOUT_ASK, quiet: true, optional: R.OPTIONAL_SAID });
+    const temperF = field(R.PERSONALITY_ASK, { max: R.PERSONALITY_INPUT_MAX, placeholder: R.PERSONALITY_ASK, quiet: true, optional: R.OPTIONAL_SAID });
     const tool = toolLine((id) => {
       agent = id;
       toolPicked = true;
       tool.render(s, agent);
       showError("");
     });
-    own.append(aboutF.box, temperF.box, tool.element);
+    own.append(aboutF.box, temperF.box);
+    const toolBox = node("div", "qc-toolbox");
+    toolBox.hidden = true;
+    toolBox.append(tool.element);
+    who.append(toolBox);
     fields.append(nameF.box);
     const error = node("p", "qc-error");
     error.setAttribute("role", "alert");
@@ -582,7 +598,7 @@
       const f = chosenFace();
       if (!f) return "";
       const u = R.uses(R.toolOf(f, s));
-      return R.joinSaid([f.hint && f.hint.said, u && u.text, u && !u.usable ? "点「" + R.BORROW + "」，可以" + R.forward(s) : ""]);
+      return R.joinSaid([f.hint && f.hint.said, u && u.text, u && !u.usable ? "可以" + R.BORROW_SAID + "，" + R.forward(s) : ""]);
     };
     // Eased (the dialog) or glided (the stage): a change of the card's height never jumps.
     const smooth = (change) => { if (resize) resize(change); else glide(centred && centred(), change); };
@@ -613,7 +629,7 @@
       const hadFocus = tail.contains(document.activeElement);
       const face = chosenFace(), look = custom ? looksFace() : face;
       const away = ready
-        ? new Map(offered.filter((f) => !R.faceUsable(f, s)).map((f) => { const t = R.toolOf(f, s) || R.UNREAD; return [f.id, { why: t.reason || "", tag: R.tag(t) }]; }).filter(([, v]) => v.why))
+        ? new Map(offered.filter((f) => !R.faceUsable(f, s)).map((f) => [f.id, R.why(R.toolOf(f, s) || R.UNREAD)]).filter(([, why]) => why))
         : null;
       faces.own(ready);
       faces.mark(away && away.size ? away : null);
@@ -622,11 +638,13 @@
       about.classList.toggle("own", custom);
       about.classList.toggle("away", blocked);
       paintHero(look ? look.id : null);
-      paintWho(face, look);
+      paintWho(face);
       paintTrait(face);
       paintUses(face);
       looksBox.hidden = !custom;
       own.hidden = !custom;
+      toolBox.hidden = !custom;
+      nick.hidden = custom;
       forward.hidden = !blocked;
       if (blocked) ahead.textContent = R.forward(s);
       borrow.disabled = busy;
@@ -644,15 +662,13 @@
       heroShown = id;
       heroPic.replaceChildren(...(id ? [portrait(id)] : []));
     }
-    // The name it comes with and its breed; for 自定义, whose cat it is (and, over its looks, which they are).
-    function paintWho(face, look) {
-      looksHead.textContent = "长相" + (custom && look ? "：" + look.label : "");
+    // The name it comes with and its breed (nothing for 自定义: its looks and its Agent say what it is).
+    function paintWho(face) {
       const sig = custom ? "own" : face ? [face.id, face.nickname, face.label].join("\n") : "";
       if (sig === whoShown) return;
       whoShown = sig;
       const parts = [];
-      if (custom) parts.push(node("span", "qc-nick-name", R.OWN_TITLE));
-      else if (face) {
+      if (!custom && face) {
         const name = face.nickname && face.nickname !== face.label ? face.nickname : "";
         parts.push(node("span", "qc-nick-name", name || face.label));
         if (name) parts.push(node("span", "qc-breed", face.label));
@@ -677,28 +693,28 @@
       const sig = u ? [u.text, t.state, command].join("\n") : "";
       if (sig === usesShown) return;
       usesShown = sig;
-      // The mark: its sentence for a screen reader (「它用这台电脑上的 Claude Code 来思考」), the name and, when not usable, the short word why.
-      agentMark.hidden = !u || !t.label;
+      // The mark: the Agent's name and, when it is not usable here (or its login could not be checked), its state in
+      // one word (R.tag: 暂不支持, 未安装, 未登录, 未知, 未确认登录); a screen reader hears it as a sentence.
+      agentMark.hidden = !u;
       agentMark.classList.toggle("away", !!u && !u.usable);
-      if (u && t.label) {
-        const parts = [spark(), node("span", "qc-sr", u.usable ? R.USES[0] : "它要用 "), node("b", "", t.label), node("span", "qc-sr", u.usable ? R.USES[1] : " 来思考，")];
-        if (!u.usable) parts.push(node("span", "qc-agent-tag", R.tag(t)));
+      if (u) {
+        const word = R.tag(t);
+        const after = u.usable ? R.USES[1] + (word ? "，" : "") : (t.label ? " 来思考" : "") + "，";
+        const parts = [spark(), node("span", "qc-sr", u.usable ? R.USES[0] : t.label ? "它要用 " : ""), node("b", "", t.label || "Agent"), node("span", "qc-sr", after)];
+        if (word) parts.push(node("span", "qc-agent-tag", word));
         agentMark.replaceChildren(...parts);
       } else agentMark.replaceChildren();
-      // Why it cannot come home as it is, in the server's words.
+      // Why it cannot come home as it is, in the server's words: said, as 创建's description, not shown.
       usesLine.hidden = !u || u.usable;
-      usesLine.replaceChildren(...(u && !u.usable ? [node("span", "qc-uses-text", R.why(t))] : []));
+      usesLine.textContent = u && !u.usable ? R.why(t) : "";
       const more = [];
-      // Installed, but its login could not be checked: said, never "ready".
-      if (u && u.usable && t.state === "unknown") {
-        more.push(node("span", "qc-uses-say", R.unconfirmed(t.label, command)));
-        if (command) more.push(commandChip(command));
-      }
-      // Needs a login, or is not installed: what to do (with the login command) and 重新检测, as the blocked
-      // screen has them; the cat and everything typed stay. A tool the app cannot connect yet has nothing to re-detect.
+      // Installed, but its login could not be checked: the mark says 未确认登录, and here is its command; never "ready".
+      if (u && u.usable && t.state === "unknown" && command) more.push(node("span", "qc-sr", R.unconfirmed(t.label, command)), commandChip(command));
+      // Needs a login, or is not installed: the login command (copyable) and 重新检测, as the blocked screen has them;
+      // the cat and everything typed stay. A tool the app cannot connect yet has nothing to re-detect.
       if (u && help) {
         checkNote.textContent = "";
-        more.push(node("span", "qc-uses-say", help.text));
+        more.push(node("span", "qc-sr", help.text));
         if (command) more.push(commandChip(command));
         more.push(checkAgain(), checkNote);
       }
@@ -724,7 +740,7 @@
     // 创建 / 带它回家: not for a cat that cannot come home as it is.
     // aria-disabled, not disabled: it stays focusable and described by the line
     // that says why, and pressing it — or Enter in a field, which presses it —
-    // sends nothing and takes the owner to the way on, 「只借它的长相」
+    // sends nothing and takes the owner to the way on, the button 自定义
     // (submit's guard). Disabled only while a request is on its way.
     function paintGo() {
       const blocked = kind === "ready" && stuck();
@@ -751,7 +767,7 @@
       });
       say(spoken());
     }
-    // 自定义, by the owner (its tile, or 「只借它的长相」 with `from`'s looks): the card becomes the owner's own cat.
+    // 自定义, by the owner (its tile, or the card's 自定义 with `from`'s looks): the card becomes the owner's own cat.
     function toOwn(borrowed = null) {
       if (busy || kind !== "ready") return;
       if (custom && !borrowed) return;
@@ -762,7 +778,7 @@
       say(R.OWN_NOTE);
       showError("");
     }
-    // 「只借它的长相」: 自定义 with the looks of the cat on the card; focus to the looks chosen, so what happened is in reach.
+    // The card's 自定义 (用它的长相自定义): the looks of the cat on the card; focus to the looks chosen, so what happened is in reach.
     function borrowLooks() {
       const from = chosenFace();
       if (!from || !stuck()) return;
@@ -820,7 +836,7 @@
     function failed(err, how) {
       const why = R.startError(err);
       if (how === "refresh" && !needBox.hidden) { paintNeed(s, "没能重新检测：" + why); return; }
-      if (how === "refresh" && !fields.hidden) { checkNote.textContent = "没能重新检测：" + why + "。"; return; }
+      if (how === "refresh" && !fields.hidden) { checkNote.textContent = "没能重新检测：" + why + "。"; checkNote.classList.remove("qc-sr"); return; }
       if ((how === "refused" || how === "face") && !fields.hidden) { showError(refused + "也没能重新读取这台电脑的情况，稍后再试。"); return; }
       if (how === "changed" && !fields.hidden) { showError("这只猫猫的介绍刚刚更新了，可没能读到新的介绍，稍后再试。"); return; }
       show("failed");
@@ -832,6 +848,9 @@
     // (after face_changed: the portrait the owner saw is out of date).
     function apply(next, how) {
       const before = s, wasReady = !fields.hidden && !!(before && before.ready), wasStuck = wasReady && stuck(before);
+      // What the card showed of the chosen cat's tool (its name, state, whether it can come home, its command):
+      // 重新检测 is answered by whether that changed, not by whatever else on the computer did.
+      const toolBefore = wasReady && !custom && chosenFace() ? R.toolOf(chosenFace(), before) : undefined;
       s = next;
       offerFaces(R.offer(next.faces, presets()));
       // Blocked: no usable tool, or (just as final) no cat's details to make one from.
@@ -872,7 +891,7 @@
       if (lost) showError(lost + " 现在用不了，已经换成 " + next.agent.label + "。再点一次就好。");
       else if (how === "refused") showError(refused + (refusedFaces ? "现在读到了，再点一次就好。" : ""));
       else if (how === "face") {
-        // The server's sentence; read again, the card says how things are now (and 「只借它的长相」 is the way on).
+        // The server's sentence; read again, the card says how things are now (and its 自定义 is the way on).
         const now = !stuck();
         showError(refused + (now ? "重新检测过，现在能用了，再点一次就好。" : ""), !now);
         (now ? go : borrow).focus();
@@ -882,9 +901,14 @@
         say(R.FACE_CHANGED + (custom ? "" : spoken()));
         go.focus();
       } else if (how === "refresh" && wasReady) {
-        // 重新检测 beside a login: said plainly when nothing changed; a cat that can come home now is said once.
-        const help = R.toolHelp(R.toolOf(chosenFace(), next));
-        checkNote.textContent = R.sameStart(before, next) ? (help ? help.unchanged : "重新检测过了，没有变化。") : "检测结果有变化。";
+        // 重新检测 beside a login or an install: when nothing the owner can see of the chosen cat's tool changed,
+        // that is said, on screen too (even if something else on the computer changed); a change shows itself on
+        // the card (the mark, the command, the group), so only a screen reader is told; a cat that can come home
+        // now is said once.
+        const toolNow = R.toolOf(chosenFace(), next), help = R.toolHelp(toolNow);
+        const same = toolBefore !== undefined ? R.sameTool(toolBefore, toolNow) : R.sameStart(before, next);
+        checkNote.textContent = same ? (help ? help.unchanged : "重新检测过了，没有变化。") : "检测结果有变化。";
+        checkNote.classList.toggle("qc-sr", !same);
         // The cat can come home now: a refusal about its tool no longer holds, and the new state is said once.
         if (wasStuck && !stuck()) { if (refusal) showError(""); say(spoken()); }
       }
@@ -894,6 +918,7 @@
     function paintNeed(next, said) {
       const copy = needOf(next), refocus = needBox.contains(document.activeElement);
       const cmds = node("div", "qc-cmds");
+      if (copy.run) cmds.append(node("span", "qc-sr", copy.run));
       for (const c of copy.commands) cmds.append(commandChip(c.command, copy.commands.length > 1 ? c.label : ""));
       cmds.hidden = !copy.commands.length;
       const label = node("span", "", "重新检测"), again = button("secondary qc-again");
@@ -937,7 +962,7 @@
     const toolLabel = () => (custom ? (R.choiceOf(s, agent) || {}).label : (R.toolOf(chosenFace(), s) || {}).label) || "";
     async function submit() {
       if (busy || !s || !s.ready || fields.hidden) return;
-      // A cat that cannot come home as it is: nothing is sent; the way on is 「只借它的长相」.
+      // A cat that cannot come home as it is: nothing is sent; the way on is the card's 自定义.
       if (stuck()) { borrow.focus(); return; }
       // A face's own cat sends the face and the rev of the portrait shown (its tool is its own); 自定义 sends
       // custom, its looks (a face, always: the server takes its colour from it), what was written and the tool shown.
@@ -1082,13 +1107,11 @@
     const root = node("section", "qc-stage"), title = node("h2", "qc-title", "领一只猫猫回家");
     title.id = uid("title");
     root.setAttribute("aria-labelledby", title.id);
-    // Each face is a cat with its own character now, not only a look: 合心意.
-    const sub = node("p", "qc-sub", "挑一只合心意的，给它起个名字。");
+    // The title, then the cats and the card: no line under the title telling what the screen itself shows (item 45).
     const flow = catFlow({
       dialog: false,
       alive: () => root.isConnected,
       centred: () => root,
-      onState: (kind) => { sub.hidden = kind !== "ready" && kind !== "loading"; },
       done: ({ name, face, picture }) => {
         root.classList.add("leaving");
         arrive(name, face, picture).catch((err) => {
@@ -1102,7 +1125,7 @@
     const arrived = node("p", "qc-arrived");
     arrived.setAttribute("role", "status");
     arrived.hidden = true;
-    root.append(title, sub, arrived, flow.element);
+    root.append(title, arrived, flow.element);
     stages.set(root, {
       flow,
       point(names) {
@@ -1354,11 +1377,13 @@
       // One key per request body (members in order, name): an unsure answer is
       // sent again unchanged under it and arrives at the same group.
       let sending = false, attempt = null;
+      // Only what the chips cannot show is said under them: how many more are needed before 创建 works, or that a
+      // group is full. The legend 成员 is for a screen reader (the chips are plainly the cats to pick).
       const hint = node("p", "qc-hint");
       hint.id = uid("hint");
       hint.setAttribute("aria-live", "polite");
       const set = node("fieldset", "qc-members-set"), chips = node("div", "qc-members");
-      set.append(node("legend", "qc-legend", "成员"), chips, hint);
+      set.append(node("legend", "qc-legend qc-sr", "成员"), chips, hint);
       const boxes = cats.map((name) => {
         const chip = node("label", "qc-chip"), cb = node("input", "qc-sr");
         cb.type = "checkbox";
@@ -1375,13 +1400,18 @@
         chips.append(chip);
         return cb;
       });
+      // 群名: once two cats are picked, the name the group gets unless one is typed stands in the field. That it
+      // may stay empty, and what an unnamed group is called, is its description (for a screen reader; not shown).
       const nameBox = node("div", "field qc-field"), lab = node("label", ""), nameIn = node("input", ""), nameErr = node("p", "qc-err");
-      lab.append("群名", node("span", "qc-opt", "可不填"));
+      const nameNote = node("span", "qc-sr", R.GROUP_NAME_SAID);
+      lab.append("群名");
       nameIn.type = "text"; nameIn.maxLength = R.NAME_INPUT_MAX; nameIn.autocomplete = "off";
       nameIn.id = uid("group-name"); lab.htmlFor = nameIn.id;
+      nameNote.id = uid("opt"); nameErr.id = uid("err");
+      nameIn.setAttribute("aria-describedby", nameNote.id + " " + nameErr.id);
       nameErr.setAttribute("role", "alert");
       nameIn.addEventListener("input", () => { nameErr.textContent = ""; nameIn.removeAttribute("aria-invalid"); showError(""); });
-      nameBox.append(lab, nameIn, nameErr);
+      nameBox.append(lab, nameIn, nameNote, nameErr);
       const error = node("p", "qc-error");
       error.setAttribute("role", "alert");
       error.hidden = true;
@@ -1393,8 +1423,9 @@
       function sync() {
         const n = picked.length, full = n >= R.MAX_MEMBERS;
         for (const cb of boxes) cb.disabled = sending || (full && !cb.checked);
-        hint.textContent = n < 2 ? (n ? "已选 1 只，再选 1 只" : "至少选 2 只") : full ? "已选 " + n + " 只，一个群最多 " + R.MAX_MEMBERS + " 只" : "已选 " + n + " 只";
-        nameIn.placeholder = n >= 2 ? R.groupName(picked) : "不填就用成员的名字";
+        hint.textContent = n < 2 ? (n ? "再选 1 只" : "至少选 2 只") : full ? "最多 " + R.MAX_MEMBERS + " 只" : "";
+        hint.hidden = !hint.textContent;
+        nameIn.placeholder = n >= 2 ? R.groupName(picked) : "";
         go.disabled = sending || n < 2;
       }
       function setBusy(on) {
