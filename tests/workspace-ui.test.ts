@@ -617,7 +617,9 @@ test('文件 shows deliverables and attachments; the working directory, its path
   assert.deepEqual(all(p.root).filter(e => e.tagName === 'H4').map(textOf), ['交付物 · 1', '附件 · 1']);
   assert.deepEqual(namesIn(sectionOf(p.root, '交付物')), ['report-v1.md']);
   assert.deepEqual(namesIn(sectionOf(p.root, '附件')), ['brief.md']);
-  assert.match(textOf(sectionOf(p.root, '交付物')), /2 KB · 交付物/);
+  // Item 46: under its own section a card does not say again which it is (in the chat it still does).
+  assert.match(textOf(sectionOf(p.root, '交付物')), /^交付物 · 1MDreport-v1\.md2 KB · /);
+  assert.doesNotMatch(textOf(sectionOf(p.root, '交付物')), /2 KB · 交付物/);
   // The first view: no path, no workspace card, no area switch, and nothing read from the directory.
   const more = foldOf(p.root, 'ws-more');
   assert.equal(more.open, false);

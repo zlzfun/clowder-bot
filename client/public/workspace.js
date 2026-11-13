@@ -586,7 +586,9 @@
     const known = gone.get(String(file.id)) || "";
     const held = R.unavailable(file);
     const kind = known || held ? "none" : R.preview(file);
-    const base = () => [R.size(file.size), R.origin(file), opts.time ? stamp(file.createdAt) : ""].filter(Boolean).join(" · ");
+    // Under its own section (文件's 成果 / 交付物 / 附件) a card does not say
+    // which it is again (item 46); in the chat it still does.
+    const base = () => [R.size(file.size), opts.grouped ? "" : R.origin(file), opts.time ? stamp(file.createdAt) : ""].filter(Boolean).join(" · ");
     const name = node("span", "wsf-name", label);
     name.title = label;
     const meta = node("span", "wsf-meta");
@@ -1129,7 +1131,7 @@
         const line = failure(results.length ? "还有些猫猫发出的文件暂时读不到，这里可能不全。" : "猫猫在对话里发出的文件暂时读不到。下面只显示已保存的文件。", () => loadFiles());
         // The server's own reason stays at hand for diagnosis, not in the sentence.
         if (S.nativeError) line.title = S.nativeError;
-        parts.splice(0, parts.length, line, ...(results.length ? [cards(results, { time: true, cls: "wide" })] : []));
+        parts.splice(0, parts.length, line, ...(results.length ? [cards(results, { time: true, cls: "wide", grouped: true })] : []));
       }
       w.results.body.replaceChildren(...parts);
     });
@@ -1153,7 +1155,7 @@
     const parts = [];
     if (S.filesState === "error") parts.push(failure("刷新没有成功，显示的是上次读取的结果。", () => loadFiles()));
     // No files and nothing to add: the section's count (· 0) says it.
-    if (files.length) parts.push(cards(files, { time: true, cls: "wide" }));
+    if (files.length) parts.push(cards(files, { time: true, cls: "wide", grouped: true }));
     else if (empty) parts.push(note(empty));
     return parts;
   }
