@@ -790,7 +790,7 @@
       "target": "client/public/chat-history.js",
       "description": "Earlier messages (newest-page reads merged with the pages the owner scrolled back to; a quiet top row: 查看更早的消息 / 正在加载… / 没有更早的消息了 / failure with 重试, changed in place and re-read by the keyed redraw; scrolling near the top loads; answers for a chat or conversation left behind discarded), the chat header's ⋯ menu (新对话 and 历史对话 for a cat, 在对话里查找 only when window.ClowderPalette exists; arrows, Escape back to ⋯), the 新对话 dialog over the existing POST /xbot-api/bots/:name/new (says the old conversation stays under 历史对话 and what the cat remembers is kept; busy, switching and unsure answers said plainly), 历史对话 opening the existing list in 详情, and the suggestions under a cat's greeting that send on a tap",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 找得到, part one (docs/xbot-frontend.md item 30); the layout explains, not captions, on every other screen (docs/xbot-frontend.md item 46) by local Claude Code (claude-opus-5-5) on 2026-11-13",
-      "sha256": "1aa365f8010a59a583c426f3e6da341643e3b77a2122622e9697b066514dfd09"
+      "sha256": "b9497f19a11c974e2620adc7a70e5505ff6aaa8b4bae4d0fa68e88f847ec4702"
     },
     {
       "target": "client/public/chat-history.css",

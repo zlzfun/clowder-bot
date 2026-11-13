@@ -453,7 +453,9 @@
   function newConversation(sel, opener) {
     const name = H.name(sel);
     const busyText = name + "还在忙这段对话。等它做完，或者先点停止，再开始新对话。";
-    const body = [node("p", "ch-note", "现在这段对话会留在「历史对话」里，随时能回去接着聊；" + name + "记住的事都还在。")];
+    // What happens to the conversation on screen, once and plainly; the
+    // reassurance after it is gone (item 46).
+    const body = [node("p", "ch-note", "现在这段对话会收进「历史对话」。")];
     const files = H.pendingFiles();
     if (files) body.push(node("p", "ch-note", "待发送的 " + files + " 个附件会被移除。"));
     // The conversation this dialog is about, named once when it opens and kept

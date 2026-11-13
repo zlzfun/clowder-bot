@@ -338,7 +338,8 @@ test('新对话 says the old conversation stays under 历史对话 and what the 
   p.app.files = 2;
   let d = start();
   assert.equal(text(d.querySelector('h2')), '和团子开始新对话');
-  assert.deepEqual(d.querySelectorAll('.ch-note').map((n: El) => text(n)), ['现在这段对话会留在「历史对话」里，随时能回去接着聊；团子记住的事都还在。', '待发送的 2 个附件会被移除。']);
+  // Item 46: where the conversation goes, once and plainly, and the attachments that would be lost; no reassurance.
+  assert.deepEqual(d.querySelectorAll('.ch-note').map((n: El) => text(n)), ['现在这段对话会收进「历史对话」。', '待发送的 2 个附件会被移除。']);
   assert.equal(d.querySelector('.modal-card')!.getAttribute('aria-modal'), 'true');
   // Escape closes it, back to ⋯.
   d.key('Escape');
