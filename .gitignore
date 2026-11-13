@@ -1,6 +1,8 @@
 node_modules/
 dist/
 data/
+# After `npm run data:move`, ./data is a link to the data outside the repository.
+/data
 .env
 .env.*
 !.env.example
