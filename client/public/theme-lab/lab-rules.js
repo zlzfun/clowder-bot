@@ -14,7 +14,7 @@
   // client/index.html's stylesheets, in its order (tests/theme-lab.test.ts keeps the two equal).
   const STYLES = Object.freeze([
     "/tokens.css", "/vendor/katex/katex.min.css", "/app.css", "/devices.css", "/remotechat.css", "/providers.css",
-    "/skills.css", "/persona-cards.css", "/account.css", "/cafe-theme.css", "/agents.css", "/cat-templates.css",
+    "/skills.css", "/persona-cards.css", "/account.css", "/cafe-theme.css", "/cafe-colors.css", "/colors.css", "/agents.css", "/cat-templates.css",
     "/chat-presentation.css", "/schedules.css", "/workspace.css", "/chat-experience.css", "/quick-create.css",
     "/palette.css", "/chat-list.css", "/chat-history.css", "/profile.css", "/mention.css", "/polish.css",
     "/chat-cards.css", "/chat-presence.css", "/sidebar.css", "/chat-live.css",
@@ -24,14 +24,19 @@
   const TRY_ID = "theme-lab-try";
 
   const decl = (o) => Object.entries(o || {}).map(([k, v]) => k + ":" + v).join(";");
-  // `html:root` is (0,1,1): one more than cafe-theme.css's `:root` and, with
-  // [data-theme="dark"], one more than its `html[data-theme="dark"]`, so the
-  // palette wins without adding anything to the app's <html>. The syntax rules
-  // follow cafe-theme.css's four: a code block, the owner's bubble in light, a
-  // code block in dark, the owner's bubble in dark, each one class above it.
-  const A = "html:root";
-  function overrideCss(p) {
-    if (!p || p.current) return "";
+  // `html:root:root` is (0,2,1): one more than the app's own palettes
+  // (cafe-colors.css's html[data-colors="<id>"], (0,1,1)) and two more than
+  // cafe-theme.css's `:root`; with [data-theme="dark"], one more than
+  // html[data-colors][data-theme="dark"]. So the palette wins whatever 配色
+  // the app itself is set to, without adding anything to the app's <html>. The
+  // syntax rules follow cafe-theme.css's four (a code block, the owner's bubble
+  // in light, a code block in dark, the owner's bubble in dark), each one class
+  // above the app's. A frame of 拿铁 is the app as it is (no style); in the
+  // app's window (`always`) 拿铁 is written out too, since the app may be set to
+  // another 配色.
+  const A = "html:root:root";
+  function overrideCss(p, always) {
+    if (!p || (p.current && !always)) return "";
     return [
       A + "{" + decl(p.light.tokens) + "}",
       A + '[data-theme="dark"]{' + decl(p.dark.tokens) + "}",

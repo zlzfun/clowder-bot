@@ -6,7 +6,8 @@
 //   - the large view: one palette at real size, scene and light/dark switches,
 //     ← → between palettes, Esc to close;
 //   - 在应用里试: the app itself (/) in its own window, with the palette added
-//     as one style element (again after the app reloads); 拿铁 removes it.
+//     as one style element (again after the app reloads), 拿铁 included: the
+//     app may have a 配色 of its own (docs/xbot-frontend.md item 48).
 // The rules (stylesheets, the palette as CSS, a frame's document) are in
 // lab-rules.js; each cat's own colour comes from the app's chat-presence-rules.js.
 (() => {
@@ -34,10 +35,12 @@
   function docFor(palette, sceneId, mode) {
     return R.frameDoc({ scene: sceneOf(sceneId), mode, palette, html: state.html, accents: accents(palette, mode) });
   }
-  // A frozen screen ready to look at: styles in, fonts in, lists scrolled where they were.
-  async function settle(frame) {
+  // A frozen screen ready to look at: styles in, fonts in, lists scrolled where they were, and in
+  // 设置 → 通用 the palette shown is the 配色 chosen (the screen was taken with 拿铁 chosen).
+  async function settle(frame, colors) {
     const doc = frame.contentDocument;
     if (!doc || !doc.body) return;
+    if (colors) for (const b of doc.querySelectorAll(".cc-opt[data-id]")) b.setAttribute("aria-checked", String(b.getAttribute("data-id") === colors));
     void doc.body.offsetHeight;
     try { await doc.fonts.ready; } catch (e) { /* shown with whatever face is there */ }
     for (const node of doc.querySelectorAll("[data-lab-scroll]")) {
@@ -69,7 +72,7 @@
     if (opts.title) frame.title = opts.title;
     frame.srcdoc = doc;
     frame.addEventListener("load", () => {
-      settle(frame).then(() => {
+      settle(frame, opts.colors).then(() => {
         if (!frame.isConnected || box.dataset.key !== key) return;
         if (opts.live) still(frame);
         // Focus inside the frame being replaced moves to its replacement, so ← → keep working there.
@@ -147,7 +150,7 @@
   function paintTile(id) {
     const tile = tiles.get(id), p = byId(id);
     if (!tile || !p || !tile.near) return;
-    for (const mode of R.MODES) show(tile.boxes[mode], state.scene + "/" + mode, docFor(p, state.scene, mode));
+    for (const mode of R.MODES) show(tile.boxes[mode], state.scene + "/" + mode, docFor(p, state.scene, mode), { colors: p.id });
   }
   function paintTiles() { for (const id of tiles.keys()) paintTile(id); }
   // Every tile frame has the same width: one scale for all of them.
@@ -173,7 +176,7 @@
     $("view-note").textContent = p.note;
     const scene = sceneOf(state.scene);
     show($("view-fit"), p.id + "/" + state.scene + "/" + state.mode, docFor(p, state.scene, state.mode),
-      { live: true, title: p.name + " · " + (scene ? scene.name : "") + " · " + MODE_NAMES[state.mode] });
+      { live: true, colors: p.id, title: p.name + " · " + (scene ? scene.name : "") + " · " + MODE_NAMES[state.mode] });
   }
   function move(by) {
     const id = R.step(state.palettes, state.open, by);
@@ -211,10 +214,13 @@
 
   // ------------------------------------------------------------- 在应用里试
   // The app in a window of its own. The lab adds one style element to it
-  // (lab-rules.js overrideCss; nothing for 拿铁) and keeps it there while that
-  // window is open: after the app reloads or is opened again, the element is
-  // added again. Light or dark there stays what the app is set to; nothing the
-  // app keeps (its settings, its storage) is written.
+  // (lab-rules.js overrideCss, 拿铁 written out as well: the app may be set to
+  // another 配色) and keeps it there while that window is open: after the app
+  // reloads or is opened again, the element is added again. Light or dark and
+  // the app's own 配色 setting stay as the app has them; nothing the app keeps
+  // (its settings, its storage) is written. The cats' name colours there are
+  // the app's decision for its own 配色 (it judges them again when its 配色
+  // changes, not when a style is added).
   let app = null, appTimer = 0, appId = null;
   function tryInApp() {
     const p = byId(state.open);
@@ -242,7 +248,7 @@
     if (!doc || !doc.head || doc.URL === "about:blank") return;
     const p = byId(appId);
     let style = doc.getElementById(R.TRY_ID);
-    const css = R.overrideCss(p);
+    const css = R.overrideCss(p, true);
     if (!css) { if (style) style.remove(); return; }
     if (!style) { style = doc.createElement("style"); style.id = R.TRY_ID; }
     // Last in <head>, after anything the app added at run time.

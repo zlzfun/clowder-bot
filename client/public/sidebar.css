@@ -66,9 +66,11 @@
 .side-glyph > .icon { width: 18px; height: 18px; }
 .side-btn:focus-visible, .side-glyph:focus-visible, .side-apps:focus-visible, .account-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* The owner's face (sidebar.js ownerFace): a person in the café's coffee on
-   the avatar tile (--x-avatar-bg, the café layer's .avatar fill). */
-.avatar.owner { color: var(--x-primary); }
+/* The owner's face (sidebar.js ownerFace): a person in the accent on the
+   avatar tile (--x-avatar-bg, the café layer's .avatar fill). The accent is the
+   primary drawn alone, 3:1 against that tile in every 配色 (item 48); in 拿铁
+   it is the primary itself, the café's coffee. */
+.avatar.owner { color: var(--accent-ink); }
 .avatar.owner .owner-head, .avatar.owner .owner-body { fill: currentColor; }
 .avatar.owner .owner-collar { fill: none; stroke: var(--x-avatar-bg); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 

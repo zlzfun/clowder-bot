@@ -9,6 +9,7 @@ import { join, resolve } from 'node:path';
 import vm from 'node:vm';
 // @ts-expect-error plain module without types
 import { buildPalettes, serialize, problems, PAIRS, SYNTAX } from '../scripts/theme-lab/palettes.mjs';
+import { declarations, specificity, applies } from './css-rank.js';
 
 // The colour lab (client/public/theme-lab/, /theme-lab/; docs/xbot-frontend.md
 // item 47): candidate palettes shown on the real interface. Review only. A
@@ -146,42 +147,31 @@ test('the lab draws on the app\'s stylesheets in client/index.html\'s order, the
   assert.match(read('client/public/theme-lab/lab.js'), /P\.accentCss\(state\.cats, R\.surfaces\(palette, mode\)\)/);
 });
 
-// Specificity of the simple selectors these stylesheets use: [ids, classes/attributes/pseudo-classes, types]; :not() counts its argument.
-function specificity(selector: string): number {
-  let s = selector.replace(/:not\(([^()]*)\)/g, ' $1');
-  const ids = (s.match(/#[\w-]+/g) || []).length;
-  const attrs = (s.match(/\[[^\]]*\]/g) || []).length; s = s.replace(/\[[^\]]*\]/g, '');
-  const classes = (s.match(/\.[\w-]+/g) || []).length;
-  const pseudo = (s.match(/(?<!:):[\w-]+/g) || []).length;
-  const types = (s.replace(/[.#:][\w-]+/g, ' ').match(/(?:^|[\s>+~])[a-z][\w-]*/gi) || []).length;
-  return ids * 10000 + (attrs + classes + pseudo) * 100 + types;
-}
-// Whether a selector of these stylesheets applies in a mode, on a code block outside or inside the owner's bubble.
-function applies(selector: string, dark: boolean, bubble: boolean) {
-  const darkOnly = /\[data-theme="dark"\]/.test(selector.replace(/:not\([^()]*\)/g, ''));
-  const lightOnly = /:not\(\[data-theme="dark"\]\)/.test(selector);
-  return (!darkOnly || dark) && (!lightOnly || !dark) && (!/\.bubble\b/.test(selector) || bubble);
-}
-
-test('a palette out-ranks every rule of the app that sets its colours, in both modes, on a code block and inside the owner\'s bubble; every other rule that sets one only points it at another token', () => {
+// Since item 48 the app has eleven 配色 of its own (cafe-colors.css, html[data-colors="<id>"]): a lab palette must
+// out-rank those as well, so that 在应用里试 shows the lab's palette whatever the app is set to.
+test('a palette out-ranks every rule of the app that sets its colours, its own 配色 included, in both modes, on a code block and inside the owner\'s bubble; every other rule that sets one only points it at another token', () => {
   const R = rules(), cinnamon = palettes.find(p => p.id === 'cinnamon');
   const names = new Set([...Object.keys(cinnamon.light.tokens), ...SYN]);
   const lab = [...R.overrideCss(cinnamon).matchAll(/([^{}\n]+)\{([^}]*)\}/g)].map(m => ({ selector: m[1]!.trim(), decls: m[2]! }));
   assert.equal(lab.length, 6, 'the tokens in light and dark, and cafe-theme.css\'s four syntax rules');
   const app: Array<{ file: string; selector: string; names: string[]; values: string[] }> = [];
   for (const href of indexStyles) {
-    const css = read('client/public' + href).replace(/\/\*[\s\S]*?\*\//g, '');
-    for (const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-      const decls = [...m[2]!.matchAll(/(--[\w-]+)\s*:\s*([^;]+)/g)].filter(d => names.has(d[1]!));
-      if (!decls.length) continue;
-      for (const selector of m[1]!.split(',').map(s => s.trim().replace(/\s+/g, ' '))) app.push({ file: href, selector, names: decls.map(d => d[1]!), values: decls.map(d => d[2]!.trim()) });
+    const byRule = new Map<string, { names: string[]; values: string[] }>();
+    for (const d of declarations(read('client/public' + href))) {
+      if (!names.has(d.prop)) continue;
+      const r = byRule.get(d.selector) ?? { names: [], values: [] };
+      r.names.push(d.prop); r.values.push(d.value); byRule.set(d.selector, r);
     }
+    for (const [selector, r] of byRule) app.push({ file: href, selector, ...r });
   }
   assert.ok(app.some(r => r.file === '/cafe-theme.css' && r.selector === ':root') && app.some(r => r.file === '/tokens.css'), 'the rules were read');
-  const atRoot = (s: string) => /^(?::root|html(?:\[data-theme="dark"\])?)$/.test(s);
+  assert.ok(app.some(r => r.file === '/cafe-colors.css' && r.selector === 'html[data-colors="honey"][data-theme="dark"]'), 'the app\'s own 配色 were read');
+  const atRoot = (s: string) => /^(?::root|html(?:\[data-colors="[a-z]+"\])?(?:\[data-theme="dark"\])?)$/.test(s);
   const isSyntax = (r: { names: string[] }) => r.names.every(n => SYN.includes(n));
+  // A 配色 swatch in 设置 carries its own palette's colours (cafe-colors.css), on itself only.
+  const isSwatch = (r: { file: string; selector: string }) => r.file === '/cafe-colors.css' && /^(?:html\[data-theme="dark"\] )?\.colors-swatch\[data-colors="[a-z]+"\]$/.test(r.selector);
   for (const r of app) {
-    if (atRoot(r.selector) || isSyntax(r)) continue;
+    if (atRoot(r.selector) || isSyntax(r) || isSwatch(r)) continue;
     for (const v of r.values) assert.match(v, /^var\(--[\w-]+\)$/, `${r.file} ${r.selector} sets a colour of its own (${v}): a palette would not reach it`);
   }
   for (const dark of [false, true]) for (const bubble of [false, true]) {
@@ -199,8 +189,8 @@ test('a palette out-ranks every rule of the app that sets its colours, in both m
     }
   }
   // Nothing is added to the app's <html>: the palette is one style element.
-  assert.doesNotMatch(R.overrideCss(cinnamon), /data-lab/);
-  for (const r of lab) assert.ok(r.selector.startsWith('html:root'), r.selector);
+  assert.doesNotMatch(R.overrideCss(cinnamon), /data-lab|data-colors/);
+  for (const r of lab) assert.ok(r.selector.startsWith('html:root:root'), r.selector);
 });
 
 test('each cat\'s own colour is the app\'s own decision on each palette\'s surfaces: with 拿铁 it is what the app wrote when the scenes were taken', () => {
@@ -268,6 +258,9 @@ test('the frozen screens are markup only: no script, no inline handler, no javas
   assert.match(body('settings'), /<div [^>]*class="setpage"(?![^>]*hidden)/);
   assert.match(body('settings'), /<option value="system" selected="">跟随系统/);
   assert.match(body('settings'), /role="switch"/);
+  // And, since item 48, the 配色 choices right under 主题 (each swatch in its own palette; the lab ticks the one shown).
+  assert.match(body('settings'), /<div class="setrow cc-row">[\s\S]*?role="radiogroup"/);
+  assert.equal((body('settings').match(/class="cc-swatch colors-swatch" data-colors="[a-z]+"/g) || []).length, 11);
   // 新建: the dialog over the scrim, 墨墨 picked and a name typed, 取消 and 创建.
   assert.match(body('new'), /class="modal qc-modal"/);
   assert.match(body('new'), /value="年糕"/);
@@ -321,9 +314,10 @@ test('the script that freezes the screens refuses anything but the staged showca
 // ---------------------------------------------------------------- review only
 test('the lab is review only: nothing in the product links it, it keeps nothing of the app\'s, it asks no other site, and its own page uses only the app\'s tokens', () => {
   for (const file of readdirSync(new URL('../client/public/', import.meta.url)).filter(f => /\.(js|css|html)$/.test(f))) {
-    assert.doesNotMatch(read('client/public/' + file), /theme-lab/, file + ' does not link the lab');
+    // (Naming the generator, scripts/theme-lab/palettes.mjs, in a comment is not a link: the 配色 come from it since item 48.)
+    assert.doesNotMatch(read('client/public/' + file), /(?<!scripts\/)theme-lab/, file + ' does not link the lab');
   }
-  assert.doesNotMatch(read('client/index.html'), /theme-lab/);
+  assert.doesNotMatch(read('client/index.html'), /(?<!scripts\/)theme-lab/);
   const own = ['index.html', 'lab.css', 'lab.js', 'lab-rules.js'].map(f => [f, read('client/public/theme-lab/' + f)] as const);
   assert.deepEqual(readdirSync(new URL('../client/public/theme-lab/', import.meta.url)).sort(), ['index.html', 'lab-rules.js', 'lab.css', 'lab.js', 'palettes.json', 'scenes.json']);
   for (const [file, source] of own) {
@@ -336,7 +330,9 @@ test('the lab is review only: nothing in the product links it, it keeps nothing 
   assert.match(js, /window\.open\("\/", "clowder-theme-lab"\)/, '在应用里试 opens the app itself');
   assert.match(js, /style\.id = R\.TRY_ID/);
   assert.doesNotMatch(js, /setAttribute\("data-theme"[^)]*app|app\.document\.documentElement\.setAttribute/, 'light or dark in the app window stays the app\'s');
-  assert.match(js, /if \(!css\) \{ if \(style\) style\.remove\(\); return; \}/, '拿铁 removes the palette from the app window');
+  // Since item 48 the app may be set to a 配色 of its own: in its window 拿铁 is written out, not left to the app.
+  assert.match(js, /const css = R\.overrideCss\(p, true\);/, '拿铁 is written out in the app window');
+  assert.ok(rules().overrideCss(palettes[0], true).startsWith('html:root:root{--x-win:' + palettes[0].light.tokens['--x-win'] + ';'));
   assert.match(js, /appTimer = setInterval\(paintApp, 400\)/, 'and adds it again after the app reloads');
   // The frames in the overview cannot be focused or pointed at; the whole tile is one button.
   assert.match(js, /frames\.inert = true;/);

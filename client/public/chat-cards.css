@@ -70,7 +70,7 @@ html[data-theme="dark"] .ck-blocks { --cardx: var(--x-bot-bubble); }
 .ck-ask-choice .ask-opt[aria-disabled="true"]:hover { background: transparent; }
 .ck-ask-choice .ask-opt[aria-disabled="true"]:hover .opt-badge { background: var(--badge-bg); color: var(--badge-ink); }
 .ck-ask-choice .ask-opt.on { background: var(--x-fill-2); }
-.ck-ask-choice .ask-opt.on .opt-badge { background: var(--accent); color: var(--primary-text); }
+.ck-ask-choice .ask-opt.on .opt-badge { background: var(--x-primary); color: var(--primary-text); }
 .ck-ask-choice .opt-badge .icon { width: 14px; height: 14px; stroke-width: 2.4; }
 .ck-ask-choice .opt-t { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .ck-opt-label { overflow-wrap: anywhere; }

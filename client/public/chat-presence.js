@@ -45,13 +45,14 @@
 
   // ------------------------------------------------------- the cats' colours
   // The surfaces a colour is judged on, from the current theme's tokens
-  // (read again only when the theme changes).
+  // (read again only when light/dark or the 配色 changes: data-theme,
+  // data-colors on <html>; item 48).
   let sheet = null, sheetText = null, surfacesAt = null, surfacesFor = null;
   function surfaces() {
     if (H.surfaces) return H.surfaces();
     const root = document.documentElement;
     if (!root || typeof window.getComputedStyle !== "function") return {};
-    const theme = root.getAttribute("data-theme") || "";
+    const theme = (root.getAttribute("data-theme") || "") + "/" + (root.getAttribute("data-colors") || "");
     if (surfacesAt && surfacesFor === theme) return surfacesAt;
     const cs = window.getComputedStyle(root);
     surfacesAt = { chat: cs.getPropertyValue("--x-card").trim(), bubble: cs.getPropertyValue("--x-bot-bubble").trim() };
@@ -337,7 +338,7 @@
     if (typeof window.addEventListener === "function") window.addEventListener("resize", () => { if (H.chip && H.chip.classList.contains("pz-on")) fit(); });
     const root = document.documentElement;
     if (root && typeof window.MutationObserver === "function") {
-      new window.MutationObserver(() => { surfacesAt = null; colours(); }).observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+      new window.MutationObserver(() => { surfacesAt = null; colours(); }).observe(root, { attributes: true, attributeFilter: ["data-theme", "data-colors"] });
     }
     watchExit(document.querySelector(".pal"), ".pal-card");
     watchExit(document.getElementById("panel-scrim"), "");

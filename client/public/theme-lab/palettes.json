@@ -371,7 +371,7 @@
     "--warn": "#755420",
     "--accent": "#ae5e44",
     "--accent-ink": "#ae5e44",
-    "--ring": "#ae5e44"
+    "--ring": "#a15238"
    },
    "syn": {
     "code": {
@@ -444,9 +444,9 @@
     "--scroll": "#66635c",
     "--warn-bg": "#40331d",
     "--warn": "#dac18f",
-    "--accent": "#cc785c",
-    "--accent-ink": "#cc785c",
-    "--ring": "#cc785c"
+    "--accent": "#e58f72",
+    "--accent-ink": "#e58f72",
+    "--ring": "#e58f72"
    },
    "syn": {
     "code": {

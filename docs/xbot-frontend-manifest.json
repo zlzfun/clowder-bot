@@ -153,7 +153,7 @@
       "file": "index.html",
       "target": "client/index.html",
       "sourceSha256": "a4160c18e23489fbc6a9e21fe494e1ac52840a67b2e138997400a0b42835b556",
-      "sha256": "7c389b6022a2f489e282194868ed81ad08d0e8b6a2ae8c6fbbc70c9e5c1583b0",
+      "sha256": "8cac9ec3e9e2d3cac97f13d60d9809d6ef2a0ebfbf8797c1c7128ec33732a195",
       "unchanged": false
     },
     {
@@ -563,9 +563,9 @@
     },
     {
       "target": "client/public/cafe-theme.css",
-      "description": "Cat-cafe light/dark color overrides; clay cat faces without a tile (transparent around the traced outline, photos/glyphs/empty seats keep their fill); closer crop of a cat's own clay portrait (data-avatar-bot faces: 1.25x about 50% 40% inside the clipped SVG drawing, circle and unread dot unchanged); group face of up to four members' own round portraits in one compact, slightly overlapping cluster without a tile (lead largest in front, 1px surface-color seams that hug a clay cat's own shape via drop-shadow and stay round for photos, clay art zoomed into its seat), quiet empty seats for unknown members (existing tokens, uploaded photos at their natural cover crop, not recolored); restores app.css's single right-aligned .field select chevron on focus (light chevron copied byte-for-byte); the open header chip without its fill, one layer under the panel scrim so it dims with the header (a click there closes the drawer through the scrim), group seams on the header surface, original CSS unchanged",
-      "sha256": "1c28b282334ce221e9abd2b91d4476310468e58a5285cc39156dcf68be00d3f4",
-      "attribution": "2026-11-06 transparent clay faces and cat-hugging group seams authored by local Claude Code (claude-opus-5-5); 2026-11-07 open header chip under the scrim by local Claude Code (claude-opus-5-5)"
+      "description": "Cat-cafe light/dark color overrides; clay cat faces without a tile (transparent around the traced outline, photos/glyphs/empty seats keep their fill); closer crop of a cat's own clay portrait (data-avatar-bot faces: 1.25x about 50% 40% inside the clipped SVG drawing, circle and unread dot unchanged); group face of up to four members' own round portraits in one compact, slightly overlapping cluster without a tile (lead largest in front, 1px surface-color seams that hug a clay cat's own shape via drop-shadow and stay round for photos, clay art zoomed into its seat), quiet empty seats for unknown members (existing tokens, uploaded photos at their natural cover crop, not recolored); restores app.css's single right-aligned .field select chevron on focus (light chevron copied byte-for-byte); the open header chip without its fill, one layer under the panel scrim so it dims with the header (a click there closes the drawer through the scrim), group seams on the header surface, original CSS unchanged; item 48: --provider-accent is the accent, and shapes in the primary colour follow one rule in every 配色 (the ✓ on the chosen Agent in --accent-ink, the knob of a switch that is on in --x-on-primary, a choice's letter badge on the primary under --primary-text); 拿铁's values are unchanged",
+      "sha256": "f76b0ad50b2309a8e2a3c932b5f6e09008df053e6a1e1248dd3c946005dc0b7c",
+      "attribution": "2026-11-06 transparent clay faces and cat-hugging group seams authored by local Claude Code (claude-opus-5-5); 2026-11-07 open header chip under the scrim by local Claude Code (claude-opus-5-5); 配色 by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 48)"
     },
     {
       "target": "client/public/runtime.html",
@@ -855,9 +855,9 @@
     },
     {
       "target": "client/public/chat-cards.css",
-      "description": "Styles for round 5 on XBot's own .approval / .approval-line / .ask cards, .sysline, .text-btn and the settings switch; a request's outcome line (every tone, and app.js's older one-line cards in the history) as a quiet receipt: no fill, an inset 1px --x-fill-3 hairline, --x-text-2 words, no dimming of an ended one, its found-flash fading to the page (item 41, 2026-11-12); existing tokens and app.css's quote-flash only, loaded before chat-live.css, original CSS unchanged",
-      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 确认与提醒 (docs/xbot-frontend.md item 32; docs/chat-experience-api.md 「等你确认的事」「卡片、清单与选项」, docs/chat-live-api.md); receipt lines by local Claude Code (claude-opus-5-5) on 2026-11-12 (item 41)",
-      "sha256": "b5f0249297303671695d9693ef2336a60e3a42a9449389b3973d4d48e841db17"
+      "description": "Styles for round 5 on XBot's own .approval / .approval-line / .ask cards, .sysline, .text-btn and the settings switch; a request's outcome line (every tone, and app.js's older one-line cards in the history) as a quiet receipt: no fill, an inset 1px --x-fill-3 hairline, --x-text-2 words, no dimming of an ended one, its found-flash fading to the page (item 41, 2026-11-12); existing tokens and app.css's quote-flash only, loaded before chat-live.css, original CSS unchanged; item 48: a chosen answer's letter badge on the primary under --primary-text",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 确认与提醒 (docs/xbot-frontend.md item 32; docs/chat-experience-api.md 「等你确认的事」「卡片、清单与选项」, docs/chat-live-api.md); receipt lines by local Claude Code (claude-opus-5-5) on 2026-11-12 (item 41); 配色 by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 48)",
+      "sha256": "d67ba81cac2b3c710031cfc2dc10c2bbd665d67bc995de2d7df17745abb0d218"
     },
     {
       "target": "client/public/chat-notify-rules.js",
@@ -879,9 +879,9 @@
     },
     {
       "target": "client/public/chat-presence.js",
-      "description": "window.ClowderPresence: the header line under the cat's name and typing dots on sidebar rows (chat-live.js presence for the open chat, the status poll elsewhere), one style element for the cats' colours, the once-stamped seen paw placed after each keyed commit without changing row identity, and the palette's and drawer scrim's exit as a fading copy",
-      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 活起来 (docs/xbot-frontend.md item 33; docs/xbot-api.md bots[].accent, docs/chat-live-api.md)",
-      "sha256": "7b72e96b6fa20e21f51be3ac5053aed35a685dfeb07a695500e9cd0ab5327196"
+      "description": "window.ClowderPresence: the header line under the cat's name and typing dots on sidebar rows (chat-live.js presence for the open chat, the status poll elsewhere), one style element for the cats' colours, the once-stamped seen paw placed after each keyed commit without changing row identity, and the palette's and drawer scrim's exit as a fading copy; item 48: the surfaces are read again when data-colors changes as well as data-theme, so the cats' colours are judged on the 配色 in effect",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 活起来 (docs/xbot-frontend.md item 33; docs/xbot-api.md bots[].accent, docs/chat-live-api.md); 配色 by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 48)",
+      "sha256": "a20b34be26b6152fe3cb617973f5cbd3b869e47c1875792e971738234335993f"
     },
     {
       "target": "client/public/chat-presence.css",
@@ -903,9 +903,9 @@
     },
     {
       "target": "client/public/polish.css",
-      "description": "Styles for 6a: the found message's quiet ring that follows its bubble and a flash that reads in dark mode, 设置 → 关于's runtime link as a settings row, and the consistency fixes from the audit; existing tokens and keyframes only; a radio in a .choice pill inside a .field form (定时's 时间规则, 导出对话's 格式) is the ordinary small radio again instead of app.css's full-width .field input (review r15 of item 46)",
-      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 打磨 6a · one voice and a clean finish (docs/xbot-frontend.md item 33); the layout explains, not captions, on every other screen (docs/xbot-frontend.md item 46) by local Claude Code (claude-opus-5-5) on 2026-11-13",
-      "sha256": "a5097e79973357dc85ebeb9b37d44eac4f80d76d5663109d928ab833d004ad20"
+      "description": "Styles for 6a: the found message's quiet ring that follows its bubble and a flash that reads in dark mode, 设置 → 关于's runtime link as a settings row, and the consistency fixes from the audit; existing tokens and keyframes only; a radio in a .choice pill inside a .field form (定时's 时间规则, 导出对话's 格式) is the ordinary small radio again instead of app.css's full-width .field input (review r15 of item 46); item 48: a message row's focus ring mixes --ring (拿铁's primary; fitted for 3:1 at 70% in every 配色)",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 打磨 6a · one voice and a clean finish (docs/xbot-frontend.md item 33); the layout explains, not captions, on every other screen (docs/xbot-frontend.md item 46) by local Claude Code (claude-opus-5-5) on 2026-11-13; 配色 by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 48)",
+      "sha256": "174d1f10807a6f75b752c0026212f0907189ce9c21f035d98f16bf0936c35ca6"
     },
     {
       "target": "client/public/sidebar.js",
@@ -915,9 +915,9 @@
     },
     {
       "target": "client/public/sidebar.css",
-      "description": "The sidebar's controls: 搜索 and 新建 as round buttons at the right end of the greeting's line (the greeting's second line runs on under them; in the macOS desktop app they sit in the window strip), no pinned row without a pinned cat, the owner's face on the rows' face column with the 应用 pill beside it, 我's menu right above the face with the owner's name and this computer as its head; in the rail (768px and wider) no head, 新建, 应用 and the face stacked at the bottom, 应用 a bare glyph, the menu beside the face right of the rail; the move's state classes (eased width with the panel's curve and tokens.css's durations, pinned and clipped content, words fading out before and in after, rail-only controls fading in, still copies); 44px targets in the drawer, visible focus, reduced motion; existing --x-* tokens, app.css aliases and the fade keyframes only, original CSS unchanged",
-      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-12 for the sidebar after Grok Bot's layout (docs/xbot-frontend.md item 43)",
-      "sha256": "d06a0ce5ca235d5352f4a341a1bccb94a1d604e2f0ae535530b29246c1ee0d86"
+      "description": "The sidebar's controls: 搜索 and 新建 as round buttons at the right end of the greeting's line (the greeting's second line runs on under them; in the macOS desktop app they sit in the window strip), no pinned row without a pinned cat, the owner's face on the rows' face column with the 应用 pill beside it, 我's menu right above the face with the owner's name and this computer as its head; in the rail (768px and wider) no head, 新建, 应用 and the face stacked at the bottom, 应用 a bare glyph, the menu beside the face right of the rail; the move's state classes (eased width with the panel's curve and tokens.css's durations, pinned and clipped content, words fading out before and in after, rail-only controls fading in, still copies); 44px targets in the drawer, visible focus, reduced motion; existing --x-* tokens, app.css aliases and the fade keyframes only, original CSS unchanged; item 48: the owner's face in --accent-ink (拿铁's primary; 3:1 on its tile in every 配色)",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-12 for the sidebar after Grok Bot's layout (docs/xbot-frontend.md item 43); 配色 by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 48)",
+      "sha256": "30f6040f9d39ef00ab74adc1835b2a6e370cb093e25785e522a3d8b51bb4aa95"
     },
     {
       "target": "client/public/theme-lab/index.html",
@@ -933,27 +933,51 @@
     },
     {
       "target": "client/public/theme-lab/lab-rules.js",
-      "description": "Colour lab rules without DOM (window.ClowderThemeLabRules): client/index.html's stylesheets in its order, a palette as one style element whose html:root rules out-rank cafe-theme.css's token and four syntax rules, the surfaces a cat's colour is judged on, a frame's srcdoc (the app's stylesheets, the cats' colours, the palette, the frozen body), stepping round the ends, scale to fit",
-      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 47); review prototype, not loaded by production pages",
-      "sha256": "e65c6f935032ef3a7bdcaf6a5e67e00631377deedc10b86e0a9fafd314cc09a4"
+      "description": "Colour lab rules without DOM (window.ClowderThemeLabRules): client/index.html's stylesheets in its order, a palette as one style element whose html:root rules out-rank cafe-theme.css's token and four syntax rules, the surfaces a cat's colour is judged on, a frame's srcdoc (the app's stylesheets, the cats' colours, the palette, the frozen body), stepping round the ends, scale to fit; item 48: client/index.html's stylesheets now include cafe-colors.css and colors.css; the override is html:root:root, one step above the app's own 配色, and 拿铁 is written out for the app's window",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 47); review prototype, not loaded by production pages; 配色 by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 48)",
+      "sha256": "8624da9bb0633f76efdbf18392c06a7dcf2b27e939a1eedecaae1c2e9099c5c9"
     },
     {
       "target": "client/public/theme-lab/lab.js",
-      "description": "Colour lab UI: tiles drawn near the screen, frames swapped in only when styles, fonts and scroll are in place, scene and light/dark switches, the large view (real size, ← → round the ends, Esc back to the tile, the frozen screen hoverable but inert), 在应用里试 (the app in its own window with one style element, re-added after a reload, removed for 拿铁; no storage written, no attribute on the app's <html>); reads only palettes.json and scenes.json",
-      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 47); review prototype, not loaded by production pages",
-      "sha256": "4339953e5d15d4b468b9e2b652c59b14eff8f2b26070225266262a961190a30d"
+      "description": "Colour lab UI: tiles drawn near the screen, frames swapped in only when styles, fonts and scroll are in place, scene and light/dark switches, the large view (real size, ← → round the ends, Esc back to the tile, the frozen screen hoverable but inert), 在应用里试 (the app in its own window with one style element, re-added after a reload, removed for 拿铁; no storage written, no attribute on the app's <html>); reads only palettes.json and scenes.json; item 48: 在应用里试 writes 拿铁 out too (the app may have its own 配色), and a frozen 设置 → 通用 ticks the palette shown",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 47); review prototype, not loaded by production pages; 配色 by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 48)",
+      "sha256": "75ba41089ce1aa6d464250223c6b5ed56a51fbd221dca1866e66d6537b51f9c6"
     },
     {
       "target": "client/public/theme-lab/palettes.json",
-      "description": "Colour lab data: 11 palettes (拿铁 = today's cafe-theme.css read as it is, plus 10 candidates), each the full token set cafe-theme.css sets plus --accent, --accent-ink and --ring, and the --syn-* colours for a code block and the owner's bubble, in light and dark; exactly the output of scripts/theme-lab/palettes.mjs",
-      "attribution": "Palettes conceived and tuned by the primary agent (2026-11-13) and generated by scripts/theme-lab/palettes.mjs, committed by local Claude Code (claude-opus-5-5) (docs/xbot-frontend.md item 47); review prototype, not loaded by production pages",
-      "sha256": "95fd8f864cb95cf2f7f2f2bfe6808731a2ca6cde916c6ea4e86cec3cc9178098"
+      "description": "Colour lab data: 11 palettes (拿铁 = today's cafe-theme.css read as it is, plus 10 candidates), each the full token set cafe-theme.css sets plus --accent, --accent-ink and --ring, and the --syn-* colours for a code block and the owner's bubble, in light and dark; exactly the output of scripts/theme-lab/palettes.mjs; item 48: the accent is fitted 3:1 against every surface it sits on and --ring for a 70% message ring (肉桂 moved), and the same data writes the product's cafe-colors.css",
+      "attribution": "Palettes conceived and tuned by the primary agent (2026-11-13) and generated by scripts/theme-lab/palettes.mjs, committed by local Claude Code (claude-opus-5-5) (docs/xbot-frontend.md item 47); review prototype, not loaded by production pages; 配色 by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 48)",
+      "sha256": "07294d1dfdd0f0818d7c52f379c830efe2ebdf0fa44e83621b7f04f7c0636cad"
     },
     {
       "target": "client/public/theme-lab/scenes.json",
-      "description": "Colour lab frozen screens: five scenes (群聊, 卡片, 确认, 设置, 新建) of the scripted showcase at 1200×760, each the page's <body> markup with scripts, inline handlers and autofocus removed and typed values, ticks, picked options and scroll positions written as attributes; the cats' colour pairs from GET /xbot-api/bots; taken by scripts/theme-lab/scenes.mjs",
-      "attribution": "Markup rendered by the clowder-bot interface (client/index.html and its scripts, which keep the original XBot structure and attribution recorded above) from the scripted showcase's staged data, frozen by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 47); review prototype, not loaded by production pages",
-      "sha256": "2f2bed12d7e1b449b308e74205bbfe3a68e36f329fbef9596163e458669552a7"
+      "description": "Colour lab frozen screens: five scenes (群聊, 卡片, 确认, 设置, 新建) of the scripted showcase at 1200×760, each the page's <body> markup with scripts, inline handlers and autofocus removed and typed values, ticks, picked options and scroll positions written as attributes; the cats' colour pairs from GET /xbot-api/bots; taken by scripts/theme-lab/scenes.mjs; item 48: retaken with the 配色 row in 设置 → 通用",
+      "attribution": "Markup rendered by the clowder-bot interface (client/index.html and its scripts, which keep the original XBot structure and attribution recorded above) from the scripted showcase's staged data, frozen by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 47); review prototype, not loaded by production pages; 配色 by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 48)",
+      "sha256": "cc30447e78e979fab4bc90b2dba2aa435185aeba0a1ce58ae5395e6a24e7890f"
+    },
+    {
+      "target": "client/public/cafe-colors.css",
+      "description": "配色: the ten palettes besides 拿铁 as html[data-colors=\"<id>\"] rules, one step above cafe-theme.css's tokens (0,1,1)/(0,2,1) and its four syntax rules, no !important; each palette's pressed owner bubble where the bubble is not the primary; .colors-swatch[data-colors=\"<id>\"] carries every palette's tokens (拿铁's too) on its swatch in the mode in effect; generated by scripts/theme-lab/palettes.mjs, byte-equal to its output",
+      "attribution": "Generated by scripts/theme-lab/palettes.mjs from the colour lab's palette specs (item 47), by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 48)",
+      "sha256": "83acdcfd556dcb25f6c8fdea64055fc017ce96494286840b67e66947f7ea382f"
+    },
+    {
+      "target": "client/public/colors.css",
+      "description": "配色 row in 设置 → 通用: a grid of eleven radios, each a small picture drawn with its palette's own --x-* tokens (window, selected sidebar row, chat card, a cat's bubble, the owner's bubble, the send button) over its name; the chosen ring in the text colour; the settings' own focus ring; tokens only, no transition under reduced motion",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 48)",
+      "sha256": "faab363def7c59491adb56f9c7fe36cf92cf9d745d84ab769ce3334e7ad810b8"
+    },
+    {
+      "target": "client/public/colors-rules.js",
+      "description": "配色 rules without DOM (window.ClowderColorsRules): the storage key xbot-colors, the eleven ids and names in the colour lab's order, 拿铁 as the default and the fallback for anything unknown, the attribute value (none for 拿铁), stepping round the ends",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 48)",
+      "sha256": "ad02de205df3957cf58dc66561512845122d42af28c532f905724d4cbb7dfbb8"
+    },
+    {
+      "target": "client/public/colors.js",
+      "description": "配色 control (window.ClowderColors): mounts one row under 主题 in 设置 → 通用, a radio group with roving tab stop, arrows/Home/End; choosing sets or removes html[data-colors], points the theme-color meta at the new --x-win and remembers the choice in localStorage xbot-colors (a browser that cannot keep it is told so); no request, no server state",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 48)",
+      "sha256": "32fb626c4e8439c424f5eb072e861136a71da4d4914308a2923fd4fb817cf958"
     }
   ]
 }
