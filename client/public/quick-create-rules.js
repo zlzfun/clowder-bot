@@ -135,47 +135,49 @@
     const face = (offered || []).find((f) => faceUsable(f, s));
     return face ? face.id : null;
   }
-  // What the hint says about the tool. One that is here: 「它用这台电脑上的
-  // Claude Code 来思考」. One that is not: what it needs and why that is not
-  // here, in the server's words (`reason`, one sentence without a stop), and
-  // that this cat cannot come home as it is. `before` + `label` + `after` is
-  // `text` (the label is set apart on screen).
+  // What a cat's Agent is, said the way a person would, for a screen reader
+  // (on screen the card shows a mark: the Agent's name and, when it is not
+  // usable here, its state in one word — item 45). One that is here:
+  // 「它用这台电脑上的 Claude Code 来思考」. One that is not: which it needs
+  // (「它要用 Gemini 来思考」), why (the server's `reason`, one sentence without a
+  // stop), and that it cannot be had now.
   const USES = Object.freeze(["它用这台电脑上的 ", " 来思考"]);
   function uses(tool) {
     if (!tool) return null;
-    if (tool.usable) return { usable: true, label: tool.label, before: USES[0], after: USES[1], text: USES[0] + tool.label + USES[1] };
-    if (!tool.label) { const text = tool.reason + "，所以它现在按原样领不了。"; return { usable: false, label: "", before: text, after: "", text }; }
-    const after = " 来思考。" + tool.reason + "，所以它现在按原样领不了。";
-    return { usable: false, label: tool.label, before: "它要用 ", after, text: "它要用 " + tool.label + after };
+    if (tool.usable) return { usable: true, label: tool.label, text: USES[0] + tool.label + USES[1] };
+    return { usable: false, label: tool.label, text: (tool.label ? "它要用 " + tool.label + " 来思考。" : "") + why(tool) };
   }
-  // What the owner can do about a tool that is not usable here, as item 28
-  // says it for the blocked screen, with 重新检测 beside it: log in, or
-  // install (and log in). A tool the app cannot connect yet has nothing to
-  // re-detect: installing it would not change that (null).
+  // What the owner can do about a tool that is not usable here: log in (its
+  // command, copyable) or install, then 重新检测. On screen the command and the
+  // button say it; `text` is the same for a screen reader. A tool the app
+  // cannot connect yet has nothing to re-detect: installing it would not
+  // change that (null).
   function toolHelp(tool) {
     if (!tool || tool.usable) return null;
-    if (tool.state === "login") return { text: tool.loginCommand ? "在终端里运行下面这行，登录好再点「重新检测」：" : "登录好再点「重新检测」。", command: tool.loginCommand,
+    if (tool.state === "login") return { text: tool.loginCommand ? "在终端里运行这行命令登录，再重新检测" : "登录后再重新检测", command: tool.loginCommand,
       unchanged: "重新检测过了，还是没检测到登录。" };
-    if (tool.state === "missing") return { text: "装好 " + tool.label + " 并登录，再点「重新检测」。", command: "", unchanged: "重新检测过了，还是没找到 " + tool.label + "。" };
+    if (tool.state === "missing") return { text: "装好 " + tool.label + " 并登录后再重新检测", command: "", unchanged: "重新检测过了，还是没找到 " + tool.label + "。" };
     return null;
   }
   const loginHelp = (command) => toolHelp({ state: "login", loginCommand: command }).text;
-  // Why a cat cannot come home as it is, on its card: the server's reason
-  // (one sentence without a stop) and what that means.
-  const why = (tool) => (tool && !tool.usable ? tool.reason + "，所以它现在按原样领不了。" : "");
-  // The one short word a cat's tile carries when its tool is not usable here,
-  // true to the state the server named: an Agent this app cannot connect yet
-  // (nothing to do on this computer), one not installed, one not logged in,
-  // or one that could not be read.
-  const TAGS = Object.freeze({ unsupported: "接不上", missing: "没安装", login: "没登录", unread: "没读到" });
-  const tag = (tool) => (!tool || tool.usable ? "" : TAGS[tool.state] || TAGS.unsupported);
-  // The way on from a cat that cannot come home as it is: 「只借它的长相」
-  // turns to 自定义 with its looks, thinking with an Agent that is here (named
-  // when there is one).
-  const BORROW = "只借它的长相";
+  // Why a cat cannot be had now: the server's reason (one sentence without a
+  // stop). Said, never shown as a caption: the card's Agent mark shows it in
+  // one word.
+  const why = (tool) => (tool && !tool.usable ? tool.reason + "，现在领不了。" : "");
+  // The one word for an Agent's state on a cat's Agent mark, true to what the
+  // server named and in the product's usual words: 暂不支持 (this app cannot
+  // connect it: nothing to install), 未安装, 未登录, 未知 (could not be read);
+  // installed with a login that could not be checked: 未确认登录.
+  const TAGS = Object.freeze({ unsupported: "暂不支持", missing: "未安装", login: "未登录", unread: "未知", unknown: "未确认登录" });
+  const tag = (tool) => (!tool ? "" : tool.usable ? (tool.state === "unknown" ? TAGS.unknown : "") : TAGS[tool.state] || TAGS.unsupported);
+  // The way on from a cat that cannot be had now: 自定义 with its looks
+  // (BORROW on the button; BORROW_SAID its name for a screen reader), thinking
+  // with an Agent that is here (forward: named when there is one).
+  const BORROW = "自定义";
+  const BORROW_SAID = "用它的长相自定义";
   function forward(s) {
     const list = choices(s);
-    return "自定义一只，用这台电脑上的 " + (list.length === 1 ? list[0].label : "Agent") + " 来思考";
+    return "用这台电脑上的 " + (list.length === 1 ? list[0].label : "Agent") + " 来思考";
   }
   // Sentences said as one, a stop between them unless one is already there.
   const joinSaid = (parts) => parts.filter(Boolean).reduce((all, part) => (!all ? part : all + (/[。！？.!?…]$/u.test(all) ? "" : "。") + part), "");
@@ -230,15 +232,16 @@
     return { lines, said };
   }
   // 自定义, one of the options beside the cats: a cat of the owner's own. Its
-  // card says whose it is and which looks it has; said once when chosen.
-  const OWN_TITLE = "你自己的猫猫";
-  const OWN_NOTE = "你自己的猫猫：长相随你挑，它做什么、什么性格你来写，都可以不填。";
-  // The row's two groups, in a few plain words: those that can come home as
-  // they are (and 自定义), then those that cannot.
-  const GROUPS = Object.freeze(["现在就能领", "暂时按原样领不了"]);
+  // card shows its looks, its Agent and two empty lines; this is said once
+  // when it is chosen (a screen reader; nothing on screen needs it).
+  const OWN_NOTE = "自定义：挑一个长相，它做什么、什么性格由你来写，都可以不填。";
   // The name box's placeholder: a cat of the owner's own borrows no template's
   // name, so its box starts empty and asks for one.
   const NAME_PLACEHOLDER = "给它起个名字";
+  // 自定义's two optional lines: the question each answers is its placeholder
+  // (and its name), with nothing beside it.
+  const ABOUT_ASK = "它主要帮你做什么";
+  const PERSONALITY_ASK = "它的性格";
 
   // ---- GET /xbot-api/start ----
   const STATES = ["ready", "unknown", "login", "missing"];
@@ -309,7 +312,8 @@
   }
   const joinOr = (labels) => (labels.length <= 1 ? labels[0] || "" : labels.slice(0, -1).join("、") + " 或 " + labels[labels.length - 1]);
 
-  // What stands in the way, in everyday words, with the native login commands.
+  // What stands in the way, in everyday words, with the native login commands
+  // (重新检测 is the button under it: the words do not point at it).
   function need(s) {
     const tools = s && s.blocked === "login_required" ? s.agents.filter((a) => a.state === "login") : [];
     if (tools.length) {
@@ -318,7 +322,7 @@
         kind: "login",
         title: "还差一步：登录 " + names,
         body: "猫猫要借这台电脑上的 " + names + " 来思考，可" + (tools.length > 1 ? "它们都" : "它") + "还没登录。"
-          + (tools.some((a) => a.loginCommand) ? "在终端里运行" + (tools.length > 1 ? "其中一行" : "下面这行") + "，" : "") + "登录好再回来点「重新检测」。",
+          + (tools.some((a) => a.loginCommand) ? "在终端里运行" + (tools.length > 1 ? "其中一行" : "下面这行") + "：" : ""),
         commands: tools.filter((a) => a.loginCommand).map((a) => ({ label: a.label, command: a.loginCommand })),
         unchanged: "重新检测过了，还是没检测到登录。",
       };
@@ -326,13 +330,13 @@
     return {
       kind: "none",
       title: "还差一步：装好 Claude Code 或 Codex",
-      body: "猫猫要借这台电脑上的 Claude Code 或 Codex 来思考。装好其中一个并登录，再回来点「重新检测」。",
+      body: "猫猫要借这台电脑上的 Claude Code 或 Codex 来思考，装好其中一个并登录。",
       commands: [],
       unchanged: "重新检测过了，还是没找到能用的。",
     };
   }
-  // 自定义's tool row: 「它会用这台电脑上的 X 来思考」 goes around the tool's
-  // name (or its select).
+  // 自定义's Agent mark is said as 「它会用这台电脑上的 X 来思考」 around the
+  // tool's name (or its select); the sentence is for a screen reader.
   const TOOL_LINE = Object.freeze(["它会用这台电脑上的 ", " 来思考"]);
   // Installed, but its login could not be checked: say so, never "ready".
   function unconfirmed(label, command) {
@@ -425,8 +429,8 @@
 
   root.ClowderQuickCreateRules = Object.freeze({
     trim, nameProblem, groupNameProblem, groupName, freeName, suggestName, NAME_INPUT_MAX, ABOUT_INPUT_MAX, aboutProblem,
-    PERSONALITY_INPUT_MAX, personalityProblem, offer, usable, facesNeed, trait, clipLine, TRAIT_MAX, OWN_TITLE, OWN_NOTE, GROUPS, NAME_PLACEHOLDER, FACE_CHANGED,
-    toolOf, faceUsable, firstUsable, uses, USES, UNREAD, why, tag, TAGS, toolHelp, loginHelp, BORROW, forward, joinSaid,
+    PERSONALITY_INPUT_MAX, personalityProblem, offer, usable, facesNeed, trait, clipLine, TRAIT_MAX, OWN_NOTE, NAME_PLACEHOLDER, ABOUT_ASK, PERSONALITY_ASK, FACE_CHANGED,
+    toolOf, faceUsable, firstUsable, uses, USES, UNREAD, why, tag, TAGS, toolHelp, loginHelp, BORROW, BORROW_SAID, forward, joinSaid,
     start, choices, choiceOf, loginCommand, sameStart, need, TOOL_LINE, unconfirmed,
     catBody, groupBody, fingerprint, MAX_MEMBERS, catError, groupError, startError, createdNotice,
   });
