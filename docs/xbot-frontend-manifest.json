@@ -27,7 +27,7 @@
       "file": "app.js",
       "target": "client/public/app.js",
       "sourceSha256": "1248f793493826bf044359c71e7d8772ccc3472d6021d6abb979dff9b6cb29bc",
-      "sha256": "9db7b89e0c5d3d513bd05bcc7969960a25e99a7cb695e6f2b32fe1126e34ea58",
+      "sha256": "07f17d7df84270c7acf1e5388b88908a4e9c1b37124641a7db01db9d27fd1413",
       "unchanged": false
     },
     {
@@ -821,15 +821,15 @@
     },
     {
       "target": "client/public/mention.js",
-      "description": "The group composer's @ list above the composer: this group's members and 「全体」, ↑/↓, Enter/Tab to insert, Esc to dismiss until another @, click or tap to insert without losing the caret, IME compositions left alone, listbox/option roles with aria-activedescendant; before a key or click picks it reads the draft, caret and members again (undo, a member who left), changes the composer makes by itself refresh it, and a send (Enter or Ctrl/⌘+Enter) closes it; the edit goes through the composer's own render and undo history; nothing in single chats; the text is sent as typed",
-      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 资料页与群 (docs/xbot-frontend.md item 31; docs/xbot-api.md group PATCH/DELETE)",
-      "sha256": "227a2638b95792ebc36d9d0e2eaadb8ad7b87e4d2014e00cb33c18c90ea222ea"
+      "description": "The group composer's @ list above the composer: this group's members and 「全体」 (its hint @ 群里每一只 visually hidden, item 46), ↑/↓, Enter/Tab to insert, Esc to dismiss until another @, click or tap to insert without losing the caret, IME compositions left alone, listbox/option roles with aria-activedescendant; before a key or click picks it reads the draft, caret and members again (undo, a member who left), changes the composer makes by itself refresh it, and a send (Enter or Ctrl/⌘+Enter) closes it; the edit goes through the composer's own render and undo history; nothing in single chats; the text is sent as typed",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 资料页与群 (docs/xbot-frontend.md item 31; docs/xbot-api.md group PATCH/DELETE); the layout explains, not captions, on every other screen (docs/xbot-frontend.md item 46) by local Claude Code (claude-opus-5-5) on 2026-11-13",
+      "sha256": "0f6cbffaec9f04d9ef42ea9f656b0b05fc4fbb23d17a25a44714084187fe2e9c"
     },
     {
       "target": "client/public/mention.css",
-      "description": "The @ list on the original .pop popover: menu-like rows, the highlighted one on --hover, faces and the 全体 mark, a quiet hint; existing tokens and app.css's rise only, off under reduced motion, original CSS unchanged",
-      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 资料页与群 (docs/xbot-frontend.md item 31; docs/xbot-api.md group PATCH/DELETE)",
-      "sha256": "d976d506106bb4adcbbe5b29d4027ad7468f2d961d4de84f84a104966a45a5a6"
+      "description": "The @ list on the original .pop popover: menu-like rows, the highlighted one on --hover, faces and the 全体 mark (its hint for a screen reader only, item 46); existing tokens and app.css's rise only, off under reduced motion, original CSS unchanged",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 资料页与群 (docs/xbot-frontend.md item 31; docs/xbot-api.md group PATCH/DELETE); the layout explains, not captions, on every other screen (docs/xbot-frontend.md item 46) by local Claude Code (claude-opus-5-5) on 2026-11-13",
+      "sha256": "fd210cffa4fe686444598d38abe4cb6d5187c61fdf7424dd099e2e8cc1120407"
     },
     {
       "target": "client/public/brand-mark-256.png",

@@ -146,6 +146,8 @@ const named = (root: El, cls: string) => all(root).filter(n => has(n, cls));
 const one = (root: El, cls: string) => { const n = named(root, cls)[0]; assert.ok(n, 'no .' + cls); return n!; };
 const shown = (n: El) => n.getClientRects().length > 0;
 const visibleText = (root: El): string => root.hidden ? '' : root.kids.map(k => (k instanceof El ? visibleText(k) : k.textContent)).join('');
+// What is on screen: the same, without what is there for a screen reader only (.visually-hidden; item 46).
+const seenText = (root: El): string => root.hidden || has(root, 'visually-hidden') ? '' : root.kids.map(k => (k instanceof El ? seenText(k) : k.textContent)).join('');
 const button = (root: El, text: string) => {
   const b = all(root).find(n => n.tagName === 'BUTTON' && visibleText(n).trim() === text && shown(n));
   assert.ok(b, 'no button ' + text);
@@ -1035,6 +1037,10 @@ test('@ in a group lists its members and 全体; ↑/↓ move, Enter inserts @�
   const c = composer();
   c.type('请 @');
   assert.deepEqual(c.options(), ['快手', '墨点', '全体@ 群里每一只']);
+  // Item 46: on screen 全体 is its name under its people mark; what it does is told to a screen reader (the option's own text).
+  assert.deepEqual(c.list()!.children.map(o => seenText(o)), ['快手', '墨点', '全体']);
+  assert.ok(named(c.list()!, 'mx-hint')[0]!.classList.contains('visually-hidden'));
+  assert.match(read('client/public/app.js'), /face: \(name\) => untipped\(avatar\(name, paintOf\(name\), "xs"\)\),\n\s+members: \(\) => \{/, 'the faces beside the names carry no tooltip of the name');
   assert.equal(c.list()!.getAttribute('role'), 'listbox');
   assert.equal(c.input.getAttribute('aria-controls'), c.list()!.id);
   assert.equal(c.active(), 0);

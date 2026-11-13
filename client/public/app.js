@@ -3793,6 +3793,13 @@
     return node;
   }
 
+  // A face drawn beside its printed name (a list row, the @ list, the drawer):
+  // no tooltip repeating the name (item 46).
+  function untipped(av) {
+    setTip(av, "");
+    return av;
+  }
+
   function listButton(name, preview, active, unread, paint, primary, label) {
     const btn = el("button", "item" + (active ? " active" : ""));
     btn.type = "button";
@@ -7787,7 +7794,7 @@
   // A group's composer offers its members on @ (mention.js); the text is sent as typed.
   mention.init({
     input, composer, icon,
-    face: (name) => avatar(name, paintOf(name), "xs"),
+    face: (name) => untipped(avatar(name, paintOf(name), "xs")),
     members: () => {
       if (!state.sel || state.sel.type !== "group" || state.peer) return null;
       const g = state.groups.find((x) => x.id === state.sel.id);
