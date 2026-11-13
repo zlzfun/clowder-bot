@@ -314,9 +314,9 @@ test('which tool a face\'s cat thinks with is read from faces[].tool as the serv
   const tools = (start: Any) => R.start(start).faces.map((f: Any) => [f.id, f.tool.label, f.tool.state, f.tool.usable, f.tool.id, f.tool.reason]);
   assert.deepEqual(plain(tools(START.ready)), [
     ['ragdoll', 'Claude Code', 'ready', true, 'claude', ''], ['maine-coon', 'Codex', 'ready', true, 'codex', ''],
-    ['siamese', 'Gemini', 'unsupported', false, '', '这个应用还接不上 Gemini'], ['turkish-van', 'Kimi', 'missing', false, '', '这台电脑上还没有装 Kimi'],
-    ['dsh', 'DSH', 'unsupported', false, '', '这个应用还接不上 DSH'], ['dragon-li', 'OpenCode', 'unsupported', false, '', '这个应用还接不上 OpenCode'],
-    ['bengal', 'Antigravity', 'unsupported', false, '', '这个应用还接不上 Antigravity'], ['golden-chinchilla', 'OpenCode', 'unsupported', false, '', '这个应用还接不上 OpenCode'],
+    ['siamese', 'Gemini', 'unsupported', false, '', '暂不支持 Gemini'], ['turkish-van', 'Kimi', 'missing', false, '', '这台电脑上还没有装 Kimi'],
+    ['dsh', 'DSH', 'unsupported', false, '', '暂不支持 DSH'], ['dragon-li', 'OpenCode', 'unsupported', false, '', '暂不支持 OpenCode'],
+    ['bengal', 'Antigravity', 'unsupported', false, '', '暂不支持 Antigravity'], ['golden-chinchilla', 'OpenCode', 'unsupported', false, '', '暂不支持 OpenCode'],
   ]);
   const maine = R.start(START.codexLogin).faces.find((f: Any) => f.id === 'maine-coon').tool;
   assert.deepEqual(plain(maine), { label: 'Codex', state: 'login', usable: false, id: '', reason: 'Codex 还没有登录', loginCommand: 'codex login' });
@@ -330,7 +330,7 @@ test('which tool a face\'s cat thinks with is read from faces[].tool as the serv
   assert.equal(read({ label: 'Codex', usable: true, state: 'login', id: 'codex' }).state, 'unknown', 'usable, so never a login; never called ready either');
   // What the hint says: the tool that is here, or what it needs, why that is not here, and that it cannot come home as it is.
   assert.equal(R.uses(R.start(START.ready).faces[0].tool).text, '它用这台电脑上的 Claude Code 来思考');
-  assert.equal(R.uses(R.start(START.ready).faces[2].tool).text, '它要用 Gemini 来思考。这个应用还接不上 Gemini，所以它现在按原样领不了。');
+  assert.equal(R.uses(R.start(START.ready).faces[2].tool).text, '它要用 Gemini 来思考。暂不支持 Gemini，所以它现在按原样领不了。');
   assert.equal(R.uses(R.start(START.ready).faces[3].tool).text, '它要用 Kimi 来思考。这台电脑上还没有装 Kimi，所以它现在按原样领不了。');
   for (const f of R.start(START.ready).faces) { const u = R.uses(f.tool); assert.equal(u.before + u.label + u.after, u.text); }
   // A server that names no tools: the usual one, as such a server made every cat.
@@ -343,7 +343,7 @@ test('which tool a face\'s cat thinks with is read from faces[].tool as the serv
   // On the card, why in the server's words; on the tile, one short word true to the state the server named (item 44):
   // an Agent the app cannot connect (nothing to do here), one not installed, one not logged in, one that could not be read.
   const [, , siamese, turkishVan] = R.start(START.ready).faces.map((f: Any) => f.tool);
-  assert.equal(R.why(siamese), '这个应用还接不上 Gemini，所以它现在按原样领不了。');
+  assert.equal(R.why(siamese), '暂不支持 Gemini，所以它现在按原样领不了。');
   assert.equal(R.why(R.start(START.ready).faces[0].tool), '', 'a usable tool needs no why');
   assert.deepEqual([siamese, turkishVan, maine, R.UNREAD, R.start(START.ready).faces[0].tool, null].map(t => R.tag(t)), ['接不上', '没安装', '没登录', '没读到', '', '']);
   assert.equal(R.loginHelp('codex login'), '在终端里运行下面这行，登录好再点「重新检测」：');
@@ -1478,7 +1478,7 @@ test('自定义 is one of the options, a tile like the cats\': chosen, the card 
   face(stage, '暹罗猫').click();
   assert.equal(chosen(stage), '暹罗猫');
   assert.deepEqual(hint(stage), ['热血奔放，善于用视觉语言表达想法，表达力是全队最强的', '擅长审美、前端设计风格、打破常规']);
-  assert.equal(voice(stage).textContent, '热血奔放，善于用视觉语言表达想法，表达力是全队最强的。擅长审美、前端设计风格、打破常规。它要用 Gemini 来思考。这个应用还接不上 Gemini，所以它现在按原样领不了。点「只借它的长相」，可以自定义一只，用这台电脑上的 Agent 来思考', 'back: what this cat is like, what it needs and the way on, said again');
+  assert.equal(voice(stage).textContent, '热血奔放，善于用视觉语言表达想法，表达力是全队最强的。擅长审美、前端设计风格、打破常规。它要用 Gemini 来思考。暂不支持 Gemini，所以它现在按原样领不了。点「只借它的长相」，可以自定义一只，用这台电脑上的 Agent 来思考', 'back: what this cat is like, what it needs and the way on, said again');
   assert.equal(shown(about), false);
   assert.equal(control(stage, '名字').value, '小烁');
   own.click();
@@ -1996,7 +1996,7 @@ test('the dialog says the same: the marked tile, why on its card, 创建 not ava
   assert.deepEqual(nickOf(card), ['烁烁', '暹罗猫']);
   assert.deepEqual(hint(card), ['热血奔放，善于用视觉语言表达想法，表达力是全队最强的', '擅长审美、前端设计风格、打破常规']);
   assert.equal(mark(card), '它要用 Gemini 来思考，接不上');
-  assert.equal(visibleText(one(card, 'qc-uses-line')), '这个应用还接不上 Gemini，所以它现在按原样领不了。');
+  assert.equal(visibleText(one(card, 'qc-uses-line')), '暂不支持 Gemini，所以它现在按原样领不了。');
   assert.equal(shown(one(card, 'qc-uses-more')), false, 'nothing to install or log in on this computer: nothing to re-detect');
   const go = all(card).find(n => n.tagName === 'BUTTON' && n.type === 'submit')!;
   assert.equal(go.getAttribute('aria-disabled'), 'true');
@@ -2165,7 +2165,7 @@ test('a login beside a face: 重新检测 says plainly when nothing changed and 
   // The rules: both refusals keep the server's sentence (it says what would help), or say plainly which tool.
   const { R } = p;
   assert.deepEqual(plain(R.catError(fail(422, '这只猫猫用 Claude Code 来思考，不能另选；想自己选，请用「自定义」。', 'face_tool'), '宪宪')), { kind: 'face', text: '这只猫猫用 Claude Code 来思考，不能另选；想自己选，请用「自定义」。' });
-  assert.deepEqual(plain(R.catError(fail(422, '这个应用还接不上 Gemini，所以这只猫猫现在领不了', 'face_unavailable'), '烁烁')), { kind: 'face', text: '这个应用还接不上 Gemini，所以这只猫猫现在领不了。' });
+  assert.deepEqual(plain(R.catError(fail(422, '暂不支持 Gemini，所以这只猫猫现在领不了', 'face_unavailable'), '烁烁')), { kind: 'face', text: '暂不支持 Gemini，所以这只猫猫现在领不了。' });
   assert.equal(R.catError(fail(422, 'Agent unavailable', 'face_unavailable'), '烁烁', 'Gemini').text, '刚才没能建好：Gemini 现在用不了。', 'never the adapter\'s words');
   assert.equal(R.catError(fail(422, '请先在本机 Agent 中完成登录'), '宪宪', 'Claude Code').kind, 'blocked', 'a 422 without the code is still what blocks every tool');
 });
@@ -2516,7 +2516,7 @@ test('item 44: one face to twelve — one face is its tile and 自定义, withou
   assert.equal(has(one(stage, 'qc-faces'), 'split'), false, 'one group: no words over it');
   // Twelve (a larger portrait library), every other one's Agent not connectable here.
   const many = Array.from({ length: 12 }, (_, i) => ({ id: 'cat' + i, label: '猫' + i, nickname: '小' + i }));
-  const toolAt = (i: number) => (i % 2 ? { label: 'Pi', state: 'unsupported', usable: false, reason: '这个应用还接不上 Pi' } : { label: 'Codex', state: 'ready', usable: true, id: 'codex' });
+  const toolAt = (i: number) => (i % 2 ? { label: 'Pi', state: 'unsupported', usable: false, reason: '暂不支持 Pi' } : { label: 'Codex', state: 'ready', usable: true, id: 'codex' });
   const q = page({ presets: many, start: { ...START.ready, faces: many.map((c, i) => ({ id: c.id, personality: c.label + '的性格', tool: toolAt(i) })) } });
   const row = await q.stage();
   assert.deepEqual(named(row, 'qc-group').map(g => tiles(g).filter(shown).map(f => f.dataset.face ?? '自定义')),
