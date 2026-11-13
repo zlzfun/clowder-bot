@@ -6,7 +6,7 @@
    of tokens.css and the café layer. No new colors, fonts or motion;
    separation is surface and spacing, never a line. */
 
-.pal-esc, .pal-foot kbd {
+.pal-esc {
   flex: none; font: inherit; font-size: var(--x-fs-cap); line-height: 18px;
   padding: 0 5px; border-radius: 5px; font-variant-numeric: tabular-nums;
   background: var(--x-fill-2); color: var(--x-muted);
@@ -48,8 +48,10 @@
 
 .pal-body { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 0 8px 8px; }
 .pal-body[hidden] { display: none; }
-.pal-group + .pal-group { margin-top: 4px; }
-.pal-head { padding: 8px 10px 4px; font-size: var(--x-fs-cap); font-weight: 500; line-height: 18px; letter-spacing: .02em; color: var(--x-faint); }
+/* The groups (recent chats, actions, found messages) without headings: a
+   gap sets them apart; the heading is for a screen reader (item 46). */
+.pal-group:first-child { padding-top: var(--x-s1); }
+.pal-group + .pal-group { margin-top: var(--x-s5); }
 .pal-opt {
   display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 6px 10px;
   border-radius: 10px; color: var(--x-text); cursor: pointer; user-select: none;
@@ -102,13 +104,7 @@ html[data-theme="dark"] .pal-ico, html[data-theme="dark"] .pal-quote { backgroun
 }
 .pal-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 
-.pal-foot[hidden] { display: none; }
-.pal-foot { flex: none; display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 10px 18px 12px; background: var(--x-fill-1); font-size: var(--x-fs-cap); color: var(--x-faint); }
-.pal-hint { display: inline-flex; align-items: center; gap: 3px; }
-.pal-foot kbd { min-width: 18px; text-align: center; }
-.pal-hint kbd:last-of-type { margin-right: 3px; }
-
-/* ---- A phone: a sheet over the whole screen, 取消 in place of esc, no key hints. */
+/* ---- A phone: a sheet over the whole screen, 取消 in place of esc. */
 @media (max-width: 767px) {
   .pal { padding: 0; align-items: stretch; }
   .pal-card {
@@ -117,7 +113,7 @@ html[data-theme="dark"] .pal-ico, html[data-theme="dark"] .pal-quote { backgroun
   }
   .pal-bar { padding: 0 14px 0 16px; }
   .pal-input { font-size: 16px; }
-  .pal-esc, .pal-foot { display: none; }
+  .pal-esc { display: none; }
   .pal-cancel { display: inline-flex; }
   .pal-opt { min-height: 48px; }
   .pal-opt > .avatar { width: 32px; height: 32px; }

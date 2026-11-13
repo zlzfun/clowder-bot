@@ -174,11 +174,9 @@
     const confirm = node("div", "pal-confirm");
     confirm.hidden = true;
     confirm.setAttribute("role", "group");
-    const foot = node("div", "pal-foot");
-    foot.setAttribute("aria-hidden", "true");
-    const hint = (keys, text) => { const s = node("span", "pal-hint"); for (const k of keys) s.append(node("kbd", "", k)); s.append(document.createTextNode(text)); return s; };
-    foot.append(hint(["↑", "↓"], "选择"), hint(["↵"], "打开"), hint(["esc"], "关闭"), hint([mac ? "⌥" : "Alt", "↑↓"], "上一个、下一个聊天"));
-    card.append(bar, body, notes, confirm, foot);
+    // No line of key hints under the list (item 46): ↑↓ and ↵ are what any
+    // list answers to, and esc is on the field.
+    card.append(bar, body, notes, confirm);
     root.append(card);
     document.body.append(root);
 
@@ -199,7 +197,7 @@
     });
     input.addEventListener("compositionend", () => { S.composing = false; onInput(); });
     input.addEventListener("input", (ev) => { if (S.composing || (ev && ev.isComposing)) return; onInput(); });
-    ui = { root, card, bar, chip, chipName, input, esc, cancel, body, list, notes, confirm, foot };
+    ui = { root, card, bar, chip, chipName, input, esc, cancel, body, list, notes, confirm };
   }
 
   // ------------------------------------------------------------- open / close
@@ -254,7 +252,6 @@
     ui.root.hidden = true;
     ui.confirm.hidden = true;
     ui.body.hidden = false;
-    ui.foot.hidden = false;
     const shell = document.getElementById("shell");
     if (shell) shell.inert = S.inert;
     const back = S.opener;
@@ -379,7 +376,10 @@
     for (const [g, sec] of sections.entries()) {
       const box = node("div", "pal-group");
       box.setAttribute("role", "group");
-      const head = node("div", "pal-head", sec.title);
+      // The groups are told apart by their rows (faces, square action tiles,
+      // two-line message hits) and a gap; the heading names the group for a
+      // screen reader only (item 46).
+      const head = node("div", "pal-head visually-hidden", sec.title);
       head.id = "pal-head-" + g;
       head.setAttribute("role", "presentation");
       box.setAttribute("aria-labelledby", head.id);
@@ -406,9 +406,10 @@
     if (row.kind === "chat") {
       const c = row.chat;
       el.append(face(c), marked("pal-name", c.name, row.range));
-      const sub = row.via ? "有 " + row.via : c.type === "group" ? "群聊" + ((c.members || []).length ? " · " + c.members.join("、") : "") : "";
+      // A group's portrait says 群聊: its members, or the member it was found by (item 46).
+      const sub = row.via ? "有 " + row.via : c.type === "group" ? (c.members || []).join("、") : "";
       if (sub) el.append(node("span", "pal-sub", sub));
-      if (row.here) el.append(node("span", "pal-tag", "当前"));
+      if (row.here) el.append(node("span", "visually-hidden", "，当前"));
     } else if (row.kind === "action") {
       const a = row.action;
       const tile = node("span", "pal-ico");
@@ -459,7 +460,7 @@
     const s = S.search, current = s.key === searchKey(v.q);
     if (S.refusal) say(S.refusal, "pal-bad");
     if (v.state === "long") say("最多可以搜 " + R.MAX_QUERY + " 个字。");
-    else if (!v.q && S.scope) say(S.scope.type === "group" ? "输入要在这个群聊里找的话。" : "输入要在和" + S.scope.chat.name + "的聊天里找的话。");
+    // A scope with nothing typed yet: the placeholder and the chat's chip say where it looks (item 46).
     else if (v.q && current && s.state === "waiting") say(S.scope ? "正在这个聊天里找…" : "正在找聊过的话…", "pal-wait");
     else if (v.q && current && s.state === "error") {
       const p = say(s.error, "pal-bad");
@@ -569,7 +570,7 @@
     ui.confirm.replaceChildren(title, text, quote, acts);
     ui.confirm.setAttribute("aria-labelledby", title.id);
     ui.confirm.setAttribute("aria-describedby", text.id);
-    ui.body.hidden = ui.notes.hidden = ui.foot.hidden = true;
+    ui.body.hidden = ui.notes.hidden = true;
     ui.confirm.hidden = false;
     yes.focus();
   }
@@ -577,7 +578,7 @@
     S.confirm = null;
     ui.confirm.hidden = true;
     ui.confirm.replaceChildren();
-    ui.body.hidden = ui.foot.hidden = false;
+    ui.body.hidden = false;
     ui.notes.hidden = !ui.notes.firstChild;
     if (refocus) ui.input.focus();
   }
@@ -698,8 +699,9 @@
     if (H.settings) actions.add({ id: "settings", label: "设置", icon: "settings", keywords: ["偏好", "选项", "模板", "Agents", "本机工具", "关于", "版本"], run: () => H.settings() });
     if (H.setTheme) {
       actions.add({
+        // The page itself and the sun or moon show the theme now: no 「现在是浅色」 beside it (item 46).
         id: "theme", label: "切换深浅色", icon: () => (dark() ? "sun" : "moon"), keywords: ["主题", "外观", "深色", "浅色", "夜间", "暗色"],
-        hint: () => (dark() ? "现在是深色" : "现在是浅色"), run: () => H.setTheme(dark() ? "light" : "dark"),
+        run: () => H.setTheme(dark() ? "light" : "dark"),
       });
     }
     // 搜索: the round lens at the top of the full sidebar; its tooltip and

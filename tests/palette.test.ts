@@ -356,6 +356,9 @@ function page(opts: { mac?: boolean; chats?: Any[]; order?: Any[]; selection?: A
   const input = () => doc.getElementById('pal-input')!;
   const rows = () => root().find('pal-opt');
   const rowText = () => rows().map(r => r.textContent);
+  // What is on screen of a row: without what is there for a screen reader only (.visually-hidden; item 46).
+  const seen = (n: El): string => n.classList.contains('visually-hidden') ? '' : n.kids.map(k => (k instanceof El ? seen(k) : k.textContent)).join('');
+  const rowSeen = () => rows().map(seen);
   const heads = () => root().find('pal-head').map(n => n.textContent);
   const notes = () => root().find('pal-note').map(n => n.textContent);
   const key = (target: El | null, k: string, mods: Record<string, unknown> = {}) => dispatch(doc, target ?? doc.body, 'keydown', { key: k, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...mods });
@@ -370,7 +373,7 @@ function page(opts: { mac?: boolean; chats?: Any[]; order?: Any[]; selection?: A
     thread.replaceChildren(inner);
     return inner;
   };
-  return { doc, P, h, shell, entry, composer, thread, root, input, rows, rowText, heads, notes, key, type, flush, advance, calls, log, state, experience, hit, answer, history };
+  return { doc, P, h, shell, entry, composer, thread, root, input, rows, rowText, rowSeen, heads, notes, key, type, flush, advance, calls, log, state, experience, hit, answer, history };
 }
 
 // ---------------------------------------------------------------- behaviour
@@ -384,8 +387,18 @@ test('⌘K opens the palette over an inert shell with the caret in the field; an
   assert.equal(p.shell.inert, true, 'nothing behind it takes focus or clicks');
   assert.equal(p.doc.activeElement, p.input());
   assert.deepEqual(p.heads(), ['最近', '操作']);
-  assert.deepEqual(p.rowText().slice(0, 4), ['Ada Lovelace', '大团子', '读书会群聊 · 团子、Ada Lovelace', '团子小队群聊 · 大团子'], 'the open chat 团子 is not offered');
-  assert.deepEqual(p.rowText().slice(4), ['新建猫猫', '新建群聊', '设置', '切换深浅色现在是浅色']);
+  // Item 46: the groups name themselves to a screen reader only; on screen the rows and a gap set them apart.
+  assert.ok(p.root().find('pal-head').every(h => h.classList.contains('visually-hidden')));
+  // A group's portrait says 群聊: its row shows its members, not 「群聊 · 」 before them.
+  assert.deepEqual(p.rowText().slice(0, 4), ['Ada Lovelace', '大团子', '读书会团子、Ada Lovelace', '团子小队大团子'], 'the open chat 团子 is not offered');
+  // The theme action without 「现在是浅色」: the page and its sun or moon show the theme.
+  assert.deepEqual(p.rowText().slice(4), ['新建猫猫', '新建群聊', '设置', '切换深浅色']);
+  // No line of key hints under the list.
+  assert.equal(p.root().find('pal-foot').length, 0);
+  assert.doesNotMatch(p.root().textContent, /上一个、下一个聊天|选择打开/);
+  const css = read('client/public/palette.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.match(css, /\.pal-group \+ \.pal-group \{ margin-top: var\(--x-s5\); \}/, 'a gap between the groups');
+  assert.doesNotMatch(css, /\.pal-head \{|\.pal-foot|\.pal-hint/);
   assert.equal(p.rows()[0].getAttribute('aria-selected'), 'true');
   assert.equal(p.input().getAttribute('aria-activedescendant'), p.rows()[0].id);
   assert.equal(p.rows()[0].find('avatar')[0].dataset.tip, undefined, 'no tooltip on the faces');
@@ -466,7 +479,9 @@ test('names filter at once; what was said is searched once typing rests, a newer
   p.P.open();
   p.type('团子');
   assert.deepEqual(p.heads(), ['猫猫和群聊']);
-  assert.deepEqual(p.rowText(), ['团子当前', '团子小队群聊 · 大团子', '大团子', '读书会有 团子'], 'best first; the open chat says so');
+  // The open chat says so to a screen reader (item 46: no 「当前」 tag on screen; choosing it only closes the palette).
+  assert.deepEqual(p.rowText(), ['团子，当前', '团子小队大团子', '大团子', '读书会有 团子'], 'best first; the open chat says so');
+  assert.deepEqual(p.rowSeen(), ['团子', '团子小队大团子', '大团子', '读书会有 团子']);
   assert.equal(p.rows()[0].find('pal-mark')[0].textContent, '团子');
   assert.deepEqual(p.notes(), ['正在找聊过的话…']);
   assert.equal(p.calls.length, 0, 'not while typing');
@@ -660,7 +675,8 @@ test('a scope searches one chat\'s current conversation through its own route: t
   assert.equal(p.root().find('pal-scope-name')[0].textContent, '团子');
   assert.equal(p.input().placeholder, '在和团子的聊天里查找');
   assert.deepEqual(p.rowText(), []);
-  assert.deepEqual(p.notes(), ['输入要在和团子的聊天里找的话。']);
+  // Item 46: the placeholder and the chat's chip say where it looks; no note repeating them.
+  assert.deepEqual(p.notes(), []);
   p.type('团子');
   assert.deepEqual(p.heads(), [], 'no chat list while scoped');
   assert.deepEqual(p.notes(), ['正在这个聊天里找…']);
@@ -743,7 +759,7 @@ test('actions run the app\'s own functions after the palette closed; the registr
   // The first-run stage: no cat yet.
   const empty = page({ chats: [], selection: null });
   empty.P.open();
-  assert.deepEqual(empty.rowText(), ['新建猫猫', '设置', '切换深浅色现在是浅色']);
+  assert.deepEqual(empty.rowText(), ['新建猫猫', '设置', '切换深浅色']);
 });
 
 test('设置 is also found by the name of its Agents pane, and by that pane\'s old name 本机工具', async () => {
