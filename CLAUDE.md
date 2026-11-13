@@ -8,6 +8,8 @@ Higher-level adaptation is allowed: combine supported native operations, transla
 
 The default product experience is a simple chat application, following the user's Dots/Grok Bot direction: choose a cat or group, talk, attach material and receive results. Everyday use must not require knowledge of Agents, models, context windows, sessions or workspaces. Keep setup minimal and technical configuration/diagnostics optional; preserve the existing XBot/café conventions. Simplicity must retain truthful status, actionable errors and meaningful permission choices. Apply both the upstream-reuse and usability gates in AGENTS.md to every feature.
 
+Avoid unnecessary secondary labels and description. Let the layout do the explaining. Add a heading, caption, tag or helper sentence only where the layout cannot carry the meaning and the user would otherwise be misled; see AGENTS.md, "Chat-first usability".
+
 External patches and generated-build edits are not exceptions. Existing patches are historical debt to audit and retire through verified upstream adoption, not permission to extend them. Do not recreate missing runtime capabilities in the Bot layer. Before proposing a feature, distinguish unpatched upstream capability, presentation/adapter work, existing local patches and upstream-dependent requests.
 
 Preserve existing user data and functionality while planning migration; do not remove runtime patches or migrate data merely because this policy was added.
