@@ -33,16 +33,16 @@ UI 保留 Bot 名称和文件夹概念，实际成员、执行和历史以 Clowd
 - `cats`：现有猫的数量。
 - `faces[]`：可以选的猫脸，各带它在引擎里的同名模板的画像和它用的 Agent：`{id, rev, name?, nickname?, role?, personality?, strengths?, tool}`。
   - 画像来自未打补丁的上游 `GET /api/cat-templates` 的 `roleDescription`／`personality`／`teamStrengths`，各压成一行并截断；`rev` 随画像内容变化，建猫时带回（见下）。`name` 是上游模板的叫法（布偶猫、小鲸鱼…），`nickname` 是模板给这只猫起的名字（宪宪、鲸鲸…），可以作为建议的名字。挑哪张脸，建出来的猫就以这份画像起步，所以首屏和新建猫猫要把它的特点简短地说出来。
-  - `tool {label, state, usable, id?, reason?, loginCommand?}`：**这只猫用哪个 Agent 思考是模板的一部分**（使用者 2026-11-12 指出：选了暹罗猫还能在下拉里挑 Codex 不合理；字段名 `tool` 照旧）。`usable` 为真时可以按这张脸原样建猫，`id` 是它会绑定的本机 Agent；否则 `reason` 用一句话说为什么（「这台电脑上还没有装 Kimi」「这个应用还接不上 AGY Native」「Codex 还没有登录」），`state` 是 `ready`／`unknown`（装了，登录没能确认，可以试）／`login`／`missing`／`unsupported`。应用接不上的 Agent 先说接不上：装上也不会变。
+  - `tool {label, state, usable, id?, reason?, loginCommand?}`：**这只猫用哪个 Agent 思考是模板的一部分**（使用者 2026-11-12 指出：选了暹罗猫还能在下拉里挑 Codex 不合理；字段名 `tool` 照旧）。`usable` 为真时可以按这张脸原样建猫，`id` 是它会绑定的本机 Agent；否则 `reason` 用一句话说为什么（「这台电脑上还没有装 Kimi」「暂不支持 AGY Native」「Codex 还没有登录」），`state` 是 `ready`／`unknown`（装了，登录没能确认，可以试）／`login`／`missing`／`unsupported`。应用还不支持的 Agent 先说不支持：装上也不会变（2026-11-13 起这句话是「暂不支持 …」，原来是「这个应用还接不上 …」；使用者认为后者不像人说的话）。
   - 脸和 Agent 的对应来自固定上游 `cat-template.json` 的猫种配置（`breeds[].variants` 的默认项）：布偶猫 Claude、缅因猫 Codex、暹罗猫 Gemini（AGY）、梵花猫 Kimi、狸花猫与金渐层 OpenCode、孟加拉猫 Antigravity；小鲸鱼是 DSH 运行时的猫。上游的模板接口自己注明是「纯灵魂层，不含 client/model 绑定」，没有受支持的接口给出这层对应，所以放在适配层的 `faceTools`（`server/native/agents.ts`）里，由 `tests/face-tools.test.ts` 对着固定上游的文件核对。适配层目前能接的只有 Claude Code、Codex、Kimi 三种（`supportsRuntime`），所以在只装了前两种的电脑上，能按模板建的是布偶猫和缅因猫，其余的脸只能「自定义」借长相。
-  - 顺序是引擎模板的顺序（也是客户端头像库的顺序）；引擎没有对应模板的脸不在其中，模板缺颜色（建猫会被拒绝）的也不在其中；模板读不到时是空数组，首屏其余内容照常。引擎用 ACP 跑的成员在 Agent 检测里以 `acp:<成员>` 出现，按它的 client 归到对应的脸上（只影响怎么称呼这个 Agent，这类接入应用仍然接不上）。
+  - 顺序是引擎模板的顺序（也是客户端头像库的顺序）；引擎没有对应模板的脸不在其中，模板缺颜色（建猫会被拒绝）的也不在其中；模板读不到时是空数组，首屏其余内容照常。引擎用 ACP 跑的成员在 Agent 检测里以 `acp:<成员>` 出现，按它的 client 归到对应的脸上（只影响怎么称呼这个 Agent，这类接入应用仍不支持）。
 
 `POST /xbot-api/bots` 增加第三种请求体 `{name, simple: {face?, rev?, custom?, about?, personality?, agent?}, idempotencyKey}`：
 
 - 只调用**未打补丁的上游** `POST /api/cats`（固定版本 `42017e0` 的 `routes/cats.ts`），与历史上的 fork／导入路径是同一个原生接口；不经过本地补丁 P005 的 `/api/bot-cat-templates/instantiate`。带 `catConfig` 的完整创建仍走 P005，那是待退出的历史补丁，不因这个流程而扩展。
 - 请求体只有成员本身的字段：`catId`、名字与别名、所选猫脸对应角色模板的颜色、职责／性格／简介、`clientId`、`configurationSource: 'native_tool'`、`defaultModel: ''`。模型与推理强度不写，沿用该 Agent 的本机默认。不传 `breedId`，由原生按新成员处理；头像只存在 Bot 的展示数据里。
 - `face` 是八张猫脸之一，决定头像和颜色，**也决定这只猫是谁、用哪个 Agent**：默认按模板建，职责、性格、擅长取引擎里同名模板的原文（与 `faces[]` 里给界面看的是同一份），Agent 是这张脸自己的（`faces[].tool`），不另选。模板里没写的项用通用的「随叫随到的伙伴」补上。
-  - 这张脸的 Agent 在这台电脑上用不了时，创建在询问原生之前被拒绝：422，`code: 'face_unavailable'`，原因就是 `tool.reason`，并说明怎么办（没装的：装好再试或改用自定义；接不上的：改用自定义；没登录的：登录后再试）。
+  - 这张脸的 Agent 在这台电脑上用不了时，创建在询问原生之前被拒绝：422，`code: 'face_unavailable'`，原因就是 `tool.reason`，并说明怎么办（没装的：装好再试或改用自定义；暂不支持的：改用自定义；没登录的：登录后再试）。
   - 按模板建时 `simple.agent` 可以不带；带了而且不是这张脸的 Agent，422，`code: 'face_tool'`（「这只猫猫用 Claude Code 来思考，不能另选；想自己选，请用「自定义」」）。
   - 不带 `face`：取 `simple.agent`（没有就取上面的默认 Agent）对应的那只猫——Claude Code 是布偶猫，Codex 是缅因猫，Kimi 是梵花猫。
 - **说话简短（默认，没有开关）**（使用者 2026-11-12：猫的回复不要太啰嗦，这是聊天软件与工作区式 Agent 的区别之一；同日又说：「说话简短作为一个默认选项，不需要按钮配置」）。每只猫都被叮嘱一句聊天时怎么说话（`chatManner`，`server/native/chat-pack.ts`）：「说话像在聊天软件里回消息：先说结论，通常两三句话说完；不用标题、列表、表格和表情符号，不复述问题，不铺垫，不在结尾总结。对方明确要清单、表格、代码或长文时照给；内容确实多时先说要点，问一句要不要展开。」它不写进任何一只猫的资料，而是引擎的一个 Pack（上游 F129，未打补丁的 `GET /api/packs` 与 `POST /api/packs/add`）：适配层让引擎里一直装着一个只含这一条默认行为的 style 包 `clowder-bot-chat`（`defaults.yaml`：`scope: all-cats`、`overridable: true`），引擎把它编进每只猫身份提示里的「默认行为（用户可覆盖）」一节。所以在这里建的、以前建的、按模板的、自定义的、用哪个 Agent 思考的猫都一样，不需要逐只设置。
@@ -59,7 +59,7 @@ UI 保留 Bot 名称和文件夹概念，实际成员、执行和历史以 Clowd
   - 进程重启过、不记得这次请求，但这个键建出的那只猫已经在（`catId` 由键推导）：直接回答这只猫，不再向原生发创建，也不按现在的模板和 Agent 重新解析——不会对一只已经建好的猫说「没有创建」或「介绍变了」。能从猫身上核对的（名字、脸、Agent、自定义时写的话）与请求不符时，按「不是同一个请求」拒绝（409）。
   - 同一个键换了内容，而原来那次已经建出了猫：409，不再询问原生。同样的请求同时到达两次，只解析一次，两次到达原生的是同一份内容。
 - 上游的模板接口不校验条目，适配层读取时只保留格式正确的字段：不是对象、没有 `id` 的条目跳过，类型不对的字段当作没写。
-- 上游有几个模板的职责本来就写着它用的模型或 Agent（狸花猫「GLM 对话猫」、孟加拉猫「混血多模型 agent…」、金渐层「开源多模型编码 agent…」）。现在按模板建的猫用的就是模板自己的 Agent，这些话与事实一致；它们的 Agent 这个应用还接不上，所以这几张脸目前只能自定义。模型本身不写进成员（`defaultModel: ''`），沿用那个 Agent 在本机的默认配置。
+- 上游有几个模板的职责本来就写着它用的模型或 Agent（狸花猫「GLM 对话猫」、孟加拉猫「混血多模型 agent…」、金渐层「开源多模型编码 agent…」）。现在按模板建的猫用的就是模板自己的 Agent，这些话与事实一致；它们的 Agent 这个应用还不支持，所以这几张脸目前只能自定义。模型本身不写进成员（`defaultModel: ''`），沿用那个 Agent 在本机的默认配置。
 - 幂等用上游成员创建自带的请求身份：请求头 `x-cat-cafe-onboarding-journey: clowder-bot-simple` 与 `idempotency-key: onboarding:clowder-bot-simple:cat:<idempotencyKey>`（`config/member-create-receipt.ts`）。`catId` 由 `idempotencyKey` 推导，所以同一个键、同样的内容重发得到同一只猫；同一个键换了内容由原生拒绝（409）。重发时如果那只猫已经在，就不再按当前的 Agent 检测结果拦截。这一路径 2026-11-11 在隔离运行时上实测过创建、重放和冲突。
 - 绑定 Claude Code 的猫，成员记录里带一组默认的「额外 CLI 参数」（上游成员编辑里的 `cliConfigArgs`，受支持的成员级设置）：`--settings {"skillOverrides":{"schedule":"off","loop":"off"}} --disallowedTools RemoteTrigger,CronCreate,CronDelete,CronList`，关掉 CLI 自带的云端定时，让「每天 9 点提醒我」走引擎的定时工具和它的确认。Codex 没有自带定时，不写参数。它是成员建好之后单独的一步（`PATCH /api/cats/:id {expectedRevision, cliConfigArgs}`），三种创建方式都一样；创建请求本身不带这组参数，形状始终是原生按幂等键记下的那个，所以默认值以后怎么变，重发旧请求都不会被当成「内容不同」。成员已有参数时不动（包括用户后来自己改的）；写入被拒绝时按成员当前的版本再试一次，仍不成功则猫照常建好，应答多带一句 `notice` 说明少了什么、去哪里补，不把它说成完全建好。`PUT /bots/:name/agent` 换 Agent 时在同一次修改里写入。设置 JSON 里不能有空白：上游按空白切分参数。只影响此后新建或重新绑定的猫，已有的猫不改。
 - 必须带 `idempotencyKey`；不能与 `catConfig`、`runtimeId`、`templateId`、`persona`、`description` 混用。没有可用的 Agent 时 422，说明要先装好并登录。两种 409 用 `code` 区分：同名是 `name_taken`（改名、其他创建方式的同名也带这个码），同一个键换了内容是 `request_changed`。

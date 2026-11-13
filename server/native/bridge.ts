@@ -510,7 +510,7 @@ export class BotBridge {
       const tool = faceTool(picked, runtimes);
       // 自定义 is only a way forward when some tool here can be used.
       if (!tool.runtime) throw new ApiError(422, tool.state === 'login' ? `${tool.reason}，登录后再试。`
-        : `${tool.reason}，所以这只猫猫现在领不了。` + (usual ? `${tool.state === 'missing' ? '装好并登录后再试，或者' : '可以'}改用「自定义」，只借它的长相。` : tool.state === 'missing' ? '装好并登录后再试。' : ''),
+        : `${tool.reason}，这只猫猫现在领不了。` + (usual ? `${tool.state === 'missing' ? '装好并登录后再试，或者' : '可以'}改用「自定义」。` : tool.state === 'missing' ? '装好并登录后再试。' : ''),
         undefined, 'face_unavailable');
       if (simple.agent && simple.agent !== tool.runtime.id) throw new ApiError(422, `这只猫猫用 ${tool.label} 来思考，不能另选；想自己选，请用「自定义」。`, undefined, 'face_tool');
       runtime = tool.runtime;

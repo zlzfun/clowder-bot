@@ -139,7 +139,7 @@ export function faceTool(face: Face, runtimes: NativeRuntime[]): FaceTool {
   const usable = listed.find(runtime => !runtimeUnavailable(runtime));
   if (usable) return { label: usable.label, state: usable.readiness?.status === 'configured' ? 'ready' : 'unknown', runtime: usable };
   const adapted = listed.filter(supportsRuntime), label = (adapted[0] ?? listed.find(runtime => runtime.installed) ?? listed[0])?.label ?? wanted.label;
-  if (!adapted.length) return { label, state: 'unsupported', reason: `这个应用还接不上 ${label}` };
+  if (!adapted.length) return { label, state: 'unsupported', reason: `暂不支持 ${label}` };
   const waiting = adapted.find(runtime => runtime.installed && runtime.readiness?.status === 'login_required');
   if (waiting) return { label, state: 'login', reason: `${label} 还没有登录`, ...(waiting.readiness?.loginCommand ? { loginCommand: waiting.readiness.loginCommand } : {}) };
   return { label, state: 'missing', reason: `这台电脑上还没有装 ${label}` };

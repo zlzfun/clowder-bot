@@ -218,12 +218,12 @@ test('a face is a cat with its own tool: without that tool here the cat cannot b
   assert.deepEqual(await tools(), {
     ragdoll: { label: 'Claude Code', state: 'unknown', usable: true, id: 'claude' },            // installed, login not confirmed: worth trying
     'maine-coon': { label: 'Codex', state: 'ready', usable: true, id: 'codex' },
-    siamese: { label: 'AGY Native', state: 'unsupported', usable: false, reason: '这个应用还接不上 AGY Native' },   // installed and logged in, but not a kind the app can connect
+    siamese: { label: 'AGY Native', state: 'unsupported', usable: false, reason: '暂不支持 AGY Native' },   // installed and logged in, but not a kind the app can connect
     'turkish-van': { label: 'Kimi', state: 'missing', usable: false, reason: '这台电脑上还没有装 Kimi' },
-    dsh: { label: 'DSH', state: 'unsupported', usable: false, reason: '这个应用还接不上 DSH' },                    // said before "not installed": installing would not help
-    'dragon-li': { label: 'OpenCode', state: 'unsupported', usable: false, reason: '这个应用还接不上 OpenCode' },    // the engine's detection does not list it at all
-    bengal: { label: 'Antigravity', state: 'unsupported', usable: false, reason: '这个应用还接不上 Antigravity' },
-    'golden-chinchilla': { label: 'OpenCode', state: 'unsupported', usable: false, reason: '这个应用还接不上 OpenCode' },
+    dsh: { label: 'DSH', state: 'unsupported', usable: false, reason: '暂不支持 DSH' },                    // said before "not installed": installing would not help
+    'dragon-li': { label: 'OpenCode', state: 'unsupported', usable: false, reason: '暂不支持 OpenCode' },    // the engine's detection does not list it at all
+    bengal: { label: 'Antigravity', state: 'unsupported', usable: false, reason: '暂不支持 Antigravity' },
+    'golden-chinchilla': { label: 'OpenCode', state: 'unsupported', usable: false, reason: '暂不支持 OpenCode' },
   });
   // The cat is made with its own tool, not the usual one (Codex here), and no other tool can be picked for it.
   assert.deepEqual((await post('宪宪', { face: 'ragdoll' })).slice(0, 2), [201, undefined]);
@@ -232,9 +232,9 @@ test('a face is a cat with its own tool: without that tool here the cat cannot b
   assert.deepEqual((await post('宪宪三', { face: 'ragdoll', agent: 'claude' })).slice(0, 2), [201, undefined], 'naming its own tool is not a different request');
   // Its tool is not here, or cannot be connected: refused before the engine is asked, with what would help.
   const before = creations().length;
-  assert.deepEqual(await post('墨墨', { face: 'turkish-van' }), [422, 'face_unavailable', '这台电脑上还没有装 Kimi，所以这只猫猫现在领不了。装好并登录后再试，或者改用「自定义」，只借它的长相。']);
-  assert.deepEqual(await post('烁烁', { face: 'siamese' }), [422, 'face_unavailable', '这个应用还接不上 AGY Native，所以这只猫猫现在领不了。可以改用「自定义」，只借它的长相。']);
-  assert.deepEqual(await post('金哥', { face: 'golden-chinchilla' }), [422, 'face_unavailable', '这个应用还接不上 OpenCode，所以这只猫猫现在领不了。可以改用「自定义」，只借它的长相。']);
+  assert.deepEqual(await post('墨墨', { face: 'turkish-van' }), [422, 'face_unavailable', '这台电脑上还没有装 Kimi，这只猫猫现在领不了。装好并登录后再试，或者改用「自定义」。']);
+  assert.deepEqual(await post('烁烁', { face: 'siamese' }), [422, 'face_unavailable', '暂不支持 AGY Native，这只猫猫现在领不了。可以改用「自定义」。']);
+  assert.deepEqual(await post('金哥', { face: 'golden-chinchilla' }), [422, 'face_unavailable', '暂不支持 OpenCode，这只猫猫现在领不了。可以改用「自定义」。']);
   assert.equal(creations().length, before);
   // Custom borrows only the looks, so any face goes with a tool that is here: the one picked, or the usual one.
   assert.deepEqual((await post('小暹', { face: 'siamese', custom: true })).slice(0, 2), [201, undefined]);
@@ -247,8 +247,8 @@ test('a face is a cat with its own tool: without that tool here the cat cannot b
   assert.deepEqual(await post('砚砚', { face: 'maine-coon' }), [422, 'face_unavailable', 'Codex 还没有登录，登录后再试。']);
   // With no tool usable at all, 自定义 is not offered as a way out: it would need a tool too.
   r.native.runtimes = [runtime('codex', 'openai', 'not_installed'), runtime('agy-native', 'google', 'configured', { label: 'AGY Native', agyCarrier: 'native' })];
-  assert.deepEqual(await post('砚砚', { face: 'maine-coon' }), [422, 'face_unavailable', '这台电脑上还没有装 Codex，所以这只猫猫现在领不了。装好并登录后再试。']);
-  assert.deepEqual(await post('烁烁', { face: 'siamese' }), [422, 'face_unavailable', '这个应用还接不上 AGY Native，所以这只猫猫现在领不了。']);
+  assert.deepEqual(await post('砚砚', { face: 'maine-coon' }), [422, 'face_unavailable', '这台电脑上还没有装 Codex，这只猫猫现在领不了。装好并登录后再试。']);
+  assert.deepEqual(await post('烁烁', { face: 'siamese' }), [422, 'face_unavailable', '暂不支持 AGY Native，这只猫猫现在领不了。']);
   // Kimi installed: 梵花猫's cat can be made, on Kimi.
   r.native.runtimes = [runtime('claude', 'anthropic', 'configured'), runtime('kimi', 'kimi', 'configured', { label: 'Kimi' })];
   assert.deepEqual((await tools())['turkish-van'], { label: 'Kimi', state: 'ready', usable: true, id: 'kimi' });
@@ -345,7 +345,7 @@ test('a repeat is answered by what is known: the cat that exists, or the tools a
   unreachable(false);
   r.native.runtimes = [runtime('codex', 'openai', 'not_installed'), runtime('claude', 'anthropic', 'configured')];
   const made = creations().length;
-  assert.deepEqual(await post('砚砚', { face: 'maine-coon' }, lost), [422, 'face_unavailable', '这台电脑上还没有装 Codex，所以这只猫猫现在领不了。装好并登录后再试，或者改用「自定义」，只借它的长相。']);
+  assert.deepEqual(await post('砚砚', { face: 'maine-coon' }, lost), [422, 'face_unavailable', '这台电脑上还没有装 Codex，这只猫猫现在领不了。装好并登录后再试，或者改用「自定义」。']);
   assert.equal(creations().length, made, 'nothing is made on a tool that is not here');
   // …and when the tool is still here, the repeat reaches native exactly as it was first resolved.
   r.native.runtimes = [runtime('codex', 'openai', 'configured')];
