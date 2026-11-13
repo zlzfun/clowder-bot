@@ -215,6 +215,30 @@ test('a background record from an earlier owner or attempt is the previous execu
   assert.deepEqual(calls.filter(c => c.method === 'POST').at(-1)!.body, { action: 'cancel', expectedOwnerRevision: 3, expectedAttemptId: 'attempt-old' });
 });
 
+test('review r15: what 停止 and 撤销整个任务 lead to is on screen beside them before either is pressed, only on a task that has that control', async () => {
+  const { host, calls } = await mount([
+    // Running, its own current execution: both controls, both lines.
+    task({ id: 'task-3', title: '当前执行', executionRef: { invocationId: 'inv-main', subexecutionId: 'attempt-9', parentInvocationId: 'inv-0', catId: 'cat-a', threadId: 'thread-1', sourceMessageId: null }, backgroundExecution: run({ attemptId: 'attempt-9', ownerRevision: 2 }) }),
+    // Another execution's record: no 停止, so no line about it; 撤销 still offered, with its line.
+    task({ id: 'task-2', title: '迁移数据', executionRef: { invocationId: 'inv-main', parentInvocationId: 'inv-0', catId: 'cat-a', threadId: 'thread-1', sourceMessageId: null }, backgroundExecution: run({ attemptId: 'attempt-7', ownerRevision: 2 }) }),
+    // Done: neither control, neither line.
+    task({ id: 'task-4', title: '做完了', status: 'done' }),
+  ]);
+  assert.deepEqual(calls.filter(c => c.method === 'POST'), [], 'nothing pressed');
+  const STOP = '停止后，「允许继续」前不会开始新的执行。', CANCEL = '撤销会收回这个任务和它的子任务，「恢复任务」前不会开始新的执行。';
+  const lines = (card: El) => all(card).filter(n => n.tag === 'p').map(p => p.textContent).filter(t => t === STOP || t === CANCEL);
+  const both = cardOf(host, 'task-3');
+  assert.deepEqual(lines(both), [STOP, CANCEL]);
+  for (const [label, text] of [['停止此次后台执行', STOP], ['撤销整个任务', CANCEL]]) {
+    const button = byText(both, label)!;
+    const said = all(both).find(p => p.tag === 'p' && (p as unknown as { id?: string }).id === button.getAttribute('aria-describedby'));
+    assert.equal(said?.textContent, text, label + ' is described by its line');
+  }
+  assert.equal(byText(cardOf(host, 'task-2'), '停止此次后台执行'), undefined);
+  assert.deepEqual(lines(cardOf(host, 'task-2')), [CANCEL]);
+  assert.deepEqual(lines(cardOf(host, 'task-4')), []);
+});
+
 test('a stop leaves its marker: 允许继续 opens only once native shows the execution ended', async () => {
   let list: Array<Record<string, unknown>> = [task({ backgroundExecution: run() })];
   const marked = { status: 'blocked', backgroundStopRequestedAt: T0 + 61_000, backgroundStopOwnerTaskId: 'task-1' };

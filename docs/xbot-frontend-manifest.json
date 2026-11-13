@@ -587,7 +587,8 @@
     {
       "target": "client/public/runtime-tasks.js",
       "description": "Native Task list: ordinary progress, current and previous background execution, stop/cancel markers shown separately; background-control and handoff requests only, no local task engine or poller",
-      "sha256": "14ec2482184c10c8f03c7feaacf075834a3fbaee9c42c447e3fc0b1c2529d6b4"
+      "sha256": "63f038c48da1f3cc35a69bc750f9d3e97cddcae3483456e995734b97d9d03cb1",
+      "attribution": "the layout explains, not captions, on every other screen (docs/xbot-frontend.md item 46) by local Claude Code (claude-opus-5-5) on 2026-11-13"
     },
     {
       "target": "client/public/agents.js",
