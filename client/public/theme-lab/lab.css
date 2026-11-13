@@ -1,0 +1,119 @@
+/* The colour lab's own page (theme-lab/index.html). It sits on tokens.css and
+   app.css only, without the café layer, so its surfaces are the neutral XBot
+   base and it does not lean towards any palette it shows: only their tokens,
+   type and spacing, no colours or fonts of its own. Its classes all start with
+   tl- so none of the app's rules apply by accident. The palettes themselves
+   are drawn inside the frames, on the app's own stylesheets. */
+
+html, body { height: auto; }
+body.tl-page { background: var(--x-win); color: var(--x-text); font-size: var(--x-fs-ui); min-height: 100vh; }
+:where(.tl-page) :where(h1, h2, p, ul) { margin: 0; }
+.tl-said:empty { display: none; }
+.tl-said { color: var(--x-danger); font-size: var(--x-fs-ui); }
+
+/* ---- The scene switch (one segmented control, as 新建's 猫猫 / 群聊) ---- */
+.tl-top {
+  position: sticky; top: 0; z-index: 3;
+  display: flex; justify-content: center; padding: var(--x-s5) var(--x-s6);
+  background: var(--x-win);
+}
+.tl-seg {
+  display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--x-r-pill);
+  background: var(--x-fill-2); max-width: 100%; overflow-x: auto; scrollbar-width: none;
+}
+.tl-seg button {
+  flex: none; min-height: 30px; padding: 0 var(--x-s6); border: 0; border-radius: var(--x-r-pill);
+  background: transparent; color: var(--x-muted); font-size: var(--x-fs-ui); font-weight: 500;
+  transition: background-color var(--dur-press) ease, color var(--dur-press) ease;
+}
+.tl-seg button:hover { color: var(--x-text); }
+.tl-seg button[aria-pressed="true"] { background: var(--x-card); color: var(--x-text); box-shadow: 0 1px 2px color-mix(in srgb, var(--x-text) 12%, transparent); }
+
+/* ---- The overview: one tile per palette, its screen in light and dark ---- */
+.tl-main { padding: var(--x-s3) var(--x-s8) var(--x-s9); }
+.tl-grid {
+  list-style: none; padding: 0;
+  display: grid; gap: var(--x-s8); grid-template-columns: repeat(auto-fill, minmax(min(100%, 600px), 1fr));
+}
+.tl-tile {
+  position: relative; display: flex; flex-direction: column; gap: var(--x-s4);
+  margin: calc(-1 * var(--x-s3)); padding: var(--x-s3); border-radius: var(--x-r-card);
+  transition: background-color var(--dur-press) ease;
+}
+.tl-tile:hover { background: var(--x-fill-2); }
+.tl-open {
+  display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--x-s4); row-gap: 2px;
+  padding: 0 2px; border: 0; background: none; color: inherit; text-align: left; min-width: 0;
+}
+/* The whole tile opens the large view; the frames under it do not take the pointer. */
+.tl-open::after { content: ""; position: absolute; inset: 0; z-index: 1; border-radius: inherit; }
+.tl-open:focus-visible { outline: none; }
+.tl-open:focus-visible::after { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tl-name { font-size: var(--x-fs-body); font-weight: 600; }
+.tl-note { color: var(--x-muted); font-size: var(--x-fs-sm); }
+.tl-frames { display: grid; grid-template-columns: 1fr 1fr; gap: var(--x-s3); }
+
+/* A frame: the app at its frozen size, scaled into its box (--tl-s, set by lab.js). */
+.tl-frame, .tl-fit {
+  position: relative; overflow: hidden; border-radius: var(--x-r-sm);
+  background: var(--x-fill-1);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--x-text) 10%, transparent);
+}
+.tl-frame { aspect-ratio: var(--tl-ar, 1200 / 760); }
+.tl-doc {
+  position: absolute; left: 0; top: 0; width: var(--tl-w, 1200px); height: var(--tl-h, 760px);
+  border: 0; transform: scale(var(--tl-s, 1)); transform-origin: 0 0; visibility: hidden;
+}
+.tl-doc.on { visibility: visible; }
+
+/* ---- The large view: one palette at real size ---- */
+.tl-view {
+  width: 100vw; height: 100vh; height: 100dvh; max-width: none; max-height: none;
+  margin: 0; padding: 0; border: 0; background: var(--x-win); color: var(--x-text);
+}
+.tl-view[open] { display: flex; flex-direction: column; }
+.tl-view::backdrop { background: var(--x-scrim); }
+.tl-view[open] { animation: tl-in var(--dur-pop) ease-out; }
+@keyframes tl-in { from { opacity: 0; } }
+.tl-bar {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--x-s4) var(--x-s6);
+  padding: var(--x-s4) var(--x-s6);
+}
+.tl-who { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.tl-id { min-width: 0; padding-left: var(--x-s4); }
+.tl-id-name { font-size: var(--x-fs-title); font-weight: 600; line-height: 1.4; }
+.tl-id-note { color: var(--x-muted); font-size: var(--x-fs-sm); }
+.tl-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--x-s4); }
+.tl-bar > .tl-said { flex-basis: 100%; }
+.tl-icon {
+  display: grid; place-items: center; flex: none; width: 36px; height: 36px; padding: 0;
+  border: 0; border-radius: 50%; background: transparent; color: var(--x-text);
+  transition: background-color var(--dur-press) ease;
+}
+.tl-icon:hover { background: var(--x-fill-2); }
+.tl-icon .icon { width: 20px; height: 20px; }
+.tl-btn {
+  min-height: 36px; padding: 0 var(--x-s6); border: 0; border-radius: var(--x-r-pill);
+  background: var(--x-fill-2); color: var(--x-text); font-size: var(--x-fs-ui); font-weight: 500;
+  transition: background-color var(--dur-press) ease;
+}
+.tl-btn:hover { background: var(--x-fill-3); }
+.tl-stage { flex: 1; min-height: 0; display: grid; place-items: center; padding: 0 var(--x-s6) var(--x-s6); }
+.tl-fit {
+  width: calc(var(--tl-w, 1200px) * var(--tl-s, 1)); height: calc(var(--tl-h, 760px) * var(--tl-s, 1));
+  border-radius: var(--x-r-card);
+}
+
+@media (max-width: 640px) {
+  .tl-main { padding: var(--x-s3) var(--x-s6) var(--x-s8); }
+  .tl-top { padding: var(--x-s4) var(--x-s6); }
+  .tl-seg button { padding: 0 var(--x-s5); }
+  .tl-bar { position: relative; padding: var(--x-s3) var(--x-s4); }
+  .tl-who { padding-right: 44px; }
+  /* Closing stays in the corner when the tools wrap under the name. */
+  #view-close { position: absolute; top: var(--x-s3); right: var(--x-s4); }
+  .tl-stage { padding: 0 var(--x-s4) var(--x-s4); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tl-view[open] { animation: none; }
+}

@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>配色样页</title>
+<script>
+// The lab's own page follows the system's light or dark; it never reads or writes the app's settings.
+try { document.documentElement.setAttribute("data-theme", matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); } catch (e) {}
+</script>
+<link rel="stylesheet" href="/tokens.css">
+<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="lab.css">
+</head>
+<body class="tl-page">
+<header class="tl-top">
+  <h1 class="visually-hidden">配色样页</h1>
+  <div class="tl-seg" id="scenes" role="group" aria-label="画面"></div>
+</header>
+<main class="tl-main" id="main">
+  <p class="tl-said" id="said" role="status"></p>
+  <ul class="tl-grid" id="grid"></ul>
+</main>
+
+<dialog class="tl-view" id="view" aria-labelledby="view-name">
+  <div class="tl-bar">
+    <div class="tl-who">
+      <button class="tl-icon" type="button" id="view-prev" aria-label="上一套" title="上一套（←）">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>
+      </button>
+      <button class="tl-icon" type="button" id="view-next" aria-label="下一套" title="下一套（→）">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
+      </button>
+      <div class="tl-id">
+        <h2 class="tl-id-name" id="view-name"></h2>
+        <p class="tl-id-note" id="view-note"></p>
+      </div>
+    </div>
+    <div class="tl-tools">
+      <div class="tl-seg" id="view-scenes" role="group" aria-label="画面"></div>
+      <div class="tl-seg" id="view-modes" role="group" aria-label="明暗">
+        <button type="button" data-mode="light" aria-pressed="true">浅色</button>
+        <button type="button" data-mode="dark" aria-pressed="false">深色</button>
+      </div>
+      <button class="tl-btn" type="button" id="view-try">在应用里试</button>
+      <button class="tl-icon" type="button" id="view-close" aria-label="关闭" title="关闭（Esc）">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <p class="tl-said" id="view-said" role="status"></p>
+  </div>
+  <div class="tl-stage" id="view-stage">
+    <div class="tl-fit" id="view-fit"></div>
+  </div>
+</dialog>
+
+<script src="/chat-presence-rules.js"></script>
+<script src="lab-rules.js"></script>
+<script src="lab.js"></script>
+</body>
+</html>
