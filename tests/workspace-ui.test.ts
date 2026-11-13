@@ -652,11 +652,13 @@ test('文件 shows deliverables and attachments; the working directory, its path
   assert.match(textOf(more), /工作目录/);
 });
 
-test('with nothing saved yet the 文件 page explains snapshots; an older project conversation browses its shared directory only inside 更多文件', async () => {
+test('with nothing saved yet the 文件 page says so by its counts alone (item 46: no tutorial under them); an older project conversation browses its shared directory only inside 更多文件', async () => {
   const empty = filesPage();
   await settle();
-  assert.equal(textOf(sectionOf(empty.root, '交付物').querySelector('p')!), '还没有交付物。可以在下面的「更多文件」里，把完成的文件存为交付物：会保存一份带校验的快照，之后改动不影响它。');
-  assert.match(textOf(sectionOf(empty.root, '附件')), /这个对话还没有附件/);
+  assert.equal(sectionOf(empty.root, '交付物').querySelector('p'), null, 'no sentence under 交付物 · 0');
+  assert.match(textOf(sectionOf(empty.root, '交付物')), /^交付物 · 0/);
+  assert.match(textOf(sectionOf(empty.root, '附件')), /^附件 · 0/);
+  assert.doesNotMatch(textOf(empty.root), /还没有交付物|还没有附件|还没有成果|回形针|快照/);
 
   const p = filesPage({ workspacePath: '/w/projects/old/cats/cat-a', sharedPath: '/w/projects/old/shared' });
   await settle();
@@ -815,7 +817,9 @@ test('the 任务 page starts from the chat: an empty list says no Task is needed
   p.ws.observe(team, 'g-1', true);
   await settle();
   assert.equal(textOf(all(p.root).find(e => e.tagName === 'H4')!), '任务 · 0');
-  assert.equal(textOf(all(p.root).find(e => e.classList.contains('ws-note'))!), '还没有任务。直接在聊天里说要做的事就好，不用先建任务。');
+  // Item 46: none is the count; no advice under it.
+  assert.equal(all(p.root).filter(e => e.classList.contains('ws-note')).length, 0);
+  assert.doesNotMatch(textOf(p.root), /还没有任务|不用先建任务/);
   assert.deepEqual(all(p.root).filter(e => e.tagName === 'BUTTON').map(b => b.getAttribute('aria-label')), ['刷新任务']);
   assert.ok(!all(p.root).some(e => e.tagName === 'FORM'));
   assert.equal(stripOf(p).hidden, true, 'no open Task, no dock line');
@@ -1086,6 +1090,11 @@ test('历史对话 is there once the cat\'s conversations are read, even with on
   assert.deepEqual(rowsOf(node).map(r => [r.tagName, textOf(r.querySelector('.ws-conv-title')!), r.getAttribute('aria-current')]),
     [['DIV', 'Ada', 'true'], ['BUTTON', '官网改版', null]]);
   assert.match(textOf(rowFor(node, 'Ada')), /当前对话$/);
+  // Item 46: on screen the open conversation is marked by a check (and its bold title), 当前对话 is for a screen reader.
+  const here = rowFor(node, 'Ada');
+  assert.ok(here.querySelector('.ws-conv-here'), 'a check mark on its row');
+  assert.ok(all(here).find(e => e.textContent === '当前对话')!.classList.contains('visually-hidden'));
+  assert.equal(here.querySelector('.ws-conv-meta')?.textContent.includes('当前对话') ?? false, false);
   assert.match(rowFor(node, '官网改版').getAttribute('aria-label')!, /^切换到「官网改版」，开始于 /);
   // Only the saved conversations: no new conversation, no project, no rename or delete.
   const controls = all(node).filter(e => e.tagName === 'BUTTON');

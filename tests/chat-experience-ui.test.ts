@@ -943,8 +943,8 @@ test('记忆: 关于你 and 你的偏好 start folded and unread; opening one re
   const controls = all(p.root).filter(e => ['BUTTON', 'TEXTAREA', 'INPUT', 'SELECT', 'FORM'].includes(e.tagName)).map(textOf);
   assert.deepEqual(controls, []);
   assert.doesNotMatch(textOf(p.root), /编辑|确认修改|停用|遗忘|忘记|添加|删除|说「记住|就会出现/);
-  // The conversation's notes stay, read only and named for their reach.
-  assert.equal(textOf(p.root.querySelector('.cx-notes')!), '这个对话的便笺 · 1周五前交便笺只属于这个对话，换到别的对话不会带过去。');
+  // The conversation's notes stay, read only and named for their reach (the heading; item 46: no sentence saying it again).
+  assert.equal(textOf(p.root.querySelector('.cx-notes')!), '这个对话的便笺 · 1周五前交');
   assert.deepEqual(p.posts(), [], 'nothing but reads');
 });
 
@@ -1037,10 +1037,11 @@ test('这个对话的便笺 is read only like the rest of 记忆: no add or dele
   notes = () => ({ memory: [] });
   button(sec, '重试').click();
   await settle();
-  assert.match(textOf(sec), /^这个对话的便笺 · 0这个对话还没有便笺。/, 'empty only after a read that worked');
+  // Item 46: none is the count, · 0, and nothing else — only after a read that worked (a failure says so instead).
+  assert.equal(textOf(sec), '这个对话的便笺 · 0', 'empty only after a read that worked');
   // The drawer's own notes are shown as they are, read only.
   p.cx.memoryView(ada, { name: 'Ada', memory: [{ id: 'note-1', scope: 'conversation', text: '周五前交' }, { id: 'note-2', scope: 'conversation', text: '用中文\n简短' }] });
-  assert.equal(textOf(sec), '这个对话的便笺 · 2周五前交用中文\n简短便笺只属于这个对话，换到别的对话不会带过去。');
+  assert.equal(textOf(sec), '这个对话的便笺 · 2周五前交用中文\n简短');
   assert.deepEqual(all(root).filter(e => ['BUTTON', 'TEXTAREA', 'INPUT', 'FORM'].includes(e.tagName)).map(textOf), [], 'no field, no add, no delete');
   assert.deepEqual(p.posts(), [], 'nothing but reads went out');
   // The module itself has no way to write memory or notes: its only write is the read position.

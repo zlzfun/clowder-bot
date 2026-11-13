@@ -75,7 +75,6 @@ html[data-theme="dark"] .pf-head.tinted .pf-portrait::before {
 .secondary.pf-new { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 6px 14px 6px 11px; font-size: 13.5px; }
 .pf-new .icon { width: 16px; height: 16px; }
 .pf-new[aria-disabled="true"] { cursor: progress; opacity: .7; }
-.psec p.pf-note { margin-top: var(--x-s2); font-size: 12px; line-height: 1.6; color: var(--x-faint); }
 .psec p.pf-line, p.pf-line { margin: var(--x-s2) 0 0; font-size: 12.5px; line-height: 1.55; color: var(--x-muted); }
 p.pf-line.bad, .psec p.pf-line.bad { color: var(--x-danger); }
 .pf-convs-slot > .ws-convs { padding: var(--x-s2) 0 0; }
@@ -105,7 +104,7 @@ p.pf-line.bad, .psec p.pf-line.bad { color: var(--x-danger); }
 .text-btn.pf-remove { min-height: 32px; margin-left: -8px; padding: 0 8px; font-size: 13px; }
 
 /* ---- 成员 ---- */
-.pf-sec-head { display: flex; align-items: center; gap: var(--x-s1); min-height: 28px; margin-bottom: var(--x-s2); }
+.pf-sec-head { display: flex; align-items: center; justify-content: flex-end; gap: var(--x-s1); min-height: 28px; margin-bottom: var(--x-s2); }
 .pf-sec-head h4 { flex: 1; min-width: 0; margin: 0; }
 .text-btn.pf-add { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; padding: 0 8px; font-size: 12.5px; color: var(--x-text-2); }
 .pf-add .icon { width: 14px; height: 14px; }
@@ -121,15 +120,16 @@ p.pf-line.bad, .psec p.pf-line.bad { color: var(--x-danger); }
 .ghost.pf-out.armed, .ghost.pf-out.armed:hover { color: var(--x-danger); background: var(--x-danger-bg); }
 .pf-out-text { font-size: 12.5px; line-height: 1; }
 .ghost.pf-out:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
-/* How to talk in a group: one quiet line under the members. */
-p.pf-hint { margin: var(--x-s5) 0 0; font-size: 12.5px; line-height: 1.65; color: var(--x-muted); }
+
+/* 编辑资料: the row over the face grid holds only 恢复默认猫猫 now (its label
+   is gone, item 46); the button keeps its place at the right end. */
+.avatar-row { justify-content: flex-end; }
 
 /* ---- dialogs ---- */
 .pf-modal .modal-card { width: min(440px, 100%); max-height: min(88vh, 640px); max-height: min(88dvh, 640px); overscroll-behavior: contain; }
 .pf-card:focus { outline: none; }
 .pf-dialog-body .field { margin-top: var(--x-s5); }
 .pf-lead { margin: var(--x-s3) 0 0; font-size: 14px; line-height: 1.6; color: var(--muted); }
-.pf-dialog-hint { margin: var(--x-s2) 0 0; font-size: var(--x-fs-sm); color: var(--x-faint); }
 .pf-card [aria-invalid="true"] { outline: 2px solid var(--x-danger); outline-offset: -2px; }
 .secondary.pf-danger { color: var(--x-danger); }
 .secondary.pf-danger:hover { background: var(--x-danger-bg); }

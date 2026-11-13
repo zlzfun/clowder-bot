@@ -203,7 +203,7 @@
     input.setAttribute("aria-describedby", P.sub.id || (P.sub.id = uid("name-sub")));
     const E = P.edit = { input, busy: false, done: false };
     P.title.replaceChildren(input);
-    setText(P.sub, "回车保存，Esc 取消");
+    editHint(P);
     const finish = (refocus) => {
       if (E.done) return;
       E.done = true;
@@ -249,13 +249,19 @@
     });
     input.addEventListener("input", () => {
       if (E.busy) return;
-      setText(P.sub, "回车保存，Esc 取消");
-      P.sub.classList.remove("bad");
-      P.sub.removeAttribute("role");
+      editHint(P);
     });
     input.addEventListener("blur", () => { if (!E.busy && !E.done) save(false); });
     input.focus();
     if (input.select) input.select();
+  }
+  // Editing the name in place: Enter saves, Esc goes back. Said to a screen
+  // reader as the field's description, not printed under the name (item 46);
+  // 正在保存… and a refusal still show there.
+  function editHint(P) {
+    P.sub.replaceChildren(node("span", "visually-hidden", "回车保存，Esc 取消"));
+    P.sub.classList.remove("bad");
+    P.sub.removeAttribute("role");
   }
   function sayHead(P, text) {
     P.sub.textContent = text;
@@ -296,18 +302,21 @@
     const root = node("div", "pf-page pf-cat");
     root.dataset.key = key;
 
-    // 职责: what the cat is for (edited in 编辑资料).
+    // 职责: what the cat is for (edited in 编辑资料). It stands first under the
+    // tabs, in the size of content; its heading is for a screen reader (item 46).
     const duty = node("section", "psec pf-duty");
     const dutyText = node("p", "pf-duty-text"), dutyNone = node("p", "pf-weak");
     dutyNone.append(node("span", "", "还没写它负责什么。"), button("text-btn pf-link", "编辑资料", (ev) => H.editProfile(P.data, ev.currentTarget)));
-    duty.append(node("h4", "", "职责"), dutyText, dutyNone);
+    duty.append(node("h4", "visually-hidden", "职责"), dutyText, dutyNone);
 
-    // 置顶: a switch row; the whole row is its label.
+    // 置顶: a switch row; the whole row is its label. The line under it says
+    // only what is being saved (no hint while idle: 置顶 and the switch say it).
     const pin = node("div", "pf-row pf-pin");
     const pinCopy = node("span", "pf-row-copy");
     const pinTitle = node("span", "pf-row-title", "置顶");
     pinTitle.id = uid("pin");
-    const pinHint = node("span", "pf-row-hint", "放在列表最上面");
+    const pinHint = node("span", "pf-row-hint");
+    pinHint.hidden = true;
     pinCopy.append(pinTitle, pinHint);
     const pinSwitch = button("g7-switch pf-switch", null, () => togglePin(P));
     pinSwitch.setAttribute("role", "switch");
@@ -321,11 +330,12 @@
     // server and says why it cannot while the cat is busy), or open a saved
     // one (workspace.js's 历史对话).
     const convs = node("section", "psec pf-convs");
+    // 新对话 and the 历史对话 fold name themselves; what 新对话 does to the
+    // conversation is said in its dialog, where the owner decides (item 46).
     const fresh = labelled("secondary pf-new", "plus", "新对话", (ev) => H.newConversation(current(P), ev.currentTarget));
     fresh.setAttribute("aria-haspopup", "dialog");
-    const note = node("p", "pf-note", R.NEW_CHAT_NOTE);
     const slot = node("div", "pf-convs-slot");
-    convs.append(node("h4", "", "对话"), fresh, note, slot);
+    convs.append(node("h4", "visually-hidden", "对话"), fresh, slot);
 
     // 高级: what is technical, as it was in 详情 and 任务.
     const fold = advanced(key, (body) => buildCatAdvanced(P, body));
@@ -426,7 +436,8 @@
     P.pinSwitch.setAttribute("aria-checked", String(on));
     if (st.busy) { P.pinSwitch.setAttribute("aria-disabled", "true"); P.pinSwitch.setAttribute("aria-busy", "true"); }
     else { P.pinSwitch.removeAttribute("aria-disabled"); P.pinSwitch.removeAttribute("aria-busy"); }
-    setText(P.pinHint, st.busy ? (st.want ? "正在置顶…" : "正在取消置顶…") : "放在列表最上面");
+    setText(P.pinHint, st.busy ? (st.want ? "正在置顶…" : "正在取消置顶…") : "");
+    P.pinHint.hidden = !st.busy;
     sayAs(P.pinLine, st.said);
   }
   async function togglePin(P) {
@@ -462,9 +473,11 @@
     const root = node("div", "pf-page pf-group");
     root.dataset.key = key;
     root.tabIndex = -1;
+    // The tab is 成员 and the list shows who: the heading (with its count) is
+    // for a screen reader; 添加猫猫 keeps its place (item 46).
     const sec = node("section", "psec pf-members-sec");
     const head = node("div", "pf-sec-head");
-    const count = node("h4", "", "成员");
+    const count = node("h4", "visually-hidden", "成员");
     const add = labelled("text-btn pf-add", "plus", "添加猫猫", (ev) => openAdd(P, ev.currentTarget));
     head.append(count, add);
     const list = node("ul", "pf-members");
@@ -472,7 +485,8 @@
     const line = node("p", "pf-line");
     line.hidden = true;
     sec.append(head, list, line);
-    const hint = node("p", "pf-hint", R.HOW_TO_TALK);
+    // How to talk in a group is shown where the owner writes: the @ list
+    // (the members, then 全体); no sentence about it here (item 46).
     const fold = advanced(key, (body) => {
       const work = node("section", "psec pf-work"), slot = node("div");
       work.append(slot);
@@ -483,7 +497,7 @@
     const foot = node("div", "pf-foot");
     const remove = button("text-btn danger pf-remove", "删除群聊", (ev) => removeGroup(P.group, ev.currentTarget));
     foot.append(remove);
-    root.append(sec, hint, node("div", "pf-rule"), fold.box, foot);
+    root.append(sec, node("div", "pf-rule"), fold.box, foot);
     Object.assign(P, { root, count, add, list, line, fold, remove });
     return P;
   }
@@ -602,8 +616,10 @@
     const hint = node("p", "qc-hint");
     hint.id = uid("add-hint");
     hint.setAttribute("aria-live", "polite");
+    // The title 添加猫猫 and the face chips say what to do: the legend is for
+    // a screen reader (item 46).
     const set = node("fieldset", "qc-members-set"), chips = node("div", "qc-members");
-    set.append(node("legend", "qc-legend", "选要加进「" + (R.trim(group.name) || "群聊") + "」的猫猫"), chips, hint);
+    set.append(node("legend", "visually-hidden", "选要加进「" + (R.trim(group.name) || "群聊") + "」的猫猫"), chips, hint);
     const go = node("button", "primary", "添加");
     go.type = "submit";
     const boxes = choices.map((name) => {
@@ -625,7 +641,9 @@
     function sync() {
       const full = picked.length >= room;
       for (const cb of boxes) cb.disabled = L.busy || (full && !cb.checked);
-      hint.textContent = !picked.length ? "还能加 " + room + " 只" : full ? "已选 " + picked.length + " 只，群里满 " + R.MAX + " 只了" : "已选 " + picked.length + " 只";
+      // Said only when it explains something: why the rest turned unavailable
+      // (the same rule as 新建's group side, item 45); a chip says it is picked.
+      hint.textContent = full ? "群里满 " + R.MAX + " 只了" : "";
       go.disabled = L.busy || !picked.length;
     }
     L.body.append(set);
@@ -671,8 +689,13 @@
     input.id = uid("rename");
     lab.htmlFor = input.id;
     err.setAttribute("role", "alert");
-    box.append(lab, input, err);
-    L.body.append(box, node("p", "pf-dialog-hint", "不填就用成员的名字。"));
+    // The placeholder is the name it gets when left empty; that it may be left
+    // empty is told to a screen reader (as on 新建's group side, item 45).
+    const said = node("span", "visually-hidden", R.nameSaid());
+    said.id = uid("rename-said");
+    input.setAttribute("aria-describedby", said.id);
+    box.append(lab, input, said, err);
+    L.body.append(box);
     const cancel = button("secondary", "取消", () => L.close());
     const go = node("button", "primary", "保存");
     go.type = "submit";
@@ -709,7 +732,7 @@
   function removeGroup(group, opener) {
     const name = R.trim(group.name) || "这个群聊";
     const L = dialog("删除群聊", opener);
-    L.body.append(node("p", "pf-lead", "删除「" + name + "」？群里的聊天记录不会被抹掉，但这个群聊会从列表里消失，之后不能再在这里打开。猫猫们都还在。"));
+    L.body.append(node("p", "pf-lead", "删除「" + name + "」？它会从列表里消失，不能再打开。聊天记录和猫猫都还在。"));
     const cancel = button("secondary", "取消", () => L.close());
     const go = node("button", "secondary pf-danger", "删除群聊");
     go.type = "submit";

@@ -247,9 +247,9 @@
     const wait = node("p", "sched-wait", "正在读取…");
     const fail = node("p", "sched-fail"), retry = button("text-btn sched-retry", "重试", () => { if (!v.loading) load(); });
     fail.setAttribute("role", "alert");
-    const empty = node("p", "pnone sched-empty", "还没有定时任务。");
+    // None: 定时任务 · 0 and 新建 say it (item 46).
     const list = node("div", "sched-list");
-    root.append(head, status, formSlot, wait, fail, retry, empty, list);
+    root.append(head, status, formSlot, wait, fail, retry, list);
 
     // stale: the line reports a failed re-read, so the next good read clears it.
     function say(text, bad, stale) {
@@ -301,7 +301,6 @@
       fail.hidden = !(v.failure && !v.list && !v.loading);
       retry.hidden = !(v.failure && !v.list);
       retry.disabled = v.loading;
-      empty.hidden = !(v.list && !v.list.length);
     }
     function paint() {
       paintTop();
@@ -691,11 +690,13 @@
       const zoneBox = field("timezone", "时区", zoneSel);
       const minIn = input("number", { value: "60", min: 1, max: MINUTES_MAX, step: 1, inputMode: "numeric" });
       // Native interval rules: wait one interval after create or resume; a runtime restart checks once at start.
-      const minBox = field("minutes", "间隔（分钟）", minIn, node("p", "sched-hint", "1–" + MINUTES_MAX + " 分钟。创建或恢复后先等满一个间隔；运行时重启后会立即检查一次。要固定钟点请选每天或每周。"));
+      const minBox = field("minutes", "间隔（分钟）", minIn, node("p", "sched-hint", "1–" + MINUTES_MAX + " 分钟。创建或恢复后先等满一个间隔。"));
 
       set.append(nameBox, promptBox, kindBox, atBox, timeBox, daysBox, zoneBox, minBox);
       const notes = node("p", "sched-note");
-      notes.append(node("span", "", "结果发到当前聊天。"), node("span", "", "需要运行时和电脑在线；离线时错过的一次任务不会补跑。不会发后台通知或手机推送。"));
+      // The form is this chat's (a reminder's row then says 当前聊天); what
+      // the owner needs to know is when it does not run (item 46).
+      notes.append(node("span", "", "电脑关机或休眠时不会运行，错过的不补。"));
       const error = node("p", "error sched-error");
       error.setAttribute("role", "alert"); error.hidden = true;
       const actions = node("div", "modal-actions");

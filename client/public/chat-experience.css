@@ -64,4 +64,4 @@
 .cx-notes h4 .ws-count { font-weight: 500; }
 .cx-note > .v { margin-top: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .cx-note-list > .ws-note { margin: var(--x-s1) 0 var(--x-s2); font-size: 12px; }
-.hint.cx-note-hint { margin-top: var(--x-s2); }
+

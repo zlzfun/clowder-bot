@@ -300,7 +300,9 @@ test('loading, empty and failed reads stay distinct; a failed refresh keeps the 
   answer = () => listing([]);
   btn(t.section, '重试').click();
   await settle();
-  assert.match(visibleText(t.section), /还没有定时任务。/);
+  // Item 46: none is the heading's count (· 0) beside 新建, without a sentence repeating it.
+  assert.match(visibleText(t.section), /^定时任务 · 0/);
+  assert.doesNotMatch(visibleText(t.section), /还没有定时任务/);
   assert.equal(buttons(t.section, '重试').length, 0);
   answer = () => listing([routine()]);
   btn(t.section, '刷新').click();
@@ -413,7 +415,9 @@ test('create sends the contract body for each rule; the server binds the cat and
     assert.equal(shown(control(form, '间隔（分钟）')), false, 'only the chosen rule\'s fields show');
     kind(form, '间隔');
     assert.equal(shown(control(form, '日期和时间')), false);
-    assert.match(visibleText(form), /创建或恢复后先等满一个间隔；运行时重启后会立即检查一次。要固定钟点请选每天或每周。/);
+    // Item 46: the range and when the first one comes; no engine detail or advice.
+    assert.match(visibleText(form), /1–10080 分钟。创建或恢复后先等满一个间隔。/);
+    assert.doesNotMatch(visibleText(form), /运行时|要固定钟点/);
     type(control(form, '间隔（分钟）'), '90');
   });
   await settle();
@@ -452,7 +456,7 @@ test('a form keeps the input on errors, blocks duplicate saves, reuses its key o
   assert.equal(control(form, '名称').getAttribute('aria-invalid'), 'true');
   assert.equal(t.doc.activeElement, control(form, '名称'));
   const minutes = control(form, '间隔（分钟）'), described = () => (minutes.getAttribute('aria-describedby') || '').split(' ').map(id => all(form).find(n => n.id === id)!.textContent);
-  assert.deepEqual(described(), ['请填 1–10080 之间的整数分钟', '1–10080 分钟。创建或恢复后先等满一个间隔；运行时重启后会立即检查一次。要固定钟点请选每天或每周。'], 'the error joins the field note');
+  assert.deepEqual(described(), ['请填 1–10080 之间的整数分钟', '1–10080 分钟。创建或恢复后先等满一个间隔。'], 'the error joins the field note');
   type(control(form, '名称'), '晨会');
   assert.deepEqual(errorsOf(form), ['请填写到时发给猫猫的消息', '请填 1–10080 之间的整数分钟'], 'typing clears that field');
   type(control(form, '消息'), '准备晨会');

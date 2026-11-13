@@ -155,6 +155,8 @@ button.ws-row.ws-conv:disabled { cursor: progress; }
 .ws-conv.here .ws-conv-title { font-weight: 600; color: var(--x-text); }
 .ws-conv-meta { font-size: var(--x-fs-cap); line-height: 1.4; color: var(--x-faint); }
 .ws-conv.here .ws-conv-meta { color: var(--x-muted); }
+/* The conversation open now: a check mark at the end of its row (item 46). */
+.ws-conv-here { flex: none; width: 16px; height: 16px; color: var(--x-muted); }
 .ws-note.ws-conv-line { margin-top: var(--x-s2); font-size: 12px; }
 
 /* ---- 任务: one card per native Task, its own owner and controls. */

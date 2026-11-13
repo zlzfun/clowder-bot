@@ -502,8 +502,9 @@
     const h = node("h4", "", "这个对话的便笺");
     const count = node("span", "ws-count");
     h.append(count);
+    // The heading says its reach (这个对话的); no sentence saying it again (item 46).
     const list = node("div", "cx-note-list");
-    sec.append(h, list, node("p", "hint cx-note-hint", "便笺只属于这个对话，换到别的对话不会带过去。"));
+    sec.append(h, list);
     root.append(sec);
     Object.assign(page.notes, { count, listEl: list });
     return page;
@@ -675,9 +676,9 @@
       retry = p.lastChild;
       parts.push(p);
     }
+    // None: 这个对话的便笺 · 0 says it (item 46).
     if (list && list.length) parts.push(...list.map(noteCard));
-    else if (list) parts.push(node("p", "hint cx-note-empty", "这个对话还没有便笺。"));
-    else if (n.state !== "error") parts.push(waiting("正在读取…"));
+    else if (!list && n.state !== "error") parts.push(waiting("正在读取…"));
     box.replaceChildren(...parts);
     if (n.state === "loading") return;
     if (n.again && retry) retry.focus({ preventScroll: true });

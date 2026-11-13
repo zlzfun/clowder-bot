@@ -206,11 +206,11 @@ test('a cat\'s own colour is used only as the server gives it, and a cat made fr
   assert.equal(R.ownBreed(null, bot), false);
 });
 
-test('the note under 新对话 says, in everyday words, where this conversation goes and that what the cat knows of you stays', () => {
+test('item 46: no note under 新对话 in 资料 — what happens to this conversation is said once, in the 新对话 dialog, where the owner decides', () => {
   const R = load(RULES).window.ClowderProfileRules;
-  assert.match(R.NEW_CHAT_NOTE, /历史对话/);
-  assert.match(R.NEW_CHAT_NOTE, /记得/);
+  assert.equal(R.NEW_CHAT_NOTE, undefined);
   assert.equal(R.newChatError, undefined, 'refusals are said by the shared dialog (chat-history.js)');
+  assert.match(read('client/public/chat-history.js'), /node\("p", "ch-note", "[^"]*「历史对话」/, 'the dialog says where the conversation goes');
 });
 
 // ---------------------------------------------------------------- rules: groups
@@ -276,10 +276,10 @@ test('a refused group change: a 409 is the server\'s own sentence (nothing is st
   for (const said of ['这个 Bot 不在群里', '原生会话已变化', '这个 thread 已删除', '模型不可用']) assert.equal(R.groupError(fail(400, said), 'members').text, '没能改好，请稍后再试。', said);
 });
 
-test('how to talk in a group is the engine\'s routing in one line: 全体 means @ each member, never the engine\'s own @全体', () => {
+test('item 46: no sentence on 成员 about how to talk in a group (the @ list shows it where the owner writes); a group name that may be left empty is said to a screen reader in 新建\'s words', () => {
   const R = load(RULES).window.ClowderProfileRules;
-  assert.equal(R.HOW_TO_TALK, '直接说，由一只猫猫接待；@名字 指定某一只；要大家都回答，就把每只都 @ 上（输入 @ 选「全体」）');
-  assert.doesNotMatch(R.HOW_TO_TALK, /@全体|@all/);
+  assert.equal(R.HOW_TO_TALK, undefined);
+  assert.equal(R.nameSaid(), '可不填，不填就用成员的名字');
 });
 
 // ---------------------------------------------------------------- rules: @
@@ -441,6 +441,8 @@ test('资料: 职责 (or the way to write one), 置顶 as a switch, 新对话 wi
   assert.equal(shown(one(page, 'pf-duty')), false);
   d.P.catPage(TUANZI, PROFILE);
   assert.equal(visibleText(one(page, 'pf-duty')), '职责帮你查资料、写东西。');
+  // Item 46: on screen it is the cat's own words, first under the tabs; 职责 names the section for a screen reader.
+  assert.equal(seenText(one(page, 'pf-duty')), '帮你查资料、写东西。');
   d.P.catPage(TUANZI, { ...PROFILE, persona: '' });
   assert.match(visibleText(one(page, 'pf-duty')), /还没写它负责什么。编辑资料/);
   button(page, '编辑资料').click();
@@ -449,7 +451,12 @@ test('资料: 职责 (or the way to write one), 置顶 as a switch, 新对话 wi
   // The order a messenger's profile reads in.
   const order = page.children.map(n => n.className);
   assert.deepEqual(order, ['psec pf-duty', 'pf-row pf-pin', 'pf-line', 'psec pf-convs', 'pf-rule', 'task-details pf-adv', 'pf-foot']);
-  assert.match(visibleText(one(page, 'pf-convs')), /^对话新对话现在的对话会收进「历史对话」/);
+  // Item 46: 新对话 and 历史对话 name themselves (对话 is for a screen reader); what 新对话 does is said in its dialog.
+  assert.equal(seenText(one(page, 'pf-convs')), '新对话');
+  assert.equal(named(page, 'pf-note').length, 0);
+  // The pin row says nothing while idle.
+  assert.equal(seenText(one(page, 'pf-pin')), '置顶');
+  assert.equal(one(page, 'pf-row-hint').hidden, true);
   assert.ok(one(page, 'pf-convs-slot').firstChild === d.convNode, '历史对话 is the conversations module\'s node');
   assert.equal(one(page, 'pf-remove').textContent, '删除猫猫');
   assert.equal(one(page, 'pf-remove').getAttribute('aria-label'), '删除猫猫「快手」');
@@ -535,6 +542,7 @@ test('置顶: the switch says only what the list confirms — while saving it ke
   assert.equal(sw.getAttribute('aria-busy'), 'true');
   assert.equal(sw.getAttribute('aria-disabled'), 'true');
   assert.equal(one(page, 'pf-row-hint').textContent, '正在置顶…');
+  assert.equal(one(page, 'pf-row-hint').hidden, false, 'what is being saved is said');
   sw.click();
   assert.deepEqual(d.log, ['pin:快手:true'], 'one request at a time');
   open();
@@ -542,7 +550,9 @@ test('置顶: the switch says only what the list confirms — while saving it ke
   assert.equal(sw.getAttribute('aria-checked'), 'true');
   assert.equal(sw.getAttribute('aria-busy'), null);
   assert.equal(sw.getAttribute('aria-disabled'), null);
-  assert.equal(one(page, 'pf-row-hint').textContent, '放在列表最上面');
+  // Item 46: idle again, the line is empty and hidden (no 「放在列表最上面」).
+  assert.equal(one(page, 'pf-row-hint').textContent, '');
+  assert.equal(one(page, 'pf-row-hint').hidden, true);
   assert.equal(d.doc.activeElement, sw);
   d.s.pinGate = null;
   // The whole row is the label.
@@ -592,7 +602,7 @@ test('a save of 置顶 belongs to its cat, not to the page: open another cat and
   const again = named(page, 'pf-switch')[0]!;
   assert.equal(again.getAttribute('aria-checked'), 'true', 'what the list says now');
   assert.equal(again.getAttribute('aria-busy'), null);
-  assert.equal(named(page, 'pf-row-hint')[0]!.textContent, '放在列表最上面');
+  assert.equal(named(page, 'pf-row-hint')[0]!.hidden, true, 'nothing being saved: nothing said');
   assert.equal(shown(named(page, 'pf-line')[0]!), false, 'the earlier failure was cleared by the new request');
   assert.deepEqual(d.log.filter((x: string) => x.startsWith('pin:')), ['pin:快手:true', 'pin:快手:true']);
 });
@@ -732,10 +742,13 @@ const GROUP = { type: 'group', id: 'g1' };
 test('成员: faces and names, 移出 only while two would stay, a second click within three seconds confirms, and the PATCH says only who leaves', async () => {
   const d = drawer();
   const page = d.show(d.P.groupPage(GROUP, d.group()));
+  // Item 46: the tab is 成员 and the list shows who: the heading and its count are for a screen reader; 添加猫猫 stays.
   assert.equal(one(page, 'pf-sec-head').firstChild!.textContent, '成员 · 3');
+  assert.ok(one(page, 'pf-sec-head').firstChild!.classList.contains('visually-hidden'));
+  assert.equal(seenText(one(page, 'pf-sec-head')), '添加猫猫');
   assert.deepEqual(named(page, 'pf-member-name').map(n => n.textContent), ['快手', '墨点', '年糕']);
   assert.deepEqual(named(page, 'pf-member-face').map(n => n.firstChild!.dataset.cat), ['快手', '墨点', '年糕']);
-  assert.equal(visibleText(one(page, 'pf-hint')), d.R.HOW_TO_TALK);
+  assert.equal(named(page, 'pf-hint').length, 0, 'no sentence on how to talk in a group');
   const out = named(page, 'pf-out')[1];
   assert.equal(out.getAttribute('aria-label'), '把「墨点」移出群聊');
   out.focus();
@@ -805,9 +818,12 @@ test('添加猫猫: the cats not yet in the group as face chips; the PATCH says 
   assert.deepEqual(named(layer, 'qc-chip-name').map(n => n.textContent), ['年糕', '宪宪 2']);
   const go = button(layer, '添加');
   assert.equal(go.disabled, true, 'nothing picked yet');
+  // Item 46: the title and the chips say what to do (the legend is for a screen reader); the hint says nothing while choosing.
+  assert.ok(one(layer, 'qc-members-set').firstChild!.classList.contains('visually-hidden'));
+  assert.equal(one(layer, 'qc-hint').textContent, '');
   const boxes = all(layer).filter(n => n.type === 'checkbox');
   for (const b of [boxes[1], boxes[0]]) { b.checked = true; b.dispatch('change'); }
-  assert.equal(one(layer, 'qc-hint').textContent, '已选 2 只');
+  assert.equal(one(layer, 'qc-hint').textContent, '', 'a chip shows it is picked');
   one(layer, 'pf-card').dispatch('submit');
   await settle();
   assert.deepEqual(d.writes(), [{ path: '/xbot-api/groups/g1', method: 'PATCH', body: { add: ['宪宪 2', '年糕'] } }], 'in the order picked');
@@ -830,6 +846,11 @@ test('a group\'s name is edited in place: Enter saves, Esc goes back, empty take
   assert.equal(input.value, '读书会');
   assert.equal(input.placeholder, '快手、墨点、年糕');
   assert.equal(d.doc.activeElement, input);
+  // Item 46: Enter saves, Esc goes back — the field's description, for a screen reader; nothing printed under the name.
+  const sub = one(head, 'pf-head-sub');
+  assert.equal(input.getAttribute('aria-describedby'), sub.id);
+  assert.equal(visibleText(sub), '回车保存，Esc 取消');
+  assert.equal(seenText(sub), '');
   // A repaint while editing keeps the edit.
   assert.equal(d.P.groupHead(GROUP, d.group()), head);
   assert.equal(one(head, 'pf-name-input'), input);
@@ -901,7 +922,8 @@ test('删除群聊 and the sidebar menu: 改名 and 删除群聊 only; deleting 
   const page = d.show(d.P.groupPage(GROUP, d.group()));
   one(page, 'pf-remove').click();
   layer = d.layer()!;
-  assert.match(visibleText(layer), /删除「晨读」？群里的聊天记录不会被抹掉，但这个群聊会从列表里消失/);
+  // The consequences once each, before anything is sent (item 46 rewrote the sentence, not what it says).
+  assert.match(visibleText(layer), /删除「晨读」？它会从列表里消失，不能再打开。聊天记录和猫猫都还在。/);
   const esc = one(layer, 'pf-card').key('Escape');
   assert.equal(esc.stopped, true, 'the drawer stays open');
   assert.equal(d.layer(), null);
@@ -1238,4 +1260,29 @@ test('the app\'s own mark: the cat-eared speech bubble replaces the upstream X i
     assert.ok(entry && entry.unchanged === false && entry.sha256 !== entry.sourceSha256, file + ' is recorded as replaced');
   }
   assert.ok(manifest.extensions.some((f: Any) => f.target === 'client/public/brand-mark-256.png'));
+});
+
+test('item 46: the drawer\'s dialogs and 高级 say once what the layout cannot — 改名 keeps 群名 with its placeholder (optional told to a screen reader), 编辑资料 has no 基本 heading and names its face grid for a screen reader, 复刻 has no example or 可不填, empty run sections are their count', () => {
+  // 改名 from the sidebar row's menu.
+  const d = drawer();
+  d.P.renameGroup(d.group(), null);
+  const layer = d.layer()!;
+  const input = all(layer).find(n => n.tagName === 'INPUT')!;
+  const said = all(layer).find(n => n.id && n.id === input.getAttribute('aria-describedby'))!;
+  assert.equal(said.textContent, '可不填，不填就用成员的名字');
+  assert.ok(said.classList.contains('visually-hidden'));
+  assert.equal(input.placeholder, '快手、墨点、年糕', 'the name it gets when left empty');
+  assert.equal(seenText(one(layer, 'pf-dialog-body')), '群名');
+  assert.equal(named(layer, 'pf-dialog-hint').length, 0);
+  // app.js: 编辑资料, 复刻猫猫 and the run sections under 高级.
+  const app = read('client/public/app.js');
+  assert.match(app, /section\("", head, labeled\("名字", name\), labeled\("简介", description\)\),/);
+  assert.match(app, /if \(title\) group\.append\(el\("h3", "", title\)\);/);
+  assert.doesNotMatch(app, /section\("基本"/);
+  assert.match(app, /grid\.setAttribute\("role", "group"\);\n\s+grid\.setAttribute\("aria-label", "选择猫猫"\);/);
+  assert.doesNotMatch(app, /el\("span", "muted", "选择猫猫"\)/);
+  assert.match(app, /\{ name: "name", label: "名字" \},\n\s+\{ name: "role", label: "它负责什么", multiline: true \},\n\s+\{ name: "group", label: "分组" \},/);
+  assert.doesNotMatch(app, /比如：审稿员|分组（可不填）|现在没有排队的任务。|还没有结束的任务。|现在没有在跑的任务。/);
+  assert.match(app, /"现在没有在跑或排队的任务。"/, 'with both live sections hidden, the one statement of the state stays');
+  assert.match(app, /catFace: \(name, size\) => untipped\(avatar\(name, paintOf\(name\), size\)\),/, 'faces beside printed names carry no tooltip of the name');
 });

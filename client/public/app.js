@@ -5640,9 +5640,7 @@
       section.hidden = emptyActive && ["进行中", "排队中"].includes(label);
       taskValue(section.querySelector("h4"), label + " · " + items.length);
       const list = section.querySelector(".task-items");
-      let hint = list.querySelector(".pnone");
-      if (items.length) hint?.remove();
-      else if (!hint) list.append(el("div", "pnone", label === "进行中" ? "现在没有在跑的任务。" : label === "排队中" ? "现在没有排队的任务。" : "还没有结束的任务。"));
+      // None: the heading's count (· 0) says it (item 46).
       let next = list.firstElementChild;
       for (const item of items) {
         keep.add(item.id);
@@ -5747,6 +5745,8 @@
     const fail = (text) => { problem.textContent = text; paint(); };
     const row = el("div", "avatar-row");
     const grid = el("div", "avatar-grid");
+    grid.setAttribute("role", "group");
+    grid.setAttribute("aria-label", "选择猫猫");
     const file = document.createElement("input");
     file.type = "file";
     file.accept = AVATAR_TYPES.join(",");
@@ -5756,7 +5756,9 @@
     clear.setAttribute("aria-label", "恢复默认猫猫");
     setTip(clear, "恢复默认猫猫");
     clear.append(icon("undo"));
-    const big = () => (picked.avatar === "custom"
+    // The faces here carry no tooltip: the name is printed under the big one,
+    // and a tooltip of it on each breed in the grid only misled (item 46).
+    const big = () => untipped(picked.avatar === "custom"
       ? avatar(name, { url: avatarURLOf(name) + "?v=" + Date.now(), seed: picked.seed, templateId: picked.templateId }, "xl")
       : avatar(name, { seed: picked.seed, templateId: picked.templateId }, "xl"));
     const pick = (label, make, on, onPick) => {
@@ -5773,14 +5775,16 @@
       const custom = picked.avatar === "custom";
       root.replaceChildren(big(), el("span", "avatar-name", name));
       if (problem.textContent) root.append(problem);
-      row.replaceChildren(el("span", "muted", "选择猫猫"));
+      // The faces with the chosen one ringed, under the big face, say what
+      // this is; the grid is named for a screen reader (item 46).
+      row.replaceChildren();
       const breed = catAvatars.resolveBreed(picked.seed, picked.templateId, name);
       if (custom || "cat:" + breed !== catAvatars.defaultSeed(picked.templateId)) row.append(clear);
       root.append(row, grid, file);
       grid.replaceChildren();
       for (const cat of catAvatars.presets) {
         const seed = "cat:" + cat.id;
-        grid.append(pick(cat.label, () => avatar(name, { seed: seed }, "pick"),
+        grid.append(pick(cat.label, () => untipped(avatar(name, { seed: seed }, "pick")),
           !custom && breed === cat.id, () => apply(seed)));
       }
       const up = el("button", "avatar-pick up");
@@ -5891,13 +5895,16 @@
     const actions = el("div", "profile-templates");
     actions.append(exp, imp, fileIn);
     modalForm.querySelector(".modal-actions").prepend(actions);
+    // The first section has no heading: the dialog's title says what it is,
+    // and its fields are labelled (item 46).
     const section = (title, ...fields) => {
       const group = el("section", "profile-section");
-      group.append(el("h3", "", title), ...fields);
+      if (title) group.append(el("h3", "", title));
+      group.append(...fields);
       return group;
     };
     wrap.append(
-      section("基本", head, labeled("名字", name), labeled("简介", description)),
+      section("", head, labeled("名字", name), labeled("简介", description)),
       section("职责", dutyBox),
       section("它用什么思考", agentTrigger(data)),
       err,
@@ -5995,9 +6002,9 @@
   function openFork(src) {
     openModal("复刻猫猫", [
       // Everyday labels: the new cat's name, what it does (its role) and the sidebar folder (分组, not a 群聊).
-      { name: "name", label: "名字", placeholder: "比如：审稿员" },
+      { name: "name", label: "名字" },
       { name: "role", label: "它负责什么", multiline: true },
-      { name: "group", label: "分组（可不填）" },
+      { name: "group", label: "分组" },
     ], async (v) => {
       const name = (v.name || "").trim();
       const role = (v.role || "").trim();
@@ -7728,7 +7735,7 @@
   profile.init({
     api, icon, visibleError, toast: showToast,
     cats: () => state.bots || [],
-    catFace: (name, size) => avatar(name, paintOf(name), size),
+    catFace: (name, size) => untipped(avatar(name, paintOf(name), size)),
     catFaceSig: (name) => avatarSignature(paintOf(name) || {}),
     groupFace: (g, size) => avatar(niceName(g.name || g.id), groupFace(g), size),
     groupFaceSig: (g) => groupFace(g).sig,

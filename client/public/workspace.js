@@ -878,7 +878,8 @@
     const keep = focusKeyIn(root);
     w.label.textContent = "历史对话 · " + list.length;
     w.list.replaceChildren(...list.map((c) => convRow(c, c.id === current)));
-    const line = S.convLine || (list.length === 1 ? { text: "开始新对话后，现在这段会留在这里。", bad: false } : null);
+    // Only what a switch came to; nothing explaining the list (item 46).
+    const line = S.convLine || null;
     w.line.textContent = line ? line.text : "";
     w.line.hidden = !line;
     w.line.classList.toggle("ws-bad", !!(line && line.bad));
@@ -906,10 +907,13 @@
     const copy = node("span", "ws-conv-copy");
     const name = node("span", "ws-conv-title", title);
     name.title = title;
-    const meta = current ? "当前对话" : going ? "正在切换…" : when ? "开始于 " + when : "";
+    const meta = going ? "正在切换…" : when ? "开始于 " + when : "";
     copy.append(name);
     if (meta) copy.append(node("span", "ws-conv-meta", meta));
     row.append(copy);
+    // Where the chat is now: a check mark on its row (bold already); the words
+    // are for a screen reader (item 46).
+    if (current) row.append(icon("check", "ws-conv-here"), node("span", "visually-hidden", "当前对话"));
     li.append(row);
     return li;
   }
@@ -1118,7 +1122,8 @@
     paintPart(w, "results", fsig, () => {
       // A failed read of the native record is a partial result: the saved
       // files below stay, and this part says it could not be read.
-      const parts = fileList(results, "还没有成果。猫猫在对话里发出的文件会出现在这里。");
+      // None: 成果 · 0 says it (item 46); a read that failed says so below.
+      const parts = fileList(results, "");
       if (nativeDown && S.files) {
         // Some may have been read: those show, and the line says the rest is missing.
         const line = failure(results.length ? "还有些猫猫发出的文件暂时读不到，这里可能不全。" : "猫猫在对话里发出的文件暂时读不到。下面只显示已保存的文件。", () => loadFiles());
@@ -1129,11 +1134,11 @@
       w.results.body.replaceChildren(...parts);
     });
     paintPart(w, "deliver", fsig, () => {
-      w.deliver.body.replaceChildren(...fileList(delivered, "还没有交付物。" + (folded ? "可以在下面的「更多文件」里，把完成的文件存为交付物：" : "交付物") + "会保存一份带校验的快照，之后改动不影响它。"));
+      w.deliver.body.replaceChildren(...fileList(delivered, ""));
     });
     paintPart(w, "attach", fsig + (w.attach.all ? "+" : ""), () => {
       const shown = w.attach.all ? attached : attached.slice(0, 6);
-      const parts = fileList(shown, nativeDown ? "已保存的附件里还没有文件。对话里的其他文件暂时读不到。" : "这个对话还没有附件。可以点输入框左侧的回形针，或直接粘贴、拖入文件。");
+      const parts = fileList(shown, nativeDown ? "已保存的附件里还没有文件。对话里的其他文件暂时读不到。" : "");
       if (attached.length > shown.length) parts.push(button("text-btn ws-link ws-more-all", "显示全部 " + attached.length + " 个", () => { w.attach.all = true; paintFiles(); }));
       w.attach.body.replaceChildren(...parts);
     });
@@ -1147,7 +1152,9 @@
     if (!S.files) return [waiting("正在读取…")];
     const parts = [];
     if (S.filesState === "error") parts.push(failure("刷新没有成功，显示的是上次读取的结果。", () => loadFiles()));
-    parts.push(files.length ? cards(files, { time: true, cls: "wide" }) : note(empty));
+    // No files and nothing to add: the section's count (· 0) says it.
+    if (files.length) parts.push(cards(files, { time: true, cls: "wide" }));
+    else if (empty) parts.push(note(empty));
     return parts;
   }
 
@@ -1224,7 +1231,7 @@
       list.setAttribute("aria-label", t.path ? "「" + t.path + "」里的文件" : rootLabel + "里的文件");
       if (t.state === "loading") list.setAttribute("aria-busy", "true");
       for (const e of entries) list.append(treeRow(e));
-      if (!entries.length) parts.push(note(t.path ? "这个文件夹是空的。" : "这里还没有文件。猫猫在" + rootLabel + "里写出的文件会出现在这里。"));
+      if (!entries.length) parts.push(note(t.path ? "这个文件夹是空的。" : "这里还没有文件。"));
       else parts.push(list);
       if (t.data.truncated) parts.push(note("只列出前 200 项。"));
     }
@@ -1476,7 +1483,7 @@
       return card;
     };
     // Work starts in the chat itself; Tasks the cats keep for it show here.
-    if (!list.length) parts.push(note("还没有任务。直接在聊天里说要做的事就好，不用先建任务。"));
+    // None: 任务 · 0 says it (item 46).
     if (open.length) {
       const box = w.open || (w.open = node("div", "wst-list"));
       arrange(box, open.map(cardFor));
