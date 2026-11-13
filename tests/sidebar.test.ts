@@ -496,10 +496,12 @@ test('every button here can be reached and seen with the keyboard, and is 44px i
   for (const rule of [/\.side-btn \{ width: 44px; height: 44px; \}/, /\.account-trigger \{ width: 44px; height: 44px; \}/, /\.side-apps \{ height: 44px; \}/]) assert.match(drawer, rule);
 });
 
-test('item 46: the sidebar keeps only what the layout cannot say — no busy count under the greeting, no heading over the groups (a gap; 群聊 for a screen reader), names as tooltips only in the rail, no name after 复制名字, no example placeholder, 应用 said once', () => {
+test('item 46: the sidebar keeps only what the layout cannot say — the busy count under the greeting stays (review r15), no heading over the groups (a gap; 群聊 for a screen reader), names as tooltips only in the rail, no name after 复制名字, no example placeholder, 应用 said once', () => {
   const app = read('client/public/app.js');
-  const greet = /\n {2}function paintGreeting\(\) \{\n([\s\S]*?)\n {2}\}\n/.exec(app)![1]!.replace(/\/\/.*$/gm, '');
-  assert.doesNotMatch(greet, /在忙|greet-stack|busy/);
+  // Review r15: the busy line under the greeting stays — the one place a pinned cat (no working mark of its own)
+  // or a cat in a collapsed folder is said to be working; native status, not a label.
+  const greet = /\n {2}function paintGreeting\(\) \{\n([\s\S]*?)\n {2}\}\n/.exec(app)![1]!;
+  assert.match(greet, /host\.append\(stack, document\.createTextNode\(" " \+ busy\.length \+ " 只猫猫"\), el\("span", "g", " 在忙。"\)\);/);
   assert.match(app, /roster\.append\(sectionLabel\("群聊", null, true\)\);/);
   assert.match(app, /const row = el\("div", "group-label" \+ \(quiet \? " cl-gap" : ""\)\);\n\s+row\.append\(el\("span", "label" \+ \(quiet \? " visually-hidden" : ""\), text\)\);/);
   // The gap is a gap, not a hidden heading: a height, never display: none (the word is read out).
@@ -515,5 +517,5 @@ test('item 46: the sidebar keeps only what the layout cannot say — no busy cou
   assert.doesNotMatch(app, /el\("span", "v mono", name\)/);
   assert.doesNotMatch(app, /placeholder: "工作"/);
   assert.doesNotMatch(app, /现在还用不了/);
-  assert.doesNotMatch(read('client/public/cafe-theme.css'), /greet-stack/);
+  assert.match(read('client/public/cafe-theme.css'), /\.greet-stack > \.avatar:has\(> svg\[data-cat-id\]\)/);
 });

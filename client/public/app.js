@@ -5407,16 +5407,25 @@
   function paintGreeting() {
     const host = $("greeting");
     if (!host) return;
+    const statuses = Object.values(stStatus.map);
+    // Busy is working or waiting in line; a cat that waits for the owner (等你确认) is not busy (its row says so).
+    const busy = statuses.filter(st => st.state === "running" || st.state === "queued");
     const hour = new Date().getHours();
     const hello = hour < 6 ? "夜深了" : hour < 12 ? "上午好" : hour < 18 ? "下午好" : "晚上好";
-    const sig = JSON.stringify([hello, state.ownerName]);
+    const sig = JSON.stringify([hello, state.ownerName, busy.map(s => s.bot)]);
     if (host.dataset.sig === sig) return;
     host.dataset.sig = sig;
     // The owner by name only when the server knows one (its default owner_name is 你).
     const who = listRules.greetName(state.ownerName);
-    // Only the greeting: who is working is on that cat's own row (its spinner
-    // and what it does), so the line 「有 N 只猫猫在忙」 is gone (item 46).
     host.replaceChildren(document.createTextNode(hello + (who ? "，" + who : "") + "。"));
+    // 状态只写「有 N 只猫猫在忙」，有忙才出；不写已完成类状态。
+    if (busy.length) {
+      host.append(el("br"), el("span", "g", "有 "));
+      const stack = el("span", "greet-stack");
+      for (const st of busy.slice(0, 3)) stack.append(avatar(st.bot, paintOf(st.bot), "xs"));
+      if (busy.length > 3) stack.append(el("span", "greet-more", "+" + (busy.length - 3)));
+      host.append(stack, document.createTextNode(" " + busy.length + " 只猫猫"), el("span", "g", " 在忙。"));
+    }
   }
 
   function paintWorkStatus() {
