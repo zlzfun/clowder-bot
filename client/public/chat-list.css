@@ -36,6 +36,11 @@
 /* A row gliding from where it was to its new place. */
 .item.cl-moving { transition: transform 180ms ease-out, background 160ms ease-out; }
 
+/* Group chats follow the cats after a gap (item 46): no heading, their member
+   portraits say what they are, and 群聊 is there for a screen reader only.
+   The rail keeps app.css's own 10px divider (a more specific rule). */
+.group-label.cl-gap { min-height: 0; height: var(--x-s6); padding: 0; line-height: 0; }
+
 /* The status could not be read: one quiet line over the list says what it
    shows is the last read (状态没能刷新…), until a read succeeds. */
 .cl-stale { margin: 0 var(--x-s5) var(--x-s2); padding: 0 var(--x-s2); font-size: var(--x-fs-cap); line-height: 1.5; color: var(--x-faint); }

@@ -529,8 +529,8 @@ test('the shell reads the sidebar lines from the status poll only: no transcript
   }
   // 晚上好，你。 and 有 N 个 Bot 在忙 are gone.
   assert.match(app, /const who = listRules\.greetName\(state\.ownerName\);/);
-  assert.match(app, /" 只猫猫"/);
-  assert.doesNotMatch(app, /个 Bot"\), el\("span", "g", " 在忙/);
+  // Item 46: no 「有 N 只猫猫在忙」 under the greeting either: each working cat's row says it.
+  assert.doesNotMatch(app, /个 Bot"\), el\("span", "g", " 在忙|" 只猫猫"\), el\("span", "g", " 在忙/);
   // Review fixes: a failed status read is said (and cleared by the next one); quotes carry
   // their conversation and are checked on each read; drafts by native ID; a deleted cat's draft goes.
   // (presence.rows() then drops the typing dots that read can no longer vouch for: chat-presence.js.)
@@ -622,7 +622,7 @@ test('a quoted send takes its quote along at once: switching chats before the an
   assert.equal('reply_to' in h.calls[0].body, false);
 });
 
-test('the greeting counts a cat as busy only while it works or waits in line, never while it waits for the owner', () => {
+test('item 46: the greeting is only the greeting — no count of busy cats under it (each working cat\'s row says what it does), whatever the cats are doing', () => {
   const app = read('client/public/app.js');
   const m = /\n {2}function paintGreeting\(\) \{\n[\s\S]*?\n {2}\}\n/.exec(app);
   assert.ok(m, 'paintGreeting is where the shell keeps it');
@@ -635,15 +635,21 @@ test('the greeting counts a cat as busy only while it works or waits in line, ne
   vm.runInNewContext(read('client/public/chat-list-rules.js'), { window });
   const stStatus: Any = { map: {} };
   const out: Any = {};
+  const state: Any = { ownerName: '你' };
   vm.runInNewContext(m[0] + 'out.paint = paintGreeting;', {
-    out, stStatus, state: { ownerName: '你' }, document: doc, Date, JSON,
+    out, stStatus, state, document: doc, Date, JSON,
     $: (id: string) => doc.getElementById(id), el, listRules: window.ClowderListRules,
     avatar: () => el('span', 'avatar'), paintOf: () => null,
   });
+  const hello = /^(夜深了|上午好|下午好|晚上好)。$/;
   stStatus.map = { 团子: { bot: '团子', state: 'awaiting' }, 栗子: { bot: '栗子', state: 'idle' } };
   out.paint();
-  assert.doesNotMatch(text(host), /在忙/, 'waiting for the owner\'s confirmation is not busy');
+  assert.match(text(host), hello);
   stStatus.map = { 团子: { bot: '团子', state: 'awaiting' }, 栗子: { bot: '栗子', state: 'running' }, 年糕: { bot: '年糕', state: 'queued' } };
   out.paint();
-  assert.match(text(host), /有\s+2 只猫猫 在忙。$/, 'working and queued count; the waiting one does not');
+  assert.match(text(host), hello, 'two cats at work: still only the greeting');
+  assert.equal(host.querySelectorAll('.avatar').length, 0, 'no faces of busy cats');
+  state.ownerName = '小鱼';
+  out.paint();
+  assert.match(text(host), /^(夜深了|上午好|下午好|晚上好)，小鱼。$/, 'the owner by name when the server knows one');
 });

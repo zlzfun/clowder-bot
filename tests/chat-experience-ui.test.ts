@@ -1069,7 +1069,7 @@ function sidebar() {
   const state: Any = { bots: [], groups: [], folders: [], others: null, sel: null, peer: null, preview: {}, listSig: '' };
   const stStatus: Any = { map: {}, groups: {} };
   const out: Any = {};
-  const code = ['el', 'spinIcon', 'workText', 'stDesc', 'attentionLine', 'groupDesc', 'paintStatus', 'listButton', 'botRow', 'renderLists', 'pickBot', 'pickGroup', 'closeDrawer', 'syncBackdrop'].map(take).join('');
+  const code = ['el', 'spinIcon', 'workText', 'stDesc', 'attentionLine', 'groupDesc', 'paintStatus', 'railTip', 'listButton', 'sectionLabel', 'botRow', 'renderLists', 'pickBot', 'pickGroup', 'closeDrawer', 'syncBackdrop'].map(take).join('');
   vm.runInNewContext(code + unreadOf[0] + 'out.renderLists = renderLists; out.paintStatus = paintStatus;', {
     out, state, stStatus, Node: El, experienceRules: rules(),
     document: { createElement: (tag: string) => doc.createElement(tag), querySelectorAll: (sel: string) => doc.body.querySelectorAll(sel) },
@@ -1134,6 +1134,27 @@ test('a sidebar row is one target: a click on its status line (busy, queued, wai
   s.state.peer = { slug: 'other' };
   s.find(PIN).click();
   assert.deepEqual(s.picked, ['bot:主猫']);
+});
+
+test('item 46: the list says no more than the layout cannot — the groups follow the cats after a gap with 群聊 for a screen reader only, and a row\'s name is a tooltip only in the rail', () => {
+  const s = sidebar();
+  s.state.bots = [{ name: '宪宪', description: '会写代码' }, { name: '主猫', pinned: true }];
+  s.state.groups = [{ id: 'g-1', name: '设计组', members: ['宪宪', '主猫'] }];
+  s.status();
+  const gap = s.find('.group-label');
+  assert.ok(gap.classList.contains('cl-gap'), 'a gap where the heading was');
+  const word = gap.querySelector('.label')!;
+  assert.equal(word.textContent, '群聊');
+  assert.ok(word.classList.contains('visually-hidden'), 'the word is there for a screen reader, not on screen');
+  for (const sel of ['.item[data-bot="宪宪"]', '.item[data-group="g-1"]']) {
+    const row = s.find(sel);
+    assert.equal(row.dataset.tipOnly, 'rail', sel + ': the name beside the face is not repeated as a tooltip in the full sidebar');
+    assert.equal(row.querySelector('.avatar')!.dataset.tipOnly, 'rail', sel + ': nor on its face');
+  }
+  // No groups, no gap.
+  s.state.groups = [];
+  s.status();
+  assert.equal(s.side.querySelector('.group-label'), null);
 });
 
 // ---------------------------------------------------------------- wiring

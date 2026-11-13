@@ -201,12 +201,6 @@ html[data-theme="dark"] .avatar.group { overflow: visible; background: transpare
   filter: drop-shadow(1px 0 0 var(--seat-seam)) drop-shadow(-1px 0 0 var(--seat-seam))
     drop-shadow(0 1px 0 var(--seat-seam)) drop-shadow(0 -1px 0 var(--seat-seam));
 }
-/* The busy-cat stack under the greeting (sidebar) overlaps its faces the same way. */
-.greet-stack > .avatar:has(> svg[data-cat-id]) {
-  box-shadow: none;
-  filter: drop-shadow(1px 0 0 var(--x-win)) drop-shadow(-1px 0 0 var(--x-win))
-    drop-shadow(0 1px 0 var(--x-win)) drop-shadow(0 -1px 0 var(--x-win));
-}
 .avatar.group > .seat.vacant {
   background: linear-gradient(color-mix(in srgb, var(--x-text) 14%, transparent) 0 0) var(--seat-seam);
 }

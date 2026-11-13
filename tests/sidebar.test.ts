@@ -478,7 +478,7 @@ test('我\'s menu opens right above the face (left edges aligned) in the full si
 
 test('应用 is a placeholder the owner asked for: it says plainly it is not available yet, and sends nothing, opens nothing, stores nothing', () => {
   const app = read('client/public/app.js');
-  assert.match(app, /\$\("side-apps"\)\.prepend\(icon\("grid-plus"\)\);\n\s+\$\("side-apps"\)\.addEventListener\("click", \(\) => showToast\("应用还没有开放，现在还用不了。", "info"\)\);/);
+  assert.match(app, /\$\("side-apps"\)\.prepend\(icon\("grid-plus"\)\);\n\s+\$\("side-apps"\)\.addEventListener\("click", \(\) => showToast\("应用还没有开放。", "info"\)\);/);
   // The retained XBot apps store is not wired: neither loaded nor called.
   const html = read('client/index.html');
   assert.doesNotMatch(html, /apps\.(js|css)/);
@@ -494,4 +494,26 @@ test('every button here can be reached and seen with the keyboard, and is 44px i
   assert.match(css, /\.side-btn:focus-visible, \.side-glyph:focus-visible, \.side-apps:focus-visible, \.account-trigger:focus-visible \{ outline: 2px solid var\(--accent\); outline-offset: 2px; \}/);
   const drawer = /@media \(max-width: 767px\) \{([\s\S]*?)\n\}/.exec(css)![1]!;
   for (const rule of [/\.side-btn \{ width: 44px; height: 44px; \}/, /\.account-trigger \{ width: 44px; height: 44px; \}/, /\.side-apps \{ height: 44px; \}/]) assert.match(drawer, rule);
+});
+
+test('item 46: the sidebar keeps only what the layout cannot say — no busy count under the greeting, no heading over the groups (a gap; 群聊 for a screen reader), names as tooltips only in the rail, no name after 复制名字, no example placeholder, 应用 said once', () => {
+  const app = read('client/public/app.js');
+  const greet = /\n {2}function paintGreeting\(\) \{\n([\s\S]*?)\n {2}\}\n/.exec(app)![1]!.replace(/\/\/.*$/gm, '');
+  assert.doesNotMatch(greet, /在忙|greet-stack|busy/);
+  assert.match(app, /roster\.append\(sectionLabel\("群聊", null, true\)\);/);
+  assert.match(app, /const row = el\("div", "group-label" \+ \(quiet \? " cl-gap" : ""\)\);\n\s+row\.append\(el\("span", "label" \+ \(quiet \? " visually-hidden" : ""\), text\)\);/);
+  // The gap is a gap, not a hidden heading: a height, never display: none (the word is read out).
+  const css = read('client/public/chat-list.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.match(css, /\.group-label\.cl-gap \{ min-height: 0; height: var\(--x-s6\); padding: 0; line-height: 0; \}/);
+  assert.doesNotMatch(css, /cl-gap[^{]*\{[^}]*display: none/);
+  // Rows, their faces and the pinned cats: the name as a tooltip only where it is not printed (the rail).
+  assert.match(app, /function railTip\(node\) \{\n\s+node\.dataset\.tipOnly = "rail";/);
+  assert.match(app, /setTip\(railTip\(btn\), name, "right"\);\n\s+const av = railTip\(avatar\(name, paint\)\);/);
+  assert.match(app, /setTip\(railTip\(btn\), niceName\(b\.name\), "right"\);/);
+  assert.match(app, /const av = railTip\(avatar\(b\.name, paintOfBot\(b\), "pin"\)\);/);
+  assert.match(app, /item\("clipboard", "复制名字", \(\) => copyBotID\(name\)\);\n/);
+  assert.doesNotMatch(app, /el\("span", "v mono", name\)/);
+  assert.doesNotMatch(app, /placeholder: "工作"/);
+  assert.doesNotMatch(app, /现在还用不了/);
+  assert.doesNotMatch(read('client/public/cafe-theme.css'), /greet-stack/);
 });

@@ -1171,7 +1171,8 @@ test('the shell wires 资料页与群: scripts before app.js, styles before the 
   // 删除猫猫 in everyday words; 群组 → 群聊 in the sidebar.
   assert.doesNotMatch(app, /原生成员配置/);
   assert.match(app, /openModal\("删除猫猫", \[/);
-  assert.match(app, /roster\.append\(sectionLabel\("群聊"\)\)/);
+  // Item 46: no heading over the groups on screen, a gap; 群聊 stays for a screen reader.
+  assert.match(app, /roster\.append\(sectionLabel\("群聊", null, true\)\)/);
   // A group row opens its own menu the way a cat row does.
   assert.match(app, /btn\.dataset\.groupMenu = "true";/);
   assert.match(app, /const sidebarBot = \(target\) => target\.closest\?\.\("\[data-bot-menu\], \[data-group-menu\]"\);/);

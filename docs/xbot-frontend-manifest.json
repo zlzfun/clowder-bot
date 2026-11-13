@@ -27,7 +27,7 @@
       "file": "app.js",
       "target": "client/public/app.js",
       "sourceSha256": "1248f793493826bf044359c71e7d8772ccc3472d6021d6abb979dff9b6cb29bc",
-      "sha256": "d70d8f0837f9b98ba2aa6aa3a61b51e73d3ba0c8b6c3cc13d17a012b840fcd40",
+      "sha256": "7116c8dbc0b3080e93ab404ca2bb125fef2cd8332f5f2ff008489ab544c0f2ed",
       "unchanged": false
     },
     {
@@ -564,8 +564,8 @@
     {
       "target": "client/public/cafe-theme.css",
       "description": "Cat-cafe light/dark color overrides; clay cat faces without a tile (transparent around the traced outline, photos/glyphs/empty seats keep their fill); closer crop of a cat's own clay portrait (data-avatar-bot faces: 1.25x about 50% 40% inside the clipped SVG drawing, circle and unread dot unchanged); group face of up to four members' own round portraits in one compact, slightly overlapping cluster without a tile (lead largest in front, 1px surface-color seams that hug a clay cat's own shape via drop-shadow and stay round for photos, clay art zoomed into its seat), quiet empty seats for unknown members (existing tokens, uploaded photos at their natural cover crop, not recolored); restores app.css's single right-aligned .field select chevron on focus (light chevron copied byte-for-byte); the open header chip without its fill, one layer under the panel scrim so it dims with the header (a click there closes the drawer through the scrim), group seams on the header surface, original CSS unchanged",
-      "sha256": "1c28b282334ce221e9abd2b91d4476310468e58a5285cc39156dcf68be00d3f4",
-      "attribution": "2026-11-06 transparent clay faces and cat-hugging group seams authored by local Claude Code (claude-opus-5-5); 2026-11-07 open header chip under the scrim by local Claude Code (claude-opus-5-5)"
+      "sha256": "f6f1181965c0468361f8e824cdcb75ae9798b1ddc84f2822b42396da625a516f",
+      "attribution": "2026-11-06 transparent clay faces and cat-hugging group seams authored by local Claude Code (claude-opus-5-5); 2026-11-07 open header chip under the scrim by local Claude Code (claude-opus-5-5); the layout explains, not captions, on every other screen (docs/xbot-frontend.md item 46) by local Claude Code (claude-opus-5-5) on 2026-11-13"
     },
     {
       "target": "client/public/runtime.html",
@@ -773,9 +773,9 @@
     },
     {
       "target": "client/public/chat-list.css",
-      "description": "Contact-list row layout (name line over preview, count at the end of the preview line), the quiet right-aligned time, the count pill on the primary pair, the 草稿 tag and the 180 ms glide, the sidebar's scrollbars shown only while the pointer is over the sidebar or focus is inside it (item 41, 2026-11-12: only the thumb's colour changes, scrollbar-color and ::-webkit-scrollbar-thumb, so rows never shift); the collapsed rail's list (768px and wider) never scrolls sideways (overflow-x: hidden; the search lens it once had to keep inside the list is gone since item 43); existing --x-* tokens only, original CSS unchanged",
-      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 找得到, part one (docs/xbot-frontend.md item 30); the sidebar's scrollbar on hover or focus by local Claude Code (claude-opus-5-5) on 2026-11-12 (item 41); the sidebar after Grok Bot's layout (docs/xbot-frontend.md item 43) by local Claude Code (claude-opus-5-5) on 2026-11-12",
-      "sha256": "7897612852e413a07220720164b6758797f2b08a5f69861baf0c3f016696a820"
+      "description": "Contact-list row layout (name line over preview, count at the end of the preview line), the quiet right-aligned time, the count pill on the primary pair, the 草稿 tag and the 180 ms glide, the sidebar's scrollbars shown only while the pointer is over the sidebar or focus is inside it (item 41, 2026-11-12: only the thumb's colour changes, scrollbar-color and ::-webkit-scrollbar-thumb, so rows never shift); the collapsed rail's list (768px and wider) never scrolls sideways (overflow-x: hidden; the search lens it once had to keep inside the list is gone since item 43); existing --x-* tokens only; the group chats follow the cats after a 16px gap instead of a heading (.group-label.cl-gap, 群聊 kept for a screen reader, item 46), original CSS unchanged",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 找得到, part one (docs/xbot-frontend.md item 30); the sidebar's scrollbar on hover or focus by local Claude Code (claude-opus-5-5) on 2026-11-12 (item 41); the sidebar after Grok Bot's layout (docs/xbot-frontend.md item 43) by local Claude Code (claude-opus-5-5) on 2026-11-12; the layout explains, not captions, on every other screen (docs/xbot-frontend.md item 46) by local Claude Code (claude-opus-5-5) on 2026-11-13",
+      "sha256": "81ee6531cde0bec967d973d052f3e6926f40f47e4f9d60bb5246e2c743fa88cb"
     },
     {
       "target": "client/public/chat-history-rules.js",

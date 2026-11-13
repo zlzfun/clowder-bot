@@ -3779,11 +3779,18 @@
     return mark;
   }
 
+  // A row's name as a tooltip only in the rail, where names are hidden; the
+  // full sidebar prints it beside the face (item 46).
+  function railTip(node) {
+    node.dataset.tipOnly = "rail";
+    return node;
+  }
+
   function listButton(name, preview, active, unread, paint, primary, label) {
     const btn = el("button", "item" + (active ? " active" : ""));
     btn.type = "button";
-    setTip(btn, name, "right");
-    const av = avatar(name, paint);
+    setTip(railTip(btn), name, "right");
+    const av = railTip(avatar(name, paint));
     if (unread) av.append(el("i", "unread"));
     const body = el("span", "item-body");
     const line = el("span", "name-line");
@@ -3796,9 +3803,11 @@
     return btn;
   }
 
-  function sectionLabel(text, action) {
-    const row = el("div", "group-label");
-    row.append(el("span", "label", text));
+  // quiet: no heading on screen, only a gap (chat-list.css .cl-gap); the
+  // words stay for a screen reader (item 46).
+  function sectionLabel(text, action, quiet) {
+    const row = el("div", "group-label" + (quiet ? " cl-gap" : ""));
+    row.append(el("span", "label" + (quiet ? " visually-hidden" : ""), text));
     if (action) row.append(action);
     return row;
   }
@@ -3996,9 +4005,9 @@
       btn.type = "button";
       btn.dataset.bot = b.name;
       btn.dataset.botMenu = "true";
-      setTip(btn, niceName(b.name), "right");
+      setTip(railTip(btn), niceName(b.name), "right");
       btn.setAttribute("aria-label", niceName(b.name));
-      const av = avatar(b.name, paintOfBot(b), "pin");
+      const av = railTip(avatar(b.name, paintOfBot(b), "pin"));
       const pinActive = state.sel && state.sel.type === "bot" && state.sel.id === b.name;
       if (!pinActive && (!!b.unread || (b.notes || 0) > 0 || unreadOf(stStatus.map[b.name]) > 0)) av.append(el("i", "unread"));
       // A pinned bot shows its name under the face; the primary bot keeps its pin.
@@ -4029,8 +4038,10 @@
     }
     if (state.others && state.others.length) roster.append(othersFolder());
 
-    // No groups, no header: 新建's dialog already offers 群聊.
-    if (state.groups.length) roster.append(sectionLabel("群聊"));
+    // No groups, no header: 新建's dialog already offers 群聊. With groups, a
+    // gap after the last cat sets them apart and their member portraits say
+    // what they are; the word stays for a screen reader only (item 46).
+    if (state.groups.length) roster.append(sectionLabel("群聊", null, true));
     for (const g of state.groups) {
       const open = state.sel && state.sel.type === "group" && state.sel.id === g.id;
       const d = groupDesc(g);
@@ -4877,8 +4888,8 @@
     item("pin", pinned ? "取消置顶" : "置顶", () => togglePin(name, !pinned));
     menu.append(moveMenu(name, currentGroup(name)));
     item("copy", "复刻", () => openFork(name));
-    const copy = item("clipboard", "复制名字", () => copyBotID(name));
-    copy.append(el("span", "v mono", name));
+    // The name it copies is the row the menu came from: not printed again (item 46).
+    item("clipboard", "复制名字", () => copyBotID(name));
     if (state.app) item("folder-open", "打开工作目录", () => openWorkdir(name));
     // 查看生成的图片 is gone: this server has no …/generated route, so the item only ever failed.
     item("download", "导出对话", () => openExport(name));
@@ -5058,7 +5069,7 @@
 
   function openNewFolder(botName) {
     openModal("新建分组", [
-      { name: "name", label: "名字", placeholder: "工作", maxLength: 32 },
+      { name: "name", label: "名字", maxLength: 32 },
     ], async (v) => {
       const name = (v.name || "").trim();
       if (!name) throw new Error("需要一个名字");
@@ -5381,25 +5392,16 @@
   function paintGreeting() {
     const host = $("greeting");
     if (!host) return;
-    const statuses = Object.values(stStatus.map);
-    // Busy is working or waiting in line; a cat that waits for the owner (等你确认) is not busy (its row says so).
-    const busy = statuses.filter(st => st.state === "running" || st.state === "queued");
     const hour = new Date().getHours();
     const hello = hour < 6 ? "夜深了" : hour < 12 ? "上午好" : hour < 18 ? "下午好" : "晚上好";
-    const sig = JSON.stringify([hello, state.ownerName, busy.map(s => s.bot)]);
+    const sig = JSON.stringify([hello, state.ownerName]);
     if (host.dataset.sig === sig) return;
     host.dataset.sig = sig;
     // The owner by name only when the server knows one (its default owner_name is 你).
     const who = listRules.greetName(state.ownerName);
+    // Only the greeting: who is working is on that cat's own row (its spinner
+    // and what it does), so the line 「有 N 只猫猫在忙」 is gone (item 46).
     host.replaceChildren(document.createTextNode(hello + (who ? "，" + who : "") + "。"));
-    // 状态只写「有 N 只猫猫在忙」，有忙才出；不写已完成类状态。
-    if (busy.length) {
-      host.append(el("br"), el("span", "g", "有 "));
-      const stack = el("span", "greet-stack");
-      for (const st of busy.slice(0, 3)) stack.append(avatar(st.bot, paintOf(st.bot), "xs"));
-      if (busy.length > 3) stack.append(el("span", "greet-more", "+" + (busy.length - 3)));
-      host.append(stack, document.createTextNode(" " + busy.length + " 只猫猫"), el("span", "g", " 在忙。"));
-    }
   }
 
   function paintWorkStatus() {
@@ -6848,7 +6850,7 @@
   }
   // 应用 keeps its place for later (the owner, item 43): today it only says so.
   $("side-apps").prepend(icon("grid-plus"));
-  $("side-apps").addEventListener("click", () => showToast("应用还没有开放，现在还用不了。", "info"));
+  $("side-apps").addEventListener("click", () => showToast("应用还没有开放。", "info"));
   $("account").addEventListener("click", () => {
     const open = $("account-menu").hidden;
     closePops();
