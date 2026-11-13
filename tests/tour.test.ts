@@ -559,7 +559,17 @@ test('回复是活的 says once that every cat talks as in a chat by default, wi
   assert.doesNotMatch(section, /同一条回复把你后来说的也一起回答/);
   assert.match(section, /<p class="t-try"><span class="t-try-k">怎么试<\/span>[^<]*；或者趁它还在写再说一句，看它在同一条回复里接着回答<\/p>/);
   // The picture of 资料 is the page as it is now: 置顶, 新对话 and 历史对话, nothing for how a cat talks; its words say so.
-  assert.match(html, /<img src="shots\/profile-light\.png" width="384" height="540" decoding="async" alt="宪宪的资料页：职责，开着的「置顶」，新对话和历史对话，收起的「高级」，最下面是「删除猫猫」。">/);
+  // Item 46: its description first (no 职责 heading on screen), retaken at the new height.
+  assert.match(html, /<img src="shots\/profile-light\.png" width="384" height="437" decoding="async" alt="宪宪的资料页：最上面是它负责什么，下面是开着的「置顶」、新对话和历史对话，收起的「高级」，最下面是「删除猫猫」。">/);
+});
+
+test('item 46: the guide\'s pictures and their words show the screens without the captions this sweep removed — no 「全体 · @ 群里每一只」, no sentence under 桌面通知, no 「最多选 3 项」 beside two picks, the groups after a gap in the list', () => {
+  const html = read('showcase/index.html');
+  const alts = [...html.matchAll(/\salt="([^"]*)"/g)].map(m => m[1]).join('\n');
+  assert.doesNotMatch(alts, /群里每一只|一句说明|注明最多选|职责，/);
+  assert.match(html, /alt="在群里输入 @ 弹出的列表：宪宪、砚砚、烁烁，最后是「全体」。"/);
+  assert.match(html, /alt="设置的「通用」页：主题「跟随系统」，下面是「桌面通知」的开关。"/);
+  assert.match(html, /隔开一段是群聊，「产品评审」有 3 条未读。/);
 });
 
 test('each picture is drawn at the size it was taken: the width and height in the page are half the file\'s pixels (taken at 2×), in both themes', () => {
