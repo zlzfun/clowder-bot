@@ -664,7 +664,7 @@
       "target": "client/public/schedules.js",
       "description": "A cat's own scheduled tasks as the last section of the drawer's 任务 tab: list with loading/empty/failed states and an explicit 刷新, once/daily/weekly/interval create form (browser-local once-time to an offset ISO instant, IANA zone, native 0=Sunday, 1-10080 minutes, stable idempotency UUID per unchanged form), enabled/effectiveEnabled/registered kept apart, 已触发 never shown as finished work, pause/resume, delete on the original modal card, recent native trigger records, current/earlier chat with a runtime ?thread= link; reads only /xbot-api/bots/:name/routines, no timers, stale answers dropped across cats",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-04; the layout explains, not captions, on every other screen (docs/xbot-frontend.md item 46) by local Claude Code (claude-opus-5-5) on 2026-11-13",
-      "sha256": "0cb8f60a91e3e97236bbe45d159f9b1b78c740f7d4bd00245dbd28e959ab9836"
+      "sha256": "ca2cdff054337ffa11ee2d38454b29400684eac555efeaf5b3896c0a45651c0e"
     },
     {
       "target": "client/public/schedules.css",

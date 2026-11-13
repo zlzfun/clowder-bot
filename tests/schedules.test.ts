@@ -397,9 +397,21 @@ test('create sends the contract body for each rule; the server binds the cat and
     fill(form);
     btn(form, '创建').click();
   };
-  make(form => type(control(form, '日期和时间'), '2099-11-05T09:00'));
+  make(form => {
+    // Review r15: what is true for each rule, beside its own fields; what every rule needs, once under them.
+    assert.match(visibleText(form), /clowder-bot 关着、电脑关机或休眠时，定时不会运行。/);
+    assert.match(visibleText(form), /按本机时区（[^）]*）。错过了不会补。/, '一次: a missed time is not made up');
+    assert.doesNotMatch(visibleText(form), /重新启动后会马上运行一次/);
+    type(control(form, '日期和时间'), '2099-11-05T09:00');
+  });
   await settle();
-  make(form => { kind(form, '每天'); type(control(form, '时间'), '07:30'); });
+  make(form => {
+    kind(form, '每天');
+    // Daily and weekly: the engine may make up one missed run after the computer wakes, so nothing says it is not.
+    assert.doesNotMatch(visibleText(form), /错过了不会补|错过的不补|重新启动后会马上运行一次/);
+    assert.match(visibleText(form), /clowder-bot 关着、电脑关机或休眠时，定时不会运行。/);
+    type(control(form, '时间'), '07:30');
+  });
   await settle();
   make(form => {
     kind(form, '每周');
@@ -415,9 +427,9 @@ test('create sends the contract body for each rule; the server binds the cat and
     assert.equal(shown(control(form, '间隔（分钟）')), false, 'only the chosen rule\'s fields show');
     kind(form, '间隔');
     assert.equal(shown(control(form, '日期和时间')), false);
-    // Item 46: the range and when the first one comes; no engine detail or advice.
-    assert.match(visibleText(form), /1–10080 分钟。创建或恢复后先等满一个间隔。/);
-    assert.doesNotMatch(visibleText(form), /运行时|要固定钟点/);
+    // The range, when the first one comes, and (review r15) that it runs at once when clowder-bot starts again.
+    assert.match(visibleText(form), /1–10080 分钟。创建或恢复后先等满一个间隔；clowder-bot 重新启动后会马上运行一次。/);
+    assert.doesNotMatch(visibleText(form), /要固定钟点|错过了不会补/);
     type(control(form, '间隔（分钟）'), '90');
   });
   await settle();
@@ -456,7 +468,7 @@ test('a form keeps the input on errors, blocks duplicate saves, reuses its key o
   assert.equal(control(form, '名称').getAttribute('aria-invalid'), 'true');
   assert.equal(t.doc.activeElement, control(form, '名称'));
   const minutes = control(form, '间隔（分钟）'), described = () => (minutes.getAttribute('aria-describedby') || '').split(' ').map(id => all(form).find(n => n.id === id)!.textContent);
-  assert.deepEqual(described(), ['请填 1–10080 之间的整数分钟', '1–10080 分钟。创建或恢复后先等满一个间隔。'], 'the error joins the field note');
+  assert.deepEqual(described(), ['请填 1–10080 之间的整数分钟', '1–10080 分钟。创建或恢复后先等满一个间隔；clowder-bot 重新启动后会马上运行一次。'], 'the error joins the field note');
   type(control(form, '名称'), '晨会');
   assert.deepEqual(errorsOf(form), ['请填写到时发给猫猫的消息', '请填 1–10080 之间的整数分钟'], 'typing clears that field');
   type(control(form, '消息'), '准备晨会');

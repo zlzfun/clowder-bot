@@ -666,7 +666,9 @@
 
       const zone = localZone();
       const atIn = input("datetime-local", { value: defaultOnce(now), min: wallValue(new Date(now)), step: 60 });
-      const atBox = field("at", "日期和时间", atIn, node("p", "sched-hint", "按本机时区" + (zone ? "（" + zone + "）" : "")));
+      // 一次: a time that passes while the engine is not running expires and is
+      // not run later (native handleMissedOnceTask) — said here, for this rule only.
+      const atBox = field("at", "日期和时间", atIn, node("p", "sched-hint", "按本机时区" + (zone ? "（" + zone + "）" : "") + "。错过了不会补。"));
       const timeIn = input("time", { value: "09:00", step: 60 });
       const timeBox = field("time", "时间", timeIn);
       const daysBox = node("div", "field sched-field"), daysLabel = node("span", "", "星期"), days = node("div", "sched-days"), daysErr = node("p", "sched-err");
@@ -689,14 +691,17 @@
       zoneSel.value = picked[0][0];
       const zoneBox = field("timezone", "时区", zoneSel);
       const minIn = input("number", { value: "60", min: 1, max: MINUTES_MAX, step: 1, inputMode: "numeric" });
-      // Native interval rules: wait one interval after create or resume; a runtime restart checks once at start.
-      const minBox = field("minutes", "间隔（分钟）", minIn, node("p", "sched-hint", "1–" + MINUTES_MAX + " 分钟。创建或恢复后先等满一个间隔。"));
+      // Native interval rules: wait one interval after create or resume; when the
+      // engine starts again the first tick runs at once (review r15).
+      const minBox = field("minutes", "间隔（分钟）", minIn, node("p", "sched-hint", "1–" + MINUTES_MAX + " 分钟。创建或恢复后先等满一个间隔；clowder-bot 重新启动后会马上运行一次。"));
 
       set.append(nameBox, promptBox, kindBox, atBox, timeBox, daysBox, zoneBox, minBox);
       const notes = node("p", "sched-note");
       // The form is this chat's (a reminder's row then says 当前聊天); what
-      // the owner needs to know is when it does not run (item 46).
-      notes.append(node("span", "", "电脑关机或休眠时不会运行，错过的不补。"));
+      // every rule needs is said once here: nothing runs while clowder-bot is
+      // not running or the computer is off or asleep. What happens to a missed
+      // time differs by rule and is said beside that rule's fields (review r15).
+      notes.append(node("span", "", "clowder-bot 关着、电脑关机或休眠时，定时不会运行。"));
       const error = node("p", "error sched-error");
       error.setAttribute("role", "alert"); error.hidden = true;
       const actions = node("div", "modal-actions");
