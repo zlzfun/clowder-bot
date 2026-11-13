@@ -16,12 +16,15 @@
    .pop box placed by the shell's placeMenu, without .pop's anchoring. */
 .pop.ch-menu { bottom: auto; left: auto; right: auto; min-width: 0; width: 188px; }
 
-/* The top of the history: 查看更早的消息, 正在加载…, 没有更早的消息了, or a failure with 重试. */
+/* The top of the history: 查看更早的消息, 正在加载…, or a failure with 重试.
+   Nothing earlier takes no room: the oldest day separator is on top, and
+   没有更早的消息了 is there for a screen reader only (item 46). */
 .ch-older {
   display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: var(--x-s2);
   min-height: 36px; margin: 0 0 var(--x-s3); padding: 0 var(--x-s4);
   font-size: var(--x-fs-sm); line-height: 18px; color: var(--x-faint); text-align: center;
 }
+.ch-older[data-older="end"] { min-height: 0; margin: 0; padding: 0; }
 .ch-older[data-older="failed"] { color: var(--x-muted); }
 .ch-older-btn {
   border: 0; background: transparent; color: var(--x-muted); font: inherit;

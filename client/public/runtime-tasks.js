@@ -15,6 +15,7 @@
 (() => {
   const enc = encodeURIComponent;
   const node = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; };
+  let seen = 0;
   const has = (map, key) => typeof key === 'string' && Object.hasOwn(map, key);
   // Native text on one line; it also keeps a title from splitting the handoff request.
   // \s covers the Unicode line and paragraph separators as well.
@@ -230,6 +231,11 @@
       if (canCancel(task)) controls.push(control(view, state, 'cancel', '撤销整个任务'));
       if (canResume(task)) controls.push(control(view, state, 'resume', resumeLabel(task), resumeWait(task)));
       if (controls.length) { const row = node('div', undefined, 'actions'); row.append(...controls); parts.push(row); }
+      // What 停止 and 撤销 lead to, said beside them before they are pressed, only
+      // on a task that has that control (review r15; the page-level paragraph is gone).
+      const before = (button, text) => { const p = node('p', text, 'muted'); p.id = 'rt-before-' + ++seen; button.setAttribute('aria-describedby', p.id); parts.push(p); };
+      if (canStop(task)) before(controls[0], '停止后，「允许继续」前不会开始新的执行。');
+      if (canCancel(task)) before(controls[canStop(task) ? 1 : 0], '撤销会收回这个任务和它的子任务，「恢复任务」前不会开始新的执行。');
       if (canResume(task)) {
         if (resumeWait(task)) parts.push(node('p', '后台执行记录确认结束后才能恢复。', 'muted'));
         else if (task.executionRef && typeof task.executionRef === 'object' && !task.executionRef.subexecutionId) parts.push(node('p', '当前执行不是后台执行；原生确认这次执行结束后才能恢复。', 'muted'));

@@ -59,6 +59,13 @@ a.setrow.about-link > .ic { flex: none; color: var(--x-muted); }
 .modal-card p.note { display: block; padding: 0; transition: none; }
 .modal-card p.note:hover, .modal-card p.note:active { background: transparent; }
 
+/* A radio in a .choice pill inside a .field form (定时's 时间规则, 导出对话's
+   格式): app.css's .field input (full width, 40px tall, padded, filled) blew
+   it up into a big circle and pushed its words into a column. It is the
+   ordinary small radio again; the pill keeps its look (review r15). */
+.field .choice-opt input[type="radio"] { flex: none; width: auto; height: auto; min-height: 0; margin: 0; padding: 0; border-radius: 50%; background: none; }
+.field .choice-opt { white-space: nowrap; }
+
 @media (prefers-reduced-motion: reduce) {
   a.setrow.about-link { transition: none; }
 }

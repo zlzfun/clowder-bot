@@ -195,11 +195,16 @@
         const list = agents || [], q = query.trim().toLowerCase();
         const hits = q ? list.filter(a => [a.label, a.id].join(" ").toLowerCase().includes(q)) : list;
         sections.replaceChildren(); rows.clear();
+        // Installed first, the rest after a gap: each row's own state
+        // (已有配置记录 / 暂未适配 / 未检测到) says which; the two headings are
+        // for a screen reader only (item 46).
         for (const [title, group] of [["已安装", hits.filter(found)], ["未安装", hits.filter(a => !found(a))]]) {
           if (!group.length) continue;
           const box = node("div", "sklist");
           for (const agent of group) box.append(item(agent));
-          sections.append(section(title, box));
+          const sec = node("div", "setsec");
+          sec.append(node("h4", "visually-hidden", title), box);
+          sections.append(sec);
         }
         empty.hidden = !agents || agents.length > 0;
         none.hidden = !list.length || hits.length > 0;

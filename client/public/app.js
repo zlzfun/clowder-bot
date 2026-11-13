@@ -2975,7 +2975,7 @@
     if (m.native_message_id || m.id) row.dataset.mid = String(m.native_message_id || m.id);
     if (m.time) row.dataset.time = String(m.time);
     row.dataset.sender = who.key;
-    if (!cont) row.append(speakerFace(who));
+    if (!cont) row.append(headFace(who));
     const body = el("div", "body");
     if (!cont) body.append(speakerHead(who, m.time));
     const replyTo = say ? say.replyTo : m.reply_to;
@@ -3022,7 +3022,7 @@
     if (who) row.dataset.sender = who.key;
     const body = el("div", "body");
     if (who && !cont) {
-      row.append(speakerFace(who));
+      row.append(headFace(who));
       body.append(speakerHead(who, m.time));
     }
     row.append(body);
@@ -3082,8 +3082,15 @@
     const name = el("div", "who");
     name.append(el("span", "", who.name));
     if (time) name.append(el("time", "", when(time)));
-    setTip(name, who.name);
     return name;
+  }
+
+  // The face beside a message's name line: the name is printed there, so it
+  // is not a tooltip as well (item 46).
+  function headFace(who) {
+    const av = speakerFace(who);
+    setTip(av, "");
+    return av;
   }
 
   // An execution record (presentation_kind "activity") in its writer's name.
@@ -3429,7 +3436,7 @@
         bindMessageMenu(row, m, text);
         row.append(wrap);
       } else {
-        if (!row.classList.contains("cont")) row.append(speakerFace(speaker));
+        if (!row.classList.contains("cont")) row.append(headFace(speaker));
         const body = el("div", "body");
         if (!row.classList.contains("cont")) body.append(speakerHead(speaker, m.time));
         const said = cards.words(m, isSilent(text) ? "" : text);
@@ -3779,15 +3786,37 @@
     return mark;
   }
 
+  // A row's name as a tooltip only in the rail, where names are hidden; the
+  // full sidebar prints it beside the face (item 46).
+  function railTip(node) {
+    node.dataset.tipOnly = "rail";
+    return node;
+  }
+
+  // A printed name keeps its full name as a tooltip, shown only while it is
+  // cut short (placeTip measures it at hover time; review r15).
+  function clipTip(node, text) {
+    node.dataset.tip = text;
+    node.dataset.tipOnly = "clipped";
+    return node;
+  }
+
+  // A face drawn beside its printed name (a list row, the @ list, the drawer):
+  // no tooltip repeating the name (item 46).
+  function untipped(av) {
+    setTip(av, "");
+    return av;
+  }
+
   function listButton(name, preview, active, unread, paint, primary, label) {
     const btn = el("button", "item" + (active ? " active" : ""));
     btn.type = "button";
-    setTip(btn, name, "right");
-    const av = avatar(name, paint);
+    setTip(railTip(btn), name, "right");
+    const av = railTip(avatar(name, paint));
     if (unread) av.append(el("i", "unread"));
     const body = el("span", "item-body");
     const line = el("span", "name-line");
-    line.append(el("span", "name", label || niceName(name)));
+    line.append(clipTip(el("span", "name", label || niceName(name)), label || niceName(name)));
     if (primary) {
       line.append(primaryMark());
     }
@@ -3796,9 +3825,11 @@
     return btn;
   }
 
-  function sectionLabel(text, action) {
-    const row = el("div", "group-label");
-    row.append(el("span", "label", text));
+  // quiet: no heading on screen, only a gap (chat-list.css .cl-gap); the
+  // words stay for a screen reader (item 46).
+  function sectionLabel(text, action, quiet) {
+    const row = el("div", "group-label" + (quiet ? " cl-gap" : ""));
+    row.append(el("span", "label" + (quiet ? " visually-hidden" : ""), text));
     if (action) row.append(action);
     return row;
   }
@@ -3996,14 +4027,14 @@
       btn.type = "button";
       btn.dataset.bot = b.name;
       btn.dataset.botMenu = "true";
-      setTip(btn, niceName(b.name), "right");
+      setTip(railTip(btn), niceName(b.name), "right");
       btn.setAttribute("aria-label", niceName(b.name));
-      const av = avatar(b.name, paintOfBot(b), "pin");
+      const av = railTip(avatar(b.name, paintOfBot(b), "pin"));
       const pinActive = state.sel && state.sel.type === "bot" && state.sel.id === b.name;
       if (!pinActive && (!!b.unread || (b.notes || 0) > 0 || unreadOf(stStatus.map[b.name]) > 0)) av.append(el("i", "unread"));
       // A pinned bot shows its name under the face; the primary bot keeps its pin.
       const label = el("span", "pin-name");
-      label.append(el("span", "pin-label", niceName(b.name)));
+      label.append(clipTip(el("span", "pin-label", niceName(b.name)), niceName(b.name)));
       if (b.primary) label.append(primaryMark());
       btn.append(av, label);
       btn.addEventListener("click", () => pickBot(b.name));
@@ -4029,8 +4060,10 @@
     }
     if (state.others && state.others.length) roster.append(othersFolder());
 
-    // No groups, no header: 新建's dialog already offers 群聊.
-    if (state.groups.length) roster.append(sectionLabel("群聊"));
+    // No groups, no header: 新建's dialog already offers 群聊. With groups, a
+    // gap after the last cat sets them apart and their member portraits say
+    // what they are; the word stays for a screen reader only (item 46).
+    if (state.groups.length) roster.append(sectionLabel("群聊", null, true));
     for (const g of state.groups) {
       const open = state.sel && state.sel.type === "group" && state.sel.id === g.id;
       const d = groupDesc(g);
@@ -4094,7 +4127,8 @@
       if (titleAv) setTip(titleAv, "");
     }
     titleEl.replaceChildren(...(titleAv ? [titleAv] : []), el("span", "title-name", shown));
-    setTip(titleEl, slug && slug !== shown ? slug : "");
+    // A cat's own name when it is shown differently; never a group's thread ID (item 46).
+    setTip(titleEl, !group && slug && slug !== shown ? slug : "");
     $("head-chip").disabled = !state.sel;
     // With the unread total in front, from the status poll (chat-list.js).
     chatList.title(shown + " · clowder-bot");
@@ -4877,8 +4911,8 @@
     item("pin", pinned ? "取消置顶" : "置顶", () => togglePin(name, !pinned));
     menu.append(moveMenu(name, currentGroup(name)));
     item("copy", "复刻", () => openFork(name));
-    const copy = item("clipboard", "复制名字", () => copyBotID(name));
-    copy.append(el("span", "v mono", name));
+    // The name it copies is the row the menu came from: not printed again (item 46).
+    item("clipboard", "复制名字", () => copyBotID(name));
     if (state.app) item("folder-open", "打开工作目录", () => openWorkdir(name));
     // 查看生成的图片 is gone: this server has no …/generated route, so the item only ever failed.
     item("download", "导出对话", () => openExport(name));
@@ -5058,7 +5092,7 @@
 
   function openNewFolder(botName) {
     openModal("新建分组", [
-      { name: "name", label: "名字", placeholder: "工作", maxLength: 32 },
+      { name: "name", label: "名字", maxLength: 32 },
     ], async (v) => {
       const name = (v.name || "").trim();
       if (!name) throw new Error("需要一个名字");
@@ -5623,9 +5657,7 @@
       section.hidden = emptyActive && ["进行中", "排队中"].includes(label);
       taskValue(section.querySelector("h4"), label + " · " + items.length);
       const list = section.querySelector(".task-items");
-      let hint = list.querySelector(".pnone");
-      if (items.length) hint?.remove();
-      else if (!hint) list.append(el("div", "pnone", label === "进行中" ? "现在没有在跑的任务。" : label === "排队中" ? "现在没有排队的任务。" : "还没有结束的任务。"));
+      // None: the heading's count (· 0) says it (item 46).
       let next = list.firstElementChild;
       for (const item of items) {
         keep.add(item.id);
@@ -5730,6 +5762,8 @@
     const fail = (text) => { problem.textContent = text; paint(); };
     const row = el("div", "avatar-row");
     const grid = el("div", "avatar-grid");
+    grid.setAttribute("role", "group");
+    grid.setAttribute("aria-label", "选择猫猫");
     const file = document.createElement("input");
     file.type = "file";
     file.accept = AVATAR_TYPES.join(",");
@@ -5739,7 +5773,9 @@
     clear.setAttribute("aria-label", "恢复默认猫猫");
     setTip(clear, "恢复默认猫猫");
     clear.append(icon("undo"));
-    const big = () => (picked.avatar === "custom"
+    // The faces here carry no tooltip: the name is printed under the big one,
+    // and a tooltip of it on each breed in the grid only misled (item 46).
+    const big = () => untipped(picked.avatar === "custom"
       ? avatar(name, { url: avatarURLOf(name) + "?v=" + Date.now(), seed: picked.seed, templateId: picked.templateId }, "xl")
       : avatar(name, { seed: picked.seed, templateId: picked.templateId }, "xl"));
     const pick = (label, make, on, onPick) => {
@@ -5756,14 +5792,16 @@
       const custom = picked.avatar === "custom";
       root.replaceChildren(big(), el("span", "avatar-name", name));
       if (problem.textContent) root.append(problem);
-      row.replaceChildren(el("span", "muted", "选择猫猫"));
+      // The faces with the chosen one ringed, under the big face, say what
+      // this is; the grid is named for a screen reader (item 46).
+      row.replaceChildren();
       const breed = catAvatars.resolveBreed(picked.seed, picked.templateId, name);
       if (custom || "cat:" + breed !== catAvatars.defaultSeed(picked.templateId)) row.append(clear);
       root.append(row, grid, file);
       grid.replaceChildren();
       for (const cat of catAvatars.presets) {
         const seed = "cat:" + cat.id;
-        grid.append(pick(cat.label, () => avatar(name, { seed: seed }, "pick"),
+        grid.append(pick(cat.label, () => untipped(avatar(name, { seed: seed }, "pick")),
           !custom && breed === cat.id, () => apply(seed)));
       }
       const up = el("button", "avatar-pick up");
@@ -5874,13 +5912,16 @@
     const actions = el("div", "profile-templates");
     actions.append(exp, imp, fileIn);
     modalForm.querySelector(".modal-actions").prepend(actions);
+    // The first section has no heading: the dialog's title says what it is,
+    // and its fields are labelled (item 46).
     const section = (title, ...fields) => {
       const group = el("section", "profile-section");
-      group.append(el("h3", "", title), ...fields);
+      if (title) group.append(el("h3", "", title));
+      group.append(...fields);
       return group;
     };
     wrap.append(
-      section("基本", head, labeled("名字", name), labeled("简介", description)),
+      section("", head, labeled("名字", name), labeled("简介", description)),
       section("职责", dutyBox),
       section("它用什么思考", agentTrigger(data)),
       err,
@@ -5978,9 +6019,9 @@
   function openFork(src) {
     openModal("复刻猫猫", [
       // Everyday labels: the new cat's name, what it does (its role) and the sidebar folder (分组, not a 群聊).
-      { name: "name", label: "名字", placeholder: "比如：审稿员" },
+      { name: "name", label: "名字" },
       { name: "role", label: "它负责什么", multiline: true },
-      { name: "group", label: "分组（可不填）" },
+      { name: "group", label: "分组" },
     ], async (v) => {
       const name = (v.name || "").trim();
       const role = (v.role || "").trim();
@@ -6848,7 +6889,7 @@
   }
   // 应用 keeps its place for later (the owner, item 43): today it only says so.
   $("side-apps").prepend(icon("grid-plus"));
-  $("side-apps").addEventListener("click", () => showToast("应用还没有开放，现在还用不了。", "info"));
+  $("side-apps").addEventListener("click", () => showToast("应用还没有开放。", "info"));
   $("account").addEventListener("click", () => {
     const open = $("account-menu").hidden;
     closePops();
@@ -7109,6 +7150,8 @@
     if (!text || (host.getAttribute("aria-expanded") === "true" && host !== $("head-chip"))) { hideTip(); return; }
     // A label the full sidebar shows already (应用) is a tooltip only in the rail.
     if (host.dataset.tipOnly === "rail" && !host.closest(".sidebar.rail")) { hideTip(); return; }
+    // A printed name: its tooltip only while it is cut short (review r15).
+    if (host.dataset.tipOnly === "clipped" && !(host.scrollWidth > host.clientWidth)) { hideTip(); return; }
     tipEl.textContent = text;
     tipEl.hidden = false;
     const r = host.getBoundingClientRect();
@@ -7711,7 +7754,7 @@
   profile.init({
     api, icon, visibleError, toast: showToast,
     cats: () => state.bots || [],
-    catFace: (name, size) => avatar(name, paintOf(name), size),
+    catFace: (name, size) => untipped(avatar(name, paintOf(name), size)),
     catFaceSig: (name) => avatarSignature(paintOf(name) || {}),
     groupFace: (g, size) => avatar(niceName(g.name || g.id), groupFace(g), size),
     groupFaceSig: (g) => groupFace(g).sig,
@@ -7777,7 +7820,7 @@
   // A group's composer offers its members on @ (mention.js); the text is sent as typed.
   mention.init({
     input, composer, icon,
-    face: (name) => avatar(name, paintOf(name), "xs"),
+    face: (name) => untipped(avatar(name, paintOf(name), "xs")),
     members: () => {
       if (!state.sel || state.sel.type !== "group" || state.peer) return null;
       const g = state.groups.find((x) => x.id === state.sel.id);

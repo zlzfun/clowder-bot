@@ -51,9 +51,6 @@
     const id = config && config.breed && config.breed.mode === "explicit" ? config.breed.breedId : "";
     return !!id && !!bot && (id === bot.native_id || id === bot.id);
   }
-  // Under 新对话 (whose dialog, refusals included, is chat-history.js's), what
-  // happens to the conversation on screen.
-  const NEW_CHAT_NOTE = "现在的对话会收进「历史对话」，随时能回去接着聊；它记得的关于你的事都还在。";
 
   // ---- a group ----
   const MIN = 2, MAX = 10;
@@ -101,10 +98,9 @@
   const defaultName = (group, cats) => QC().groupName(known(group, cats));
   const nameProblem = (name) => QC().groupNameProblem(name);
   const renameBody = (name, group, cats) => ({ name: trim(name) || defaultName(group, cats) });
-  // How to talk in a group: the engine's own routing (no @ → one cat answers;
-  // @名字 → that one). The engine's @全体 means every cat the owner has, not
-  // this group, so 「全体」 in the @ list mentions each member by name.
-  const HOW_TO_TALK = "直接说，由一只猫猫接待；@名字 指定某一只；要大家都回答，就把每只都 @ 上（输入 @ 选「全体」）";
+  // A group name may be left empty (it then takes the members' names): told
+  // to a screen reader, as on 新建's group side.
+  const nameSaid = () => QC().GROUP_NAME_SAID;
   // A refused group change, in everyday words; a 409 is the server's own
   // sentence (a cat to remove still has work there: nothing is stopped here).
   function groupError(err, what) {
@@ -117,8 +113,8 @@
 
   root.ClowderProfileRules = Object.freeze({
     trim, plain, key, TABS, tabs, home, tabFor, opensAdvanced,
-    accent, ownBreed, NEW_CHAT_NOTE,
+    accent, ownBreed,
     MIN, MAX, members, known, countText, addable, room, canRemove, addBody, removeBody, groupFrom,
-    defaultName, nameProblem, renameBody, HOW_TO_TALK, groupError,
+    defaultName, nameProblem, renameBody, nameSaid, groupError,
   });
 })(typeof window !== "undefined" ? window : globalThis);

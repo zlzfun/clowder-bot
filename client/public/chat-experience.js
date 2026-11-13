@@ -323,12 +323,18 @@
     row.setAttribute("aria-expanded", String(S.open));
     row.setAttribute("aria-controls", "cx-list");
     const lead = view.catId ? H.face(view.catId, view.catName, "xs") : H.icon(ICON[view.kind] || "info");
-    row.append(lead, node("b", "cx-lead", view.lead));
+    // One failure with the cat's name: the name may shrink, 「这次没完成」 stays
+    // whole, the reason follows in regular weight (review r15).
+    if (view.who) {
+      const said = node("span", "cx-said-fail");
+      said.append(node("b", "cx-lead cx-who", view.who), node("b", "cx-lead cx-what", view.lead));
+      row.append(lead, said);
+    } else row.append(lead, node("b", "cx-lead", view.lead));
     if (view.label) { const l = node("span", "cx-label", view.label); l.title = view.label; row.append(l); }
     if (view.rest.length) row.append(node("span", "cx-rest", "· " + view.rest.join(" · ")));
     if (view.partial) row.append(node("span", "cx-partial", "· 部分状态读不到"));
     row.append(H.icon("chevron", "cx-chev"));
-    row.setAttribute("aria-label", [view.lead, view.label, ...view.rest, view.partial ? "部分状态读不到" : ""].filter(Boolean).join("，") + "。" + (S.open ? "收起" : "展开查看"));
+    row.setAttribute("aria-label", [(view.who || "") + view.lead, view.label, ...view.rest, view.partial ? "部分状态读不到" : ""].filter(Boolean).join("，") + "。" + (S.open ? "收起" : "展开查看"));
     const parts = [row];
     if (S.open) parts.push(listView(fresh));
     box.replaceChildren(...parts);
@@ -367,7 +373,7 @@
     }
     // Counted by the server without a row of its own: said, never dropped.
     const more = total(a) - all.length;
-    if (more > 0) list.append(note("另有 " + more + " 项没有列出" + (a.counts.task ? "，任务的全部内容在「任务」页。" : "。"), "cx-more"));
+    if (more > 0) list.append(note("另有 " + more + " 项没有列出。", "cx-more"));
     if (S.state === "error") list.append(failure("状态没能刷新：" + S.error + (a ? "。下面是上次读到的结果，可能已经变化。" : "。"), () => loadActivity()));
     else if (a && a.readStatus !== "ready") {
       const p = failure("部分状态暂时读不到，这里不代表已经空闲或全部完成。", () => loadActivity());
@@ -502,8 +508,9 @@
     const h = node("h4", "", "这个对话的便笺");
     const count = node("span", "ws-count");
     h.append(count);
+    // The heading says its reach (这个对话的); no sentence saying it again (item 46).
     const list = node("div", "cx-note-list");
-    sec.append(h, list, node("p", "hint cx-note-hint", "便笺只属于这个对话，换到别的对话不会带过去。"));
+    sec.append(h, list);
     root.append(sec);
     Object.assign(page.notes, { count, listEl: list });
     return page;
@@ -675,9 +682,9 @@
       retry = p.lastChild;
       parts.push(p);
     }
+    // None: 这个对话的便笺 · 0 says it (item 46).
     if (list && list.length) parts.push(...list.map(noteCard));
-    else if (list) parts.push(node("p", "hint cx-note-empty", "这个对话还没有便笺。"));
-    else if (n.state !== "error") parts.push(waiting("正在读取…"));
+    else if (!list && n.state !== "error") parts.push(waiting("正在读取…"));
     box.replaceChildren(...parts);
     if (n.state === "loading") return;
     if (n.again && retry) retry.focus({ preventScroll: true });

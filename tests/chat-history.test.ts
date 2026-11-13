@@ -175,6 +175,11 @@ test('scrolling to the top loads the page before with the newest page\'s cursor;
   p.answer({ messages: [], hasMore: false, before: null, thread_id: 'T1' });
   await p.settle();
   assert.equal(text(p.topRow()), '没有更早的消息了');
+  // Item 46: on screen the oldest day separator says it; the words are there for a screen reader only.
+  assert.equal(p.topRow()!.dataset.older, 'end');
+  assert.ok(p.topRow()!.querySelector('span')!.classList.contains('visually-hidden'), 'not on screen');
+  const css = read('client/public/chat-history.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.match(css, /\.ch-older\[data-older="end"\] \{ min-height: 0; margin: 0; padding: 0; \}/, 'and it takes no room');
   assert.equal(p.history.peek().cursor, '');
 });
 
@@ -333,7 +338,8 @@ test('新对话 says the old conversation stays under 历史对话 and what the 
   p.app.files = 2;
   let d = start();
   assert.equal(text(d.querySelector('h2')), '和团子开始新对话');
-  assert.deepEqual(d.querySelectorAll('.ch-note').map((n: El) => text(n)), ['现在这段对话会留在「历史对话」里，随时能回去接着聊；团子记住的事都还在。', '待发送的 2 个附件会被移除。']);
+  // Item 46: where the conversation goes, once and plainly, and the attachments that would be lost; no reassurance.
+  assert.deepEqual(d.querySelectorAll('.ch-note').map((n: El) => text(n)), ['现在这段对话会收进「历史对话」。', '待发送的 2 个附件会被移除。']);
   assert.equal(d.querySelector('.modal-card')!.getAttribute('aria-modal'), 'true');
   // Escape closes it, back to ⋯.
   d.key('Escape');
@@ -603,4 +609,15 @@ test('the shell joins earlier pages in both reads, draws the top row and suggest
   assert.ok(said.length > 20);
   for (const s of said) assert.doesNotMatch(s, /Bot|Agent|session|thread|原生|会话|线程/i, s);
   assert.doesNotMatch(css.replace(/\/\*[\s\S]*?\*\//g, ''), /#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i);
+});
+
+test('item 46: the chat does not say twice what is on screen — a message\'s face and name line carry no tooltip of the printed name, and a group\'s title never shows its thread ID on hover', () => {
+  const app = read('client/public/app.js');
+  const head = /\n {2}function speakerHead\(who, time\) \{\n([\s\S]*?)\n {2}\}\n/.exec(app)![1]!;
+  assert.doesNotMatch(head, /setTip/);
+  assert.match(app, /function headFace\(who\) \{\n\s+const av = speakerFace\(who\);\n\s+setTip\(av, ""\);\n\s+return av;\n\s+\}/);
+  // Every message head that prints the name next to the face uses it.
+  assert.equal((app.match(/row\.append\(headFace\((who|speaker)\)\)/g) || []).length, 3);
+  assert.doesNotMatch(app, /row\.append\(speakerFace\((who|speaker)\)\);\n\s+(const body = el\("div", "body"\);\n\s+)?(if \([^\n]*\) )?body\.append\(speakerHead/);
+  assert.match(app, /setTip\(titleEl, !group && slug && slug !== shown \? slug : ""\);/);
 });

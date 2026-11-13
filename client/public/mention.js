@@ -104,9 +104,16 @@
         const mark = node("span", "mx-all");
         mark.setAttribute("aria-hidden", "true");
         mark.append(glyph(USERS));
-        row.append(mark, node("span", "mx-name", R.ALL.label), node("span", "mx-hint", R.ALL.hint));
+        // 全体 after the members, under its people mark; what it does shows the
+        // moment it is picked (each member's @ in the composer). The hint is
+        // for a screen reader only (item 46).
+        row.append(mark, node("span", "mx-name", R.ALL.label), node("span", "mx-hint visually-hidden", R.ALL.hint));
       } else {
-        row.append(H.face(it.name), node("span", "mx-name", it.name));
+        // The full name on hover only while the printed one is cut short (review r15).
+        const name = node("span", "mx-name", it.name);
+        name.dataset.tip = it.name;
+        name.dataset.tipOnly = "clipped";
+        row.append(H.face(it.name), name);
       }
       row.addEventListener("mousemove", () => { if (S.active !== i) { S.active = i; mark(); } });
       row.addEventListener("click", () => pick(i));

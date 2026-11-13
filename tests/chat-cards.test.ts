@@ -204,8 +204,11 @@ test('an unfinished reply says how it ended; the server\'s stand-in words and a 
   assert.deepEqual(plain(R.ending({ ended: { how: 'stopped' } })), { how: 'stopped', label: '已停止', reason: '', again: false });
   assert.equal(R.ending({ ended: { how: 'interrupted' } }).label, '中途被打断');
   assert.equal(R.ending({ ended: { how: 'weird' } }), null);
-  assert.equal(R.words({ ended: { how: 'failed' } }, '这次没完成，请查看详情'), '');
-  assert.equal(R.words({ ended: { how: 'interrupted' } }, '中途被打断，没有写完'), '');
+  // The server's stand-in for a reply that ended before any words is the line's own words (b1dbf60a): not drawn as a reply.
+  assert.equal(R.words({ ended: { how: 'failed' } }, '这次没完成'), '');
+  assert.equal(R.words({ ended: { how: 'interrupted' } }, '中途被打断'), '');
+  assert.equal(R.words({ ended: { how: 'stopped' } }, '已停止'), '');
+  assert.equal(R.words({ ended: { how: 'failed' } }, '这次没完成，请查看详情'), '这次没完成，请查看详情', 'the old stand-in is no longer one: words a cat really wrote are kept');
   assert.equal(R.words({ ended: { how: 'stopped' } }, '写到一半'), '写到一半', 'words written before it stopped stay');
   assert.equal(R.words({ blocks: [{ kind: 'card', approval: { id: 'p1' } }] }, '提议捕捉品味信号：…'), '', 'the request card is drawn instead');
   const messages = [
@@ -707,9 +710,15 @@ test('a multiple choice toggles in pick order up to max and sends once; a confir
   const box = () => p.row('m-pick').querySelector('.ask')!;
   const opt = (label: string) => all(box()).find(e => e.tagName === 'BUTTON' && e.textContent.endsWith(label))!;
   assert.equal(button(box(), '确认选择').getAttribute('aria-disabled'), 'true');
+  // Item 46: the limit is told to a screen reader until it is reached, then shown, when the rest turn unavailable.
+  const limit = () => box().querySelector('.approval-timer')!;
+  assert.equal(limit().textContent, '最多选 2 项');
+  assert.ok(limit().classList.contains('visually-hidden'), 'nothing picked: not on screen');
   opt('书').click();
+  assert.ok(limit().classList.contains('visually-hidden'), 'one of two: still not on screen (确认选择（1） counts)');
   opt('水').click();
   assert.equal(opt('伞').getAttribute('aria-disabled'), 'true', 'max reached');
+  assert.ok(!limit().classList.contains('visually-hidden'), 'the limit reached: shown, the reason the third is unavailable');
   assert.equal(opt('书').getAttribute('aria-pressed'), 'true');
   button(box(), '确认选择（2）').click();
   assert.equal(p.sends[0].text, '我选了：书, 水（要带的）');
@@ -742,13 +751,13 @@ test('an unfinished reply ends quietly: 详情 shows the engine\'s reason verbat
   const p = page();
   const history = [
     { id: 'u1', role: 'user', content: '帮我查一下' },
-    { id: 'r1', role: 'assistant', content: '这次没完成，请查看详情', status: 'failed', ended: { how: 'failed', reason: 'Error: rate limit exceeded' }, native: { replyTo: 'u1' } },
+    { id: 'r1', role: 'assistant', content: '这次没完成', status: 'failed', ended: { how: 'failed', reason: 'Error: rate limit exceeded' }, native: { replyTo: 'u1' } },
     { id: 'u2', role: 'user', content: '停' },
     { id: 'r2', role: 'assistant', content: '写到一半', ended: { how: 'stopped' }, native: { replyTo: 'u2' } },
   ];
   p.draw(history);
   const failed = p.row('r1');
-  assert.doesNotMatch(failed.textContent, /请查看详情/, 'the stand-in words are not the reply');
+  assert.equal((failed.textContent.match(/这次没完成/g) || []).length, 1, 'the stand-in words are not the reply: 「这次没完成」 once, in the line under it');
   const line = failed.querySelector('.ck-ended')!;
   assert.equal(line.textContent, '这次没完成详情再发一次');
   const reason = failed.querySelector('.ck-reason')!;
@@ -774,7 +783,7 @@ test('再发一次 on a reply that took in what was said meanwhile sends all of 
   const took = { kind: 'input', dispatchRefs: [{ targetId: 'c', statusMessageId: 'r1', appendAcceptance: 'accepted' }] };
   const history = [
     { id: 'u1', native_message_id: 'u1', role: 'user', content: '帮我查一下' },
-    { id: 'r1', native_message_id: 'r1', role: 'assistant', content: '这次没完成，请查看详情', status: 'failed', ended: { how: 'failed' }, follows: 3,
+    { id: 'r1', native_message_id: 'r1', role: 'assistant', content: '这次没完成', status: 'failed', ended: { how: 'failed' }, follows: 3,
       native: { id: 'r1', replyTo: 'u1', lifecycle: { status: 'failed', inputMessageIds: ['u1', 'u2', 'u3'] } } },
     { id: 'u2', native_message_id: 'u2', role: 'user', content: '顺便看下导出', native: { lifecycle: took } },
     { id: 'u3', native_message_id: 'u3', role: 'user', content: '还有同步', native: { lifecycle: took } },
@@ -872,6 +881,13 @@ test('the switch asks the browser only when turned on, says plainly when it refu
   const p = b.tab();
   assert.equal(p.toggle.getAttribute('aria-checked'), 'false');
   assert.match(p.pane.textContent, /桌面通知/);
+  // Item 46: the row names itself (no 通知 heading); when it reminds is the switch's description, for a screen reader.
+  assert.equal(p.pane.querySelectorAll('h4').length, 0);
+  const hint = p.pane.querySelector('.hint')!;
+  assert.equal(hint.id, 'ck-notify-hint');
+  assert.ok(hint.classList.contains('visually-hidden'));
+  assert.equal(hint.textContent, '猫猫回复了，或有事等你确认时提醒你。正在看的聊天不提醒，没有声音。');
+  assert.match(p.toggle.getAttribute('aria-describedby')!, /ck-notify-hint/);
   p.toggle.click();
   await settle();
   assert.equal(b.asked(), 1);

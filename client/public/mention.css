@@ -18,7 +18,7 @@
 .mx-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mx-all { flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--x-fill-2); color: var(--x-muted); }
 .mx-all .icon { width: 15px; height: 15px; }
-.mx-hint { flex: none; margin-left: auto; padding-left: var(--x-s3); font-size: var(--x-fs-sm); color: var(--x-faint); white-space: nowrap; }
+/* 全体's hint (@ 群里每一只) is for a screen reader only (.visually-hidden, item 46). */
 @media (prefers-reduced-motion: reduce) {
   .pop.mx-pop { animation: none; }
 }

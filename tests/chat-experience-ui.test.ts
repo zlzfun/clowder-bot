@@ -320,7 +320,12 @@ test('the status line leads with what waits for the owner and keeps every concur
   assert.equal(line.partial, false);
   // A failure outranks a run; the run keeps its count.
   const failed = X.line(X.activity(activity({ items: [{ id: 'f', kind: 'failure', label: '执行失败' }, { id: 'r', kind: 'running', label: '在写' }], counts: { failure: 1, running: 1 } })));
-  assert.deepEqual([failed.lead, plain(failed.rest)], ['失败', ['处理中 1']]);
+  // Item 46: one failure leads with its own label, which already says it failed (not 「失败 执行失败」); it keeps its kind (the colour).
+  assert.deepEqual([failed.lead, failed.label, failed.kind, plain(failed.rest)], ['执行失败', '', 'failure', ['处理中 1']]);
+  const bare = X.line(X.activity(activity({ items: [{ id: 'f', kind: 'failure' }], counts: { failure: 1 } })));
+  assert.deepEqual([bare.lead, bare.label], ['失败', ''], 'a failure without words of its own still says 失败');
+  const twoFailed = X.line(X.activity(activity({ items: [{ id: 'f', kind: 'failure', label: '宪宪这次没完成' }, { id: 'g', kind: 'failure', label: '砚砚这次没完成' }], counts: { failure: 2 } })));
+  assert.deepEqual([twoFailed.lead, twoFailed.label], ['2 项失败', '宪宪这次没完成'], 'two are counted, the first named');
   // One run says who and what in its own words; several are counted.
   const one = X.line(X.activity(activity({ items: [{ id: 'r', kind: 'running', label: '宪宪正在处理', catId: 'cat-a' }] })));
   assert.deepEqual([one.lead, one.label, one.catId], ['宪宪正在处理', '', 'cat-a']);
@@ -412,6 +417,38 @@ test('memory reads keep proposed changes apart from saved content, retired entri
 });
 
 // ---------------------------------------------------------------- status line
+test('review r15: one failure keeps the words that say it failed whole — the cat\'s name may shrink, 「这次没完成」 is its own bold part, the reason follows in regular weight; two failures stay counted', async () => {
+  const X = rules();
+  const NAME = '一只名字有二十个字那么长的橘色大猫咪呀呀';
+  assert.equal([...NAME].length, 20);
+  const one = (label: string, catName = NAME) => X.line(X.activity(activity({ items: [{ id: 'f', kind: 'failure', label, catId: 'cat-f', catName }], counts: { failure: 1 } })));
+  const plainFail = one(NAME + '这次没完成');
+  assert.deepEqual([plainFail.who, plainFail.lead, plainFail.label], [NAME, '这次没完成', '']);
+  const reason = '模型返回了 401：登录已经过期，请在终端里重新登录以后再试一次，'.repeat(4);
+  const withReason = one(NAME + '这次没完成：' + reason);
+  assert.deepEqual([withReason.who, withReason.lead, withReason.label], [NAME, '这次没完成', reason.trim()], 'split at the first 「：」 only');
+  // Without the cat's name at the start, the words before 「：」 are what is said.
+  assert.deepEqual(plain(X.failureParts('执行失败：超时', '团子')), { who: '', what: '执行失败', reason: '超时' });
+  const two = X.line(X.activity(activity({ items: [{ id: 'f', kind: 'failure', label: NAME + '这次没完成', catName: NAME }, { id: 'g', kind: 'failure', label: '砚砚这次没完成', catName: '砚砚' }], counts: { failure: 2 } })));
+  assert.deepEqual([two.lead, two.who], ['2 项失败', ''], 'two or more are counted as before');
+  // Drawn: the name and 「这次没完成」 in a pair whose second column is never narrower than its words; the reason in regular weight.
+  const p = page(path => (path.endsWith('/activity') ? activity({ items: [{ id: 'f', kind: 'failure', label: NAME + '这次没完成：' + reason, catId: 'cat-f', catName: NAME, messageId: 'm-f' }], counts: { failure: 1 } }) : {}));
+  p.cx.select(ada);
+  p.cx.observe(ada, 'thread-A', true);
+  await settle();
+  const row = p.strip().querySelector('.cx-row')!;
+  const pair = row.querySelector('.cx-said-fail')!;
+  assert.deepEqual(pair.children.map(c => [c.tagName, c.className, c.textContent]), [['B', 'cx-lead cx-who', NAME], ['B', 'cx-lead cx-what', '这次没完成']]);
+  const label = row.querySelector('.cx-label')!;
+  assert.equal(label.tagName, 'SPAN', 'the reason is not bold');
+  assert.equal(label.textContent, reason.trim());
+  assert.match(row.getAttribute('aria-label')!, new RegExp('^' + NAME + '这次没完成，模型返回了 401'));
+  const css = read('client/public/chat-experience.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.match(css, /\.cx-row \.cx-said-fail \{ display: inline-grid; grid-template-columns: minmax\(0, auto\) max-content; align-items: center; \}/);
+  assert.match(css, /\.cx-row \.cx-said-fail > \.cx-what \{ max-width: none; overflow: visible; \}/);
+  assert.match(css, /\.cx-row\[data-kind="failure"\] \.cx-label \{ flex: 1 1 0; \}/);
+});
+
 test('concurrent approvals: the line leads with both, keeps the other counts, steps the old lines aside, and opens in place onto items that find their message or Task', async () => {
   const p = page(path => (path.endsWith('/activity') ? busy() : {}));
   p.cx.select(ada);
@@ -429,7 +466,9 @@ test('concurrent approvals: the line leads with both, keeps the other counts, st
   assert.equal(strip.querySelector('.cx-row')!.getAttribute('aria-expanded'), 'true');
   const items = list.querySelectorAll('.cx-item');
   assert.deepEqual(items.map(i => i.dataset.kind), ['approval', 'approval', 'running', 'queued', 'task', 'task']);
-  assert.match(textOf(list), /另有 1 项没有列出，任务的全部内容在「任务」页。/, 'a count beyond the list is never dropped');
+  // Item 46: no pointer to a 「任务」 page, which is gone (tasks live under 资料 › 高级).
+  assert.match(textOf(list), /另有 1 项没有列出。/, 'a count beyond the list is never dropped');
+  assert.doesNotMatch(textOf(list), /「任务」页/);
   assert.equal(all(list).filter(e => /^查看其余/.test(e.textContent)).length, 0, 'six rows fit: nothing to open');
   // An approval points at its message and at the existing approval controls; nothing approves here.
   const first = items[0];
@@ -936,8 +975,8 @@ test('记忆: 关于你 and 你的偏好 start folded and unread; opening one re
   const controls = all(p.root).filter(e => ['BUTTON', 'TEXTAREA', 'INPUT', 'SELECT', 'FORM'].includes(e.tagName)).map(textOf);
   assert.deepEqual(controls, []);
   assert.doesNotMatch(textOf(p.root), /编辑|确认修改|停用|遗忘|忘记|添加|删除|说「记住|就会出现/);
-  // The conversation's notes stay, read only and named for their reach.
-  assert.equal(textOf(p.root.querySelector('.cx-notes')!), '这个对话的便笺 · 1周五前交便笺只属于这个对话，换到别的对话不会带过去。');
+  // The conversation's notes stay, read only and named for their reach (the heading; item 46: no sentence saying it again).
+  assert.equal(textOf(p.root.querySelector('.cx-notes')!), '这个对话的便笺 · 1周五前交');
   assert.deepEqual(p.posts(), [], 'nothing but reads');
 });
 
@@ -1030,10 +1069,11 @@ test('这个对话的便笺 is read only like the rest of 记忆: no add or dele
   notes = () => ({ memory: [] });
   button(sec, '重试').click();
   await settle();
-  assert.match(textOf(sec), /^这个对话的便笺 · 0这个对话还没有便笺。/, 'empty only after a read that worked');
+  // Item 46: none is the count, · 0, and nothing else — only after a read that worked (a failure says so instead).
+  assert.equal(textOf(sec), '这个对话的便笺 · 0', 'empty only after a read that worked');
   // The drawer's own notes are shown as they are, read only.
   p.cx.memoryView(ada, { name: 'Ada', memory: [{ id: 'note-1', scope: 'conversation', text: '周五前交' }, { id: 'note-2', scope: 'conversation', text: '用中文\n简短' }] });
-  assert.equal(textOf(sec), '这个对话的便笺 · 2周五前交用中文\n简短便笺只属于这个对话，换到别的对话不会带过去。');
+  assert.equal(textOf(sec), '这个对话的便笺 · 2周五前交用中文\n简短');
   assert.deepEqual(all(root).filter(e => ['BUTTON', 'TEXTAREA', 'INPUT', 'FORM'].includes(e.tagName)).map(textOf), [], 'no field, no add, no delete');
   assert.deepEqual(p.posts(), [], 'nothing but reads went out');
   // The module itself has no way to write memory or notes: its only write is the read position.
@@ -1069,7 +1109,7 @@ function sidebar() {
   const state: Any = { bots: [], groups: [], folders: [], others: null, sel: null, peer: null, preview: {}, listSig: '' };
   const stStatus: Any = { map: {}, groups: {} };
   const out: Any = {};
-  const code = ['el', 'spinIcon', 'workText', 'stDesc', 'attentionLine', 'groupDesc', 'paintStatus', 'listButton', 'botRow', 'renderLists', 'pickBot', 'pickGroup', 'closeDrawer', 'syncBackdrop'].map(take).join('');
+  const code = ['el', 'spinIcon', 'workText', 'stDesc', 'attentionLine', 'groupDesc', 'paintStatus', 'railTip', 'clipTip', 'listButton', 'sectionLabel', 'botRow', 'renderLists', 'pickBot', 'pickGroup', 'closeDrawer', 'syncBackdrop'].map(take).join('');
   vm.runInNewContext(code + unreadOf[0] + 'out.renderLists = renderLists; out.paintStatus = paintStatus;', {
     out, state, stStatus, Node: El, experienceRules: rules(),
     document: { createElement: (tag: string) => doc.createElement(tag), querySelectorAll: (sel: string) => doc.body.querySelectorAll(sel) },
@@ -1134,6 +1174,58 @@ test('a sidebar row is one target: a click on its status line (busy, queued, wai
   s.state.peer = { slug: 'other' };
   s.find(PIN).click();
   assert.deepEqual(s.picked, ['bot:主猫']);
+});
+
+test('item 46: the list says no more than the layout cannot — the groups follow the cats after a gap with 群聊 for a screen reader only, and a row\'s name is a tooltip only in the rail', () => {
+  const s = sidebar();
+  s.state.bots = [{ name: '宪宪', description: '会写代码' }, { name: '主猫', pinned: true }];
+  s.state.groups = [{ id: 'g-1', name: '设计组', members: ['宪宪', '主猫'] }];
+  s.status();
+  const gap = s.find('.group-label');
+  assert.ok(gap.classList.contains('cl-gap'), 'a gap where the heading was');
+  const word = gap.querySelector('.label')!;
+  assert.equal(word.textContent, '群聊');
+  assert.ok(word.classList.contains('visually-hidden'), 'the word is there for a screen reader, not on screen');
+  for (const sel of ['.item[data-bot="宪宪"]', '.item[data-group="g-1"]']) {
+    const row = s.find(sel);
+    assert.equal(row.dataset.tipOnly, 'rail', sel + ': the name beside the face is not repeated as a tooltip in the full sidebar');
+    assert.equal(row.querySelector('.avatar')!.dataset.tipOnly, 'rail', sel + ': nor on its face');
+    // Review r15: the printed name keeps its full name, shown only while it is cut short (measured at hover).
+    const printed = row.querySelector('.name')!;
+    assert.deepEqual([printed.dataset.tip, printed.dataset.tipOnly], [printed.textContent, 'clipped'], sel);
+  }
+  // No groups, no gap.
+  s.state.groups = [];
+  s.status();
+  assert.equal(s.side.querySelector('.group-label'), null);
+});
+
+test('review r15: a printed name shows its full name on hover only while it is cut short — a long name gets the tooltip, a short one does not; a name in the rail keeps its own', () => {
+  const app = read('client/public/app.js');
+  const take = (name: string) => new RegExp(`\\n {2}function ${name}\\([^)]*\\) \\{\\n[\\s\\S]*?\\n {2}\\}\\n`).exec(app)![0];
+  const tip: Any = { hidden: true, textContent: '', style: {}, offsetWidth: 80, offsetHeight: 20 };
+  const out: Any = {};
+  vm.runInNewContext(take('hideTip') + take('placeTip') + 'out.place = placeTip;', {
+    out, tipEl: tip, tipTimer: 0, tipHost: null, $: () => null, window: { innerWidth: 1440, innerHeight: 900, clearTimeout() {} },
+  });
+  const host = (text: string, scrollWidth: number, clientWidth: number, only = 'clipped', rail = false): Any => ({
+    dataset: { tip: text, tipOnly: only }, scrollWidth, clientWidth,
+    getAttribute: (k: string) => (k === 'data-tip' ? text : null),
+    closest: (sel: string) => (rail && sel === '.sidebar.rail' ? {} : null),
+    getBoundingClientRect: () => ({ left: 20, right: 80, top: 100, bottom: 116, width: 60, height: 16 }),
+  });
+  out.place(host('喵喵喵喵喵喵喵喵喵喵大橘猫', 168, 60));
+  assert.deepEqual([tip.hidden, tip.textContent], [false, '喵喵喵喵喵喵喵喵喵喵大橘猫'], 'cut short: the full name');
+  out.place(host('宪宪', 28, 28));
+  assert.equal(tip.hidden, true, 'printed in full: no tooltip repeating it');
+  // A row's own tooltip stays rail-only, as in item 46.
+  out.place(host('宪宪', 0, 0, 'rail', false));
+  assert.equal(tip.hidden, true);
+  out.place(host('宪宪', 0, 0, 'rail', true));
+  assert.deepEqual([tip.hidden, tip.textContent], [false, '宪宪']);
+  // Wired for the pinned cats too (their names have 60px).
+  assert.match(app, /label\.append\(clipTip\(el\("span", "pin-label", niceName\(b\.name\)\), niceName\(b\.name\)\)\);/);
+  assert.match(app, /if \(host\.dataset\.tipOnly === "clipped" && !\(host\.scrollWidth > host\.clientWidth\)\) \{ hideTip\(\); return; \}/);
 });
 
 // ---------------------------------------------------------------- wiring
