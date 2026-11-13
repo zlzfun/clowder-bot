@@ -259,22 +259,23 @@ test('wiring: the palette passes its operation, the shell its notes with owners;
   assert.match(hist, /older: \(\) => \(\{ key: P\.key, thread: P\.thread, gen: P\.gen, state: P\.state, more: !!nextCursor\(\), loaded: P\.loaded, drawn: P\.drawn,/);
 });
 
-test('the found message\'s focus ring reaches 3:1 against the chat in both café themes, and uses the system highlight in forced colours', () => {
+test('the found message\'s focus ring reaches 3:1 against the chat in every 配色 and both themes, and uses the system highlight in forced colours', () => {
   const css = read('client/public/polish.css'), cafe = read('client/public/cafe-theme.css');
-  // The café tokens, light (first block) and dark (the html[data-theme="dark"] block).
-  const dark = cafe.indexOf('html[data-theme="dark"]');
-  const token = (name: string, from: number) => new RegExp(`--${name}:\\s*(#[0-9a-f]{6})`, 'i').exec(cafe.slice(from))![1]!;
   const hex = (h: string) => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
   const lin = (c: number) => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
   const lum = ([r, g, b]: number[]) => 0.2126 * lin(r!) + 0.7152 * lin(g!) + 0.0722 * lin(b!);
   const ratio = (a: number[], b: number[]) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
-  // Every ring rule mixes the primary colour at one share over transparency.
-  const shares = [...css.matchAll(/#thread \.msg:focus-visible[^{]*\{[^}]*color-mix\(in srgb, var\(--x-primary\) (\d+)%, transparent\)/g)].map(m => Number(m[1]));
+  // Every ring rule mixes the ring colour at one share over transparency. It was the primary until item 48; the
+  // ring colour is 拿铁's primary (cafe-theme.css points --ring at it), and every other 配色 fits its --ring for this.
+  assert.match(cafe, /--ring: var\(--x-primary\);/);
+  const shares = [...css.matchAll(/#thread \.msg:focus-visible[^{]*\{[^}]*color-mix\(in srgb, var\(--ring\) (\d+)%, transparent\)/g)].map(m => Number(m[1]));
   assert.equal(shares.length, 2, 'the bubble ring and the row ring');
-  for (const share of shares) for (const from of [0, dark]) {
-    const fg = hex(token('x-primary', from)), bg = hex(token('x-card', from));
+  const palettes = JSON.parse(read('client/public/theme-lab/palettes.json'));
+  assert.equal(palettes.length, 11);
+  for (const share of shares) for (const p of palettes) for (const mode of ['light', 'dark']) {
+    const fg = hex(p[mode].tokens['--ring']), bg = hex(p[mode].tokens['--x-card']);
     const seen = fg.map((c, i) => Math.round(c * share / 100 + bg[i]! * (1 - share / 100)));
-    assert.ok(ratio(seen, bg) >= 3, `${share}% in ${from ? 'dark' : 'light'}: ${ratio(seen, bg).toFixed(2)}:1`);
+    assert.ok(ratio(seen, bg) >= 3, `${share}% in ${p.id} ${mode}: ${ratio(seen, bg).toFixed(2)}:1`);
   }
   assert.match(css, /@media \(forced-colors: active\) \{\n\s+#thread \.msg:focus-visible :is\(\.bubble, \.bot-bubble\), #thread \.msg:focus-visible:not\(:has\(\.bubble, \.bot-bubble\)\) \{ outline-color: Highlight; \}/);
 });

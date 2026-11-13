@@ -8,15 +8,23 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <script>
+(function () {
 try {
   var t = localStorage.getItem("xbot-theme");
   if (t !== "light" && t !== "dark") {
     t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   }
   document.documentElement.setAttribute("data-theme", t);
+  // 配色 (设置 → 通用, colors.js): one of these ids, else 拿铁, which is cafe-theme.css with no attribute.
+  // Each one's window colour in light and dark, for the browser's own bar (written by scripts/theme-lab/palettes.mjs).
+  var w = /* colors */{"latte":["#f0e5d6","#201a17"],"oat":["#f2ece3","#1c1612"],"cinnamon":["#f5efe6","#181715"],"americano":["#f1f0ee","#131311"],"matcha":["#eaefe5","#131914"],"seasalt":["#e7eef3","#111820"],"berry":["#f4eaeb","#1c1518"],"earlgrey":["#edecf2","#17161e"],"honey":["#f0ede5","#1a1712"],"coldbrew":["#eaedf1","#0d1420"],"mintchoco":["#e5f0eb","#1d1512"]}/* /colors */;
+  var c = localStorage.getItem("xbot-colors");
+  if (c === "latte" || !Object.prototype.hasOwnProperty.call(w, c)) c = "";
+  if (c) document.documentElement.setAttribute("data-colors", c);
   var m = document.getElementById("theme-color");
-  if (m) m.setAttribute("content", t === "dark" ? "#201A17" : "#F0E5D6");
+  if (m) m.setAttribute("content", w[c || "latte"][t === "dark" ? 1 : 0]);
 } catch (e) {}
+})();
 </script>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -35,6 +43,8 @@ try {
 <link rel="stylesheet" href="/persona-cards.css">
 <link rel="stylesheet" href="/account.css">
 <link rel="stylesheet" href="/cafe-theme.css">
+<link rel="stylesheet" href="/cafe-colors.css">
+<link rel="stylesheet" href="/colors.css">
 <link rel="stylesheet" href="/agents.css">
 <link rel="stylesheet" href="/cat-templates.css">
 <link rel="stylesheet" href="/chat-presentation.css">
@@ -299,6 +309,8 @@ try {
 <script src="/chat-notify.js"></script>
 <script src="/chat-presence-rules.js"></script>
 <script src="/chat-presence.js"></script>
+<script src="/colors-rules.js"></script>
+<script src="/colors.js"></script>
 <script src="/sidebar.js"></script>
 <script src="/account.js"></script>
 <script src="/app.js"></script>

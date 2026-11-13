@@ -7,16 +7,25 @@
 // inside the owner's bubble. The first palette, 拿铁, is today's cafe-theme.css
 // read as it is, so the lab compares against what the app really shows.
 //
-//   node scripts/theme-lab/palettes.mjs           writes client/public/theme-lab/palettes.json, reports failing pairs
-//   node scripts/theme-lab/palettes.mjs --check   only says whether the committed file is what this gives
+// Since 2026-11-13 all eleven are the product's 配色 (设置 → 通用; item 48): the
+// same data also becomes client/public/cafe-colors.css (the ten besides 拿铁,
+// and every palette's swatch) and the window-colour table in the boot script
+// of client/index.html.
 //
-// The committed palettes.json is exactly what this writes (tests/theme-lab.test.ts).
+//   node scripts/theme-lab/palettes.mjs           writes palettes.json, cafe-colors.css and the boot table; reports failing pairs
+//   node scripts/theme-lab/palettes.mjs --check   only says whether the committed files are what this gives
+//
+// The committed files are exactly what this writes (tests/theme-lab.test.ts, tests/colors.test.ts).
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { hex, rgba, fit, contrast, lum, hexToOklch } from "./color.mjs";
 
 const REPO = path.resolve(import.meta.dirname, "../..");
+// The share of the ring colour a message row's focus ring is drawn with, over the chat card (polish.css).
+export const RING_SHARE = 0.7;
+/** fg at `share` over an opaque bg, as color-mix(in srgb, fg share%, transparent) shows it there. */
+export const mixed = (fg, bg, share) => "#" + [1, 3, 5].map((i) => Math.round(parseInt(fg.slice(i, i + 2), 16) * share + parseInt(bg.slice(i, i + 2), 16) * (1 - share)).toString(16).padStart(2, "0")).join("");
 export const OUT = path.join(REPO, "client/public/theme-lab/palettes.json");
 const L = (v) => (typeof v === "string" ? hexToOklch(v) : v);
 
@@ -104,7 +113,17 @@ function mode(s, dark) {
   const warn = sem(dark ? [0.82, 0.08 * semC, 85] : [0.47, 0.09 * semC, 75], [warnBg, S.card]);
 
   const shadowC = dark ? [0.1, 0.012, s.sh] : [0.3, Math.min(0.05, s.sc * 3), s.sh];
-  const accent = s.accent ? hex(fit(L(s.accent), [S.card, S.win], 4.5, dir)) : primary;
+  // The accent is the primary drawn alone on a surface: a dot, the owner's face, a tick, a focus ring.
+  // A palette may name its own (蜂蜜: its yellow primary is a fill, too light to stand alone on a light
+  // surface), which reads 4.5:1 on the card and the window; either way it stands out 3:1 from every
+  // surface it sits on (WCAG 1.4.11), the avatar circle and the selected row included.
+  let acc = s.accent ? fit(L(s.accent), [S.card, S.win], 4.5, dir) : pri;
+  acc = fit(acc, [S.card, S.win, S.panel, S.fill1, S.fill2, S.fill3, S.botBubble, S.avatar, S.popover], 3, dir);
+  const accent = hex(acc);
+  // The focus ring is the accent, except that a message row draws it at RING_SHARE over the chat card
+  // (polish.css): there it still reads 3:1, so where the accent is too light for that the ring is deeper.
+  let ring = acc;
+  for (let i = 0; i < 160 && contrast(mixed(hex(ring), S.card, RING_SHARE), S.card) < 3; i++) ring = [ring[0] + dir * 0.005, ring[1], ring[2]];
 
   const t = {
     "--x-win": S.win, "--x-card": S.card, "--x-panel": S.panel, "--x-panel-card": S.panelCard,
@@ -126,7 +145,7 @@ function mode(s, dark) {
       : `0 8px 30px ${rgba(shadowC, 0.14)}, 0 1px 3px ${rgba(shadowC, 0.08)}`,
     "--x-scrim": dark ? rgba([0.1, 0.01, s.sh], 0.52) : rgba([0.22, Math.min(0.03, s.sc * 2), s.sh], 0.3),
     "--scroll": S.scroll, "--warn-bg": warnBg, "--warn": warn,
-    "--accent": accent, "--accent-ink": accent, "--ring": accent,
+    "--accent": accent, "--accent-ink": accent, "--ring": hex(ring),
   };
   Object.assign(t, s.pin || {});
   return { tokens: t, syn: { code: syntax(t["--x-code"], s.th), user: syntax(t["--x-user-code"], s.th) } };
@@ -236,6 +255,7 @@ export function buildPalettes() {
 export const serialize = (palettes) => JSON.stringify(palettes, null, 1);
 
 // ---- The pairs a reader actually meets: [foreground, backgrounds, minimum WCAG ratio].
+export const MARK_SURFACES = ["--x-card", "--x-win", "--x-panel", "--x-fill-1", "--x-fill-2", "--x-fill-3", "--x-bot-bubble", "--x-avatar-bg", "--x-popover"];
 export const PAIRS = [
   ["--x-text", ["--x-card", "--x-win", "--x-fill-3", "--x-bot-bubble"], 7],
   ["--x-text-2", ["--x-card", "--x-win", "--x-fill-3"], 4.5],
@@ -249,7 +269,9 @@ export const PAIRS = [
   ["--x-type-dev", ["--x-type-dev-bg"], 4.5], ["--x-type-res", ["--x-type-res-bg"], 4.5],
   ["--x-type-gen", ["--x-type-gen-bg"], 4.5], ["--x-type-own", ["--x-type-own-bg"], 4.5],
   ["--warn", ["--warn-bg"], 4.5],
-  ["--accent", ["--x-card", "--x-win"], 3],
+  // Shapes drawn alone in the accent (a dot, the owner's face, a tick, a focus ring) on the surfaces around them.
+  ["--accent", MARK_SURFACES, 3],
+  ["--accent-ink", MARK_SURFACES, 3],
   ["--x-user-bubble", ["--x-card"], 1.12],
   ["--x-bot-bubble", ["--x-card"], 1.04],
   ["--x-fill-3", ["--x-win"], 1.08],
@@ -271,19 +293,87 @@ export function problems(palettes) {
       const c = contrast(v, t[bgTok]);
       if (c < 4.5 - 0.005) out.push(`${p.id} ${m}: ${k} in ${where} = ${c.toFixed(2)}`);
     }
+    // A message row's focus ring: the ring colour at RING_SHARE over the chat card (拿铁's is an alias of its primary).
+    const ring = t["--ring"].startsWith("#") ? t["--ring"] : t["--x-primary"];
+    const rc = contrast(mixed(ring, t["--x-card"], RING_SHARE), t["--x-card"]);
+    if (rc < 3 - 0.005) out.push(`${p.id} ${m}: --ring at ${RING_SHARE * 100}% on --x-card = ${rc.toFixed(2)} (< 3)`);
   }
   return out;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  const palettes = buildPalettes(), text = serialize(palettes);
-  if (process.argv.includes("--check")) {
-    const same = fs.existsSync(OUT) && fs.readFileSync(OUT, "utf8") === text;
-    console.log(same ? "palettes.json is what the generator gives" : "palettes.json differs from what the generator gives: run node scripts/theme-lab/palettes.mjs");
-    process.exit(same ? 0 : 1);
+// ---- The product's 配色 (设置 → 通用; docs/xbot-frontend.md item 48).
+export const CSS_OUT = path.join(REPO, "client/public/cafe-colors.css");
+export const INDEX = path.join(REPO, "client/index.html");
+
+/**
+ * The owner's bubble while its message menu is open (app.js marks it .message-target). cafe-theme.css
+ * darkens it to --x-primary-hover, right where the bubble is the primary (null: nothing to add); a
+ * palette whose bubble has its own colour gets that colour pressed instead, 0.05 darker in OKLCH,
+ * its words still 4.5:1.
+ */
+export function pressedBubble(tokens) {
+  const bubble = tokens["--x-user-bubble"], words = tokens["--x-user-bubble-text"];
+  if (bubble === tokens["--x-primary"]) return null;
+  const [l, c, h] = hexToOklch(bubble);
+  return hex(fit([l - 0.05, c, h], [words], 4.5, lum(words) > lum(bubble) ? -1 : 1));
+}
+
+const block = (selectors, values) => `${selectors.join(",\n")} {\n${Object.entries(values).map(([k, v]) => `  ${k}: ${v};`).join("\n")}\n}`;
+/** client/public/cafe-colors.css, exactly. */
+export function colorsCss(palettes) {
+  const out = [`/* 配色 (设置 → 通用): the palettes besides 拿铁. Written by scripts/theme-lab/palettes.mjs from its
+   specs (the same data as the colour lab's palettes.json); do not edit by hand, run the script
+   (docs/xbot-frontend.md item 48). Loaded right after cafe-theme.css.
+
+   html[data-colors="<id>"] is set before the first paint by client/index.html's boot script and on a
+   choice by colors.js; no attribute is 拿铁, which is cafe-theme.css itself. Each palette's rules are
+   one step above cafe-theme.css's (and app.css's): its tokens on html[data-colors] (0,1,1) and
+   html[data-colors][data-theme="dark"] (0,2,1) over :root and html[data-theme="dark"], and its four
+   syntax rules one class over theirs; no !important. .colors-swatch[data-colors="<id>"] carries a
+   palette's tokens on its swatch among the 配色 choices (拿铁's too), in the mode in effect. */`];
+  for (const p of palettes) {
+    const A = `html[data-colors="${p.id}"]`, S = `.colors-swatch[data-colors="${p.id}"]`, D = `html[data-theme="dark"] ${S}`;
+    if (p.current) {
+      out.push("", `/* ${p.name}: cafe-theme.css's own colours, here only for its swatch. */`, block([S], p.light.tokens), block([D], p.dark.tokens));
+      continue;
+    }
+    out.push("", `/* ${p.name} */`,
+      block([A, S], p.light.tokens),
+      block([`${A}[data-theme="dark"]`, D], p.dark.tokens),
+      block([`${A} .code-block`], p.light.syn.code),
+      block([`${A}:not([data-theme="dark"]) .bubble .code-block`], p.light.syn.user),
+      block([`${A}[data-theme="dark"] .code-block`], p.dark.syn.code),
+      block([`${A}[data-theme="dark"] .bubble .code-block`], p.dark.syn.user));
+    const light = pressedBubble(p.light.tokens), dark = pressedBubble(p.dark.tokens);
+    if (light) out.push(block([`${A}:not([data-theme="dark"]) .bubble.message-target`], { background: light }));
+    if (dark) out.push(block([`${A}[data-theme="dark"] .bubble.message-target`], { background: dark }));
   }
-  fs.writeFileSync(OUT, text);
-  console.log(palettes.length, "palettes →", path.relative(REPO, OUT));
+  return out.join("\n") + "\n";
+}
+
+// Each palette's window colour, light and dark, for the browser's own bar before the first paint: the
+// table in client/index.html's boot script, between /* colors */ and /* /colors */.
+export const BOOT_TABLE = /\/\* colors \*\/\{[^}]*\}\/\* \/colors \*\//;
+export const windowTable = (palettes) => "/* colors */{" + palettes.map((p) => `"${p.id}":["${p.light.tokens["--x-win"]}","${p.dark.tokens["--x-win"]}"]`).join(",") + "}/* /colors */";
+export function bootHtml(html, palettes) {
+  if (!BOOT_TABLE.test(html)) throw new Error("client/index.html has no /* colors */ table in its boot script");
+  return html.replace(BOOT_TABLE, windowTable(palettes));
+}
+
+/** Every file this writes, with its exact text. */
+export function outputs(palettes = buildPalettes()) {
+  return [[OUT, serialize(palettes)], [CSS_OUT, colorsCss(palettes)], [INDEX, bootHtml(fs.readFileSync(INDEX, "utf8"), palettes)]];
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  const palettes = buildPalettes(), files = outputs(palettes);
+  if (process.argv.includes("--check")) {
+    const stale = files.filter(([file, text]) => !fs.existsSync(file) || fs.readFileSync(file, "utf8") !== text).map(([file]) => path.relative(REPO, file));
+    console.log(stale.length ? `${stale.join(", ")} differ from what the generator gives: run node scripts/theme-lab/palettes.mjs` : "palettes.json, cafe-colors.css and the boot table are what the generator gives");
+    process.exit(stale.length ? 1 : 0);
+  }
+  for (const [file, text] of files) fs.writeFileSync(file, text);
+  console.log(palettes.length, "palettes →", files.map(([file]) => path.relative(REPO, file)).join(", "));
   for (const p of palettes) {
     const l = p.light.tokens, d = p.dark.tokens;
     console.log(p.id.padEnd(10), "L", l["--x-win"], l["--x-card"], l["--x-user-bubble"], l["--x-primary"], l["--x-text"], l["--x-muted"], l["--x-faint"], "| D", d["--x-win"], d["--x-card"], d["--x-user-bubble"], d["--x-primary"], d["--x-text"]);

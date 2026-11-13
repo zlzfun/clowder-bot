@@ -228,7 +228,7 @@ html[data-theme="dark"] .avatar.group { overflow: visible; background: transpare
 html[data-theme="dark"] .bubble.message-target { background: var(--x-primary-hover); }
 #settings-providers,
 html[data-theme="dark"] #settings-providers {
-  --provider-accent: var(--x-primary);
+  --provider-accent: var(--accent);
   --provider-selected: var(--x-fill-2);
 }
 
@@ -280,3 +280,21 @@ html[data-theme="dark"] .bubble .code-block {
    did; the focused chip still toggles on Enter/Space. Closed, it is unchanged. */
 .top-title.on,
 .top-title.on:hover:not(:disabled) { background: transparent; z-index: 27; }
+
+/* Shapes drawn in the primary colour, in every 配色 (item 48). Alone on a
+   surface (a tick, a dot, a ring) a shape takes the accent (--accent,
+   --accent-ink, --ring: the primary, fitted 3:1 against every surface it sits
+   on; 蜂蜜's yellow primary is a fill, its accent a deep amber); on a primary
+   fill it takes --x-on-primary, and a fill under --primary-text is the primary.
+   In 拿铁 the accent is the primary and --x-on-primary is --x-card (light) or a
+   step from it (dark), so 拿铁 looks as before. Repairs of upstream rules:
+   providers.css's ✓ on the chosen Agent was the primary; devices.css's knob of
+   a switch that is on was white, or --bg in dark; app.css filled the letter
+   badge of a choice with the accent under --primary-text. */
+.binding-option[aria-checked=true]::after { color: var(--accent-ink); }
+.g7-switch[aria-checked="true"]::after,
+html[data-theme="dark"] .g7-switch[aria-checked="true"]::after { background: var(--x-on-primary); }
+.ask-opt:hover .opt-badge,
+.ask-opt:focus-visible .opt-badge,
+.ask-opt.recommend .opt-badge,
+.ask-chosen .opt-badge { background: var(--x-primary); }

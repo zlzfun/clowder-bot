@@ -246,6 +246,11 @@ const TOKENS: Record<string, Record<string, string>> = {
   light: { '--x-card': LIGHT.chat, '--x-bot-bubble': LIGHT.bubble, '--dur-pop-close': '120ms' },
   dark: { '--x-card': DARK.chat, '--x-bot-bubble': DARK.bubble, '--dur-pop-close': '120ms' },
 };
+// And those of each other 配色 (item 48), by "<id>/<theme>": what html[data-colors="<id>"] gives.
+for (const p of JSON.parse(read('client/public/theme-lab/palettes.json'))) {
+  if (!p.current) for (const mode of ['light', 'dark']) TOKENS[p.id + '/' + mode] = { '--x-card': p[mode].tokens['--x-card'], '--x-bot-bubble': p[mode].tokens['--x-bot-bubble'], '--dur-pop-close': '120ms' };
+}
+const tokensOf = (n: Any) => TOKENS[(n.getAttribute('data-colors') ? n.getAttribute('data-colors') + '/' : '') + (n.getAttribute('data-theme') || 'light')] || {};
 type Opts = { reduce?: boolean; dark?: boolean; group?: boolean; theme?: boolean };
 function page(opts: Opts = {}) {
   const doc = new Doc();
@@ -290,7 +295,7 @@ function page(opts: Opts = {}) {
     matchMedia: () => ({ matches: !!opts.reduce }),
     requestAnimationFrame: (fn: () => void) => { frames.push(fn); return frames.length; },
     MutationObserver: FakeObserver,
-    getComputedStyle: (n: Any) => ({ getPropertyValue: (k: string) => (TOKENS[n.getAttribute('data-theme') || 'light'] || {})[k] || '' }),
+    getComputedStyle: (n: Any) => ({ getPropertyValue: (k: string) => tokensOf(n)[k] || '' }),
     addEventListener: (type: string, fn: () => void) => { if (type === 'resize') window.onResize = fn; },
   };
   const RealDate = Date;
@@ -674,6 +679,29 @@ test('the colours follow a theme switched at runtime: the theme\'s own tokens ar
   p.doc.root.setAttribute('data-theme', 'light');
   p.fire(p.doc.root, 'dark');
   assert.equal(text(sheet), '');
+});
+
+test('item 48: the colours follow a 配色 chosen at runtime too: the new palette\'s surfaces are read and the rules re-decided, so no cat keeps a colour judged on the last palette', () => {
+  // The observer watches both attributes applyTheme and 配色 set on <html> (the fake observer below does not filter).
+  assert.match(read('client/public/chat-presence.js'), /\.observe\(root, \{ attributes: true, attributeFilter: \["data-theme", "data-colors"\] \}\)/);
+  const p = page({ theme: true });
+  // 宪宪's lilac: on 拿铁's darker cream reply bubble its paw does not reach 3:1; on 燕麦's lighter one it does.
+  p.state.bots = [{ name: '团子', native_id: 'a', accent: PAIRS.ragdoll }];
+  p.presence.rows(p.roster);
+  const sheet = p.doc.getElementById('pz-accents')!;
+  assert.doesNotMatch(text(sheet), /--pz-paw/, '拿铁: no paw colour');
+  p.doc.root.setAttribute('data-colors', 'oat');
+  p.fire(p.doc.root, null);
+  assert.match(text(sheet), /--pz-paw: #9b7ebd/, '燕麦: the paw takes the cat\'s colour');
+  // Back to 拿铁 (no attribute): judged on 拿铁's surfaces again, not kept from 燕麦.
+  p.doc.root.removeAttribute('data-colors');
+  p.fire(p.doc.root, 'oat');
+  assert.doesNotMatch(text(sheet), /--pz-paw/);
+  // A palette and a theme change together: the pair is read again.
+  p.doc.root.setAttribute('data-colors', 'honey');
+  p.doc.root.setAttribute('data-theme', 'dark');
+  p.fire(p.doc.root, null);
+  assert.match(text(sheet), /\.who > span:first-child \{ color: #9b7ebd; \}/);
 });
 
 test('the day separators are drawn again when the calendar day changes, through the status poll, once', () => {

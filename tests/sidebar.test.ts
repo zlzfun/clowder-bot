@@ -176,9 +176,10 @@ test('the owner\'s face is a person of ours, drawn inline: never one of the clay
   const renderMe = /\n {2}function renderMe\(\) \{\n[\s\S]*?\n {2}\}\n/.exec(app)![0];
   assert.match(renderMe, /window\.ClowderSidebar\.ownerFace\(\)/);
   assert.doesNotMatch(app, /avatar\([^)]*"me"\)/, 'no cat face is made for the owner anywhere');
-  // Café tones from the tokens, in both themes: coffee on the avatar tile.
+  // From the tokens, in both themes: the accent on the avatar tile (拿铁's accent is its primary, the café's coffee; since
+  // item 48 every 配色's accent stands 3:1 against that tile, which a primary like 蜂蜜's light yellow does not).
   const css = read('client/public/sidebar.css');
-  assert.match(css, /\.avatar\.owner \{ color: var\(--x-primary\); \}/);
+  assert.match(css, /\.avatar\.owner \{ color: var\(--accent-ink\); \}/);
   assert.match(css, /\.avatar\.owner \.owner-collar \{ fill: none; stroke: var\(--x-avatar-bg\);/);
 });
 
