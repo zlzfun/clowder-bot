@@ -903,9 +903,9 @@
     },
     {
       "target": "client/public/polish.css",
-      "description": "Styles for 6a: the found message's quiet ring that follows its bubble and a flash that reads in dark mode, 设置 → 关于's runtime link as a settings row, and the consistency fixes from the audit; existing tokens and keyframes only",
-      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 打磨 6a · one voice and a clean finish (docs/xbot-frontend.md item 33)",
-      "sha256": "bbfffb0eeda11858e91846eee045c57a8d2712829412470f40d843422180235f"
+      "description": "Styles for 6a: the found message's quiet ring that follows its bubble and a flash that reads in dark mode, 设置 → 关于's runtime link as a settings row, and the consistency fixes from the audit; existing tokens and keyframes only; a radio in a .choice pill inside a .field form (定时's 时间规则, 导出对话's 格式) is the ordinary small radio again instead of app.css's full-width .field input (review r15 of item 46)",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 打磨 6a · one voice and a clean finish (docs/xbot-frontend.md item 33); the layout explains, not captions, on every other screen (docs/xbot-frontend.md item 46) by local Claude Code (claude-opus-5-5) on 2026-11-13",
+      "sha256": "a5097e79973357dc85ebeb9b37d44eac4f80d76d5663109d928ab833d004ad20"
     },
     {
       "target": "client/public/sidebar.js",

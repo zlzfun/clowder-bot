@@ -879,3 +879,15 @@ test('the drawer\'s 定时 tab mounts the module on a page of its own; the retir
   assert.deepEqual([...new Set([...source.matchAll(/["'](\/xbot-api\/[^"']*)["']/g)].map(m => m[1]))], ['/xbot-api/bots/']);
   assert.doesNotMatch(source, /innerHTML|localStorage|sessionStorage/);
 });
+
+test('review r15: 时间规则 is one row of ordinary radio pills — a radio in a .choice pill inside a .field is not sized by app.css\'s .field input (in an extension stylesheet; upstream CSS untouched)', () => {
+  const app = read('client/public/app.css');
+  assert.match(app, /\.field input, \.field textarea, \.field select, \.agent input, \.task input \{\n\s+border: 0; border-radius: 8px; background: var\(--fill\);\n\s+padding: 8px 12px; min-height: 40px; outline: none; width: 100%;/, 'the generic rule that sized the radio is still there, unchanged');
+  const css = read('client/public/polish.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.match(css, /\.field \.choice-opt input\[type="radio"\] \{ flex: none; width: auto; height: auto; min-height: 0; margin: 0; padding: 0; border-radius: 50%; background: none; \}/);
+  assert.match(css, /\.field \.choice-opt \{ white-space: nowrap; \}/);
+  // The form builds its rules as that markup: radios inside .choice-opt labels in a .field.
+  const source = read('client/public/schedules.js');
+  assert.match(source, /const kindBox = node\("div", "field sched-field"\)[^\n]*kinds = node\("div", "choice sched-kinds"\)/);
+  assert.match(source, /const opt = node\("label", "choice-opt"\), radio = input\("radio"/);
+});
