@@ -112,16 +112,28 @@
     if (fresh) rest.push(SHORT.reply + " " + fresh);
     const first = a.items.find((i) => i.kind === top) || null;
     const n = a.counts[top], text = itemText(first);
-    let head = lead(top, n), label = text;
-    // One run or one queued message: its own label says who and what. One
-    // failure too: its label (「团子这次没完成」) already says it failed, so the
-    // kind word 「失败」 is not put before it (item 46); it keeps the colour.
-    if ((top === "running" || top === "queued" || top === "failure") && n === 1 && text) { head = text; label = ""; }
+    let head = lead(top, n), label = text, who = "";
+    // One run or one queued message: its own label says who and what.
+    if ((top === "running" || top === "queued") && n === 1 && text) { head = text; label = ""; }
     else if ((top === "running" || top === "queued") && n > 1) label = "";
+    // One failure: its label (「团子这次没完成：原因」) already says it failed, so
+    // the kind word 「失败」 is not put before it (item 46). It is cut into the
+    // cat's name (who, which may shrink), the words that say it failed (lead,
+    // always whole) and the reason after 「：」 (label, regular weight; review r15).
+    else if (top === "failure" && n === 1 && text) ({ who, what: head, reason: label } = failureParts(text, first.catName));
     return {
-      kind: top, lead: head, label, rest, partial,
+      kind: top, lead: head, label, rest, partial, who,
       catId: first ? first.catId : "", catName: first ? first.catName : "",
     };
+  }
+  // 「<name>这次没完成：<reason>」 → {who: name, what: 这次没完成, reason}. Without
+  // the cat's name at its start the words before 「：」 are what is said.
+  function failureParts(text, name) {
+    let who = "", body = String(text || "");
+    if (name && body.startsWith(name) && body.length > name.length) { who = name; body = body.slice(name.length); }
+    const at = body.search(/[：:]/);
+    const what = (at >= 0 ? body.slice(0, at) : body).trim();
+    return { who: what ? who : "", what: what || body.trim(), reason: at >= 0 ? body.slice(at + 1).trim() : "" };
   }
 
   // ---- Sidebar ----
@@ -206,6 +218,6 @@
   }
 
   window.ClowderExperienceRules = Object.freeze({
-    KINDS, TAG, SHORT, MEMORY, activity, line, withoutShown, lead, itemText, side, readTarget, memory, sources, memoryError, oneLine, unreadText,
+    KINDS, TAG, SHORT, MEMORY, activity, line, withoutShown, lead, itemText, failureParts, side, readTarget, memory, sources, memoryError, oneLine, unreadText,
   });
 })();

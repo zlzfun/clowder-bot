@@ -14,6 +14,13 @@
 .cx-row :is(.cx-rest, .cx-partial) { flex: none; color: var(--x-faint); }
 .cx-row[data-kind="approval"] .cx-lead { color: var(--x-text); }
 .cx-row[data-kind="failure"] .cx-lead, .cx-row[data-kind="failure"] > .icon:first-child { color: var(--x-danger); }
+/* One failure: the cat's name shrinks (its column may go to nothing), the
+   words that say it failed never do (their column is their own width, so the
+   pair is never narrower than them), and the reason after them takes only
+   the room left over, so it gives way first (review r15). */
+.cx-row .cx-said-fail { display: inline-grid; grid-template-columns: minmax(0, auto) max-content; align-items: center; }
+.cx-row .cx-said-fail > .cx-what { max-width: none; overflow: visible; }
+.cx-row[data-kind="failure"] .cx-label { flex: 1 1 0; }
 .cx-row[aria-expanded="true"] > .cx-chev { transform: rotate(90deg); }
 
 /* In place under the line: a short list, each row pointing at its message or

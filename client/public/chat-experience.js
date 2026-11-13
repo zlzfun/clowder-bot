@@ -323,12 +323,18 @@
     row.setAttribute("aria-expanded", String(S.open));
     row.setAttribute("aria-controls", "cx-list");
     const lead = view.catId ? H.face(view.catId, view.catName, "xs") : H.icon(ICON[view.kind] || "info");
-    row.append(lead, node("b", "cx-lead", view.lead));
+    // One failure with the cat's name: the name may shrink, 「这次没完成」 stays
+    // whole, the reason follows in regular weight (review r15).
+    if (view.who) {
+      const said = node("span", "cx-said-fail");
+      said.append(node("b", "cx-lead cx-who", view.who), node("b", "cx-lead cx-what", view.lead));
+      row.append(lead, said);
+    } else row.append(lead, node("b", "cx-lead", view.lead));
     if (view.label) { const l = node("span", "cx-label", view.label); l.title = view.label; row.append(l); }
     if (view.rest.length) row.append(node("span", "cx-rest", "· " + view.rest.join(" · ")));
     if (view.partial) row.append(node("span", "cx-partial", "· 部分状态读不到"));
     row.append(H.icon("chevron", "cx-chev"));
-    row.setAttribute("aria-label", [view.lead, view.label, ...view.rest, view.partial ? "部分状态读不到" : ""].filter(Boolean).join("，") + "。" + (S.open ? "收起" : "展开查看"));
+    row.setAttribute("aria-label", [(view.who || "") + view.lead, view.label, ...view.rest, view.partial ? "部分状态读不到" : ""].filter(Boolean).join("，") + "。" + (S.open ? "收起" : "展开查看"));
     const parts = [row];
     if (S.open) parts.push(listView(fresh));
     box.replaceChildren(...parts);

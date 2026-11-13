@@ -417,6 +417,38 @@ test('memory reads keep proposed changes apart from saved content, retired entri
 });
 
 // ---------------------------------------------------------------- status line
+test('review r15: one failure keeps the words that say it failed whole — the cat\'s name may shrink, 「这次没完成」 is its own bold part, the reason follows in regular weight; two failures stay counted', async () => {
+  const X = rules();
+  const NAME = '一只名字有二十个字那么长的橘色大猫咪呀呀';
+  assert.equal([...NAME].length, 20);
+  const one = (label: string, catName = NAME) => X.line(X.activity(activity({ items: [{ id: 'f', kind: 'failure', label, catId: 'cat-f', catName }], counts: { failure: 1 } })));
+  const plainFail = one(NAME + '这次没完成');
+  assert.deepEqual([plainFail.who, plainFail.lead, plainFail.label], [NAME, '这次没完成', '']);
+  const reason = '模型返回了 401：登录已经过期，请在终端里重新登录以后再试一次，'.repeat(4);
+  const withReason = one(NAME + '这次没完成：' + reason);
+  assert.deepEqual([withReason.who, withReason.lead, withReason.label], [NAME, '这次没完成', reason.trim()], 'split at the first 「：」 only');
+  // Without the cat's name at the start, the words before 「：」 are what is said.
+  assert.deepEqual(plain(X.failureParts('执行失败：超时', '团子')), { who: '', what: '执行失败', reason: '超时' });
+  const two = X.line(X.activity(activity({ items: [{ id: 'f', kind: 'failure', label: NAME + '这次没完成', catName: NAME }, { id: 'g', kind: 'failure', label: '砚砚这次没完成', catName: '砚砚' }], counts: { failure: 2 } })));
+  assert.deepEqual([two.lead, two.who], ['2 项失败', ''], 'two or more are counted as before');
+  // Drawn: the name and 「这次没完成」 in a pair whose second column is never narrower than its words; the reason in regular weight.
+  const p = page(path => (path.endsWith('/activity') ? activity({ items: [{ id: 'f', kind: 'failure', label: NAME + '这次没完成：' + reason, catId: 'cat-f', catName: NAME, messageId: 'm-f' }], counts: { failure: 1 } }) : {}));
+  p.cx.select(ada);
+  p.cx.observe(ada, 'thread-A', true);
+  await settle();
+  const row = p.strip().querySelector('.cx-row')!;
+  const pair = row.querySelector('.cx-said-fail')!;
+  assert.deepEqual(pair.children.map(c => [c.tagName, c.className, c.textContent]), [['B', 'cx-lead cx-who', NAME], ['B', 'cx-lead cx-what', '这次没完成']]);
+  const label = row.querySelector('.cx-label')!;
+  assert.equal(label.tagName, 'SPAN', 'the reason is not bold');
+  assert.equal(label.textContent, reason.trim());
+  assert.match(row.getAttribute('aria-label')!, new RegExp('^' + NAME + '这次没完成，模型返回了 401'));
+  const css = read('client/public/chat-experience.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.match(css, /\.cx-row \.cx-said-fail \{ display: inline-grid; grid-template-columns: minmax\(0, auto\) max-content; align-items: center; \}/);
+  assert.match(css, /\.cx-row \.cx-said-fail > \.cx-what \{ max-width: none; overflow: visible; \}/);
+  assert.match(css, /\.cx-row\[data-kind="failure"\] \.cx-label \{ flex: 1 1 0; \}/);
+});
+
 test('concurrent approvals: the line leads with both, keeps the other counts, steps the old lines aside, and opens in place onto items that find their message or Task', async () => {
   const p = page(path => (path.endsWith('/activity') ? busy() : {}));
   p.cx.select(ada);
