@@ -239,9 +239,10 @@
   const hiddenText = (n) => (count(n) ? "还有 " + count(n) + " 项内容暂时无法显示" : "");
 
   // ---- A reply that did not finish ----
+  // The words under a reply that did not finish. When it ended before any
+  // words, the server writes these same words as the reply (b1dbf60a,
+  // message-presentation.ts), so there is no separate stand-in to know.
   const ENDED = { stopped: "已停止", failed: "这次没完成", interrupted: "中途被打断" };
-  // What the server writes as the reply when it ended before any words.
-  const STAND_IN = { stopped: "已停止", failed: "这次没完成，请查看详情", interrupted: "中途被打断，没有写完" };
   function ending(m) {
     const e = m && m.ended;
     if (!e || typeof e !== "object" || !ENDED[e.how]) return null;
@@ -256,7 +257,7 @@
   function words(m, text) {
     if (request(m)) return "";
     const e = ending(m);
-    if (e && oneLine(text) === STAND_IN[e.how]) return "";
+    if (e && oneLine(text) === ENDED[e.how]) return "";
     return text;
   }
 

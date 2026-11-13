@@ -204,8 +204,11 @@ test('an unfinished reply says how it ended; the server\'s stand-in words and a 
   assert.deepEqual(plain(R.ending({ ended: { how: 'stopped' } })), { how: 'stopped', label: '已停止', reason: '', again: false });
   assert.equal(R.ending({ ended: { how: 'interrupted' } }).label, '中途被打断');
   assert.equal(R.ending({ ended: { how: 'weird' } }), null);
-  assert.equal(R.words({ ended: { how: 'failed' } }, '这次没完成，请查看详情'), '');
-  assert.equal(R.words({ ended: { how: 'interrupted' } }, '中途被打断，没有写完'), '');
+  // The server's stand-in for a reply that ended before any words is the line's own words (b1dbf60a): not drawn as a reply.
+  assert.equal(R.words({ ended: { how: 'failed' } }, '这次没完成'), '');
+  assert.equal(R.words({ ended: { how: 'interrupted' } }, '中途被打断'), '');
+  assert.equal(R.words({ ended: { how: 'stopped' } }, '已停止'), '');
+  assert.equal(R.words({ ended: { how: 'failed' } }, '这次没完成，请查看详情'), '这次没完成，请查看详情', 'the old stand-in is no longer one: words a cat really wrote are kept');
   assert.equal(R.words({ ended: { how: 'stopped' } }, '写到一半'), '写到一半', 'words written before it stopped stay');
   assert.equal(R.words({ blocks: [{ kind: 'card', approval: { id: 'p1' } }] }, '提议捕捉品味信号：…'), '', 'the request card is drawn instead');
   const messages = [
@@ -748,13 +751,13 @@ test('an unfinished reply ends quietly: 详情 shows the engine\'s reason verbat
   const p = page();
   const history = [
     { id: 'u1', role: 'user', content: '帮我查一下' },
-    { id: 'r1', role: 'assistant', content: '这次没完成，请查看详情', status: 'failed', ended: { how: 'failed', reason: 'Error: rate limit exceeded' }, native: { replyTo: 'u1' } },
+    { id: 'r1', role: 'assistant', content: '这次没完成', status: 'failed', ended: { how: 'failed', reason: 'Error: rate limit exceeded' }, native: { replyTo: 'u1' } },
     { id: 'u2', role: 'user', content: '停' },
     { id: 'r2', role: 'assistant', content: '写到一半', ended: { how: 'stopped' }, native: { replyTo: 'u2' } },
   ];
   p.draw(history);
   const failed = p.row('r1');
-  assert.doesNotMatch(failed.textContent, /请查看详情/, 'the stand-in words are not the reply');
+  assert.equal((failed.textContent.match(/这次没完成/g) || []).length, 1, 'the stand-in words are not the reply: 「这次没完成」 once, in the line under it');
   const line = failed.querySelector('.ck-ended')!;
   assert.equal(line.textContent, '这次没完成详情再发一次');
   const reason = failed.querySelector('.ck-reason')!;
@@ -780,7 +783,7 @@ test('再发一次 on a reply that took in what was said meanwhile sends all of 
   const took = { kind: 'input', dispatchRefs: [{ targetId: 'c', statusMessageId: 'r1', appendAcceptance: 'accepted' }] };
   const history = [
     { id: 'u1', native_message_id: 'u1', role: 'user', content: '帮我查一下' },
-    { id: 'r1', native_message_id: 'r1', role: 'assistant', content: '这次没完成，请查看详情', status: 'failed', ended: { how: 'failed' }, follows: 3,
+    { id: 'r1', native_message_id: 'r1', role: 'assistant', content: '这次没完成', status: 'failed', ended: { how: 'failed' }, follows: 3,
       native: { id: 'r1', replyTo: 'u1', lifecycle: { status: 'failed', inputMessageIds: ['u1', 'u2', 'u3'] } } },
     { id: 'u2', native_message_id: 'u2', role: 'user', content: '顺便看下导出', native: { lifecycle: took } },
     { id: 'u3', native_message_id: 'u3', role: 'user', content: '还有同步', native: { lifecycle: took } },
