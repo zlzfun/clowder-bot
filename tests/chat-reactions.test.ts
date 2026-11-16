@@ -158,12 +158,16 @@ function page(opts: Any = {}) {
   thread.id = 'thread';
   doc.body.append(thread);
   let frames: Array<() => void> = [];
+  // ResizeObserver (opts.observer): the test says when the history's box changed size (resized).
+  const sized: Array<() => void> = [];
+  class FakeSize { constructor(private cb: () => void) {} observe(target: Any) { if (target === thread) sized.push(this.cb); } }
   const window: Any = {
     matchMedia: () => ({ matches: !!opts.reduce }),
     requestAnimationFrame: (fn: () => void) => { frames.push(fn); return frames.length; },
     innerWidth: 1440,
     listeners: {} as Record<string, () => void>,
     addEventListener(type: string, fn: () => void) { this.listeners[type] = fn; },
+    ...(opts.observer ? { ResizeObserver: FakeSize } : {}),
   };
   const context = vm.createContext({ window, document: doc, console, Promise, setTimeout, clearTimeout });
   for (const f of ['chat-live-rules.js', 'chat-reactions-rules.js', 'chat-reactions.js']) vm.runInContext(read('client/public/' + f), context);
@@ -227,7 +231,7 @@ function page(opts: Any = {}) {
   const flush = () => { const list = frames; frames = []; list.forEach((fn) => fn()); };
   const row = (mid: string) => inner!.children.find((r) => r.dataset.mid === mid)!;
   const chips = (mid: string) => row(mid).querySelectorAll('.rx-chip');
-  return { doc, window, thread, X, state, log, answers, draw, flush, row, chips, get inner() { return inner!; } };
+  return { doc, window, thread, X, state, log, answers, draw, flush, row, chips, resized: () => sized.forEach((fn) => fn()), get inner() { return inner!; } };
 }
 const reacted = (base: Any, ...marks: Any[]) => ({ ...base, reactions: marks });
 
@@ -704,6 +708,30 @@ test('review 2, item 14: narrowing the window with the focus left where it is fi
   assert.ok(!row.classList.contains('rx-over') && !row.classList.contains('rx-tight'), 'room again: a line beside it');
 });
 
+test('item 50: the conversation narrowing without the window (the details panel opening beside it, the sidebar\'s grip) fits the focused row again too; a change of height alone does nothing', () => {
+  const p = page({ observer: true });
+  p.draw([owner('u1', 1), cat('m1', 3)]);
+  const row = p.row('m1');
+  row.children[0]!.box = { left: 40, right: 640, width: 600, top: 100, bottom: 140, height: 40 };
+  const width = (w: number) => { p.thread.box = { left: 0, top: 0, right: w, bottom: 600, width: w, height: 600 }; p.thread.clientWidth = w; };
+  width(900);
+  p.resized(); // the first observation, as the browser makes on observe()
+  row.querySelector('.rx-act-react')!.focus();
+  p.X.fit(row);
+  assert.ok(!row.classList.contains('rx-over') && !row.classList.contains('rx-tight'));
+  // The panel opens beside the chat: the history is narrower, the window is not.
+  width(680);
+  p.resized();
+  p.flush();
+  assert.ok(row.classList.contains('rx-over'), 'no room beside it now: the toolbar over the bubble');
+  assert.equal(p.window.listeners.resize !== undefined, true, 'the window\'s own resize still counts');
+  // The dock grew (a status line): the same width, nothing is fitted again.
+  row.classList.remove('rx-over');
+  p.resized();
+  p.flush();
+  assert.ok(!row.classList.contains('rx-over'), 'a change of height alone fits nothing');
+});
+
 test('review 1, item 10: on the dark theme 🐾 (a dark grey glyph, about #464646) stays visible on every chip and in the picker, in all eleven 配色; the owner\'s chips stay told apart from the cats\'', () => {
   const css = read('client/public/chat-reactions.css').replace(/\/\*[\s\S]*?\*\//g, '');
   assert.match(css, /html\[data-theme="dark"\] \.rx-chip \{ background: color-mix\(in srgb, var\(--x-text\) 82%, var\(--x-card\)\); color: var\(--x-card\);/);
@@ -827,7 +855,7 @@ test('the shell wires it with thin hooks: scripts after chat-presence.js and bef
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map((m) => m[1]);
   const at = (n: string) => scripts.indexOf(n);
   assert.ok(at('chat-presence.js') < at('chat-reactions-rules.js') && at('chat-reactions-rules.js') < at('chat-reactions.js') && at('chat-reactions.js') < at('app.js'));
-  assert.deepEqual(styles.slice(-4), ['chat-presence.css', 'chat-reactions.css', 'sidebar.css', 'chat-live.css']);
+  assert.deepEqual(styles.slice(-5), ['chat-presence.css', 'chat-reactions.css', 'sidebar.css', 'chat-panel.css', 'chat-live.css']);
   assert.match(app, /const strip = reactions\.strip\(data\.message, data\.text, closeMessageMenu\);\n {4}if \(strip\) menu\.append\(strip\);/);
   assert.match(app, /menu\.querySelector\("button\.menu-row:not\(:disabled\)"\)/);
   assert.match(app, /reactions\.rendered\(messages, null\);/);

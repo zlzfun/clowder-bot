@@ -417,7 +417,7 @@ test('the full sidebar: 搜索 and 新建 at the right end of the greeting\'s li
   assert.match(read('client/public/sidebar.css'), /\.pin-row:empty \{ display: none; \}/);
   // Styles after every earlier one, chat-live.css still last; the script before app.js.
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
-  assert.deepEqual(styles.slice(-2), ['sidebar.css', 'chat-live.css']);
+  assert.deepEqual(styles.slice(-3), ['sidebar.css', 'chat-panel.css', 'chat-live.css']);
   const scripts = [...html.matchAll(/<script src="\/([^"]+)"/g)].map(m => m[1]);
   assert.ok(scripts.indexOf('sidebar.js') >= 0 && scripts.indexOf('sidebar.js') < scripts.indexOf('app.js'));
 });

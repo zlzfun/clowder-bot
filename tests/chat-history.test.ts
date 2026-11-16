@@ -636,7 +636,8 @@ test('item 46: the chat does not say twice what is on screen — a message\'s fa
   const app = read('client/public/app.js');
   const head = /\n {2}function speakerHead\(who, time\) \{\n([\s\S]*?)\n {2}\}\n/.exec(app)![1]!;
   assert.doesNotMatch(head, /setTip/);
-  assert.match(app, /function headFace\(who\) \{\n\s+const av = speakerFace\(who\);\n\s+setTip\(av, ""\);\n\s+return av;\n\s+\}/);
+  // (Item 50: a cat's face is also marked as what opens the details, chat-panel.js; still no tooltip.)
+  assert.match(app, /function headFace\(who\) \{\n\s+const av = speakerFace\(who\);\n\s+setTip\(av, ""\);\n\s+if \(who\.paint\) av\.classList\.add\("pb-face"\);\n\s+return av;\n\s+\}/);
   // Every message head that prints the name next to the face uses it.
   assert.equal((app.match(/row\.append\(headFace\((who|speaker)\)\)/g) || []).length, 3);
   assert.doesNotMatch(app, /row\.append\(speakerFace\((who|speaker)\)\);\n\s+(const body = el\("div", "body"\);\n\s+)?(if \([^\n]*\) )?body\.append\(speakerHead/);

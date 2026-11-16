@@ -963,6 +963,9 @@
   // bubble's corner, the picker; init() near the end.
   const reactions = window.ClowderReactions;
   const reactionRules = window.ClowderReactionRules;
+  // The details panel beside the chat where the card has room for both, else
+  // the drawer over it (chat-panel.js, item 50); init() next to panelOpen.
+  const panelPlace = window.ClowderPanel;
   // An empty single chat's greeting invitation (chat-presentation.js): one
   // POST per chat thread for the page's life, never retried by itself. Its
   // outcome redraws only the line of the chat it was sent for, if that chat is still
@@ -3133,10 +3136,13 @@
   }
 
   // The face beside a message's name line: the name is printed there, so it
-  // is not a tooltip as well (item 46).
+  // is not a tooltip as well (item 46). A cat's face opens the details as the
+  // header's chip does (pb-face, chat-panel.js); the neutral tile of a speaker
+  // nobody knows does not.
   function headFace(who) {
     const av = speakerFace(who);
     setTip(av, "");
+    if (who.paint) av.classList.add("pb-face");
     return av;
   }
 
@@ -6130,9 +6136,10 @@
   function syncBackdrop() {
     const drawer = window.innerWidth < 768 && sidebar.classList.contains("open");
     backdrop.hidden = !drawer;
-    // The panel is a drawer over the card at every width (#243), so it always
-    // covers part of the conversation. The exposed conversation closes it.
-    $("panel-scrim").hidden = !(panel.classList.contains("open") && !drawer);
+    // The drawer over the card (#243) covers part of the conversation: the
+    // exposed conversation closes it. Beside the chat (chat-panel.js) the
+    // panel covers nothing, so there is no scrim and nothing dims.
+    $("panel-scrim").hidden = !(panel.classList.contains("open") && !drawer && !panelPlace.beside());
   }
 
   async function refreshLists() {
@@ -7010,7 +7017,8 @@
   function panelOpen(open) {
     // Opening again over a scheduled-task section still in place reads its list again.
     if (open && !panel.classList.contains("open")) window.ClowderSchedules?.reopened();
-    panel.classList.toggle("open", open);
+    // Beside the chat the chat's column narrows or widens with it (chat-panel.js keeps the place being read).
+    if (open !== panel.classList.contains("open")) panelPlace.moved(() => panel.classList.toggle("open", open));
     $("head-chip").classList.toggle("on", open);
     $("head-chip").setAttribute("aria-expanded", open ? "true" : "false");
     $("head-chip").setAttribute("aria-label", open ? "收起信息" : "打开信息");
@@ -7018,7 +7026,9 @@
     syncBackdrop();
   }
 
-  $("head-chip").addEventListener("click", async () => {
+  // What the header's identity chip does, and a cat's face beside its reply
+  // too (chat-panel.js): one path for both.
+  async function togglePanel() {
     const open = !panel.classList.contains("open");
     rememberPanel(open);
     panelOpen(open);
@@ -7026,6 +7036,21 @@
     if (open) {
       try { await loadPanel(); } catch (e) { setStatus(visibleError(e), true); }
     }
+  }
+  $("head-chip").addEventListener("click", togglePanel);
+
+  // Beside the chat or over it (chat-panel.js): one decision, from the card's own width.
+  panelPlace.init({
+    main: document.querySelector(".main"), panel, thread, chip: $("head-chip"),
+    open: () => panel.classList.contains("open"),
+    // At the end the history stays at the end; further up, the row at the top stays where it was.
+    keep: () => {
+      const near = live.following(), anchor = near ? null : readingAnchor();
+      return () => { if (near) thread.scrollTop = thread.scrollHeight; else keepReading(anchor); };
+    },
+    changed: () => syncBackdrop(),
+    toggle: togglePanel,
+    peer: () => !!state.peer,
   });
 
   document.addEventListener("keydown", (ev) => {
@@ -7081,8 +7106,10 @@
     }) || null;
   }
 
-  // The remote conversation is a full panel at z-index 12; this drawer sits at
-  // 30, so it would cover its header and composer. Close it when one opens.
+  // The remote conversation is a full panel at z-index 12 over the whole card;
+  // this panel sits at 30, so as a drawer it would cover its header and
+  // composer, and beside the chat it would stay over the card's right side
+  // with the details of a chat no longer in view. Close it when one opens.
   window.addEventListener("xbot:remote-open", () => {
     if (!panel.classList.contains("open")) return;
     rememberPanel(false);
@@ -7341,10 +7368,15 @@
     if (!modal.hidden) { closeModal(); return; }
     if (state.replyTo) { clearQuote(); return; }
     if (!$("account-menu").hidden) { closePops(); return; }
-    if (panel.classList.contains("open")) {
+    // The drawer is the layer on top: Escape puts it away from anywhere. Beside
+    // the chat (chat-panel.js) the panel is a column, not a layer: Escape closes
+    // it only from inside it, and focus goes to the chip that opens it again.
+    const beside = panelPlace.beside();
+    if (panel.classList.contains("open") && (!beside || panel.contains(document.activeElement))) {
       rememberPanel(false);
       closePops();
       panelOpen(false);
+      if (beside) $("head-chip").focus({ preventScroll: true });
     }
     sidebar.classList.remove("open");
     syncBackdrop();
@@ -7574,13 +7606,14 @@
   // The views that only show something, put away so the chat a link opens is in
   // view: menus, settings, the search palette, the picture viewer and the
   // drawer over the conversation (closed without changing whether it opens
-  // next time).
+  // next time). A panel beside the chat covers nothing (chat-panel.js): it
+  // stays, and follows the chat that opens.
   function uncover() {
     closePops();
     if (!$("setpage").hidden) closeSettings(false);
     if (window.ClowderPalette && window.ClowderPalette.isOpen()) window.ClowderPalette.close({ restore: false });
     closeShots();
-    if (panel.classList.contains("open")) panelOpen(false);
+    if (panel.classList.contains("open") && !panelPlace.beside()) panelOpen(false);
   }
   // …and the same when the address changes to one while the app is open (after
   // boot, which reads the first one itself).
@@ -7611,9 +7644,10 @@
     if (state.panelTouched) return;
     let preference = null;
     try { preference = localStorage.getItem("xbot-panel-open"); } catch (e) {}
-    // The panel is a drawer over the conversation now (#243), so it starts
-    // closed everywhere: nothing is hidden until the owner asks for it. Only
-    // an explicit "true" from a previous session opens it again.
+    // The panel starts closed everywhere (#243: as a drawer it covers the
+    // conversation, and beside the chat it narrows it, item 50): nothing
+    // changes until the owner asks for it. Only an explicit "true" from a
+    // previous session opens it again.
     const wide = preference === "true";
     const was = panel.classList.contains("open");
     panelOpen(wide);
@@ -7657,9 +7691,12 @@
       return bot ? avatar(bot.name, paintOfBot(bot), size) : speakerFace({ name: name || catId, paint: null }, size);
     },
     peer: () => !!state.peer,
-    // The history is covered: settings, the picture viewer, or a drawer over a narrow window.
+    // The history is covered: settings, the picture viewer, the panel as a
+    // drawer over the card at any width (its scrim dims the history; beside the
+    // chat it covers nothing, chat-panel.js), or the list's drawer on a phone.
     obscured: () => !$("setpage").hidden || !lightbox.hidden
-      || (window.innerWidth < 768 && (panel.classList.contains("open") || sidebar.classList.contains("open"))),
+      || (panel.classList.contains("open") && !panelPlace.beside())
+      || (window.innerWidth < 768 && sidebar.classList.contains("open")),
     focusTask: (id) => workspace.focusTask(id),
     // Cats drawn writing in the history (chat-live.js): the line does not repeat 「…正在处理」 for them.
     writing: () => live.writing(),

@@ -128,7 +128,9 @@ async function drawer(page, name, tab) {
   await page.locator('#panel .tabs').getByText(tab, { exact: true }).click();
   await page.waitForTimeout(900);
 }
-const closeDrawer = (page) => page.locator('#panel-scrim').click({ position: { x: 20, y: 400 } });
+// At 1440 wide the panel sits beside the chat (docs/xbot-frontend.md item 50), with no scrim to click away:
+// the identity chip that opened it closes it again.
+const closePanel = (page) => page.locator('#head-chip').click();
 async function shoot(name, frame, { focus = false } = {}) {
   await both(async (page, theme) => {
     await settle(page, focus);
@@ -198,7 +200,7 @@ try {
     await shoot('files', async page => around(page, ['#thread .thread-inner > .msg'], 20, await column(page)));
     await both(page => drawer(page, '墨墨', '文件'));
     await shoot('files-tab', panel);
-    await both(closeDrawer);
+    await both(closePanel);
   }
 
   // 说一句就设提醒: 鲸鲸, a reminder come due (after its time divider) and the one still waiting.
@@ -207,7 +209,7 @@ try {
     await shoot('reminder', async page => around(page, ['#thread .tdiv:has(+ .ck-reminder)', '@last:1'], 20, { ...(await column(page)), y0: 64 }));
     await both(page => drawer(page, '鲸鲸', '定时'));
     await shoot('reminder-tab', panel);
-    await both(closeDrawer);
+    await both(closePanel);
   }
 
   // 要记住的事先问你: 小狸花's card, and what is kept under 资料 → 记忆.
@@ -220,7 +222,7 @@ try {
       await page.waitForTimeout(700);
     });
     await shoot('memory-tab', panel);
-    await both(closeDrawer);
+    await both(closePanel);
   }
 
   // 没做完也如实说: 斑斑, a reply that did not finish, one interrupted, content that cannot be drawn yet.
@@ -259,7 +261,7 @@ try {
   if (wanted('profile')) {
     await both(page => drawer(page, '宪宪', '资料'));
     await shoot('profile', panel);
-    await both(closeDrawer);
+    await both(closePanel);
   }
 
   // 通知: 设置 → 通用, the desktop notification switch (我's menu opens from the owner's face at the bottom of the sidebar).

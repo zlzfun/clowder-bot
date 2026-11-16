@@ -251,7 +251,7 @@ for (const p of JSON.parse(read('client/public/theme-lab/palettes.json'))) {
   if (!p.current) for (const mode of ['light', 'dark']) TOKENS[p.id + '/' + mode] = { '--x-card': p[mode].tokens['--x-card'], '--x-bot-bubble': p[mode].tokens['--x-bot-bubble'], '--dur-pop-close': '120ms' };
 }
 const tokensOf = (n: Any) => TOKENS[(n.getAttribute('data-colors') ? n.getAttribute('data-colors') + '/' : '') + (n.getAttribute('data-theme') || 'light')] || {};
-type Opts = { reduce?: boolean; dark?: boolean; group?: boolean; theme?: boolean };
+type Opts = { reduce?: boolean; dark?: boolean; group?: boolean; theme?: boolean; observer?: boolean };
 function page(opts: Opts = {}) {
   const doc = new Doc();
   (doc as Any).documentElement = doc.root;
@@ -291,12 +291,17 @@ function page(opts: Opts = {}) {
   const observers: Array<{ target: Any; cb: (r: Any[]) => void }> = [];
   class FakeObserver { constructor(private cb: (r: Any[]) => void) {} observe(target: Any) { observers.push({ target, cb: this.cb }); } }
   const fire = (target: Any, oldValue: string | null) => { for (const o of observers) if (o.target === target) o.cb([{ oldValue }]); };
+  // ResizeObserver (opts.observer): the test says when an element's size changed (resized).
+  const sized: Array<{ target: Any; cb: () => void }> = [];
+  class FakeSize { constructor(private cb: () => void) {} observe(target: Any) { sized.push({ target, cb: this.cb }); } }
+  const resized = (target: Any) => { for (const o of sized) if (o.target === target) o.cb(); };
   const window: Any = {
     matchMedia: () => ({ matches: !!opts.reduce }),
     requestAnimationFrame: (fn: () => void) => { frames.push(fn); return frames.length; },
     MutationObserver: FakeObserver,
     getComputedStyle: (n: Any) => ({ getPropertyValue: (k: string) => tokensOf(n)[k] || '' }),
     addEventListener: (type: string, fn: () => void) => { if (type === 'resize') window.onResize = fn; },
+    ...(opts.observer ? { ResizeObserver: FakeSize } : {}),
   };
   const RealDate = Date;
   class FakeDate extends RealDate {
@@ -357,7 +362,7 @@ function page(opts: Opts = {}) {
   };
   // The polite region chat-presence.js says things in.
   const region = () => doc.body.children.find((n: El) => n.getAttribute('role') === 'status' && n.getAttribute('aria-live') === 'polite') || null;
-  return { doc, h, bar, chip, more, thread, roster, pal, scrim, live, presence, state, draw, onScreen, userRow, catRow, settle, ev, sideRow, advance, frame, key, fire, window, region, clock: () => now };
+  return { doc, h, bar, chip, more, thread, roster, pal, scrim, live, presence, state, draw, onScreen, userRow, catRow, settle, ev, sideRow, advance, frame, key, fire, resized, window, region, clock: () => now };
 }
 const sub = (p: Any) => p.chip.find('pz-sub')[0];
 const own = (m: Any) => ({ role: 'user', id: m, native_message_id: m });
@@ -528,6 +533,34 @@ test('the header line runs only as far as the header\'s free width: up to the �
   p.more.box = box(0, 0);
   p.window.onResize();
   assert.equal(sub(p).style.maxWidth, (374 - 8 - 180) + 'px');
+});
+
+test('item 50: the header changing width without the window (the details panel opening beside the chat, the sidebar\'s grip) measures the line again; a change of height alone does not', async () => {
+  const p = page({ group: true, observer: true });
+  Object.assign(p.bar, { clientWidth: 680 });
+  p.bar.box = box(300, 680);
+  p.chip.box = box(560, 160);
+  p.more.box = box(940, 32);
+  p.draw([], []);
+  p.presence.refresh();
+  sub(p).box = box(600, 0);
+  p.resized(p.bar); // the first observation, as the browser makes on observe()
+  p.live.event({ kind: 'start', messageId: 'm1', catId: 'a' });
+  p.live.event({ kind: 'start', messageId: 'm2', catId: 'b' });
+  await p.settle();
+  assert.equal(sub(p).style.maxWidth, (940 - 8 - 600) + 'px');
+  // The panel opens beside the chat: the header narrows and its ⋯ moves left; no window resize.
+  Object.assign(p.bar, { clientWidth: 376 });
+  p.bar.box = box(300, 376);
+  p.chip.box = box(410, 160);
+  sub(p).box = box(450, 0);
+  p.more.box = box(640, 32);
+  p.resized(p.bar);
+  assert.equal(sub(p).style.maxWidth, (640 - 8 - 450) + 'px', 'stops before ⋯ where it is now');
+  // The same width again (only the height changed): nothing is measured.
+  sub(p).style.maxWidth = 'kept';
+  p.resized(p.bar);
+  assert.equal(sub(p).style.maxWidth, 'kept');
 });
 
 test('the sidebar: typing dots only for a row whose own chat was read running in a poll that succeeded; the live words on the open chat\'s row (given back after); never over what needs the owner', async () => {
@@ -775,7 +808,7 @@ test('the shell wires 活起来 with thin hooks: scripts before app.js, styles j
   const at = (name: string) => scripts.indexOf(name);
   assert.ok(at('chat-live.js') < at('chat-presence-rules.js') && at('chat-presence-rules.js') < at('chat-presence.js') && at('chat-presence.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
-  assert.deepEqual(styles.slice(-4), ['chat-presence.css', 'chat-reactions.css', 'sidebar.css', 'chat-live.css']);
+  assert.deepEqual(styles.slice(-5), ['chat-presence.css', 'chat-reactions.css', 'sidebar.css', 'chat-panel.css', 'chat-live.css']);
   const sort = /\n {2}function sortStatusRows\(\) \{\n([\s\S]*?)\n {2}\}\n/.exec(app)![1];
   assert.match(sort, /chatList\.paint\(\$\("roster"\)\);\n\s+presence\.rows\(\$\("roster"\)\);/);
   assert.equal((app.match(/cards\.rendered\(\);[^\n]*\n\s+presence\.rendered\(messages\);/g) || []).length, 2, 'both histories, right after the cards are filled');
