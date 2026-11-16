@@ -3,8 +3,9 @@
 // already draws through init(). What it draws:
 //
 //   catHead() / groupHead()  the drawer's identity: the portrait (a cat's own
-//                            colour as a quiet wash behind it), the name; a
-//                            group's name is edited in place, with 「N 只猫猫」.
+//                            colour as a quiet wash behind it; a cat's is
+//                            the button to 编辑资料), the name; a group's
+//                            name is edited in place, with 「N 只猫猫」.
 //   catPage()                资料: 职责, 置顶, 新对话 and 历史对话, then one
 //                            folded 高级 (它用什么思考, 模型与画像, 任务与执行,
 //                            导出对话 / 复制名字 / 运行面板), 删除猫猫 last.
@@ -136,16 +137,26 @@
   }
   // ------------------------------------------------------------ the drawer head
   // A cat: its portrait on a soft wash of its own colour (bots[].accent), its
-  // name. Drawn again only when the face or the name changes.
+  // name. Drawn again only when the face or the name changes. The portrait is
+  // the head's way to 编辑资料 (item 51): a button, one node for the chat's
+  // life (a new face is drawn inside it, so focus and the cue survive), with
+  // a pencil that comes up at its corner under the pointer or keyboard focus
+  // and stands there quietly where there is no hover (profile.css). It opens
+  // the chat's loaded 资料, as the corner's pencil did (editProfile(null, …)).
   function catHead(sel, data) {
     const key = R.key(sel), name = (data && data.name) || sel.id;
     let P = S.head;
     if (!P || P.key !== key) {
       const root = node("div", "pf-head");
-      const portrait = node("span", "pf-portrait"), tx = node("div", "tx"), title = node("b");
+      const edit = button("pf-edit", null, (ev) => H.editProfile(null, ev.currentTarget));
+      edit.setAttribute("aria-label", "编辑资料");
+      const portrait = node("span", "pf-portrait"), mark = node("span", "pf-edit-mark"), tx = node("div", "tx"), title = node("b");
+      mark.setAttribute("aria-hidden", "true");
+      mark.append(H.icon("pencil"));
+      edit.append(portrait, mark);
       tx.append(title);
-      root.append(portrait, tx);
-      P = S.head = { key, root, portrait, title, faceSig: null };
+      root.append(edit, tx);
+      P = S.head = { key, root, edit, portrait, title, faceSig: null };
     }
     const sig = H.catFaceSig(name);
     if (P.faceSig !== sig) { P.faceSig = sig; P.portrait.replaceChildren(H.catFace(name, "lg")); }
@@ -158,8 +169,9 @@
     return P.root;
   }
 
-  // A group: its members' face, the name (a click edits it in place: Enter
-  // saves, Esc goes back, leaving saves a change) and 「N 只猫猫」.
+  // A group: its members' face (a picture, derived from them, not a control),
+  // the name (a click edits it in place: Enter saves, Esc goes back, leaving
+  // saves a change; since item 51 the head's only way to 改群名) and 「N 只猫猫」.
   function groupHead(sel, group) {
     const key = R.key(sel);
     let P = S.head;
@@ -268,9 +280,6 @@
     P.sub.classList.add("bad");
     P.sub.setAttribute("role", "alert");
   }
-  // 改群名 from the drawer's action row: the same edit in place.
-  function renameHere() { if (S.head && S.head.group && !S.head.edit) editName(S.head); }
-
   // The selection to act for: the shell's current one when it is this chat.
   function current(P) {
     const now = H.selected ? H.selected() : null;
@@ -802,7 +811,7 @@
 
   window.ClowderProfile = Object.freeze({
     init: (hooks) => { H = hooks; },
-    catHead, groupHead, catPage, groupPage, groupMenu, renameHere, renameGroup, removeGroup,
+    catHead, groupHead, catPage, groupPage, groupMenu, renameGroup, removeGroup,
     // Whether a drawer node is the page this module keeps for the chat shown.
     current: (n, sel) => !!n && !!sel && ((S.cat && S.cat.root === n && S.cat.key === R.key(sel)) || (S.group && S.group.root === n && S.group.key === R.key(sel))),
     // Open 高级 for this chat (the old 任务 tab, the work row above the composer).

@@ -187,24 +187,26 @@ test('app.js marks only a known cat\'s face, with no tooltip and no tab stop or 
   assert.equal(cat.dataset.tip, '', 'no tooltip (item 46)');
   assert.doesNotMatch(take('headFace'), /tabIndex|setAttribute\("(role|tabindex|aria-)/, 'the chip and ⌘/Ctrl+\\ are the keyboard\'s way; no tab stop or button on every message');
 
-  // togglePanel: the chip's click, and the face's.
+  // togglePanel: the chip's click, and the face's; closing goes through closePanel (item 51: the × and Escape too).
   const calls: string[] = [];
   const side = doc.createElement('aside'); side.className = 'sidebar open';
   const panel = doc.createElement('aside');
   const shell: Any = {
     panel, sidebar: side, window: { innerWidth: 390 },
+    document: { get activeElement() { return doc.activeElement; } }, $: (id: string) => doc.getElementById(id),
     rememberPanel: (open: boolean) => calls.push('remember:' + open),
+    closePops: () => calls.push('closePops'),
     panelOpen: (open: boolean) => { calls.push('panelOpen:' + open); panel.classList.toggle('open', open); },
     loadPanel: async () => { calls.push('load'); },
     setStatus: (t: string) => calls.push('status:' + t), visibleError: (e: Error) => e.message,
   };
-  vm.runInNewContext(take('togglePanel') + 'this.togglePanel = togglePanel;', shell);
+  vm.runInNewContext(take('togglePanel') + take('closePanel') + 'this.togglePanel = togglePanel;', shell);
   await shell.togglePanel();
   assert.deepEqual(calls, ['remember:true', 'panelOpen:true', 'load']);
   assert.equal(side.classList.contains('open'), false, 'on a phone the list\'s drawer gives way');
   calls.length = 0;
   await shell.togglePanel();
-  assert.deepEqual(calls, ['remember:false', 'panelOpen:false'], 'closing loads nothing');
+  assert.deepEqual(calls, ['remember:false', 'closePops', 'panelOpen:false'], 'closing loads nothing');
   shell.loadPanel = async () => { throw new Error('读不到'); };
   calls.length = 0;
   await shell.togglePanel();
@@ -279,7 +281,7 @@ function escape(opts: { beside: boolean; focus: 'composer' | 'panel'; quote?: bo
     panelOpen: (open: boolean) => { calls.push('panelOpen:' + open); panel.classList.toggle('open', open); },
     panelPlace: { beside: () => opts.beside }, syncBackdrop: () => {},
   };
-  vm.runInNewContext(m![0], ctx);
+  vm.runInNewContext(m![0] + take('closePanel'), ctx);
   return { press: () => listener({ key: 'Escape' }), calls, panel, chip, doc };
 }
 
@@ -287,7 +289,12 @@ test('Escape: the drawer is the layer on top and goes from anywhere (as before);
   const drawer = escape({ beside: false, focus: 'composer' });
   drawer.press();
   assert.deepEqual(drawer.calls, ['remember:false', 'closePops', 'panelOpen:false']);
-  assert.notEqual(drawer.doc.activeElement, drawer.chip, 'the drawer\'s path is unchanged');
+  assert.notEqual(drawer.doc.activeElement, drawer.chip, 'the drawer\'s path is unchanged: focus stays in the composer');
+  // Item 51: Escape closes through the same closePanel as the ×, so focus inside the drawer goes to the chip too.
+  const drawerInside = escape({ beside: false, focus: 'panel' });
+  drawerInside.press();
+  assert.deepEqual(drawerInside.calls, ['remember:false', 'closePops', 'panelOpen:false']);
+  assert.equal(drawerInside.doc.activeElement, drawerInside.chip);
   const composer = escape({ beside: true, focus: 'composer' });
   composer.press();
   assert.deepEqual(composer.calls, [], 'from the composer the panel beside the chat stays');
@@ -379,4 +386,103 @@ test('the page loads chat-panel.js before app.js (after sidebar.js) and chat-pan
   assert.deepEqual(styles.slice(-3), ['sidebar.css', 'chat-panel.css', 'chat-live.css']);
   const manifest = JSON.parse(read('docs/xbot-frontend-manifest.json'));
   for (const f of ['client/public/chat-panel.js', 'client/public/chat-panel.css']) assert.ok(manifest.extensions.some((e: Any) => e.target === f), f + ' is registered');
+});
+
+// ---------------------------------------------------------------- item 51: the head's corner and its portrait
+// closePanel, as app.js keeps it, with a small DOM: the chip, 返回 and the panel.
+function closer(opts: { focus: 'panel' | 'composer' | 'body'; chipDisabled?: boolean; back?: boolean }) {
+  const doc = new Doc();
+  const h = (tag: string, id = '') => { const e = doc.createElement(tag); if (id) e.id = id; return e; };
+  const chip = h('button', 'head-chip'), back = h('button', 'back'), input = h('div', 'input'), panel = h('aside', 'panel'), x = h('button');
+  chip.disabled = !!opts.chipDisabled;
+  back.hidden = !opts.back;
+  panel.append(x); panel.classList.add('open');
+  doc.body.append(chip, back, input, panel);
+  if (opts.focus === 'panel') x.focus(); else if (opts.focus === 'composer') input.focus();
+  // A disabled button takes no focus, as in a browser.
+  for (const b of [chip, back]) { const own = b.focus.bind(b); b.focus = () => { if (!b.disabled) own(); }; }
+  const calls: string[] = [];
+  const ctx: Any = {
+    panel, document: { get activeElement() { return doc.activeElement; } }, $: (id: string) => doc.getElementById(id),
+    rememberPanel: (open: boolean) => calls.push('remember:' + open), closePops: () => calls.push('closePops'),
+    panelOpen: (open: boolean) => { calls.push('panelOpen:' + open); panel.classList.toggle('open', open); },
+  };
+  vm.runInNewContext(take('closePanel') + 'this.closePanel = closePanel;', ctx);
+  return { ...ctx, calls, chip, back, input, x, doc };
+}
+
+test('item 51: the panel\'s own × closes it as the chip does (remembered, menus put away), in both forms; focus goes to the chip, to 返回 in the two-cat exchange where the chip is disabled, never to the page', () => {
+  const c = closer({ focus: 'panel' });
+  c.closePanel(true);
+  assert.deepEqual(c.calls, ['remember:false', 'closePops', 'panelOpen:false']);
+  assert.equal(c.panel.classList.contains('open'), false);
+  assert.equal(c.doc.activeElement, c.chip);
+  // A browser that does not focus a clicked button (Safari): the × still hands focus to the chip.
+  const safari = closer({ focus: 'body' });
+  safari.closePanel(true);
+  assert.equal(safari.doc.activeElement, safari.chip);
+  // The read-only exchange between two cats: the chip is disabled, so 返回 in the same header.
+  const peer = closer({ focus: 'panel', chipDisabled: true, back: true });
+  peer.closePanel(true);
+  assert.equal(peer.panel.classList.contains('open'), false, 'it closes where the chip cannot');
+  assert.equal(peer.doc.activeElement, peer.back);
+  // Nothing to take it (no chat open): it closes, and nothing is forced.
+  const none = closer({ focus: 'panel', chipDisabled: true });
+  none.closePanel(true);
+  assert.equal(none.panel.classList.contains('open'), false);
+  // Closed from outside the panel (the chip, a face): focus stays where the owner is.
+  const outside = closer({ focus: 'composer' });
+  outside.closePanel();
+  assert.equal(outside.doc.activeElement, outside.input);
+});
+
+test('item 51: the corner holds only the ×, built once for every chat (a chat change or a poll never rebuilds it); syncPanelChrome only puts away a sidebar menu acting for the old chat; the corner\'s pencil is gone', () => {
+  assert.equal((app.match(/\$\("panel-actions"\)\.replaceChildren\(/g) || []).length, 1, 'the corner is filled once');
+  assert.match(app, /const panelX = panelAct\("x", "收起信息"\);\n\s+setTip\(panelX, "收起信息" \+ \(isMac \? " {2}⌘\\\\" : " {2}Ctrl\+\\\\"\)\);\n\s+panelX\.addEventListener\("click", \(\) => closePanel\(true\)\);\n\s+\$\("panel-actions"\)\.replaceChildren\(panelX\);\n\s+\$\("panel-actions"\)\.hidden = false;/);
+  assert.doesNotMatch(app, /panelAct\("pencil"/, 'no pencil in the corner');
+  assert.doesNotMatch(app, /renameHere/);
+  const sync = take('syncPanelChrome');
+  assert.doesNotMatch(sync, /panel-actions/, 'the corner is not touched on a repaint');
+  let closed = 0;
+  const ctx: Any = { state: { sel: null }, profileRules: { key: (sel: Any) => (sel ? sel.type + ':' + sel.id : '') }, closePanelMenu: () => { closed++; } };
+  vm.runInNewContext('var chromeBot = "";' + sync + 'this.sync = syncPanelChrome;', ctx);
+  ctx.state.sel = { type: 'bot', id: '团子' }; ctx.sync();
+  assert.equal(closed, 1);
+  ctx.sync(); ctx.sync();
+  assert.equal(closed, 1, 'a poll for the same chat keeps an open menu');
+  ctx.state.sel = { type: 'group', id: 'g1' }; ctx.sync();
+  assert.equal(closed, 2, 'another chat: the old one\'s menu goes');
+});
+
+test('item 51: 编辑资料 from the head\'s portrait opens the same dialog with the chat\'s loaded 资料, and closing it (saved, cancelled, Escape) gives focus back to that portrait; gone, to this chat\'s portrait, else the chip', () => {
+  assert.match(app, /editProfile: \(data, opener\) => openProfile\(data && data\.name \? data : state\.panelData \|\| \{\}, opener\),/);
+  assert.match(take('openProfile'), /profileReturnFocus = opener \|\| document\.activeElement;/);
+  const doc = new Doc();
+  const h = (tag: string, id = '', cls = '') => { const e = doc.createElement(tag); if (id) e.id = id; if (cls) e.className = cls; return e; };
+  const ident = h('div', 'panel-ident'), chip = h('button', 'head-chip'), setpage = h('div', 'setpage'), ok = h('button', 'modal-ok'), cancel = h('button', 'modal-cancel');
+  setpage.hidden = true;
+  doc.body.append(ident, chip, setpage, ok, cancel);
+  const portrait = (cls = 'pf-edit') => { const b = h('button', '', cls); ident.replaceChildren(b); return b; };
+  const ctx: Any = {
+    modal: h('div'), modalForm: h('form'), modalError: h('p'), settingsSection: 'general',
+    $: (id: string) => doc.getElementById(id),
+  };
+  vm.runInNewContext('var profileReturnFocus = null;' + take('closeModal') + 'this.closeModal = closeModal;', ctx);
+  // The portrait it was opened from, still there (the same node for the chat, a new face drawn inside).
+  const mine = portrait();
+  ctx.profileReturnFocus = mine;
+  ctx.closeModal();
+  assert.equal(doc.activeElement, mine);
+  assert.equal(ctx.profileReturnFocus, null);
+  // Gone (another chat's head now): this chat's portrait.
+  const old = mine;
+  const now = portrait();
+  ctx.profileReturnFocus = old;
+  ctx.closeModal();
+  assert.equal(doc.activeElement, now);
+  // A group's head has no portrait button: the chip.
+  ident.replaceChildren(h('span', '', 'pf-portrait'));
+  ctx.profileReturnFocus = old;
+  ctx.closeModal();
+  assert.equal(doc.activeElement, chip);
 });

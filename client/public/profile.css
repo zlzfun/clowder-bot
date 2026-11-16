@@ -28,6 +28,38 @@ html[data-theme="dark"] .pf-head.tinted .pf-portrait::before {
     transparent 100%);
 }
 
+/* A cat's portrait is the head's 编辑资料 (item 51): the face as it is, and
+   under the pointer or keyboard focus a pencil comes up at its lower right
+   corner, on the primary (the fill a badge takes, --x-on-primary on it), cut
+   from the face by a ring of the panel's surface; nothing covers the face.
+   Where there is no hover (phones, tablets) the pencil stands there, smaller
+   and quiet. Pressed, the face gives a little. Reduced motion: app.css's
+   global rule turns the pop off. */
+.pf-edit {
+  position: relative; flex: none; display: block; padding: 0; border: 0; border-radius: 50%;
+  background: transparent; color: inherit; line-height: 0;
+}
+.pf-edit:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.pf-edit .pf-portrait { transition: transform var(--dur-press) ease-out; }
+.pf-edit:active .pf-portrait { transform: scale(var(--press-scale)); }
+.pf-edit-mark {
+  position: absolute; right: -4px; bottom: -4px; z-index: 1;
+  width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--x-primary); color: var(--x-on-primary); box-shadow: 0 0 0 2px var(--panel);
+  opacity: 0; transform: scale(var(--pop-scale-start));
+  transition: opacity var(--dur-pop-close) ease-out, transform var(--dur-pop) var(--ease-spring);
+  pointer-events: none;
+}
+.pf-edit-mark .icon { width: 12px; height: 12px; stroke-width: 1.8; }
+.pf-edit:focus-visible .pf-edit-mark { opacity: 1; transform: none; }
+@media (hover: hover) {
+  .pf-edit:hover .pf-edit-mark { opacity: 1; transform: none; }
+}
+@media (hover: none) {
+  .pf-edit .pf-edit-mark { opacity: 1; transform: none; width: 18px; height: 18px; right: -3px; bottom: -3px; background: var(--x-fill-2); color: var(--x-text-2); }
+  .pf-edit .pf-edit-mark .icon { width: 10px; height: 10px; }
+}
+
 /* A group's name is a quiet button: a click edits it in place. */
 .phdr b.pf-title { overflow: visible; }
 .pf-name {
@@ -37,12 +69,13 @@ html[data-theme="dark"] .pf-head.tinted .pf-portrait::before {
   transition: background 160ms ease-out;
 }
 .pf-name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* The pencil shows on hover or focus; a touch screen has the action row's 改群名. */
+/* The pencil shows on hover or focus. Where there is no hover it stands
+   there (item 51: the corner's 改群名 is gone, so it is the only cue). */
 .pf-name .icon { width: 14px; height: 14px; flex: none; color: var(--x-faint); opacity: 0; transition: opacity 160ms ease-out; }
 .pf-name:hover .icon, .pf-name:focus-visible .icon { opacity: 1; }
 .pf-name:hover { background: var(--hover); }
 .pf-name:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
-@media (hover: none) { .pf-name .icon { display: none; } }
+@media (hover: none) { .pf-name .icon { opacity: 1; } }
 .pf-name-input {
   display: block; width: 100%; min-width: 0; margin: 0 0 0 -6px; padding: 2px 6px;
   border: 0; border-radius: var(--x-r-sm); background: var(--fill); color: var(--text);

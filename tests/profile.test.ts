@@ -383,7 +383,7 @@ function drawer(opts: { cats?: Any[]; groups?: Any[]; route?: (path: string, met
     toast: (text: string) => log.push('toast:' + text),
     cats: () => s.cats,
     catFace: (name: string) => made('span', 'avatar', { cat: name }),
-    catFaceSig: (name: string) => 'face:' + name,
+    catFaceSig: (name: string) => 'face:' + name + (s.faceRev || ''),
     groupFace: (g: Any) => made('span', 'avatar group', { group: g.id }),
     groupFaceSig: (g: Any) => JSON.stringify(g.members),
     unknownFace: () => made('span', 'avatar glyph'),
@@ -395,7 +395,7 @@ function drawer(opts: { cats?: Any[]; groups?: Any[]; route?: (path: string, met
     conversations: () => convNode,
     runtimeHref: (data: Any) => data.thread_id ? '/runtime.html?thread=' + data.thread_id : '/runtime.html',
     newConversation: (sel: Any, opener: El) => { log.push('new:' + sel.type + ':' + sel.id); s.opener = opener; },
-    editProfile: (data: Any) => log.push('edit:' + data.name),
+    editProfile: (data: Any, opener: El) => { log.push('edit:' + (data ? data.name : '(loaded)')); s.editOpener = opener; },
     pin: async (name: string, on: boolean) => {
       log.push('pin:' + name + ':' + on);
       if (s.pinGate) await s.pinGate;
@@ -888,7 +888,7 @@ test('a group\'s name is edited in place: Enter saves, Esc goes back, empty take
   // The same name again is no change: nothing sent.
   const same = drawer();
   const h3 = same.show(same.P.groupHead(GROUP, same.group()));
-  same.P.renameHere();
+  one(h3, 'pf-name').click();
   one(h3, 'pf-name-input').key('Enter');
   await settle();
   assert.equal(same.writes().length, 0);
@@ -903,6 +903,60 @@ test('a cat\'s head carries its own colour as a quiet wash only when the server 
   const other = d.P.catHead({ type: 'bot', id: '墨点' }, { name: '墨点' });
   assert.equal(has(other, 'tinted'), false);
   assert.equal(other.style['--pf-accent'], undefined);
+});
+
+test('item 51: a cat\'s portrait is the head\'s 编辑资料 — a real button named for a screen reader, the face as it is with a pencil for the cue, opening the chat\'s loaded 资料 with itself as the opener; one node for the chat, so a new face keeps it and its focus', () => {
+  const d = drawer();
+  const head = d.show(d.P.catHead(TUANZI, PROFILE));
+  const edit = one(head, 'pf-edit');
+  assert.equal(edit.tagName, 'BUTTON');
+  assert.equal(edit.type, 'button');
+  assert.equal(edit.getAttribute('aria-label'), '编辑资料');
+  assert.notEqual(edit.getAttribute('tabindex'), '-1', 'reachable by keyboard');
+  assert.equal(visibleText(edit), '', 'no words: the face and, for the cue, a pencil');
+  assert.equal(one(edit, 'pf-portrait').firstChild!.dataset.cat, '快手', 'the face, as before');
+  const mark = one(edit, 'pf-edit-mark');
+  assert.equal(mark.getAttribute('aria-hidden'), 'true');
+  assert.equal(mark.firstChild!.dataset.icon, 'pencil');
+  edit.click();
+  assert.deepEqual(d.log, ['edit:(loaded)'], 'the chat\'s loaded 资料, as the corner\'s pencil opened (never a profile with only a name)');
+  assert.equal(d.s.editOpener, edit, 'focus comes back to it');
+  // The face changes while the head is shown (a new picture, catFaceSig): drawn inside the same button.
+  edit.focus();
+  const face = one(edit, 'pf-portrait').firstChild;
+  d.s.faceRev = '-2';
+  assert.equal(d.P.catHead(TUANZI, PROFILE), head);
+  assert.equal(one(head, 'pf-edit'), edit, 'the same button');
+  assert.notEqual(one(edit, 'pf-portrait').firstChild, face, 'the new face is drawn');
+  assert.equal(one(edit, 'pf-edit-mark'), mark, 'the cue stays');
+  assert.equal(d.doc.activeElement, edit, 'focus stays on it');
+  // Another cat: its own button.
+  const other = d.show(d.P.catHead({ type: 'bot', id: '墨点' }, { name: '墨点' }));
+  assert.notEqual(one(other, 'pf-edit'), edit);
+});
+
+test('item 51: a group\'s portrait stays a picture (its members\' faces, nothing to edit); its name is the head\'s only button, 改群名 in place', () => {
+  const d = drawer();
+  const head = d.show(d.P.groupHead(GROUP, d.group()));
+  assert.equal(named(head, 'pf-edit').length, 0);
+  assert.equal(one(head, 'pf-portrait').tagName, 'SPAN');
+  assert.deepEqual(all(head).filter((n) => n.tagName === 'BUTTON').map((n) => n.getAttribute('aria-label')), ['改群名：读书会']);
+  assert.equal(one(head, 'pf-name').dataset.tip, '改群名');
+  assert.equal(d.P.renameHere, undefined, 'the corner\'s 改群名 is gone, and its entry with it');
+  one(head, 'pf-name').click();
+  assert.equal(named(head, 'pf-name-input').length, 1);
+});
+
+test('item 51: the cue in profile.css — a pencil on the primary comes up at the portrait\'s corner under the pointer or keyboard focus, nothing over the face, stands quietly where there is no hover; the group name\'s pencil stands there too; existing tokens and motion only', () => {
+  const css = read('client/public/profile.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.match(css, /\.pf-edit:focus-visible \{ outline: 2px solid var\(--accent\); outline-offset: 3px; \}/);
+  assert.match(css, /\.pf-edit-mark \{[^}]*background: var\(--x-primary\); color: var\(--x-on-primary\); box-shadow: 0 0 0 2px var\(--panel\);[^}]*opacity: 0; transform: scale\(var\(--pop-scale-start\)\);[^}]*transition: opacity var\(--dur-pop-close\) ease-out, transform var\(--dur-pop\) var\(--ease-spring\);[^}]*pointer-events: none;/);
+  assert.match(css, /\.pf-edit:focus-visible \.pf-edit-mark \{ opacity: 1; transform: none; \}/);
+  assert.match(css, /@media \(hover: hover\) \{\n\s+\.pf-edit:hover \.pf-edit-mark \{ opacity: 1; transform: none; \}\n\}/, 'under the pointer only where there is one');
+  assert.match(css, /@media \(hover: none\) \{\n\s+\.pf-edit \.pf-edit-mark \{ opacity: 1; transform: none; width: 18px; height: 18px;[^}]*background: var\(--x-fill-2\); color: var\(--x-text-2\); \}/, 'standing, smaller and quiet without hover');
+  assert.match(css, /\.pf-edit:active \.pf-portrait \{ transform: scale\(var\(--press-scale\)\); \}/);
+  assert.match(css, /@media \(hover: none\) \{ \.pf-name \.icon \{ opacity: 1; \} \}/, 'the group name\'s pencil stands where there is no hover');
+  assert.doesNotMatch(css, /\.pf-edit[^{]*\{[^}]*(?:filter|backdrop-filter)\s*:/, 'no overlay or dimming of the face');
 });
 
 test('删除群聊 and the sidebar menu: 改名 and 删除群聊 only; deleting asks first, says the history is kept, and only then sends DELETE', async () => {
