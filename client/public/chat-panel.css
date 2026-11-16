@@ -1,0 +1,47 @@
+/* The details panel beside the chat (chat-panel.js, docs/xbot-frontend.md
+   item 50). app.css stays byte for byte: its drawer (#243, a panel over the
+   card with a shadow and the scrim) is still the panel wherever the card has
+   no room for both. Where it has, chat-panel.js puts .pb-beside on .main and
+   these rules take over; nothing here depends on the window's width except
+   the phone layout's own 768px line, which the script keeps too.
+
+   Beside the chat the panel is part of the card, told apart by its own
+   surface (tokens.css: --x-panel, "和对话区同卡，靠底色分开"): no line, no
+   shadow, no corners of its own (the card's clip it), from the card's top.
+   Open, it is in the card's row and the chat's column gives it its width;
+   closed, it is out of the row again and slides away over the chat with
+   app.css's own 180ms transform, as it came in. The chat's column changes
+   width once per opening or closing, never frame by frame (a reply being
+   written does not reflow on every frame of the motion); chat-panel.js keeps
+   the place being read across that change. Reduced motion: app.css already
+   turns the panel's transition off. */
+@media (min-width: 768px) {
+  .main.pb-beside { flex-direction: row; }
+  .main.pb-beside > .panel { top: 0; border-radius: 0; box-shadow: none; }
+  .main.pb-beside > .panel.open { position: relative; flex: none; }
+
+  /* The open identity chip. For the drawer, item 26 (cafe-theme.css) took its
+     fill away and put it under the scrim, where a click on it lands on the
+     scrim; that still holds there. Beside the chat there is no scrim: the chip
+     is an ordinary toggle in the chat's header again and fills under the
+     pointer as it does closed. Open, it keeps no fill of its own: the panel
+     beside it says it is open, and the line of what the cat is doing
+     (chat-presence.css) is drawn over the chip and runs past it, which a
+     standing fill would cut off. Its group seams follow the fill. */
+  .main.pb-beside .top-title.on:hover:not(:disabled) { background: var(--hover); }
+  .main.pb-beside .top-title.on:hover:not(:disabled) .avatar.group { --seat-seam: var(--hover); }
+}
+
+/* A cat's face beside its reply opens the details as the chip does
+   (chat-panel.js). It is a pointer target only: the chip and ⌘/Ctrl+\ are the
+   keyboard's and the screen reader's way, so there is no tab stop or button on
+   every message, and no tooltip (item 46). Under the pointer the clay cat gets
+   the round fill a bare icon gets in the rail; pressed, it gives a little. */
+#thread .pb-face {
+  cursor: pointer;
+  transition: background-color 160ms ease-out, box-shadow 160ms ease-out, transform var(--dur-press) ease-out;
+}
+@media (hover: hover) {
+  #thread .pb-face:hover { background-color: var(--hover); box-shadow: 0 0 0 3px var(--hover); }
+}
+#thread .pb-face:active { transform: scale(var(--press-scale)); }

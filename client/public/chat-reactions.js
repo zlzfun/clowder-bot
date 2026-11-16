@@ -552,12 +552,22 @@
       }, true);
       document.addEventListener("scroll", (ev) => { if (P.picker && !P.picker.menu.contains(ev.target)) closePicker(false); }, true);
     }
-    if (typeof window.addEventListener === "function") {
-      let wait = 0;
-      window.addEventListener("resize", () => {
-        closePicker(false);
-        if (!wait) wait = frame(() => { wait = 0; const inner = currentInner(); if (inner) { inset(inner); refit(inner); } }) || 0;
-      });
+    let wait = 0;
+    const relayout = () => {
+      closePicker(false);
+      if (!wait) wait = frame(() => { wait = 0; const inner = currentInner(); if (inner) { inset(inner); refit(inner); } }) || 0;
+    };
+    if (typeof window.addEventListener === "function") window.addEventListener("resize", relayout);
+    // The conversation also changes width without the window: the details
+    // panel opening beside it (chat-panel.js), the sidebar's grip. Only a
+    // change of width counts (the dock growing changes the height).
+    if (thread && typeof window.ResizeObserver === "function") {
+      let width = null;
+      new window.ResizeObserver(() => {
+        const now = thread.clientWidth;
+        if (width !== null && now !== width) relayout();
+        width = now;
+      }).observe(thread);
     }
   }
 

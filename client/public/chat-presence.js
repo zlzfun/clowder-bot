@@ -336,6 +336,17 @@
     H = hooks || {};
     if (H.live && typeof H.live.watch === "function") H.live.watch(onLive);
     if (typeof window.addEventListener === "function") window.addEventListener("resize", () => { if (H.chip && H.chip.classList.contains("pz-on")) fit(); });
+    // The header also changes width without the window: the details panel
+    // opening beside the chat (chat-panel.js), the sidebar's grip.
+    const bar = H.chip && H.chip.parentElement;
+    if (bar && typeof window.ResizeObserver === "function") {
+      let width = null;
+      new window.ResizeObserver(() => {
+        const now = bar.clientWidth;
+        if (width !== null && now !== width && H.chip.classList.contains("pz-on")) fit();
+        width = now;
+      }).observe(bar);
+    }
     const root = document.documentElement;
     if (root && typeof window.MutationObserver === "function") {
       new window.MutationObserver(() => { surfacesAt = null; colours(); }).observe(root, { attributes: true, attributeFilter: ["data-theme", "data-colors"] });

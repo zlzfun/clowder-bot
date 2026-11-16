@@ -27,7 +27,7 @@
       "file": "app.js",
       "target": "client/public/app.js",
       "sourceSha256": "1248f793493826bf044359c71e7d8772ccc3472d6021d6abb979dff9b6cb29bc",
-      "sha256": "69f2b8b9546bab477a3a187220bb5d179eae9afe799bb02504e8cf9ca6d176e0",
+      "sha256": "8dfacb7978c1490e37c1ef5a75761504abcf35aef44ac2c6ed4b73954174b7ad",
       "unchanged": false
     },
     {
@@ -153,7 +153,7 @@
       "file": "index.html",
       "target": "client/index.html",
       "sourceSha256": "a4160c18e23489fbc6a9e21fe494e1ac52840a67b2e138997400a0b42835b556",
-      "sha256": "d85fbd9ff4854070c3124095675dd869b5e3282bf0c5726f6b19c69012d61612",
+      "sha256": "abbdda26dcbb3b0999ca428fb4e6ed5010d5e360ee78dce9708e46b85ecc6dbb",
       "unchanged": false
     },
     {
@@ -879,9 +879,9 @@
     },
     {
       "target": "client/public/chat-presence.js",
-      "description": "window.ClowderPresence: the header line under the cat's name and typing dots on sidebar rows (chat-live.js presence for the open chat, the status poll elsewhere), one style element for the cats' colours, the once-stamped seen paw placed after each keyed commit without changing row identity, and the palette's and drawer scrim's exit as a fading copy; item 48: the surfaces are read again when data-colors changes as well as data-theme, so the cats' colours are judged on the 配色 in effect",
-      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 活起来 (docs/xbot-frontend.md item 33; docs/xbot-api.md bots[].accent, docs/chat-live-api.md); 配色 by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 48)",
-      "sha256": "a20b34be26b6152fe3cb617973f5cbd3b869e47c1875792e971738234335993f"
+      "description": "window.ClowderPresence: the header line under the cat's name and typing dots on sidebar rows (chat-live.js presence for the open chat, the status poll elsewhere), one style element for the cats' colours, the once-stamped seen paw placed after each keyed commit without changing row identity, and the palette's and drawer scrim's exit as a fading copy; item 48: the surfaces are read again when data-colors changes as well as data-theme, so the cats' colours are judged on the 配色 in effect; item 50: the header changing width without the window (the details panel beside the chat, the sidebar's grip) measures the line under the name again, through a ResizeObserver on the header's bar that counts a change of width only",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 活起来 (docs/xbot-frontend.md item 33; docs/xbot-api.md bots[].accent, docs/chat-live-api.md); 配色 by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 48); item 50 by local Claude Code (claude-opus-5-5) on 2026-11-16 (docs/xbot-frontend.md item 50)",
+      "sha256": "792b5efb93856890c2af7773d565ef20d6f4cfcf0dfaf8ecfb055ef1a90c82af"
     },
     {
       "target": "client/public/chat-presence.css",
@@ -897,9 +897,9 @@
     },
     {
       "target": "client/public/chat-reactions.js",
-      "description": "window.ClowderReactions: the hover buttons beside a bubble (表情 · 回复; a line with the time, the buttons above the time, or a small toolbar over the bubble with no room beside it; not shown, they take no room; the hovered or focused row is fitted again after each drawing and on resize), the chips pressed onto a bubble's corner after each keyed commit (outside the row signature; data-rx / data-rxs for finding a row by a reaction), each coming in once, a cat's one-emoji answer landing from where it was written, the emoji picker (sent: 已回应, on its way: 发送中) and the message menu's row of five, and sending a reaction through the existing message route without the composer (on its way until the record has the receipt's userMessageId; a body that breaks off or names no message is an unknown outcome; refused or unknown told plainly, late answers kept to their chat)",
-      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-13 for 回复与表情回应 (docs/xbot-frontend.md item 49; docs/chat-experience-api.md 「回复与表情回应」)",
-      "sha256": "e4b9796332c5ff4b2d6735722b08a02ce21b01a818f6fa1872922ce98af5a03e"
+      "description": "window.ClowderReactions: the hover buttons beside a bubble (表情 · 回复; a line with the time, the buttons above the time, or a small toolbar over the bubble with no room beside it; not shown, they take no room; the hovered or focused row is fitted again after each drawing and on resize), the chips pressed onto a bubble's corner after each keyed commit (outside the row signature; data-rx / data-rxs for finding a row by a reaction), each coming in once, a cat's one-emoji answer landing from where it was written, the emoji picker (sent: 已回应, on its way: 发送中) and the message menu's row of five, and sending a reaction through the existing message route without the composer (on its way until the record has the receipt's userMessageId; a body that breaks off or names no message is an unknown outcome; refused or unknown told plainly, late answers kept to their chat); item 50: the history changing width without the window (the details panel opening beside the chat, the sidebar's grip) fits the hovered or focused row and the quote insets again, through a ResizeObserver on #thread that counts a change of width only",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-13 for 回复与表情回应 (docs/xbot-frontend.md item 49; docs/chat-experience-api.md 「回复与表情回应」); item 50 by local Claude Code (claude-opus-5-5) on 2026-11-16 (docs/xbot-frontend.md item 50)",
+      "sha256": "c14f1ebd38aa54ff454bd061caeacf442dbb741679c3af34dfde44e50dbebd3b"
     },
     {
       "target": "client/public/chat-reactions.css",
@@ -938,6 +938,18 @@
       "sha256": "30f6040f9d39ef00ab74adc1835b2a6e370cb093e25785e522a3d8b51bb4aa95"
     },
     {
+      "target": "client/public/chat-panel.js",
+      "description": "window.ClowderPanel: where the details panel sits. One decision from the card's own width (.main: the sidebar's width, the rail and the desktop shell's margins change it, not only the window): beside the chat when the window is a desktop one (768px and wider) and the card holds the panel and a chat of at least 420px (CHAT; the chat's reading column is then never narrower than a phone's), else the drawer over the card with its scrim as before (#243); the decision is the class pb-beside on .main, set by sync() on a ResizeObserver of the card (the window's resize without one), never from the open state, and read by beside(); a change that moves the chat's edge (opening or closing beside it, or the mode changing while it is open) keeps the place being read across its one reflow (moved(), the shell's keep hook); a cat's face beside its reply (pb-face) toggles the panel as the header's chip does, through one delegated click listener on #thread, not while the chip is disabled, not in the two-cat exchange, not for a click that ends a selection or a right click; no requests, no stored state",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-16 for the details panel beside the chat (docs/xbot-frontend.md item 50)",
+      "sha256": "509efcfdb8f7973c8b7c51847fc430b74770e66c1ee803f417e80053b7b87f2f"
+    },
+    {
+      "target": "client/public/chat-panel.css",
+      "description": "The details panel beside the chat (only under .main.pb-beside, set by chat-panel.js, and only in the 768px query): the card's row, the panel part of the card told apart by its own surface (--x-panel; no line, no shadow, no corners of its own, from the card's top), open in the row and taking its width from the chat's column (app.css's width, 340px or 384px from 960px), closed out of the row and sliding away with app.css's own 180ms transform; the open chip beside the chat with no standing fill and the hover fill of a toggle (item 26's drawer rule in cafe-theme.css stays for the drawer), its group seams on that fill; a cat's face beside its reply as a pointer target (cursor, the rail's round --hover fill under a hovering pointer, --press-scale when pressed); existing tokens only, no colour literals, nothing animating the chat's width frame by frame, original CSS unchanged",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-16 for the details panel beside the chat (docs/xbot-frontend.md item 50)",
+      "sha256": "35588c06fe1973260e4825f057aeb3fc4737469af90fac1398d40e3ab1fb6958"
+    },
+    {
       "target": "client/public/theme-lab/index.html",
       "description": "Colour lab review page (/theme-lab/): the scene switch, one tile per palette, the large view dialog (previous/next, scene and light/dark switches, 在应用里试, close); links tokens.css and app.css only (the neutral XBot base, no café layer) and loads the app's own chat-presence-rules.js; follows the system's light or dark and never reads or writes the app's settings",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 47); review prototype, not loaded by production pages",
@@ -953,7 +965,7 @@
       "target": "client/public/theme-lab/lab-rules.js",
       "description": "Colour lab rules without DOM (window.ClowderThemeLabRules): client/index.html's stylesheets in its order, a palette as one style element whose html:root rules out-rank cafe-theme.css's token and four syntax rules, the surfaces a cat's colour is judged on, a frame's srcdoc (the app's stylesheets, the cats' colours, the palette, the frozen body), stepping round the ends, scale to fit; item 48: client/index.html's stylesheets now include cafe-colors.css and colors.css; the override is html:root:root, one step above the app's own 配色, and 拿铁 is written out for the app's window Item 49 (2026-11-13): STYLES follows client/index.html with chat-reactions.css after chat-presence.css.",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 47); review prototype, not loaded by production pages; 配色 by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 48)",
-      "sha256": "97c2997151a9a1fe125ce1227c45e7f6e06a2c0c6e3036828a685ebd6869d096"
+      "sha256": "cf6617ae00d6ba2cee9c22c12e1677cbf8482ee1b26a29df9e1f206246848340"
     },
     {
       "target": "client/public/theme-lab/lab.js",

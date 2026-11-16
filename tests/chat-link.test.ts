@@ -63,7 +63,7 @@ test('the cat with that name opens, else the first group chat with it; nothing a
 // app.js's own pickBot, pickGroup, openLinked, linkHeld, uncover and boot, run
 // with the shell's state, history, pickers and covering views faked; the open
 // dialogs are elements of a small DOM (tests/fake-dom.ts).
-function shell(hash: string, more: { sel?: Any; peer?: Any; search?: string; covered?: (doc: Doc) => void; slow?: boolean } = {}) {
+function shell(hash: string, more: { sel?: Any; peer?: Any; search?: string; covered?: (doc: Doc) => void; slow?: boolean; beside?: boolean } = {}) {
   const calls: string[] = [];
   const doc = new Doc();
   const setpage = doc.createElement('div'); setpage.id = 'setpage'; setpage.setAttribute('aria-modal', 'true'); setpage.hidden = true;
@@ -79,6 +79,8 @@ function shell(hash: string, more: { sel?: Any; peer?: Any; search?: string; cov
   const ctx: Any = {
     location, history, state, calls, console, document: doc, panel, lightbox, setpage,
     window: { ClowderPalette: palette }, palette,
+    // Where the panel sits (chat-panel.js, item 50): beside the chat, or the drawer over it.
+    panelPlace: { beside: () => !!more.beside },
     $: (id: string) => doc.getElementById(id),
     listRules: rules(), Promise, sessionStorage: { getItem: () => '小鲸鱼' },
     quietNote: (text: string) => calls.push('note:' + text),
@@ -132,6 +134,13 @@ test('what only shows something is put away before the chat opens: settings, the
   assert.equal(s.calls.at(-1), 'selectBot:小鲸鱼', 'then the chat opens, in view');
   assert.equal(s.setpage.hidden, true);
   assert.equal(s.panel.classList.contains('open'), false);
+  // Item 50: a panel beside the chat covers nothing, so it stays open and follows the chat that opens.
+  const beside = shell('#chat=' + encodeURIComponent('小鲸鱼'), { beside: true });
+  beside.panel.classList.add('open');
+  await beside.openLinked();
+  assert.deepEqual(covers(beside), ['closePops'], 'nothing to put away: the panel beside the chat is not closed');
+  assert.equal(beside.panel.classList.contains('open'), true);
+  assert.equal(beside.calls.at(-1), 'selectBot:小鲸鱼');
   // Settings and the palette are dialogs too, but only views: they never hold a link back.
   const settingsOnly = shell('#chat=' + encodeURIComponent('产品评审'));
   settingsOnly.setpage.hidden = false;
