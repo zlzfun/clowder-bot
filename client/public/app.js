@@ -4823,7 +4823,8 @@
     return box;
   }
 
-  // The info header has only edit; other actions belong to sidebar Bot rows.
+  // An icon button of the info header's corner (since item 51 only the
+  // panel's ×) and of the sidebar rows' menus.
   function panelAct(iconName, label, danger) {
     const btn = el("button", "ghost panel-act" + (danger ? " danger" : ""));
     btn.type = "button";
@@ -4886,22 +4887,17 @@
     });
   }
 
-  // Polling preserves both the edit button focus and an open sidebar menu.
+  // The head's corner holds only the panel's own × (item 51), the same button
+  // for every chat: built once next to panelOpen, never rebuilt here, so a
+  // chat change or a poll keeps focus on it. 编辑资料 is the cat's portrait and
+  // 改群名 the group's name, both in the head (profile.js). A change of chat
+  // still closes an open sidebar menu acting for the old one; a repaint for
+  // the same chat (polling, status) does not.
   function syncPanelChrome() {
     const key = profileRules.key(state.sel);
-    // A repaint for the same chat (polling, status) must not close an open menu.
-    if (key && chromeBot === key) return;
-    const row = $("panel-actions");
+    if (chromeBot === key) return;
     closePanelMenu();
-    row.replaceChildren();
-    row.hidden = !key;
     chromeBot = key;
-    if (!key) return;
-    // A cat: 编辑资料. A group: 改群名, the head's name edited in place.
-    const group = state.sel.type === "group";
-    const edit = panelAct("pencil", group ? "改群名" : "编辑资料");
-    edit.addEventListener("click", () => (group ? profile.renameHere() : openProfile(state.panelData || {})));
-    row.append(edit);
   }
 
   // Delegate to the sidebar so pinned tiles and normal rows share one path,
@@ -6037,9 +6033,11 @@
     return wrap;
   }
 
-  function openProfile(data) {
+  // opener: what opened it (the head's portrait, 资料's 编辑资料), where focus
+  // goes back when it closes; the focused element when none is given.
+  function openProfile(data, opener) {
     if (!data || !data.name) return;
-    profileReturnFocus = document.activeElement;
+    profileReturnFocus = opener || document.activeElement;
     hideTip();
     $("modal-title").textContent = "编辑资料";
     modal.classList.add("profile-drawer");
@@ -6577,10 +6575,11 @@
     modalForm.removeAttribute("aria-modal");
     modalForm.removeAttribute("aria-labelledby");
     if (profileReturnFocus) {
-      // The action row is redrawn; return to its live 编辑资料 button instead.
-      const acts = $("panel-actions");
-      const target = profileReturnFocus.closest("#panel-actions") || !profileReturnFocus.isConnected
-        ? acts.querySelector(".panel-act:not(.danger)") || $("head-chip") : profileReturnFocus;
+      // Back to what opened it: the head's portrait is one node per chat,
+      // updated in place. Gone (another chat, a page drawn anew): this chat's
+      // portrait, else the chip.
+      const target = profileReturnFocus.isConnected ? profileReturnFocus
+        : $("panel-ident").querySelector(".pf-edit") || $("head-chip");
       profileReturnFocus = null;
       target.focus({ preventScroll: true });
     }
@@ -7030,14 +7029,36 @@
   // too (chat-panel.js): one path for both.
   async function togglePanel() {
     const open = !panel.classList.contains("open");
-    rememberPanel(open);
-    panelOpen(open);
-    if (open && window.innerWidth < 768) sidebar.classList.remove("open");
-    if (open) {
-      try { await loadPanel(); } catch (e) { setStatus(visibleError(e), true); }
-    }
+    if (!open) { closePanel(); return; }
+    rememberPanel(true);
+    panelOpen(true);
+    if (window.innerWidth < 768) sidebar.classList.remove("open");
+    try { await loadPanel(); } catch (e) { setStatus(visibleError(e), true); }
   }
   $("head-chip").addEventListener("click", togglePanel);
+
+  // Putting the panel away as the owner's choice (remembered for next time):
+  // the chip and a face (togglePanel), Escape, and the panel's own ×. Focus
+  // that was inside the panel (or the × itself, refocus: some browsers do not
+  // focus a clicked button) goes to the chip that opens it again, or to 返回
+  // in the two-cat exchange, where the chip is disabled; never to the page.
+  function closePanel(refocus) {
+    const inside = !!refocus || panel.contains(document.activeElement);
+    rememberPanel(false);
+    closePops();
+    panelOpen(false);
+    if (!inside) return;
+    const chip = $("head-chip"), back = $("back");
+    const to = !chip.disabled ? chip : back && !back.hidden ? back : null;
+    if (to) to.focus({ preventScroll: true });
+  }
+  // The × in the head's top-right corner: closes the panel in both of its
+  // forms, for every chat, also where the chip is disabled. Built once.
+  const panelX = panelAct("x", "收起信息");
+  setTip(panelX, "收起信息" + (isMac ? "  ⌘\\" : "  Ctrl+\\"));
+  panelX.addEventListener("click", () => closePanel(true));
+  $("panel-actions").replaceChildren(panelX);
+  $("panel-actions").hidden = false;
 
   // Beside the chat or over it (chat-panel.js): one decision, from the card's own width.
   panelPlace.init({
@@ -7370,14 +7391,8 @@
     if (!$("account-menu").hidden) { closePops(); return; }
     // The drawer is the layer on top: Escape puts it away from anywhere. Beside
     // the chat (chat-panel.js) the panel is a column, not a layer: Escape closes
-    // it only from inside it, and focus goes to the chip that opens it again.
-    const beside = panelPlace.beside();
-    if (panel.classList.contains("open") && (!beside || panel.contains(document.activeElement))) {
-      rememberPanel(false);
-      closePops();
-      panelOpen(false);
-      if (beside) $("head-chip").focus({ preventScroll: true });
-    }
+    // it only from inside it. Focus that was inside goes to the chip (closePanel).
+    if (panel.classList.contains("open") && (!panelPlace.beside() || panel.contains(document.activeElement))) closePanel();
     sidebar.classList.remove("open");
     syncBackdrop();
   });
@@ -7909,7 +7924,8 @@
     runtimeHref: (data) => "/runtime.html" + (data.thread_id ? "?thread=" + encodeURIComponent(data.thread_id) : ""),
     // 新对话 is the header ⋯ menu's own dialog (chat-history.js), opened from 资料.
     newConversation: (sel, opener) => chatHistory.newConversation(sel, opener),
-    editProfile: (data) => openProfile(data && data.name ? data : state.panelData || {}),
+    // The head's portrait passes no data: the chat's loaded 资料 (none yet: nothing opens).
+    editProfile: (data, opener) => openProfile(data && data.name ? data : state.panelData || {}, opener),
     pin: async (name, on) => {
       await api("/xbot-api/bots/" + encodeURIComponent(name) + "/pin", { method: "POST", body: { pinned: on } });
       await refreshLists();
