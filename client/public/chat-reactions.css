@@ -1,0 +1,169 @@
+/* Replies and emoji reactions (chat-reactions.js): the two buttons beside a
+   bubble on hover (表情, 回复), the chips pressed onto a bubble's corner, the
+   picker, the message menu's row of five, and a cat's face in a group's
+   quotes. Loaded after chat-presence.css (whose seen paw and hover time it
+   makes room for) and before sidebar.css and chat-live.css (which stays
+   last). Builds on app.css, tokens.css and the café layer: no new colours or
+   fonts; motion uses the press and pop tokens, and the global
+   prefers-reduced-motion rule of app.css stills what is here
+   (chat-reactions.js starts no motion of its own then either). */
+
+/* ---- 表情 · 回复: beside the bubble's foot, where the hover time is ----
+   The time steps further out to make room (as it does for the seen paw);
+   the buttons and the time come and go together, so nothing seems to move.
+   Touch screens have no hover: the long-press menu is the way there. Not
+   shown, they take no room at all (display: none), so a hidden one beside a
+   wide bubble can never make the conversation scroll sideways; shown, they
+   fade in. */
+.msg > :is(.body, .bubble-col) > .rx-acts {
+  position: absolute; z-index: 1; bottom: calc(-1px + var(--rx-lift, 0px));
+  display: none; gap: 2px; transition: opacity 120ms ease-out;
+}
+.msg.bot > .body > .rx-acts { left: calc(100% + 4px - var(--rx-inset, 0px)); }
+.msg.user > .bubble-col > .rx-acts { right: calc(100% + 4px - var(--rx-inset, 0px)); }
+.msg.user > .bubble-col:has(> .pz-seen) > .rx-acts { right: calc(100% + 22px - var(--rx-inset, 0px)); }
+@media (hover: hover) {
+  .msg:hover > :is(.body, .bubble-col) > .rx-acts { display: flex; }
+}
+.msg:is(:focus-visible, :has(:focus-visible), .rx-open) > :is(.body, .bubble-col) > .rx-acts { display: flex; }
+@starting-style { .msg > :is(.body, .bubble-col) > .rx-acts { opacity: 0; } }
+html.message-menu-open .msg > :is(.body, .bubble-col) > .rx-acts { display: none; }
+@media (hover: none) { .msg > :is(.body, .bubble-col) > .rx-acts { display: none; } }
+
+/* The hover time and the seen paw keep their places (app.css,
+   chat-presence.css), measured from the bubble rather than from a wider
+   quote above it (--rx-inset, chat-reactions.js); with the buttons, the time
+   steps out past them. */
+.msg.bot > .body > .ht { left: calc(100% + 8px - var(--rx-inset, 0px)); }
+.msg.user > .bubble-col > .ht { right: calc(100% + 8px - var(--rx-inset, 0px)); }
+.msg.user > .bubble-col:has(> .pz-seen) > .ht { right: calc(100% + 24px - var(--rx-inset, 0px)); }
+.msg.user > .bubble-col > .pz-seen { right: calc(100% + 6px - var(--rx-inset, 0px)); }
+.msg > :is(.body, .bubble-col):has(> .rx-acts, > .rx-chips) > .ht { bottom: calc(6px + var(--rx-lift, 0px)); }
+/* Only while it shows (hover), so a hidden time never reaches past the
+   conversation's edge and scrolls it sideways. */
+.msg.bot:hover > .body:has(> .rx-acts[data-n="2"]) > .ht { left: calc(100% + 68px - var(--rx-inset, 0px)); }
+.msg.bot:hover > .body:has(> .rx-acts[data-n="1"]) > .ht { left: calc(100% + 38px - var(--rx-inset, 0px)); }
+.msg.user:hover > .bubble-col:has(> .rx-acts) > .ht { right: calc(100% + 38px - var(--rx-inset, 0px)); }
+.msg.user:hover > .bubble-col:has(> .rx-acts):has(> .pz-seen) > .ht { right: calc(100% + 56px - var(--rx-inset, 0px)); }
+/* A wide bubble on a narrow window: the buttons sit above the time instead
+   of pushing it off the edge (chat-reactions.js measures, rx-tight). */
+.msg.rx-tight > :is(.body, .bubble-col) > .rx-acts { bottom: calc(20px + var(--rx-lift, 0px)); }
+.msg.bot.rx-tight:hover > .body:has(> .rx-acts) > .ht { left: calc(100% + 8px - var(--rx-inset, 0px)); }
+.msg.user.rx-tight:hover > .bubble-col:has(> .rx-acts) > .ht { right: calc(100% + 8px - var(--rx-inset, 0px)); }
+.msg.user.rx-tight:hover > .bubble-col:has(> .rx-acts):has(> .pz-seen) > .ht { right: calc(100% + 24px - var(--rx-inset, 0px)); }
+/* No room beside the bubble at all: a small toolbar over its inner foot
+   corner, the time inside it before the buttons (rx-over). */
+.msg.rx-over > :is(.body, .bubble-col) > .rx-acts {
+  bottom: calc(-12px + var(--rx-lift, 0px)); padding: 2px; border-radius: 10px;
+  background: var(--x-popover); box-shadow: var(--x-shadow-pop);
+}
+.msg.bot.rx-over > .body > .rx-acts { left: auto; right: calc(8px + var(--rx-inset, 0px)); padding-left: 44px; }
+.msg.user.rx-over > .bubble-col > .rx-acts { right: auto; left: calc(8px + var(--rx-inset, 0px)); padding-right: 44px; }
+.msg.rx-over:hover > :is(.body, .bubble-col) > .ht { z-index: 2; bottom: calc(-3px + var(--rx-lift, 0px)); }
+.msg.bot.rx-over:hover > .body:has(> .rx-acts[data-n="2"]) > .ht { left: auto; right: calc(72px + var(--rx-inset, 0px)); }
+.msg.bot.rx-over:hover > .body:has(> .rx-acts[data-n="1"]) > .ht { left: auto; right: calc(42px + var(--rx-inset, 0px)); }
+.msg.user.rx-over:hover > .bubble-col:has(> .rx-acts) > .ht { right: auto; left: calc(42px + var(--rx-inset, 0px)); }
+
+.rx-act {
+  width: 28px; height: 28px; padding: 0; border: 0; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; color: var(--x-faint); cursor: pointer;
+  transition: background-color 120ms ease-out, color 120ms ease-out, transform var(--dur-press) ease-out;
+}
+.rx-act .icon { width: 17px; height: 17px; }
+.rx-act:hover, .rx-act[aria-expanded="true"] { background: var(--x-fill-2); color: var(--x-text); }
+.rx-act:active { transform: scale(var(--press-scale)); }
+.rx-act:focus-visible { outline: 2px solid color-mix(in srgb, var(--ring) 70%, transparent); outline-offset: -1px; color: var(--x-text); }
+
+/* ---- The chips: pressed onto the bubble's outer corner ----
+   Under a cat's bubble at its left, under the owner's at its right, so the
+   hover buttons, the time and the seen paw keep the inner side. A ring of
+   the chat's own surface cuts each chip out of the bubble; the owner's own
+   carry the accent. One chip per emoji, a count from two. */
+.rx-chips {
+  position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 4px;
+  margin: -8px 0 2px; max-width: 100%;
+}
+.msg.bot > .body > .rx-chips { align-self: flex-start; padding-left: 10px; }
+/* The owner's column has a 4px gap between its items. */
+.msg.user > .bubble-col > .rx-chips { align-self: flex-end; justify-content: flex-end; padding-right: 10px; margin-top: -12px; }
+/* Chips at the foot of the message: the hover time, the buttons and the seen
+   paw stay level with the bubble's foot, above the chips. */
+.msg > :is(.body, .bubble-col):has(> .rx-chips + .ht) { --rx-lift: 16px; }
+.msg.user > .bubble-col:has(> .rx-chips + .ht) > .pz-seen { bottom: calc(7px + var(--rx-lift)); }
+/* The dark theme: emoji drawn dark (🐾 is a dark grey, about #464646, and it
+   is the one cats answer with most) vanish on dark chips. There the chips are
+   light: a cat's in a pale tone of the theme's own text colour, the owner's in
+   the accent, the owner's own colour (the user bubble's in most 配色). The
+   paw on either is at least 3.8:1 in every 配色's dark mode, the count in the
+   chat's dark colour at least 7.8:1 (tests/chat-reactions.test.ts computes
+   them from the generated palettes). */
+html[data-theme="dark"] .rx-chip { background: color-mix(in srgb, var(--x-text) 82%, var(--x-card)); color: var(--x-card); box-shadow: 0 0 0 2px var(--x-card); }
+html[data-theme="dark"] .rx-chip.rx-mine { background: var(--accent); color: var(--x-card); box-shadow: 0 0 0 2px var(--x-card); }
+
+.rx-chip {
+  display: inline-flex; align-items: center; justify-content: center; gap: 3px;
+  height: 24px; min-width: 26px; padding: 0 6px; border-radius: 12px;
+  background: var(--x-card); color: var(--x-muted);
+  box-shadow: 0 0 0 2px var(--x-card), 0 1px 3px color-mix(in srgb, var(--x-text) 16%, transparent);
+  font-size: 13px; line-height: 1; font-variant-numeric: tabular-nums;
+  cursor: default; user-select: none; -webkit-user-select: none;
+  transition: opacity 180ms ease-out, background-color 180ms ease-out;
+}
+.rx-chip > .rx-glyph { display: inline-block; font-size: 14px; line-height: 1; }
+.rx-chip > .rx-n { font-size: 12px; font-weight: 560; }
+.rx-chip.rx-mine {
+  background: color-mix(in srgb, var(--accent) 14%, var(--x-card)); color: var(--x-text-2);
+  box-shadow: 0 0 0 2px var(--x-card), inset 0 0 0 1px color-mix(in srgb, var(--accent) 38%, transparent), 0 1px 3px color-mix(in srgb, var(--x-text) 16%, transparent);
+}
+/* On its way: quieter until the record has it. */
+.rx-chip.rx-sending { opacity: .5; }
+
+/* ---- The picker: the five in one row, above the 表情 button ---- */
+.rx-pick {
+  position: fixed; z-index: 70; display: flex; gap: 2px; padding: 5px;
+  border-radius: 23px; background: var(--x-popover); box-shadow: var(--x-shadow-pop);
+}
+.rx-emo {
+  width: 36px; height: 36px; padding: 0; border: 0; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; font-size: 21px; line-height: 1; cursor: pointer;
+  transition: transform var(--dur-press) ease-out, background-color 120ms ease-out;
+}
+.rx-emo > span { display: inline-block; }
+.rx-emo:not(.rx-given):hover { background: var(--x-popover-hover); transform: translateY(-1px) scale(1.12); }
+.rx-emo:not(.rx-given):active { transform: scale(var(--press-scale)); }
+.rx-emo:focus-visible { outline: 2px solid color-mix(in srgb, var(--ring) 70%, transparent); outline-offset: -2px; }
+/* 🐾 is the app's own mark: under the pointer it kneads once, the way the
+   typing paws do (chat-presence.css). */
+.rx-emo[data-emoji="🐾"]:not(.rx-given):hover > span { animation: pz-knead 600ms ease-in-out 1; transform-origin: 50% 100%; }
+/* Already sent on this message: chosen, and it stays so. Not a switch.
+   Still on its way: chosen, quieter. */
+.rx-emo.rx-given {
+  background: color-mix(in srgb, var(--accent) 16%, var(--x-popover));
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 42%, transparent);
+  cursor: default;
+}
+.rx-emo.rx-pending { opacity: .55; }
+/* The dark theme: each emoji sits on a light disc, as on the chips (a dark
+   paw on the dark popover would vanish); the chosen ones in the accent. */
+html[data-theme="dark"] .rx-emo { background: color-mix(in srgb, var(--x-text) 82%, var(--x-popover)); }
+html[data-theme="dark"] .rx-emo:not(.rx-given):hover { background: var(--x-text); }
+html[data-theme="dark"] .rx-emo.rx-given { background: var(--accent); box-shadow: none; }
+
+/* The message menu (right click, long press): the five over its rows. */
+.message-menu-surface > .rx-strip {
+  display: flex; justify-content: space-between; margin: 0 0 6px; padding: 0 0 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--x-text) 8%, transparent);
+}
+.message-menu-surface > .rx-strip > .rx-emo { width: 28px; height: 28px; border-radius: 8px; font-size: 18px; }
+
+/* ---- A group's quotes say whose words they are with the cat's face ---- */
+.quote-block > .avatar { width: 16px; height: 16px; flex: none; }
+.quote-row > .avatar { width: 18px; height: 18px; flex: none; }
+.quote-row:has(> .avatar) > svg.icon { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rx-emo:not(.rx-given):hover { transform: none; }
+  .rx-emo[data-emoji="🐾"]:not(.rx-given):hover > span { animation: none; }
+}

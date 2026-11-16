@@ -176,12 +176,15 @@
   }
 
   // ----------------------------------------------------------- the message rows
-  // A history row by native message ID: the last of a message's bubbles.
+  // A history row by native message ID: the last of a message's bubbles, or
+  // the row a reaction with that ID is drawn on (data-rx, chat-reactions.js).
   function findRow(id) {
     const host = H.thread;
     if (!id || !host) return null;
     let hit = null;
-    for (const row of host.querySelectorAll("[data-mid]")) if (row.dataset.mid === id) hit = row;
+    for (const row of host.querySelectorAll("[data-mid]")) {
+      if (row.dataset.mid === id || String(row.dataset.rx || "").split(" ").includes(id)) hit = row;
+    }
     return hit;
   }
   // On screen in the history's own viewport.
@@ -214,10 +217,15 @@
   // it in the engine's order (H.displacedBefore) is or has been too: the
   // server's read position is cumulative, so confirming this reply confirms
   // those. One that is not drawn at all has nothing to be seen.
+  // When the newest reply is a cat's reaction (drawn on an older row, found
+  // by data-rx), the hook also names the newest reply that is a row of its
+  // own (chat-reactions-rules.js readFirst()): it too must be in sight, have
+  // been seen here, or be confirmed. Each piece of evidence is that row's own
+  // (its message ID), never another row's or a reaction's in its place.
   function seenThrough(id) {
     const before = H.displacedBefore ? (H.displacedBefore(id) || []).map(findRow).filter(Boolean) : [];
     for (const row of before) if (inSight(row)) viewed.add(doneKey(S.key, S.threadId, row.dataset.mid));
-    return inSight(findRow(id)) && before.every((row) => viewed.has(doneKey(S.key, S.threadId, row.dataset.mid)));
+    return inSight(findRow(id)) && before.every((row) => viewed.has(doneKey(S.key, S.threadId, row.dataset.mid)) || done.has(doneKey(S.key, S.threadId, row.dataset.mid)));
   }
   function target() {
     if (!S.sel || H.peer()) return "";

@@ -43,10 +43,13 @@
     was = Array.isArray(was) ? was : [];
     page = Array.isArray(page) ? page : [];
     const joined = [...held, ...was];
-    const first = page.map(rowKey).find(Boolean);
-    if (first) {
-      const at = joined.findIndex((m) => rowKey(m) === first);
-      if (at >= 0) return joined.slice(0, at);
+    // Joined at the first of the page's rows that was already there. Rows
+    // before it that were not are rows only now (a reaction drawn on a row
+    // that has left the newest page is a line of its own now, item 49).
+    const keys = page.map(rowKey).filter(Boolean);
+    for (const k of keys) {
+      const at = joined.findIndex((m) => rowKey(m) === k);
+      if (at >= 0) return joined.slice(0, at).filter((m) => !keys.includes(rowKey(m)));
     }
     // None of the newest page's rows is among those held. If the page they
     // were joined to showed rows, they would be: the page has moved past
@@ -58,6 +61,30 @@
     return a != null && b != null && b >= a ? joined : null;
   }
 
+  // One reaction, one place (item 49). The newest page and the pages held
+  // above it were read at different times, and a reaction drawn on a row on
+  // one may be a line of its own on the other (its row left the newest page,
+  // or a line of its own there is drawn on its row now). The newest page says
+  // how it is now: a held row the newest page draws as a reaction goes (with
+  // its delivery receipt), and a reaction on a held row that the newest page
+  // has as a line of its own leaves that row. Returns the held rows to show.
+  function single(held, page) {
+    const id = (m) => str(m && (m.native_message_id || m.id));
+    const lines = new Set((Array.isArray(page) ? page : []).map(id).filter(Boolean));
+    const marks = new Set();
+    for (const m of Array.isArray(page) ? page : []) for (const r of m && Array.isArray(m.reactions) ? m.reactions : []) if (r && r.id) marks.add(str(r.id));
+    if (!lines.size && !marks.size) return Array.isArray(held) ? held : [];
+    const out = [];
+    for (const m of Array.isArray(held) ? held : []) {
+      if (!m) continue;
+      if (marks.has(id(m)) || (m.role === "tool" && marks.has(str(m.tool_call_id).replace(/^delivery_/, "")))) continue;
+      const list = Array.isArray(m.reactions) ? m.reactions : null;
+      if (list && list.some((r) => r && lines.has(str(r.id)))) out.push({ ...m, reactions: list.filter((r) => !(r && lines.has(str(r.id)))) });
+      else out.push(m);
+    }
+    return out;
+  }
+
   // An earlier page arrived: its rows go above what is held, except rows
   // already shown (pages can overlap at their edges).
   function prepend(rows, held, page) {
@@ -66,11 +93,12 @@
     return [...fresh, ...(held || [])];
   }
 
-  // The request for the page before `cursor`.
+  // The request for the page before `cursor`. reactions=1, as for the newest
+  // page: a one-emoji message is drawn on the row it reacts to (chat-reactions.js).
   function pagePath(sel, cursor) {
     if (!sel || !sel.id || !cursor) return "";
     const scope = sel.type === "group" ? "/xbot-api/groups/" : "/xbot-api/bots/";
-    return scope + encodeURIComponent(sel.id) + (sel.type === "group" ? "" : "/transcript") + "?before=" + encodeURIComponent(cursor);
+    return scope + encodeURIComponent(sel.id) + (sel.type === "group" ? "" : "/transcript") + "?before=" + encodeURIComponent(cursor) + "&reactions=1";
   }
 
   // A page's own answer, checked: its rows, the cursor of the page before it
@@ -104,5 +132,5 @@
     return cat;
   }
 
-  window.ClowderHistoryRules = Object.freeze({ rowKey, order, stitch, prepend, pagePath, page, STARTERS, showStarters });
+  window.ClowderHistoryRules = Object.freeze({ rowKey, order, stitch, single, prepend, pagePath, page, STARTERS, showStarters });
 })();

@@ -14,11 +14,14 @@
   const MAX_PAGES = 10;
 
   // A history row is the target by its native message ID (search results, the
-  // status line) or by its seq (a quote's reply_to).
+  // status line) or by its seq (a quote's reply_to). A reaction is drawn on a
+  // row rather than as one: the row that carries it (its IDs in data-rx, its
+  // numbers in data-rxs, chat-reactions.js) is where it is found.
+  const listed = (list, v) => String(list || "").split(" ").includes(String(v));
   function matches(row, target) {
     if (!row || !row.dataset || !target) return false;
-    if (target.messageId && row.dataset.mid === String(target.messageId)) return true;
-    return target.seq != null && target.seq !== "" && row.dataset.seq === String(target.seq);
+    if (target.messageId && (row.dataset.mid === String(target.messageId) || listed(row.dataset.rx, target.messageId))) return true;
+    return target.seq != null && target.seq !== "" && (row.dataset.seq === String(target.seq) || listed(row.dataset.rxs, target.seq));
   }
 
   // What to do now: { act: "found" } | { act: "load" } | { act: "stop", why }.

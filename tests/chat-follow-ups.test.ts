@@ -431,7 +431,9 @@ test('the shell draws both histories in that order, keeps every index the row\'s
   // What was drawn is what the read position asks about (chat-experience.js); an empty history draws nothing to ask about.
   assert.equal((single.match(/state\.drawn = null;/g) || []).length, 1);
   assert.equal((group.match(/state\.drawn = null;/g) || []).length, 1);
-  assert.match(app, /displacedBefore: \(id\) => \(state\.drawn && !state\.peer \? liveRules\.displaced\(state\.drawn, id\) : \[\]\),/);
+  // Item 49 adds, when the newest reply is a cat's reaction, the newest reply that is a row of its own and the rows
+  // displaced below it (chat-reactions-rules.js readFirst()); for any other reply the same rows as before.
+  assert.match(app, /displacedBefore: \(id\) => \{\n\s+if \(!state\.drawn \|\| state\.peer\) return \[\];\n\s+const row = reactionRules\.readFirst\(state\.drawn\.messages, id\);\n\s+return \[\.\.\.liveRules\.displaced\(state\.drawn, id\), \.\.\.row, \.\.\.row\.flatMap\(\(r\) => liveRules\.displaced\(state\.drawn, r\)\)\];/);
   assert.doesNotMatch(group, /for \(const m of messages\)/);
   // The redraw key of a reply in progress includes follows (its place), not its growing words.
   const out: Any = {};

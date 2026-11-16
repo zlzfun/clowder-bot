@@ -62,6 +62,10 @@ export class NativeFixture implements NativeTransport {
   memoryViews: Record<string, any> = { profile: {readStatus:'ready',entries:[]}, taste: {readStatus:'ready',entries:[]} };
   uploads = new Map<string, Buffer>();
   fail?: ApiError;
+  /** Why the engine's routing preview picks a cat when the words name none. */
+  routingReason: Record<string, unknown> = { kind: 'recent_replier' };
+  /** Cats that cannot run: named in the words, the preview passes them over and lists them (native: unavailableTargets). */
+  routingUnavailable: string[] = [];
   /** Installed engine packs in the order the engine lists them (F129) — the first is the one it applies: the manifest and, for this fixture, the default behaviours read from the source. */
   packs: Array<{ name: string; version: string; description: string; packType: string; behaviors: string[] }> = [];
   async request<T>(path: string, options: { method?: string; body?: any } = {}): Promise<T> {
@@ -110,6 +114,18 @@ export class NativeFixture implements NativeTransport {
       const end = cursor ? all.findIndex(message => message.id === cursor.slice(cursor.indexOf(':') + 1)) : all.length;
       const limit = Math.min(Number(url.searchParams.get('limit')) || 200, this.pageLimit ?? Infinity, this.pageLimits.get(url.searchParams.get('threadId')!) ?? Infinity), start = Math.max(0, (end < 0 ? 0 : end) - limit);
       result = { messages: all.slice(start, end < 0 ? 0 : end), hasMore: start > 0 };
+    }
+    // The engine's read-only routing preview, as far as these tests need it: a cat named in the words the ways the pinned
+    // AgentRouter reads them (@名字, 「at 名字」, 「艾特 名字」), a line that asks every member (#ideate), else the conversation's history.
+    else if (path === '/api/routing/preview' && method === 'POST') {
+      const members = (this.threads.get(body.threadId)?.preferredCats ?? []).map(id => this.cats.find(cat => cat.id === id)).filter((cat): cat is NativeCat => !!cat);
+      const named = this.cats.filter(cat => new RegExp(`(?:@|(?:^|\\s)(?:at|艾特)\\s*)${cat.name}(?=$|[\\s，。！？、,.:：;；])`, 'i').test(String(body.content)));
+      // A named cat that cannot run is passed over and listed; with no other name left, the engine falls back on history.
+      const able = named.filter(cat => !this.routingUnavailable.includes(cat.id)), skipped = named.filter(cat => this.routingUnavailable.includes(cat.id)).map(cat => cat.id);
+      const unavailable = skipped.length ? { unavailableTargets: skipped } : {};
+      result = able.length ? { targetCats: able.map(cat => cat.id), reason: { kind: 'current_message_mentions' }, ...unavailable }
+        : /#ideate\b/i.test(String(body.content)) && members.length > 1 ? { targetCats: members.map(cat => cat.id), reason: { kind: 'preferred_parallel' }, ...unavailable }
+        : { targetCats: members.slice(0, 1).map(cat => cat.id), reason: this.routingReason, ...unavailable };
     }
     else if (path === '/api/messages' && method === 'POST') result = { status: 'queued', userMessageId: 'message-1', entries: [{ entryId: 'queue-1', targetCatId: body.mentions?.[0] }], queuePosition: 1 };
     else if (url.pathname === '/api/tasks' && method === 'GET') result = {tasks:this.taskRows.filter(task=>task.threadId===url.searchParams.get('threadId'))};

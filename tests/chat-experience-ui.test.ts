@@ -759,6 +759,96 @@ test('a reply drawn below the newest although it came first (under a follow-up i
   assert.deepEqual(r.posts().map((c: Any) => c.body.messageId), ['B']);
 });
 
+test('item 49 (review 1, items 2–4): the newest reply being a cat\'s reaction, its own row in sight is not enough — the newest row of a cat\'s must be in sight, seen here or confirmed; by the history\'s order, each piece of evidence its own', async () => {
+  const window: Any = {};
+  vm.runInNewContext(read('client/public/chat-live-rules.js') + read('client/public/chat-reactions-rules.js'), { window });
+  const R = window.ClowderReactionRules, L = window.ClowderLiveRules;
+  // u (the owner's 谢谢) carries the cat's 🐾 rx, the newest reply; B is the newest row of a cat's, drawn below.
+  // B's time claims to be later than the reaction's, A's earlier: times play no part.
+  const rows = [
+    { id: 'A', role: 'assistant', content: '好的', native: { type: 'assistant', catId: 'c' }, time: '2026-11-13T10:00:00Z' },
+    { id: 'u', role: 'user', time: '2026-11-13T10:00:01Z', reactions: [{ id: 'rx', emoji: '🐾', mine: false, native_cat_id: 'c', time: '2026-11-13T10:00:02Z' }] },
+    { id: 'B', role: 'assistant', content: '整理好了', native: { type: 'assistant', catId: 'c' }, time: '2026-11-13T11:00:00Z' },
+  ];
+  // The hook as app.js builds it: displaced rows, and for a reaction the newest row of a cat's with its own displaced rows.
+  const hook = (list: Any[]) => (id: string) => {
+    const drawn = { messages: list, order: list.map((_: Any, i: number) => i), group: false };
+    const row = R.readFirst(list, id);
+    return [...L.displaced(drawn, id), ...row, ...row.flatMap((r: string) => L.displaced(drawn, r))];
+  };
+  const route = (latest: string) => (path: string, method: string, body: Any) => {
+    if (path.endsWith('/activity')) return activity({ unread: 2, latestMessageId: latest });
+    if (path.endsWith('/read') && method === 'POST') return { threadId: body.expectedThreadId, readMessageId: body.messageId };
+    return {};
+  };
+  // Parked above on 谢谢: its row is in sight, B below is not — nothing is confirmed.
+  const p = page(route('rx'), { displacedBefore: hook(rows) });
+  p.cx.select(ada);
+  p.row('A', -300);
+  const host = p.row('u', 100), b = p.row('B', 900);
+  host.dataset.rx = 'rx';
+  p.cx.observe(ada, 'thread-A', true);
+  await settle();
+  await p.advance(2000);
+  assert.deepEqual(p.posts(), [], 'the reaction\'s row alone does not confirm the replies below it');
+  // Down to B (谢谢 out of sight): B is seen, but the reaction's own row is not in sight now.
+  b.rect = { top: 300, bottom: 340 }; host.rect = { top: -200, bottom: -160 };
+  p.thread.dispatchEvent(new Ev('scroll'));
+  await p.advance(300); await p.advance(1000);
+  assert.deepEqual(p.posts(), []);
+  // 谢谢 in sight again, B seen on this page: confirmed, by the reaction's own ID.
+  host.rect = { top: 100, bottom: 140 };
+  p.thread.dispatchEvent(new Ev('scroll'));
+  await p.advance(300); await p.advance(1000);
+  assert.deepEqual(p.posts(), [{ path: '/xbot-api/bots/Ada/read', method: 'POST', body: { expectedThreadId: 'thread-A', messageId: 'rx' } }]);
+  // No row of a cat's at all: the reaction's row decides alone.
+  const only = [{ id: 'u', role: 'user', time: 'x', reactions: [{ id: 'rx', emoji: '🐾', mine: false, native_cat_id: 'c', time: 'y' }] }];
+  const q = page(route('rx'), { displacedBefore: hook(only) });
+  q.cx.select(ada);
+  q.row('u', 100).dataset.rx = 'rx';
+  q.cx.observe(ada, 'thread-A', true);
+  await settle();
+  await q.advance(2000);
+  assert.deepEqual(q.posts().map((c: Any) => c.body.messageId), ['rx']);
+  // Review 2, item 12: the newest row of a cat's is a reply that failed (it counts, as the server counts it), below
+  // the view: the reaction on 谢谢 above waits for it too.
+  const failed = [...rows, { id: 'F', role: 'assistant', content: '这次没完成', ended: { how: 'failed' }, native: { type: 'assistant', catId: 'c' }, time: 't' }];
+  const f = page(route('rx'), { displacedBefore: hook(failed) });
+  f.cx.select(ada);
+  f.row('A', -300); f.row('B', -100);
+  const fh = f.row('u', 100), ff = f.row('F', 900);
+  fh.dataset.rx = 'rx';
+  f.cx.observe(ada, 'thread-A', true);
+  await settle();
+  await f.advance(2000);
+  assert.deepEqual(f.posts(), [], 'the failed reply below the view is not confirmed with the reaction above');
+  ff.rect = { top: 300, bottom: 340 };
+  f.thread.dispatchEvent(new Ev('scroll'));
+  await f.advance(300); await f.advance(1000);
+  assert.deepEqual(f.posts().map((c: Any) => c.body.messageId), ['rx'], 'both in sight: confirmed');
+  // The reaction on a cat's own row that was confirmed before: that row being confirmed does not stand in for the
+  // reaction's row being in sight now (its own evidence), but it does count for the newest row of a cat's, which it is.
+  const mine = [{ id: 'H', role: 'assistant', content: '要我开始吗？', native: { type: 'assistant', catId: 'c' }, time: 't', reactions: [{ id: 'x', emoji: '👍', mine: true }, { id: 'ry', emoji: '🐾', mine: false, native_cat_id: 'c' }] }];
+  let latest = 'H';
+  const r = page((path: string, method: string, body: Any) => (path.endsWith('/activity') ? activity({ unread: 1, latestMessageId: latest }) : route(latest)(path, method, body)), { displacedBefore: hook(mine) });
+  r.cx.select(ada);
+  const h = r.row('H', 100);
+  r.cx.observe(ada, 'thread-A', true);
+  await settle();
+  await r.advance(2000);
+  assert.deepEqual(r.posts().map((c: Any) => c.body.messageId), ['H']);
+  // The cat answers your 👍 with 🐾 on H while H is out of sight.
+  latest = 'ry'; h.dataset.rx = 'x ry'; h.rect = { top: -400, bottom: -360 };
+  r.cx.observe(ada, 'thread-A', true);
+  await settle();
+  await r.advance(2000);
+  assert.deepEqual(r.posts().map((c: Any) => c.body.messageId), ['H'], 'H confirmed earlier is not the reaction seen');
+  h.rect = { top: 100, bottom: 140 };
+  r.thread.dispatchEvent(new Ev('scroll'));
+  await r.advance(300); await r.advance(1000);
+  assert.deepEqual(r.posts().map((c: Any) => c.body.messageId), ['H', 'ry']);
+});
+
 test('a hidden page, a covered chat, or reading older messages never clears the newest unread; the line offers the new reply instead', async () => {
   const p = reading();
   p.cx.select(ada);
@@ -1236,7 +1326,7 @@ test('the page loads the status-line scripts after workspace.js and before app.j
   assert.ok(at('workspace.js') < at('chat-experience-rules.js') && at('chat-experience-rules.js') < at('chat-experience.js') && at('chat-experience.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
   // Only the 开箱即用 extension (quick-create.css), the search palette (palette.css), 找得到 (chat-list.css, chat-history.css), 资料页与群 (profile.css, mention.css) and the live-reply styles (chat-live.css, last) come after.
-  assert.deepEqual(styles.slice(-12), ['chat-experience.css', 'quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'profile.css', 'mention.css', 'polish.css', 'chat-cards.css', 'chat-presence.css', 'sidebar.css', 'chat-live.css']);
+  assert.deepEqual(styles.slice(-13), ['chat-experience.css', 'quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'profile.css', 'mention.css', 'polish.css', 'chat-cards.css', 'chat-presence.css', 'chat-reactions.css', 'sidebar.css', 'chat-live.css']);
   // Conversation changes, reads, native events and redraws reach the module.
   assert.match(app, /workspace\.select\(state\.sel\);\n[^\n]*\n\s+experience\.select\(state\.sel\);/);
   assert.equal((app.match(/experience\.observe\(selection, /g) || []).length, 2, 'single chats and groups');

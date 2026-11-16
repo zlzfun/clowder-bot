@@ -12,6 +12,7 @@ import { NativeFiles } from './files.js';
 import { Activity } from './activity.js';
 import { Approvals } from './approvals.js';
 import { ChatPack } from './chat-pack.js';
+import { PageReading, soleEmoji } from './reactions.js';
 
 export const encode = encodeURIComponent;
 // A regular conversation request. The native member receives its own name, role
@@ -63,6 +64,8 @@ const accent = (cat: NativeCat) => hex(cat.color?.primary) && hex(cat.color?.sec
 export class BotBridge {
   private directCreates = new Map<string, Promise<NativeThread>>();
   private greetingRequests = new Map<string, Promise<GreetingAdmission>>();
+  /** Whom a group reply was addressed to, by conversation and the request's idempotency key (see answeredCat). Request bookkeeping, in memory. */
+  private addressedReplies = new Map<string, Promise<string | undefined>>();
   readonly workspaces: Workspaces;
   readonly nativeFiles: NativeFiles;
   readonly activity: Activity;
@@ -156,7 +159,8 @@ export class BotBridge {
     }
     return [...new Map(pages.reverse().flat().map(m => [m.id, m])).values()];
   }
-  async transcript(cat: NativeCat, before?: string) {
+  /** `reactions`: the reader draws reactions (see PageReading); without it every message is the line it is. */
+  async transcript(cat: NativeCat, before?: string, view: { reactions?: boolean } = {}) {
     const thread = await this.direct(cat);
     const [page, cats] = await Promise.all([this.messages(thread.id, before), this.cats()]);
     // A poll can see the native invitation before the simultaneous POST has
@@ -167,12 +171,12 @@ export class BotBridge {
     const source = typeof invitation === 'string' ? invitation : undefined;
     const rows: Record<string, unknown>[] = [], known = this.store.references;
     for (const message of page.messages) this.store.sequence(thread.id, message.id);
-    // A reply names the message it answers. Right under that message the quote
-    // only repeats it, so it is shown when something else came in between.
-    let lastUser: string | undefined, previous: string | undefined;
+    // What each row quotes, and which messages are drawn on another row as a reaction (see PageReading).
+    const reading = new PageReading({ hasMore: page.hasMore, invitation: source, reactions: view.reactions });
+    const drawn = new Map<string, Record<string, unknown>>();
     // A cat that was addressed but does not belong to this conversation: said once by name (see rosterRefusals).
     const refusals = rosterRefusals(page.messages, id => cats.find(cat => cat.id === id)?.name, false);
-    const decided = this.decisions(page.messages), later = this.laterInputs(page.messages), onCards = this.receiptsOnCards(page.messages);
+    const decided = this.decisions(page.messages), onCards = this.receiptsOnCards(page.messages);
     for (const { message, ...presentation } of this.presentMessages(page.messages, cats)) {
       if (message.type === 'user' && message.id === source) continue;
       if (refusals.get(message.id) === null) continue;
@@ -184,40 +188,93 @@ export class BotBridge {
       const refusal = refusals.get(message.id) ?? (receipt ? approvalReceiptText(receipt) : reminder ? `提醒：${reminder}` : undefined);
       const text = refusal ?? messageDisplayText(message, thread.id, presentation.speaker?.name), inProgress = replyInProgress(message);
       const rich = message.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(message, decided), ending = replyEnding(message);
-      // At the top of a page that continues further back, what came just before is not known; no quote is guessed there.
-      // …and a reply that answers several of the owner's messages at once (the engine lists them as its inputs) stands under
-      // the last of them: quoting the first, two lines up, says nothing new.
-      const inputs = message.type !== 'user' && Array.isArray(message.lifecycle?.inputMessageIds) ? message.lifecycle.inputMessageIds as unknown[] : [];
-      const answersBoth = lastUser !== undefined && inputs.includes(lastUser) && inputs.includes(message.replyTo);
-      const quoted = message.replyTo && message.replyTo !== source
-        && !(message.type !== 'user' && (message.replyTo === lastUser || message.replyTo === previous || answersBoth || (lastUser === undefined && page.hasMore))) ? message.replyTo : undefined;
-      if (message.type === 'user') lastUser = message.id;
-      // …and the same for a reply right under any other line it answers (a reminder that came due).
-      previous = message.id;
+      const attachments = this.workspaces.messageFiles(thread.id, message), time = new Date(message.timestamp).toISOString();
+      // The owner's or a cat's own words and nothing else: what a reaction is made of, and what one can be drawn on.
+      const said = !refusal && presentation.presentation_kind === 'message' && (message.type === 'user' || (message.type === 'assistant' && !!message.catId));
+      const emoji = said && !inProgress && !ending && !attachments.length && !rich.blocks.length && !rich.hidden ? soleEmoji(text) : undefined;
+      if (emoji && message.replyTo && reading.react(message, { id: message.id, seq, reply_to_id: message.replyTo, emoji, time, ...this.reactor(message, presentation.name) })) continue;
+      const quoted = reading.quote(message);
       const base = { seq, id: message.id, native_message_id: message.id, role: message.type === 'user' ? 'user' : 'assistant',
-        content: text, ...presentation, time: new Date(message.timestamp).toISOString(),
+        content: text, ...presentation, time,
         reply_to: quoted ? this.store.state.messageRefs[thread.id]?.[quoted] ?? 0 : 0,
         status: message.lifecycle?.status ?? (message.isDraft ? 'processing' : 'complete'), ...(inProgress ? { in_progress: true } : {}),
         ...(ending ? { ended: ending } : {}), ...(refusal ? { notice: true } : {}), ...(reminder ? { reminder: true } : {}),
-        // The owner said more while this reply was being written and the engine let the reply take it in: the last such message (see laterInputs).
-        ...(later.has(message.id) ? { follows: this.store.sequence(thread.id, later.get(message.id)!) } : {}),
-        attachments: this.workspaces.messageFiles(thread.id, message),
+        attachments,
         // Cards, checklists and choices the cat attached; `blocks_hidden` counts what the chat cannot draw yet.
         ...(rich.blocks.length ? { blocks: rich.blocks } : {}), ...(rich.hidden ? { blocks_hidden: rich.hidden } : {}), native: message };
-      if (message.type === 'user' || presentation.presentation_kind === 'activity') rows.push(base);
+      let row: Record<string, unknown> | undefined;
+      if (message.type === 'user' || presentation.presentation_kind === 'activity') rows.push(row = base);
       // A reply that has started but has no words yet stays as a row: the chat shows it as typing.
       else if (text || base.attachments.length || inProgress || rich.blocks.length || rich.hidden) {
         // XBot's delivery view. These receipts describe rendering, never model tool execution.
         const callId = `delivery_${message.id}`;
-        rows.push({ ...base, presentation_receipt: true, tool_calls: [{ id: callId, type: 'function', function: { name: 'send_message_to_user', arguments: JSON.stringify({ text }) } }] });
+        rows.push(row = { ...base, presentation_receipt: true, tool_calls: [{ id: callId, type: 'function', function: { name: 'send_message_to_user', arguments: JSON.stringify({ text }) } }] });
         rows.push({ seq: seq + 1, role: 'tool', name: 'send_message_to_user', content: "sent to the owner's chat", tool_call_id: callId, presentation_receipt: true, time: base.time });
       }
+      if (row) drawn.set(message.id, row);
+      if (row && said) reading.drawn(message, row);
+    }
+    // The owner said more while a reply was being written and the engine let the reply take it in: the last such message
+    // (see laterInputs). Among the messages that are lines here — a reaction sent meanwhile is drawn on its row, not under it.
+    for (const [replyId, inputId] of this.laterInputs(page.messages.filter(message => !reading.folded(message.id)))) {
+      const row = drawn.get(replyId);
+      if (row) row.follows = this.store.sequence(thread.id, inputId);
     }
     // The chat re-reads the conversation every few seconds; only a read that met new messages has something to save.
     if (this.store.references !== known) this.store.save();
     const first = page.messages[0];
     return { messages: rows, hasMore: page.hasMore, before: first ? `${first.timelineOrderAt ?? first.timestamp}:${first.id}` : null, thread_id: thread.id,
       ...(invitation !== undefined ? { greeting: source ? { status: 'accepted', sourceMessageId: source } : { status: 'unconfirmed' } } : {}) };
+  }
+  /** Who a reaction is from, as a row says it. */
+  reactor(message: NativeMessage, name: string) {
+    return message.type === 'user' ? { mine: true } : { mine: false, name, ...(message.catId ? { native_cat_id: message.catId } : {}) };
+  }
+  /** A group's conversation, one page: the same reading as a cat's own chat (what a row quotes, what is drawn on it as a reaction). */
+  async groupTranscript(thread: NativeThread, before?: string, view: { reactions?: boolean } = {}) {
+    const [cats, page] = await Promise.all([this.cats(), this.messages(thread.id, before)]);
+    const first = page.messages[0], known = this.store.references;
+    // A row's number, as in a cat's own chat: what a reply names when it quotes one.
+    for (const message of page.messages) this.store.sequence(thread.id, message.id);
+    // A cat that was addressed but is not in this group: said once by name instead of the engine's raw refusal lines.
+    const refusals = rosterRefusals(page.messages, id => cats.find(cat => cat.id === id)?.name, true), decided = this.decisions(page.messages);
+    // A receipt whose request card on this page already says how it was answered is not drawn as a line as well.
+    const onCards = this.receiptsOnCards(page.messages);
+    const reading = new PageReading({ hasMore: page.hasMore, reactions: view.reactions }), rows: Record<string, unknown>[] = [];
+    const drawn = new Map<string, Record<string, unknown>>();
+    for (const { message: m, name, ...presentation } of this.presentMessages(page.messages.filter(m => refusals.get(m.id) !== null && !onCards.has(m.id)), cats)) {
+      const rich = m.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(m, decided), receipt = approvalReceipt(m);
+      const reminder = scheduledReminder(m);
+      const refusal = refusals.get(m.id) ?? (receipt ? approvalReceiptText(receipt) : reminder ? `提醒：${reminder}` : undefined);
+      const text = refusal ?? messageDisplayText(m, thread.id, presentation.speaker?.name), inProgress = replyInProgress(m), ending = replyEnding(m);
+      const attachments = this.workspaces.messageFiles(thread.id, m), time = new Date(m.timestamp).toISOString();
+      const said = !refusal && presentation.presentation_kind === 'message' && (m.type === 'user' || (m.type === 'assistant' && !!m.catId));
+      const emoji = said && !inProgress && !ending && !attachments.length && !rich.blocks.length && !rich.hidden ? soleEmoji(text) : undefined;
+      const seq = this.store.sequence(thread.id, m.id);
+      if (emoji && m.replyTo && reading.react(m, { id: m.id, seq, reply_to_id: m.replyTo, emoji, time, ...this.reactor(m, name) })) continue;
+      const quoted = reading.quote(m);
+      // An empty reply that is neither being written nor carries anything is not a line.
+      if (m.type === 'assistant' && !text.trim() && !attachments.length && presentation.presentation_kind !== 'activity' && !inProgress && !rich.blocks.length && !rich.hidden) continue;
+      const row: Record<string, unknown> = { seq, id: m.id, time, sender: m.type === 'user' ? 'local' : name,
+        kind: m.type === 'user' ? 'person' : 'bot', text, ...(refusal ? { notice: true } : {}),
+        ...(reminder ? { reminder: true } : {}),
+        reply_to: quoted ? this.store.state.messageRefs[thread.id]?.[quoted] ?? 0 : 0,
+        status: m.lifecycle?.status ?? (m.isDraft ? 'processing' : 'complete'), ...(inProgress ? { in_progress: true } : {}),
+        ...(ending ? { ended: ending } : {}),
+        attachments,
+        ...(rich.blocks.length ? { blocks: rich.blocks } : {}), ...(rich.hidden ? { blocks_hidden: rich.hidden } : {}), ...presentation, native: m };
+      rows.push(row); drawn.set(m.id, row);
+      if (said) reading.drawn(m, row);
+    }
+    // The last message of the owner's that a reply took in after it had begun (by message id here), among those that are lines.
+    for (const [replyId, inputId] of this.laterInputs(page.messages.filter(m => !reading.folded(m.id)))) {
+      const row = drawn.get(replyId);
+      if (row) row.follows = inputId;
+    }
+    if (this.store.references !== known) this.store.save();
+    return { group: this.groupItem(thread, cats), hasMore: page.hasMore,
+      // The cursor for the page before this one, as the single-chat transcript gives it.
+      before: first ? `${first.timelineOrderAt ?? first.timestamp}:${first.id}` : null, messages: rows };
   }
   async greet(cat: NativeCat, threadId: string): Promise<GreetingAdmission> {
     const meta = this.store.bot(cat.id);
@@ -555,6 +612,7 @@ export class BotBridge {
     const attachments = body.attachments?.length ? await this.workspaces.attachments(thread.id, body.attachments) : [];
     const replyTo = body.reply_to ? this.store.messageId(thread.id, body.reply_to) : undefined;
     if (body.reply_to && !replyTo) throw new ApiError(400, '引用的消息不存在，请刷新对话');
+    const addressed = directCat?.id ?? (replyTo ? await this.answeredCat(thread, replyTo, body.text, body.idempotencyKey) : undefined);
     await this.manner.ready();
     return this.native.request('/api/messages', { method: 'POST', body: {
       threadId: thread.id, content: body.text, idempotencyKey: body.idempotencyKey ?? randomUUID(),
@@ -563,8 +621,64 @@ export class BotBridge {
       // Do not inspect a stale busy snapshot or issue a second force/steer request here.
       messageDisposition: 'continue_current',
       ...(attachments.length ? { contextAttachments: attachments } : {}),
-      ...(directCat ? { mentions: [directCat.id] } : {}), ...(replyTo ? { replyTo } : {}),
+      ...(addressed ? { mentions: [addressed] } : {}), ...(replyTo ? { replyTo } : {}),
     } });
+  }
+  /**
+   * In a group, an answer to what one cat said goes to that cat, the way a reply does in a chat app. Native routing
+   * looks at mentions only, never at replyTo, so the cat is named with the engine's own explicit mention — which
+   * replaces what the engine would read from the words. Whether the words name someone is therefore asked of the
+   * engine itself (its read-only routing preview, the path admission uses): a cat named in the message, or a line
+   * that asks every member (#ideate), keeps the engine's routing, and so does any reason this code does not know.
+   * A cat that has left the group cannot be answered: that is said, and nothing is sent. Returns the cat to name.
+   */
+  private answeredCat(thread: NativeThread, replyTo: string, text: string, key?: string): Promise<string | undefined> {
+    if (!key) return this.readAnsweredCat(thread, replyTo, text);
+    // The same request sent again (its receipt was lost), or twice at once, names whom it named the first time: native
+    // replays an admission only when its recipients are the same, and the group or a cat's readiness may have changed in
+    // between. A request is one conversation's (native keys idempotency by conversation too) and is what it said and
+    // answered: a key reused for other words or another message is not that request. The answer is shared from before
+    // the first read, so two sends of it cannot each work out their own.
+    const slot = JSON.stringify([thread.id, key, replyTo, text]), known = this.addressedReplies.get(slot);
+    if (known) return known;
+    const asked = this.readAnsweredCat(thread, replyTo, text);
+    this.addressedReplies.set(slot, asked);
+    // A request that was refused or could not be read named no one; the next attempt asks again.
+    asked.catch(() => { if (this.addressedReplies.get(slot) === asked) this.addressedReplies.delete(slot); });
+    // Bookkeeping of recent requests only; the oldest go first.
+    if (this.addressedReplies.size > 500) this.addressedReplies.delete(this.addressedReplies.keys().next().value!);
+    return asked;
+  }
+  private async readAnsweredCat(thread: NativeThread, replyTo: string, text: string): Promise<string | undefined> {
+    const answered = await this.findMessage(thread.id, replyTo);
+    // Native would drop a quote of a message that is not in the conversation, silently; say it instead.
+    if (!answered) throw new ApiError(400, '引用的消息不存在，请刷新对话');
+    if (answered.type !== 'assistant' || !answered.catId) return undefined;
+    const preview = await this.native.request<{ reason?: { kind?: string; baseKind?: string }; unavailableTargets?: unknown[] }>('/api/routing/preview', { method: 'POST', body: { scope: 'thread', threadId: thread.id, content: text } });
+    const reason = preview.reason?.kind === 'thread_policy' ? preview.reason.baseKind : preview.reason?.kind;
+    // The engine found no one named in the words and would fall back on the conversation's history or its members. A cat
+    // it met in the words and passed over because that cat cannot run (unavailableTargets) was named all the same: what
+    // happens then is the engine's to decide and to say.
+    if (!reason || !['previous_user_mentions', 'recent_replier', 'preferred_cat', 'default_cat', 'available_participant'].includes(reason)) return undefined;
+    if (Array.isArray(preview.unavailableTargets) && preview.unavailableTargets.length) return undefined;
+    if (!thread.preferredCats?.includes(answered.catId)) {
+      const name = (await this.cats()).find(known => known.id === answered.catId)?.name;
+      throw new ApiError(409, `${name ? `「${name}」` : '这只猫猫'}已经不在这个群里，这句话没有发出去。想问群里的猫猫，可以 @ 它再发。`, undefined, 'reply_cat_left');
+    }
+    return answered.catId;
+  }
+  /** One message of a conversation by its native id: the newest page first, then further back until it is met. */
+  async findMessage(threadId: string, id: string): Promise<NativeMessage | undefined> {
+    const seen = new Set<string>();
+    for (let before: string | undefined;;) {
+      const page = await this.messages(threadId, before), found = page.messages.find(message => message.id === id);
+      if (found || !page.hasMore) return found;
+      const first = page.messages[0];
+      if (!first) throw new ApiError(502, '引擎的消息分页返回了空游标');
+      before = `${first.timelineOrderAt ?? first.timestamp}:${first.id}`;
+      if (seen.has(before)) throw new ApiError(502, '引擎的消息分页没有前进');
+      seen.add(before);
+    }
   }
   async stop(threadId: string, catId?: string) {
     const queue = await this.queue(threadId);

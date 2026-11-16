@@ -147,7 +147,8 @@
   // ---- Drafts ----
   // What the owner was writing in each chat, kept for this browser session
   // and only for chats other than the one open (the composer holds that
-  // one). A draft is its text and, in a single chat, the message it quotes.
+  // one). A draft is its text and the message it quotes (a group's too, since
+  // item 49; a quote of a cat's words in a group also names the cat).
   // A chat is known by what does not change: a cat by its native ID (its name
   // can), a group by its ID. A quote names its message by the conversation's
   // own number, so it carries that conversation (thread): a quote without
@@ -155,8 +156,11 @@
   const MAX = 16000;
   function quoteOf(q) {
     if (!q || typeof q !== "object") return null;
-    const seq = Number(q.seq), thread = str(q.thread);
-    return Number.isSafeInteger(seq) && seq > 0 && thread ? { seq, text: str(q.text).slice(0, 2000), thread } : null;
+    const seq = Number(q.seq), thread = str(q.thread), cat = str(q.cat);
+    if (!(Number.isSafeInteger(seq) && seq > 0 && thread)) return null;
+    const out = { seq, text: str(q.text).slice(0, 2000), thread };
+    if (cat) out.cat = cat.slice(0, 200);
+    return out;
   }
   // The quote may go into this conversation (thread) only if it was taken there.
   const quoteFits = (q, thread) => !!q && !!thread && q.thread === thread;

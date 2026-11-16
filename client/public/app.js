@@ -959,6 +959,10 @@
   // 活起来 (chat-presence.js): 正在输入… in the header and on the sidebar row,
   // each cat's own colour, the seen paw and the panels' exits; init() near the end.
   const presence = window.ClowderPresence;
+  // 回复与表情回应 (chat-reactions.js): the hover buttons, the chips on a
+  // bubble's corner, the picker; init() near the end.
+  const reactions = window.ClowderReactions;
+  const reactionRules = window.ClowderReactionRules;
   // An empty single chat's greeting invitation (chat-presentation.js): one
   // POST per chat thread for the page's life, never retried by itself. Its
   // outcome redraws only the line of the chat it was sent for, if that chat is still
@@ -2411,8 +2415,11 @@
     const menu = el("div", "message-menu-surface message-menu");
     menu.setAttribute("role", "menu");
     menu.setAttribute("aria-label", "消息操作");
+    // On a cat's words, the five emoji over the rows (chat-reactions.js).
+    const strip = reactions.strip(data.message, data.text, closeMessageMenu);
+    if (strip) menu.append(strip);
     const items = [
-      {label: "回复", glyph: "reply", run: () => armQuote(data.message.seq, previewText(data.message))},
+      {label: "回复", glyph: "reply", run: () => armQuote(data.message.seq, previewText(data.message), quoteCat(data.message))},
       {label: "复制", glyph: "copy", run: async () => {
         if (!await copyText(selected || data.text)) { setStatus("复制失败，请再试一次"); return; }
         if (!mobile) return;
@@ -2427,7 +2434,7 @@
       }},
     ];
     for (const item of items) {
-      if (item.label === "回复" && !data.message.seq) continue;
+      if (item.label === "回复" && !reactionRules.canReply(data.message, !!state.peer)) continue;
       const button = el("button", "menu-row");
       button.type = "button";
       button.setAttribute("role", "menuitem");
@@ -2456,7 +2463,8 @@
     messageTarget.classList.add("message-target");
     animateBubbleTarget(messageTarget, mobile);
     document.documentElement.classList.add("message-menu-open");
-    menu.querySelector("button:not(:disabled)")?.focus({preventScroll: true});
+    // Focus starts on the first row (回复), not on an emoji a stray Enter would send.
+    (menu.querySelector("button.menu-row:not(:disabled)") || menu.querySelector("button:not(:disabled)"))?.focus({preventScroll: true});
   }
 
   thread.addEventListener("keydown", ev => {
@@ -2800,17 +2808,30 @@
     if (last < src.length) addText(src.slice(last));
   }
 
+  // The row with this number; or, when the number is a reaction's (drawn on
+  // a row rather than as one, reactions[].seq), the row it is drawn on.
   function lineBySeq(messages, seq) {
     const n = Number(seq);
     if (!n) return null;
     for (const m of messages || []) {
       if (Number(m.seq) === n) return m;
     }
+    for (const m of messages || []) {
+      if (Array.isArray(m.reactions) && m.reactions.some((r) => r && Number(r.seq) === n)) return m;
+    }
     return null;
   }
 
+  // A row that carries the reaction with this number (it is drawn on this row).
+  const carriesSeq = (m, seq) => Array.isArray(m && m.reactions) && m.reactions.some((r) => r && Number(r.seq) === Number(seq));
+
+  // The cat whose words a row is (its native ID), "" for the owner's and for system lines.
+  const quoteCat = (m) => reactionRules.catOf(m);
+
   function previewText(m) {
     if (!m) return "";
+    // A group's row: its own words (text), the owner's as typed.
+    if (m.role == null && (m.kind === "person" || m.kind === "bot")) return String(m.kind === "bot" ? displayText(m.text || "") : m.text || "").replace(/\r\n/g, "\n").trim();
     const raw = m.role === "user" ? unwrap(m.content || "").text : sayText(m);
     return String(m.role === "assistant" ? displayText(raw) : raw).replace(/\r\n/g, "\n").trim();
   }
@@ -2838,13 +2859,26 @@
   function quoteBlock(messages, seq) {
     const btn = el("button", "quote-block");
     btn.type = "button";
-    btn.append(icon("bubble"));
-    btn.append(el("span", "", quoteSnippet(previewText(lineBySeq(messages, seq)))));
+    const line = lineBySeq(messages, seq);
+    // In a group, a cat's words are quoted with its face: whose they are,
+    // without a word more (chat-reactions.css).
+    const cat = state.sel && state.sel.type === "group" ? quoteCat(line) : "";
+    btn.append(cat ? quoteFace(cat) : icon("bubble"));
+    btn.append(el("span", "", quoteSnippet(previewText(line))));
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
       jumpToSeq(seq);
     });
     return btn;
+  }
+
+  // A cat's small face in a quote: its name is its tip, and its label for a screen reader.
+  function quoteFace(catId) {
+    const who = catWho(catId);
+    const av = speakerFace(who, "xs");
+    av.setAttribute("role", "img");
+    av.setAttribute("aria-label", who.name || "猫猫");
+    return av;
   }
 
   // A quote's jump finds its message like a search hit does (chat-locate.js):
@@ -2867,7 +2901,8 @@
     if (m.time) row.dataset.time = String(m.time);
     row.dataset.sender = "user";
     const wrap = el("div", "bubble-col");
-    if (m.reply_to) wrap.append(quoteBlock(messages, m.reply_to));
+    // A number that is a reaction drawn on this very row quotes nothing new.
+    if (m.reply_to && !carriesSeq(m, m.reply_to)) wrap.append(quoteBlock(messages, m.reply_to));
     const pulled = pullImages(parsed.text);
     const pasted = pastedURLs(state.sel, m.images);
     if (pulled.text) {
@@ -2979,7 +3014,7 @@
     const body = el("div", "body");
     if (!cont) body.append(speakerHead(who, m.time));
     const replyTo = say ? say.replyTo : m.reply_to;
-    if (replyTo) body.append(quoteBlock(messages, replyTo));
+    if (replyTo && !carriesSeq(m, replyTo)) body.append(quoteBlock(messages, replyTo));
     // Pictures the bot showed with send_message_to_user, stored in paste/ like the
     // owner's own; the same gallery as userBubble.
     const pasted = pastedURLs(state.sel, say ? say.images : m.images);
@@ -3051,7 +3086,7 @@
   // written, with the native words so far (the raw draft, whose length is the
   // stream's own position), and which have ended.
   function liveRows(messages, group) {
-    return (messages || []).filter((m) => m && (group ? m.kind === "bot" : m.role === "assistant")).map((m) => ({
+    const rows = (messages || []).filter((m) => m && (group ? m.kind === "bot" : m.role === "assistant")).map((m) => ({
       id: String(m.native_message_id || m.id || ""),
       catId: String(m.native_cat_id || ""),
       inProgress: !!m.in_progress && !presentation.isActivity(m),
@@ -3059,6 +3094,18 @@
       // The owner's message it answers (native replyTo): a send's typing bubble goes to its own reply.
       replyTo: m.native && typeof m.native.replyTo === "string" ? m.native.replyTo : "",
     }));
+    // A cat's whole answer that was one emoji is drawn on the row it reacts
+    // to (reactions[], chat-reactions.js): a finished reply, so its row or
+    // typing bubble goes in the same drawing and its late events change
+    // nothing. What it answers is the record's own (reply_to_id: the row, or
+    // an earlier reaction on it), never guessed from the order.
+    for (const m of messages || []) {
+      for (const r of m && Array.isArray(m.reactions) ? m.reactions : []) {
+        if (!r || !r.id || r.mine === true) continue;
+        rows.push({ id: String(r.id), catId: String(r.native_cat_id || ""), inProgress: false, draft: String(r.emoji || ""), replyTo: String(r.reply_to_id || "") });
+      }
+    }
+    return rows;
   }
 
   // A reply in progress changes with every draft the engine saves; its words
@@ -3267,6 +3314,7 @@
     const shown = live.commit(inner, keep);
     cards.rendered(); // request cards and choices filled in place, before the scroll is placed
     presence.rendered(messages); // the seen paw by the owner's message a reply answers (chat-presence.js)
+    reactions.rendered(messages, null); // 表情 · 回复 on hover, the chips on each bubble (chat-reactions.js)
     state.firstRender = false;
     thread.scrollTop = near ? thread.scrollHeight : Math.min(prevTop, thread.scrollHeight);
     keepReading(anchor);
@@ -3418,12 +3466,17 @@
       const key = mine ? "user" : speaker.key;
       row.dataset.sender = key;
       if (m.id) { row.dataset.id = String(m.id); row.dataset.mid = String(m.id); }
+      // Its number in the conversation: what a reply quotes, and how a quote's jump finds it.
+      if (m.seq) row.dataset.seq = String(m.seq);
       if (m.time) row.dataset.time = String(m.time);
       if (!groupStart(lastMsg, m, last, key)) row.classList.add("cont");
+      // What it quotes, as in single chats (a number that is a reaction on this very row quotes nothing new).
+      const quoted = m.reply_to && !carriesSeq(m, m.reply_to) ? quoteBlock(messages, m.reply_to) : null;
       lastMsg = m;
       const files = m.attachments || [];
       if (mine) {
         const wrap = el("div", "bubble-col");
+        if (quoted) wrap.append(quoted);
         const pulled = pullImages(text);
         if (pulled.text) {
           const bubble = el("div", "bubble");
@@ -3439,6 +3492,7 @@
         if (!row.classList.contains("cont")) row.append(headFace(speaker));
         const body = el("div", "body");
         if (!row.classList.contains("cont")) body.append(speakerHead(speaker, m.time));
+        if (quoted) body.append(quoted);
         const said = cards.words(m, isSilent(text) ? "" : text);
         if (said || !files.length) appendBotContent(body, said);
         cards.blocks(body, m, messages, true);
@@ -3458,6 +3512,7 @@
     const shown = live.commit(inner, sendFeedback(inner, messages));
     cards.rendered(); // request cards and choices filled in place, before the scroll is placed
     presence.rendered(messages); // the seen paw by the owner's message a reply answers (chat-presence.js)
+    reactions.rendered(messages, group); // as in single chats; a cat that left the group gets no 表情
     state.firstRender = false;
     thread.scrollTop = near ? thread.scrollHeight : Math.min(prevTop, thread.scrollHeight);
     keepReading(anchor);
@@ -4441,6 +4496,8 @@
     // the other tabs learn which chat this one shows (chat-notify.js).
     cards.select(state.sel);
     notify.tell();
+    // The emoji picker, and the chips this page has already brought in (chat-reactions.js).
+    reactions.select(state.sel);
     stopState = null;
     state.streaming = 0;
     state.pendingSends = [];
@@ -4644,7 +4701,8 @@
     const requestedAt = Date.now();
     try {
       if (selection.type === "bot") {
-        const data = await api("/xbot-api/bots/" + encodeURIComponent(selection.id) + "/transcript");
+        // reactions=1: this page draws a one-emoji message on the row it reacts to (chat-reactions.js).
+        const data = await api("/xbot-api/bots/" + encodeURIComponent(selection.id) + "/transcript?reactions=1");
         if (state.sel !== selection || request !== state.threadLoad || state.streaming || state.peer) return;
         // A missing or malformed list is a failed read, not an empty chat.
         if (!data || !Array.isArray(data.messages)) throw new Error("transcript without messages");
@@ -4668,7 +4726,9 @@
           begun: state.pendingSends.length > 0 || state.replyErrors.length > 0,
         });
         // Replies being written take their drafts (and ended ones their end)
-        // before deciding whether anything else changed.
+        // before deciding whether anything else changed. A reply that became
+        // a reaction is noted where it was written first (its chip lands from there).
+        reactions.before(messages);
         live.read(liveRows(messages, false), requestedAt);
         const sig = transcriptSig(read);
         state.messages = messages;
@@ -4682,10 +4742,13 @@
         if (panel.classList.contains("open")) await loadPanel();
         return;
       }
-      const data = await api("/xbot-api/groups/" + encodeURIComponent(selection.id));
+      const data = await api("/xbot-api/groups/" + encodeURIComponent(selection.id) + "?reactions=1");
       if (state.sel !== selection || request !== state.threadLoad || state.streaming || state.peer) return;
       watchNativeThread(data.group?.native_thread_id || data.group?.id);
       const messages = chatHistory.merge(selection, data.group?.native_thread_id || data.group?.id, data);
+      // A quote restored with the draft comes back only into the conversation it was taken in (chat-list.js).
+      chatList.read(selection, String(data.group?.native_thread_id || data.group?.id || ""));
+      reactions.before(messages);
       live.read(liveRows(messages, true), requestedAt);
       const sig = JSON.stringify(sigRows(messages));
       workspace.observe(selection, data.group?.native_thread_id || data.group?.id, sig !== state.sig);
@@ -6253,9 +6316,16 @@
     const quote = !card && state.replyTo && state.replyTo.seq > 0 ? state.replyTo : null;
     if (quote) clearQuote();
     ++state.threadLoad;
-    // One key per message: resending the same words and files after an
-    // unknown outcome reuses it, so a send that did land is not repeated.
-    const sendSig = JSON.stringify([text, files ? files.ids : []]);
+    // The thread this conversation was read from: a send never lands in a
+    // conversation that changed (another saved conversation) in the meantime.
+    const threadId = files ? files.threadId : workspace.threadId();
+    // What it quotes: only a quote taken in this same conversation.
+    const replyTo = quote && (!quote.thread || !threadId || quote.thread === threadId) ? quote.seq : 0;
+    // One key per request: resending exactly the same request after an
+    // unknown outcome (same chat and conversation, words, quote, pictures and
+    // files) reuses it, so a send that did land is not repeated; anything
+    // changed (another quote, say) is another request with a new key.
+    const sendSig = JSON.stringify([selection.type, selection.id, threadId || "", text, replyTo, images, files ? files.ids : []]);
     let sendKey = "";
     if (!pending) {
       // Resending a failed text from the composer replaces its failed row.
@@ -6311,11 +6381,8 @@
       const payload = { text: text, idempotencyKey: sendKey };
       if (images.length) payload.images = images;
       if (files) payload.attachments = files.ids;
-      // The thread this conversation was read from: a send never lands in a
-      // conversation that changed (another saved conversation) in the meantime.
-      const threadId = files ? files.threadId : workspace.threadId();
       if (threadId) payload.expectedThreadId = threadId;
-      if (quote && (!quote.thread || !threadId || quote.thread === threadId)) payload.reply_to = quote.seq;
+      if (replyTo) payload.reply_to = replyTo;
       const res = await apiFetch("/xbot-api/" + (selection.type === "group" ? "groups/" : "bots/") + encodeURIComponent(selection.id) + "/messages", {
         method: "POST",
         credentials: "same-origin",
@@ -6326,6 +6393,7 @@
         const data = await res.json().catch(() => ({}));
         const err = new Error(data.error || "发送失败");
         err.status = res.status;
+        err.code = data.code || "";
         throw err;
       }
       markSent();
@@ -6383,7 +6451,8 @@
       // The server's own reason for a refusal (a changed conversation, a
       // file that no longer belongs to it), when it gives one in Chinese.
       const reason = !accepted && e.status >= 400 && e.status < 500 && /\p{Script=Han}/u.test(e.message || "") ? "：" + e.message.replace(/[。.]+$/, "") : "";
-      const failed = accepted ? "没送到" : "没发出去" + reason;
+      // A reply to a cat that has left the group: the server's own sentence already says it did not go out.
+      const failed = accepted ? "没送到" : e.code === "reply_cat_left" && reason ? reason.slice(1) : "没发出去" + reason;
       // A picture cannot go back into the textarea, but its words can: the
       // send cleared the input, so the text is restored whether or not a
       // picture came with it, and the row says what the picture needs.
@@ -7214,9 +7283,14 @@
 
   function paintQuoteBar() {
     const bar = $("quote-bar");
-    const on = !!(state.replyTo && state.sel && state.sel.type === "bot" && !state.peer);
+    const on = !!(state.replyTo && state.sel && !state.peer);
     bar.hidden = !on;
     composer.classList.toggle("quoting", on);
+    // In a group, replying to a cat's words goes to that cat: the bar carries
+    // its face where the quote mark was (chat-reactions.css), and says no more.
+    bar.querySelector(":scope > .avatar")?.remove();
+    const cat = on && state.sel.type === "group" ? String(state.replyTo.cat || "") : "";
+    if (cat) bar.insertBefore(quoteFace(cat), $("quote-bar-text"));
     if (on) {
       $("quote-bar-text").textContent = quoteSnippet(state.replyTo.text);
       input.dataset.placeholder = "回复…";
@@ -7225,11 +7299,13 @@
     }
   }
 
-  function armQuote(seq, text) {
+  // cat: whose words they are (native ID), "" for the owner's own.
+  function armQuote(seq, text, cat) {
     const n = Number(seq);
-    if (!n || !state.sel || state.sel.type !== "bot" || state.peer) return;
+    if (!n || !state.sel || state.peer) return;
     // thread: the conversation the quoted message is in (its seq means nothing elsewhere).
     state.replyTo = { seq: n, text: String(text || "").trim(), thread: workspace.threadId() || "" };
+    if (cat) state.replyTo.cat = String(cat);
     paintQuoteBar();
     input.focus();
   }
@@ -7590,7 +7666,14 @@
     // Replies drawn below a reply although they came before it in the engine's
     // order (a reply under a follow-up it took in): confirming that reply read
     // covers them, so they must have been seen too (chat-live-rules.js displaced()).
-    displacedBefore: (id) => (state.drawn && !state.peer ? liveRules.displaced(state.drawn, id) : []),
+    // …and before a cat's reaction (drawn on an older row) confirms, the unread replies before it (chat-reactions-rules.js).
+    // …and when the newest reply is a cat's reaction (drawn on an older row), the newest
+    // reply that is a row of its own, with its own displaced rows (chat-reactions-rules.js readFirst()).
+    displacedBefore: (id) => {
+      if (!state.drawn || state.peer) return [];
+      const row = reactionRules.readFirst(state.drawn.messages, id);
+      return [...liveRules.displaced(state.drawn, id), ...row, ...row.flatMap((r) => liveRules.displaced(state.drawn, r))];
+    },
     // 去确认 finds the request's card in the history (chat-cards.js).
     confirm: (item) => cards.find(item),
     // A confirmed read clears that conversation's dot at once; the next status poll agrees.
@@ -7671,6 +7754,27 @@
     stale: () => chatList.isStale(),
     // The calendar day changed: the open history is drawn again, so 今天 / 昨天 follow.
     redraw: () => { state.sig = ""; loadThread().catch(() => {}); },
+  });
+  // 回复与表情回应 (chat-reactions.js): the hover buttons, the chips and the
+  // picker; a reaction is sent with the existing message route, not the composer.
+  reactions.init({
+    thread,
+    selected: () => (state.peer ? null : state.sel),
+    peer: () => !!state.peer,
+    threadId: () => workspace.threadId(),
+    messageOf: (row) => messageContents.get(row) || null,
+    reply: (m) => armQuote(m.seq, previewText(m), quoteCat(m)),
+    catName: catNameOf,
+    chatName: (sel) => niceName(sel.type === "group" ? ((state.groups.find((g) => g.id === sel.id) || {}).name || sel.id) : sel.id),
+    // The newest page's rows: a reaction drawn on an older page's row would come back as a line of its own.
+    latest: () => chatHistory.latest(),
+    fetch: apiFetch, receipt: liveRules.receipt, requestKey,
+    // The cat's typing bubble at once, as for a send, only for an owner at the latest:
+    // a reaction to an older message never pulls the view away from it.
+    expect: (catId) => (live.following() ? live.expect(catId) : null),
+    reload: () => { state.sig = ""; loadThread().catch(() => {}); },
+    note: (text) => showToast(text, "info"),
+    setTip,
   });
   // 开箱即用 (quick-create.js) draws with these and opens what it made.
   quick.init({

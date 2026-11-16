@@ -111,6 +111,9 @@
       else P.held = kept;
     }
     P.was = rows;
+    // Each reaction in one place only, as the newest page has it (item 49),
+    // and kept so: the pages held are what is joined to the next newest page.
+    if (P.held.length) P.held = R.single(P.held, rows);
     return P.held.length ? [...P.held, ...rows] : rows;
   }
 
@@ -563,6 +566,9 @@
     older: () => ({ key: P.key, thread: P.thread, gen: P.gen, state: P.state, more: !!nextCursor(), loaded: P.loaded, drawn: P.drawn,
       error: P.error, asked, failures }),
     whenDrawn,
+    // The native message IDs of the newest page as last read: a reaction is
+    // drawn on a row of that page only (chat-reactions.js offers 表情 there).
+    latest: () => new Set(P.was.map((m) => String((m && (m.native_message_id || m.id)) || "")).filter(Boolean)),
     // For tests and diagnostics only: what this page holds, never a record.
     peek: () => ({ key: P.key, thread: P.thread, held: P.held.length, state: P.state, loaded: P.loaded, cursor: nextCursor() }),
   });
