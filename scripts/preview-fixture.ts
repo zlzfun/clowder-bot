@@ -12,7 +12,9 @@
 //   …  -d '{"page":12}'  (read conversations 12 messages at a time, to see earlier pages load)
 //   …  -d '{"append":"off"}'  (a cat that is writing does not take in what is said meanwhile; it answers that afterwards)
 //   curl :3230/__preview   → {preview, scene: "plain" | "showcase", staged, zone, plays[], cats[]} (what this is; changes nothing)
-// Typed words steer the canned reply: 长, 文件/查/资料, 慢, 失败, 清单, 选一个, 确认一下, 记住, 提醒/定时;
+// Typed words steer the canned reply: 长, 文件/查/资料, 慢, 失败, 清单, 选一个, 确认一下, 记住, 提醒/定时; 谢谢/晚安/再见 gets one
+// emoji and nothing else (a reaction); a message that is itself one emoji gets the cat going on when it answers a question
+// of the cat's (确认一下 → 👍), and one emoji back otherwise;
 // in a group @名字 picks the cat and 大家/@all asks all of them; a message that names no cat is taken, as in the engine,
 // by the cat last addressed by name, else the one that spoke last, else the first member.
 //
@@ -32,6 +34,7 @@ import { ApiError } from '../server/errors.js';
 import type { NativeRuntime } from '../server/native/bridge.js';
 import type { NativeCat, NativeEvent, NativeMessage } from '../server/native/types.js';
 import { NativeFixture, catTemplates } from '../tests/native-fixture.js';
+import { soleEmoji } from '../server/native/reactions.js';
 import { seedShowcase, type Script, type Proposal } from './showcase-scene.js';
 
 const root = resolve(import.meta.dirname, '..');
@@ -195,6 +198,14 @@ export class PreviewNative extends NativeFixture {
       for (const turn of this.turns.values()) if (turn.threadId === parts[3] && turn.catId === parts[5]) turn.stop = true;
       return done({ ok: true, cancelled: true });
     }
+    // The engine's read-only routing preview, by the same rule this stand-in routes a message with (below).
+    if (url.pathname === '/api/routing/preview' && method === 'POST') {
+      const thread = this.threads.get(body.threadId); if (!thread) throw new ApiError(404, 'Thread not found');
+      const members = (thread.preferredCats ?? []).map(id => this.cats.find(cat => cat.id === id)).filter((cat): cat is NativeCat => !!cat);
+      const named = members.filter(cat => String(body.content).includes('@' + cat.name)), all = /大家|@all|@全体/.test(String(body.content));
+      return done(all || named.length ? { targetCats: (all ? members : named).map(cat => cat.id), reason: { kind: 'current_message_mentions' } }
+        : { targetCats: this.taker(this.messages.get(thread.id) ?? [], members).map(cat => cat.id), reason: { kind: 'recent_replier' } });
+    }
     if (url.pathname === '/api/messages' && method === 'POST') {
       const thread = this.threads.get(body.threadId); if (!thread) throw new ApiError(404, 'Missing thread');
       const list = this.messages.get(thread.id) ?? []; this.messages.set(thread.id, list);
@@ -299,7 +310,7 @@ export class PreviewNative extends NativeFixture {
     for (const message of said) { const spoke = message.type === 'assistant' && members.find(cat => cat.id === message.catId); if (spoke) return [spoke]; }
     return members.slice(0, 1);
   }
-  script(cat: NativeCat, text: string, threadId: string) {
+  script(cat: NativeCat, text: string, threadId: string, said?: NativeMessage) {
     const staged = this.scene?.(threadId, cat, text);
     if (staged) return { steps: staged.steps ?? [], reply: staged.reply + `\n\n[${cat.name}/示例🐾]`, fail: staged.fail ?? false, think: staged.think ?? 500,
       blocks: staged.blocks ?? [], proposal: staged.proposal, files: staged.files ?? [] };
@@ -307,6 +318,14 @@ export class PreviewNative extends NativeFixture {
     let reply: string, fail: boolean | string = false, think = 500;
     if (text.startsWith('聊天页的开场邀请')) reply = `你好呀，我是${cat.name}。今天想聊点什么？`;
     else if (/失败/.test(text)) { reply = '我先看一下…'; fail = true; }
+    // One emoji and nothing else, as a reaction is sent: under a question of the cat's own it is the go-ahead and the cat
+    // goes on; anywhere else there is nothing to do, and the cat answers with one emoji, as it is told to (chatManner).
+    else if (soleEmoji(text)) {
+      const about = said?.replyTo ? (this.messages.get(threadId) ?? []).find(message => message.id === said.replyTo) : undefined;
+      const asked = about?.type === 'assistant' && /[?？][\s\S]{0,3}$/.test(about.content.replace(/\n\n\[[^\]]*🐾\]\s*$/u, '').trim());
+      reply = asked ? '好，那就这么办，我接着做。\n\n这是预览环境里的固定回复，不是真的猫在回答。' : '🐾';
+    }
+    else if (/^(谢谢|多谢|辛苦了|晚安|再见)/.test(text.trim())) reply = '🐾';
     else if (/长/.test(text)) reply = ['## 先说结论', '这是一段**预览用**的长回复，用来看一条回复被写出来的样子。', '',
       '- 第一点：列表、`行内代码` 和[链接](https://example.com)都会出现。', '- 第二点：下面有一段代码。', '- 第三点：最后是一张表。', '',
       '```js', 'function greet(name) {', '  return `你好，${name}`;', '}', '```', '',
@@ -336,7 +355,7 @@ export class PreviewNative extends NativeFixture {
     const list = this.messages.get(threadId)!, invocationId = randomUUID(), key = `${threadId}:${cat.id}:${invocationId}`;
     const state: { threadId: string; catId: string; invocationId: string; stop: boolean; reply?: NativeMessage; more: NativeMessage[] } = { threadId, catId: cat.id, invocationId, stop: false, more: [] };
     this.turns.set(key, state);
-    const first = this.script(cat, user.content, threadId);
+    const first = this.script(cat, user.content, threadId, user);
     const message: NativeMessage = { id: this.id(), type: 'assistant', catId: cat.id, timestamp: Date.now(), content: '', origin: 'stream', replyTo: user.id,
       lifecycle: { kind: 'response', status: 'processing', invocationId, inputMessageIds: [user.id], startedAt: Date.now() }, toolEvents: [] };
     (user.lifecycle?.dispatchRefs as unknown[] | undefined)?.push({ targetId: cat.id, phase: 'settled', statusMessageId: message.id, dispatchedAt: Date.now() });
@@ -401,7 +420,7 @@ export class PreviewNative extends NativeFixture {
     if (!await answer(first, user)) failed = first.fail || true;
     // What the owner said while this was being written is answered in the same reply, in the order it came.
     // If answering one of them fails, the reply fails.
-    while (!failed && !state.stop && state.more.length) { const next = state.more.shift()!, script = this.script(cat, next.content, threadId); if (!await answer(script, next)) failed = script.fail || true; }
+    while (!failed && !state.stop && state.more.length) { const next = state.more.shift()!, script = this.script(cat, next.content, threadId, next); if (!await answer(script, next)) failed = script.fail || true; }
     if (codex) status('done');
     if (state.stop) { message.content = written; settle('canceled'); this.emit(threadId, { type: 'done', ...stamp, isFinal: true, timestamp: Date.now() }, true); return; }
     if (failed) { message.content = ''; settle('failed', typeof failed === 'string' ? failed : undefined); this.emit(threadId, { type: 'error', ...stamp, error: 'preview failure', timestamp: Date.now() }, true); return; }

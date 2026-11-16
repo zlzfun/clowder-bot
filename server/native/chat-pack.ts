@@ -12,8 +12,12 @@ import type { NativeTransport } from './types.js';
  * Measured on the isolated runtime (2026-11-12, Claude haiku, the same two questions, a new conversation
  * each time): 387 and 600 characters in 32 and 35 lines without it; 124 and 166 characters in 3 lines each
  * with it, and still a table when a table was asked for.
+ *
+ * Its last sentence (2026-11-13) is what lets a cat answer with a reaction: a reply that is one emoji and nothing
+ * else is drawn on the owner's message instead of as a line of its own (see reactions.ts). It names the moments a
+ * person would do that — thanks, a goodbye, a reaction of the owner's with nothing to act on — and no other.
  */
-export const chatManner = '说话像在聊天软件里回消息：先说结论，通常两三句话说完；不用标题、列表、表格和表情符号，不复述问题，不铺垫，不在结尾总结。对方明确要清单、表格、代码或长文时照给；内容确实多时先说要点，问一句要不要展开。';
+export const chatManner = '说话像在聊天软件里回消息：先说结论，通常两三句话说完；不用标题、列表、表格和表情符号，不复述问题，不铺垫，不在结尾总结。对方明确要清单、表格、代码或长文时照给；内容确实多时先说要点，问一句要不要展开。对方只是道谢、道别，或只回了一个表情，而你没有别的要说、也没有要接着做的事时，只回一个表情就够了，不必写字。';
 
 /**
  * It reaches the cats as a default behaviour of an engine pack (Clowder AI F129, unpatched): a pack's
