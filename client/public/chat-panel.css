@@ -19,6 +19,20 @@
   .main.pb-beside { flex-direction: row; }
   .main.pb-beside > .panel { top: 0; border-radius: 0; box-shadow: none; }
   .main.pb-beside > .panel.open { position: relative; flex: none; }
+  /* The drawer form starts below the chat's header on every desktop width,
+     as app.css already has it at 768–959px "so the chip stays clickable to
+     close it again". From 960px app.css started it at the card's top, over
+     the chip, and the head's portrait (编辑资料 since item 51) could land
+     right under the pointer that had just opened it: a second click there
+     started an edit instead of closing. Below the header the chip stays in
+     view, dimmed under the scrim (item 26), and a click on it lands on the
+     scrim, which closes. The beside form is the norm on wide windows now;
+     the drawer, its fallback, looks the same at every desktop width. */
+  .main:not(.pb-beside) > .panel { top: var(--top-h); }
+  /* Below the header the window's own controls (Windows, Linux desktop app)
+     are above it, so its head needs no room for them (app.css's 36px; the
+     beside form, which reaches the window's top, keeps it). */
+  .in-app:is(.os-win, .os-linux) .main:not(.pb-beside) > .panel .phdr { padding-top: 14px; }
 
   /* The open identity chip. For the drawer, item 26 (cafe-theme.css) took its
      fill away and put it under the scrim, where a click on it lands on the

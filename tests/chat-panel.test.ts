@@ -486,3 +486,23 @@ test('item 51: 编辑资料 from the head\'s portrait opens the same dialog with
   ctx.closeModal();
   assert.equal(doc.activeElement, chip);
 });
+
+test('item 51, review: the drawer form starts below the chat\'s header at every desktop width, so the chip stays in view under the scrim and the head\'s portrait (编辑资料) never lands under the pointer that opened it; the beside form and phones are untouched', () => {
+  const desk = /@media \(min-width: 768px\) \{([\s\S]*?)\n\}/.exec(bare)![1]!;
+  assert.match(desk, /\n\s+\.main:not\(\.pb-beside\) > \.panel \{ top: var\(--top-h\); \}/, 'in the desktop query: not on phones (app.css\'s fixed sheet there)');
+  assert.match(desk, /\n\s+\.in-app:is\(\.os-win, \.os-linux\) \.main:not\(\.pb-beside\) > \.panel \.phdr \{ padding-top: 14px; \}/, 'below the header the window\'s controls are not over the head');
+  assert.match(desk, /\.main\.pb-beside > \.panel \{ top: 0;/, 'beside the chat it still reaches the card\'s top');
+  // What it overrides: app.css starts the drawer at the card's top from 960px (below the header only at 768–959).
+  const appCss = read('client/public/app.css');
+  assert.match(appCss, /\.panel \{\n {2}position: absolute; top: 0; bottom: 0; right: 0;/);
+  assert.match(appCss, /@media \(max-width: 959px\) and \(min-width: 768px\) \{[\s\S]*?\.panel \{ top: var\(--top-h\);/);
+  // Nothing loaded after chat-panel.css moves the panel's top again.
+  const html = read('client/index.html');
+  const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map((x) => x[1]!);
+  for (const later of styles.slice(styles.indexOf('chat-panel.css') + 1)) {
+    assert.doesNotMatch(read('client/public/' + later).replace(/\/\*[\s\S]*?\*\//g, ''), /\.panel\b[^{]*\{[^}]*\btop\s*:/, later + ' leaves the panel\'s top alone');
+  }
+  // The chip under the scrim, as item 26 has it for the drawer: a click there lands on the scrim, which closes.
+  assert.match(read('client/public/cafe-theme.css'), /\.top-title\.on,\n\.top-title\.on:hover:not\(:disabled\) \{ background: transparent; z-index: 27; \}/);
+  assert.match(appCss, /\.panel-scrim \{\n {2}position: absolute; inset: 0; z-index: 28;/);
+});
