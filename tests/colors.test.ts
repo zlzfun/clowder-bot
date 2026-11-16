@@ -268,6 +268,10 @@ const DRAWS: Record<string, 'fill' | 'mark' | 'tint' | 'pressed' | 'swatch'> = {
   'quick-create.css|.qc-borrow|background': 'fill', 'quick-create.css|.qc-borrow:hover|background': 'fill', 'quick-create.css|.qc-chip:has(input:checked)|background': 'fill',
   'chat-list.css|.cl-count|background': 'fill', 'chat-cards.css|.ck-ask-choice .ask-opt.on .opt-badge|background': 'fill',
   'chat-cards.css|.ck-checks li.on .ck-box|background': 'fill', 'sidebar.css|.avatar.owner|color': 'mark',
+  // Item 49: the owner's own reaction chip and an emoji already sent in the picker, washed with the accent.
+  'chat-reactions.css|.rx-chip.rx-mine|background': 'tint', 'chat-reactions.css|.rx-emo.rx-given|background': 'tint',
+  // …and on the dark theme, where the chips and the picker's discs are light, the accent itself (a dark paw stays visible on it).
+  'chat-reactions.css|html[data-theme="dark"] .rx-chip.rx-mine|background': 'mark', 'chat-reactions.css|html[data-theme="dark"] .rx-emo.rx-given|background': 'mark',
 };
 const FAMILY = /var\(--(?:x-primary|x-primary-hover|primary|primary-hover|accent|accent-ink|accent-soft|send|ring|provider-accent)\)/;
 const ACCENT = /var\(--(?:accent|accent-ink|ring|provider-accent)\)/;

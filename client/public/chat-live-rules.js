@@ -395,6 +395,15 @@
     };
     const at = new Map();
     list.forEach((m, i) => { if (mine(m)) { const k = keyOf(m); if (k && !at.has(k)) at.set(k, i); } });
+    // The owner's reaction is drawn on the row it reacts to (reactions[],
+    // chat-reactions.js): a follow-up that names it names that row.
+    list.forEach((m, i) => {
+      for (const r of m && Array.isArray(m.reactions) ? m.reactions : []) {
+        if (!r || r.mine !== true) continue;
+        const k = group ? (typeof r.id === "string" && r.id ? "i:" + r.id : "") : (Number.isSafeInteger(Number(r.seq)) && Number(r.seq) > 0 ? "s:" + Number(r.seq) : "");
+        if (k && !at.has(k)) at.set(k, i);
+      }
+    });
     const under = new Map(), moved = new Set();
     list.forEach((m, i) => {
       if (!m || mine(m) || m.follows == null) return;

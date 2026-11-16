@@ -47,8 +47,8 @@ test('rows are known by their native message (a delivery row by its call); earli
 
 test('the page before is asked for with the server\'s own cursor, on the transcript for a cat and on the group route for a group; a page answer is checked', () => {
   const R = rules();
-  assert.equal(R.pagePath({ type: 'bot', id: '团子' }, '1794:m 1'), '/xbot-api/bots/%E5%9B%A2%E5%AD%90/transcript?before=1794%3Am%201');
-  assert.equal(R.pagePath({ type: 'group', id: 'g/1' }, '5:x'), '/xbot-api/groups/g%2F1?before=5%3Ax');
+  assert.equal(R.pagePath({ type: 'bot', id: '团子' }, '1794:m 1'), '/xbot-api/bots/%E5%9B%A2%E5%AD%90/transcript?before=1794%3Am%201&reactions=1');
+  assert.equal(R.pagePath({ type: 'group', id: 'g/1' }, '5:x'), '/xbot-api/groups/g%2F1?before=5%3Ax&reactions=1');
   assert.equal(R.pagePath({ type: 'bot', id: 'a' }, ''), '');
   assert.deepEqual(plain(R.page({ messages: [msg(1)], hasMore: true, before: '1:m1', thread_id: 'T' })), { rows: [msg(1)], before: '1:m1', more: true, thread: 'T' });
   assert.equal(R.page({ messages: [], hasMore: true, before: null }).more, false, 'no cursor, no page before');
@@ -156,7 +156,7 @@ test('scrolling to the top loads the page before with the newest page\'s cursor;
   p.thread.scrollTop = 100;
   p.thread.dispatch('scroll');
   assert.equal(p.calls.length, 1);
-  assert.equal(p.calls[0]!.path, '/xbot-api/bots/%E5%9B%A2%E5%AD%90/transcript?before=1794%3Am21');
+  assert.equal(p.calls[0]!.path, '/xbot-api/bots/%E5%9B%A2%E5%AD%90/transcript?before=1794%3Am21&reactions=1');
   assert.equal(text(p.topRow()), '正在加载更早的消息…');
   assert.equal(p.topRow()!.getAttribute('role'), 'status');
   // Still scrolling while it loads: no second request.
@@ -171,7 +171,7 @@ test('scrolling to the top loads the page before with the newest page\'s cursor;
   assert.equal(text(p.topRow()), '查看更早的消息', 'there is more before');
   // The button asks for the next page with the cursor of the oldest one held.
   p.topRow()!.querySelector('button')!.click();
-  assert.equal(p.calls[1]!.path, '/xbot-api/bots/%E5%9B%A2%E5%AD%90/transcript?before=1794%3Am1');
+  assert.equal(p.calls[1]!.path, '/xbot-api/bots/%E5%9B%A2%E5%AD%90/transcript?before=1794%3Am1&reactions=1');
   p.answer({ messages: [], hasMore: false, before: null, thread_id: 'T1' });
   await p.settle();
   assert.equal(text(p.topRow()), '没有更早的消息了');
@@ -241,10 +241,10 @@ test('a group asks for its earlier page on the group route; a page of records wi
   p.app.thread = 'g1';
   p.poll({ messages: range(21, 40), hasMore: true, before: '5:m21' });
   p.history.load();
-  assert.equal(p.calls[0]!.path, '/xbot-api/groups/g1?before=5%3Am21');
+  assert.equal(p.calls[0]!.path, '/xbot-api/groups/g1?before=5%3Am21&reactions=1');
   p.answer({ messages: [], hasMore: true, before: '4:m0', group: { id: 'g1' } });
   await p.settle();
-  assert.equal(p.calls[1]!.path, '/xbot-api/groups/g1?before=4%3Am0', 'nothing to show on that page: the one before');
+  assert.equal(p.calls[1]!.path, '/xbot-api/groups/g1?before=4%3Am0&reactions=1', 'nothing to show on that page: the one before');
   for (let i = 0; i < 3; i++) { p.answer({ messages: [], hasMore: true, before: '3:x' + i }); await p.settle(); }
   assert.equal(p.calls.length, 4, 'it stops after a few empty pages; the button is still there');
   assert.equal(text(p.topRow()), '查看更早的消息');
@@ -508,7 +508,7 @@ test('a poll that moves the newest page on while the first earlier page is asked
   p.open({ type: 'bot', id: '团子' });
   p.poll(newest(21, 40));
   p.history.load();
-  assert.equal(p.calls[0]!.path, '/xbot-api/bots/%E5%9B%A2%E5%AD%90/transcript?before=1794%3Am21');
+  assert.equal(p.calls[0]!.path, '/xbot-api/bots/%E5%9B%A2%E5%AD%90/transcript?before=1794%3Am21&reactions=1');
   // Two messages arrive before the answer: the newest page is now 23–42.
   p.poll(newest(23, 42));
   p.answer({ messages: range(1, 20), hasMore: false, before: '1794:m1', thread_id: 'T1' });
@@ -527,6 +527,27 @@ test('a poll that moves the newest page on while the first earlier page is asked
   assert.equal(text(q.topRow()), '查看更早的消息');
 });
 
+test('item 49, review 2 (point 13): a reaction stays in one place through two moves of the newest page\'s boundary — the pages held keep what the newest page said, so the reaction drawn on a row and the line it became never come back together', async () => {
+  const p = page();
+  p.open({ type: 'bot', id: '团子' });
+  const page0 = { messages: [msg(21), { ...msg(22), reactions: [{ id: 'r', seq: 23, emoji: '👍', mine: true, reply_to_id: 'm22' }] }, msg(24), msg(25)], hasMore: true, before: '1794:m21', thread_id: 'T1' };
+  p.poll(page0);
+  p.history.load();
+  p.answer({ messages: range(1, 20), hasMore: false, before: '1794:m1', thread_id: 'T1' });
+  await p.settle();
+  const where = (rows: Any[]) => ({ lines: rows.filter((m: Any) => m.id === 'r').length, chips: rows.filter((m: Any) => (m.reactions || []).some((x: Any) => x.id === 'r')).length });
+  // First move: m22 leaves the newest page, so r is a line of its own on it.
+  let rows = p.poll({ messages: [{ ...msg(23), id: 'r', native_message_id: 'r' }, msg(24), msg(25), msg(26)], hasMore: true, before: '1794:r', thread_id: 'T1' });
+  assert.deepEqual(where(rows), { lines: 1, chips: 0 });
+  // Second move: the line r leaves the newest page too and joins the pages held above it.
+  rows = p.poll({ messages: [msg(25), msg(26), msg(27)], hasMore: true, before: '1794:m25', thread_id: 'T1' });
+  assert.deepEqual(plain(where(rows)), { lines: 1, chips: 0 }, 'the old chip on m22 does not come back');
+  assert.deepEqual(plain(rows.map((m: Any) => m.id).slice(18)), ['m19', 'm20', 'm21', 'm22', 'r', 'm24', 'm25', 'm26', 'm27']);
+  // And a poll that changes nothing keeps it so.
+  rows = p.poll();
+  assert.deepEqual(where(rows), { lines: 1, chips: 0 });
+});
+
 test('a newest page whose records show no rows keeps the earlier rows loaded above it (its native boundary is the seam), and an empty group view offers them instead of 没有消息', async () => {
   const R = rules();
   const held = range(1, 20);
@@ -543,7 +564,7 @@ test('a newest page whose records show no rows keeps the earlier rows loaded abo
   p.poll(empty);
   assert.equal(text(p.topRow()), '查看更早的消息');
   p.history.load();
-  assert.equal(p.calls[0]!.path, '/xbot-api/bots/%E5%9B%A2%E5%AD%90/transcript?before=5%3Ax');
+  assert.equal(p.calls[0]!.path, '/xbot-api/bots/%E5%9B%A2%E5%AD%90/transcript?before=5%3Ax&reactions=1');
   p.answer({ messages: range(1, 20), hasMore: false, before: '1:m1', thread_id: 'T1' });
   await p.settle();
   assert.deepEqual(ids(p), range(1, 20).map(m => m.id), 'the earlier rows show and stay');

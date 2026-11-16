@@ -980,7 +980,7 @@ test('the page loads the palette after the quick-create scripts and before app.j
   assert.ok(at('workspace.js') < at('palette.js') && at('chat-experience.js') < at('palette.js') && at('palette-rules.js') < at('palette.js') && at('palette.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
   // Only the 找得到 styles (chat-list.css, chat-history.css), 资料页与群 (profile.css, mention.css) and chat-live.css (last) follow.
-  assert.deepEqual(styles.slice(-11), ['quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'profile.css', 'mention.css', 'polish.css', 'chat-cards.css', 'chat-presence.css', 'sidebar.css', 'chat-live.css']);
+  assert.deepEqual(styles.slice(-12), ['quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'profile.css', 'mention.css', 'polish.css', 'chat-cards.css', 'chat-presence.css', 'chat-reactions.css', 'sidebar.css', 'chat-live.css']);
   // 搜索 is the first of the two round buttons at the right end of the greeting's line (item 43), before 新建; the rail has none.
   assert.match(html, /<div class="side-head">\n\s+<div class="side-acts">\n\s+<button id="palette-open" class="side-btn" type="button" aria-haspopup="dialog" aria-label="搜索"><\/button>\n\s+<button id="side-new" class="side-btn"[^>]*aria-label="新建"[^>]*><\/button>\n\s+<\/div>\n\s+<div id="greeting"/);
   assert.doesNotMatch(html, /pal-entry/);

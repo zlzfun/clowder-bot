@@ -1301,7 +1301,7 @@ test('the shell loads the module before app.js and its styles after every earlie
   assert.ok(at('quick-create-rules.js') < at('quick-create.js') && at('quick-create.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
   // After every earlier style; only the search palette, the 找得到 styles, 资料页与群 (profile.css, mention.css) and the live-reply styles (chat-live.css), which stay last, follow.
-  assert.deepEqual(styles.slice(styles.indexOf('chat-experience.css') + 1), ['quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'profile.css', 'mention.css', 'polish.css', 'chat-cards.css', 'chat-presence.css', 'sidebar.css', 'chat-live.css']);
+  assert.deepEqual(styles.slice(styles.indexOf('chat-experience.css') + 1), ['quick-create.css', 'palette.css', 'chat-list.css', 'chat-history.css', 'profile.css', 'mention.css', 'polish.css', 'chat-cards.css', 'chat-presence.css', 'chat-reactions.css', 'sidebar.css', 'chat-live.css']);
   // 新建 is the sidebar's own button, at the top of the full sidebar and at the bottom of the rail (item 43): one dialog, no menu.
   assert.match(html, /<button id="side-new" class="side-btn" type="button" aria-haspopup="dialog" aria-label="新建" data-tip="新建"><\/button>/);
   assert.match(html, /<button id="rail-new" class="side-glyph rail-only" type="button" aria-haspopup="dialog" aria-label="新建" data-tip="新建" data-tip-placement="right"><\/button>/);

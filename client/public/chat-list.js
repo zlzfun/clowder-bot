@@ -307,12 +307,12 @@
   // a restored quote still waiting for a read to show its conversation.
   let open = null;
   const isOpenChat = (sel) => !!open && !!sel && open.type === sel.type && open.id === sel.id;
-  // Leaving a chat: what is in the composer (and, in a single chat, the
-  // message it quotes, with its conversation) stays with that chat.
+  // Leaving a chat: what is in the composer (and the message it quotes,
+  // with its conversation) stays with that chat.
   function leave(sel) {
     if (!H || !sel || !sel.id) { open = null; return; }
     const key = isOpenChat(sel) ? open.key : draftKeyOf(sel);
-    const quote = sel.type === "bot" ? H.composer.quote() || (open && open.quote) : null;
+    const quote = H.composer.quote() || (open && open.quote) || null;
     open = null;
     if (key && drafts.put(key, H.composer.text(), quote)) save();
   }
@@ -325,11 +325,11 @@
     const key = draftKeyOf(sel);
     const d = drafts.take(key);
     save();
-    open = { type: sel.type, id: sel.id, key, quote: d && sel.type === "bot" ? d.quote : null };
+    open = { type: sel.type, id: sel.id, key, quote: d ? d.quote : null };
     H.composer.set(d ? d.text : "");
     H.composer.setQuote(null);
   }
-  // Each transcript read of the open single chat (threadId: its conversation
+  // Each transcript or group read of the open chat (threadId: its conversation
   // now): a waiting quote comes back if it belongs here and is dropped if not;
   // a quote in the composer from another conversation (the chat moved
   // meanwhile, say in another tab) is taken away, so a reply never points at
@@ -351,12 +351,12 @@
     if (isOpenChat(sel) && H) {
       if (H.composer.text().trim()) return false;
       H.composer.set(text);
-      if (sel.type === "bot" && quote && !H.composer.quote()) open.quote = quote;
+      if (quote && !H.composer.quote()) open.quote = quote;
       return true;
     }
     const key = draftKeyOf(sel);
     if (!key || drafts.get(key)) return false;
-    if (drafts.put(key, text, sel.type === "bot" ? quote : null)) { save(); return true; }
+    if (drafts.put(key, text, quote || null)) { save(); return true; }
     return false;
   }
   // A cat deleted for good: its draft goes too (by its ID and its old name key).
@@ -374,7 +374,7 @@
     const sel = H.selected();
     const key = isOpenChat(sel) ? open.key : draftKeyOf(sel);
     const text = key ? H.composer.text() : "";
-    const quote = key && sel.type === "bot" ? H.composer.quote() || (open && open.quote) : null;
+    const quote = key ? H.composer.quote() || (open && open.quote) || null : null;
     save(key && (text.trim() || quote) ? { key, text, quote } : null);
   }
 
@@ -399,7 +399,8 @@
   //   selected()  the open chat ({type, id}) or null;
   //   catId(name) a cat's native ID (drafts are kept by it);
   //   composer    {text(), set(text), quote(), setQuote(q)}; a quote is
-  //               {seq, text, thread} (thread: the conversation it was taken in).
+  //               {seq, text, thread, cat?} (thread: the conversation it was
+  //               taken in; cat: whose words, in a group).
   let timer = 0;
   function init(hooks) {
     H = hooks;

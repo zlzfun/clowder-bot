@@ -209,6 +209,11 @@
       out.set(to, list);
     };
     for (const m of messages || []) {
+      // A cat's whole answer that was one emoji is drawn on the owner's row
+      // (reactions[], chat-reactions.js): a finished reply to it, so seen too.
+      if (ownerRow(m) && midOf(m) && Array.isArray(m.reactions)) {
+        for (const r of m.reactions) if (r && r.mine === false && str(r.native_cat_id)) add(midOf(m), r.native_cat_id);
+      }
       if (!began(m)) continue;
       const to = typeof m.native.replyTo === "string" ? m.native.replyTo : "";
       if (to && owners.has(to)) add(to, m.native.catId);

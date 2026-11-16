@@ -411,8 +411,14 @@
       const e = S.replies.get(id);
       if (!row.inProgress) {
         S.settled.add(id);
-        if (e) e.gone = true;
-        else {
+        if (e) {
+          e.gone = true;
+          // Met mid-way (its start was missed, so it never took the typing
+          // bubble of the send it answers) and finished now: that bubble goes
+          // too, by the message the record says it answers.
+          const w = answering(row);
+          if (w && w.row !== e.row) dropWait(w);
+        } else {
           // Finished before this page saw any of it: the typing bubble of the
           // send it answers gives its place to it (the redraw swaps them in place).
           const w = answering(row);

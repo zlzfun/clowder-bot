@@ -374,9 +374,10 @@ test('each chat keeps its own draft and quote: leaving takes them along, another
   p.list.enter(group);
   assert.equal(p.composer.text, '');
   p.composer.text = '大家好';
-  p.composer.quote = { seq: 2, text: 'x', thread: 'G' };
+  p.composer.quote = { seq: 2, text: 'x', thread: 'G', cat: 'c2' };
   p.list.leave(group);
-  assert.deepEqual(plain(p.list.draft(group)), { text: '大家好', quote: null }, 'a group has no quote');
+  // Item 49: a group quotes too, so its draft keeps the quote, with whose words they are (the bar shows that cat).
+  assert.deepEqual(plain(p.list.draft(group)), { text: '大家好', quote: { seq: 2, text: 'x', thread: 'G', cat: 'c2' } }, 'a group keeps its quote too');
   p.app.sel = cat;
   p.list.enter(cat);
   assert.equal(p.composer.text, '帮我把这段');
@@ -394,6 +395,13 @@ test('each chat keeps its own draft and quote: leaving takes them along, another
   q.list.read(cat, 'T1');
   assert.deepEqual(plain(q.composer.quote), quote);
   assert.equal(text(q.list.preview('bot', '栗子').node), '草稿：群里也说一声');
+  // The group's quote comes back the same way: once a read of the group shows the same conversation.
+  q.app.sel = group;
+  q.list.enter(group);
+  assert.equal(q.composer.text, '大家好');
+  assert.equal(q.composer.quote, null);
+  q.list.read(group, 'G');
+  assert.deepEqual(plain(q.composer.quote), { seq: 2, text: 'x', thread: 'G', cat: 'c2' });
 });
 
 test('a quote never lands in another conversation of the same cat: after a 新对话, a saved conversation opened again, or a move made elsewhere, it is dropped; one in the composer goes when a read shows the chat moved', () => {
