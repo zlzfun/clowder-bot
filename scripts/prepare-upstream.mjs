@@ -41,6 +41,13 @@ for (const file of [runtimeLock, resolve(build, '.bot-runtime.lock'), resolve(ro
   // Legacy launchers owned .runtime/clowder-ai. Never rebuild that live path,
   // while allowing an independent candidate to use another build and data directory.
   if (file === resolve(root, '.runtime/native-runtime.lock') && resolve(owner.build || resolve(root, '.runtime/clowder-ai')) !== build) continue;
+  // The runtime that holds this data directory may be running from another build directory. Every pin
+  // builds into a directory of its own, so the next engine can be built while the current one keeps
+  // serving, and the instance is down only for the moment it changes over. What is shared is the home
+  // repository in the data directory, where this adds one more linked worktree and touches neither the
+  // main worktree (the owner's taste memory) nor the running build. A lock that does not name its
+  // build (older launchers) still refuses.
+  if (file === runtimeLock && typeof owner.build === 'string' && resolve(owner.build) !== build && !sameDir(owner.build, build)) continue;
   let alive = true;
   try { process.kill(owner.pid, 0); } catch (e) { if (e.code === 'ESRCH') alive = false; else if (e.code !== 'EPERM') throw e; }
   if (alive) throw new Error('Stop the native runtime before rebuilding. Its persistent data is preserved.');
