@@ -121,9 +121,16 @@ export function probeReason(error: string | undefined, source: AppRow['source'])
 /** What of a probe error may leave as `detail`: only fragments that cannot carry a secret. The engine's error can
  *  quote the answering server's own response body, and a server may echo the credential it was sent — so the raw
  *  text never goes out; the reason above is derived from it, and this is what is left for diagnosing. */
+/** Every code named here is a fixed word: nothing in the pattern is open-ended (no wildcard, no unbounded number),
+ *  so a matched fragment is one of a finite set and cannot be something the answering server made up. */
+const DIAGNOSTIC = new RegExp(String.raw`\bHTTP \d{3}\b|\bstatus code \(?\d{3}\b\)?|\bMCP error -?\d{1,5}\b|\bConnection closed\b|\bfetch failed\b|\b[Tt]imed? ?out\b|\b(?:${[
+  'ENOENT', 'EACCES', 'EPERM', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT', 'EPIPE', 'EHOSTUNREACH', 'ENETUNREACH',
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'UNABLE_TO_GET_ISSUER_CERT', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'SELF_SIGNED_CERT_IN_CHAIN', 'CERT_HAS_EXPIRED', 'CERT_NOT_YET_VALID', 'CERT_UNTRUSTED', 'CERT_REVOKED', 'ERR_TLS_CERT_ALTNAME_INVALID',
+].join('|')})\b`, 'g');
 export function probeDetail(error: string | undefined): string | undefined {
-  const said = error ?? '', found = new Set<string>();
-  for (const [part] of said.matchAll(/\bHTTP \d{3}\b|\bstatus code \(?\d{3}\)?|\bMCP error -?\d+\b|\bConnection closed\b|\bfetch failed\b|\b[Tt]imed? ?out\b|\b(?:ENOENT|EACCES|EPERM|ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|EPIPE|EHOSTUNREACH|ENETUNREACH|UNABLE_TO_[A-Z_]+|[A-Z_]*SELF_SIGNED_CERT[A-Z_]*|CERT_[A-Z_]+)\b/g)) found.add(part);
+  const found = new Set<string>();
+  for (const [part] of (error ?? '').matchAll(DIAGNOSTIC)) found.add(part);
   return found.size ? [...found].join(' · ') : undefined;
 }
 
