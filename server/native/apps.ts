@@ -125,10 +125,20 @@ export function nativeIdFor(name: string, taken: ReadonlySet<string>, seed?: str
 export class BotApps {
   /** Request bookkeeping: an answer that was lost and asked again finds the app it made (memory only). */
   private created = new Map<string, { nativeId: string; at: number }>();
+  /** Two steps that must not interleave run one after another: picking a free id then installing it; clearing the operation state then acting. */
+  private adding: Promise<unknown> = Promise.resolve();
+  private acting: Promise<unknown> = Promise.resolve();
+  private inTurn<T>(lane: 'adding' | 'acting', work: () => Promise<T>): Promise<T> {
+    const run = this[lane].then(work, work);
+    this[lane] = run.catch(() => undefined);
+    return run;
+  }
   constructor(private native: NativeTransport, private store: ProductStore, private platform: NodeJS.Platform = process.platform) {}
 
   async list(): Promise<{ apps: AppRow[] }> {
-    const [wechat, custom] = await Promise.all([this.wechat(), this.registry()]);
+    // 微信 that cannot be read must not take the owner's other apps off the screen: it is listed as it is — not readable.
+    const unread = (): AppRow => ({ id: 'wechat', kind: 'wechat', title: '微信', state: 'unavailable', reason: '没能读到它的状态' });
+    const [wechat, custom] = await Promise.all([this.wechat().catch(unread), this.registry()]);
     return { apps: [wechat, ...custom.map(entry => this.customRow(entry))] };
   }
   async detail(id: string): Promise<AppRow> {
@@ -163,7 +173,8 @@ export class BotApps {
     if (probe.connectionStatus !== 'disconnected') return { ...row, state: 'unchecked', reason: '没能检查' };
     return { ...row, state: 'failed', reason: probeReason(probe.error, row.source), ...(probe.error ? { detail: probe.error.slice(0, 400) } : {}) };
   }
-  async addCustom(input: CustomAppInput): Promise<AppRow> {
+  addCustom(input: CustomAppInput): Promise<AppRow> { return this.inTurn('adding', () => this.install(input)); }
+  private async install(input: CustomAppInput): Promise<AppRow> {
     const replay = input.idempotencyKey && this.created.get(input.idempotencyKey);
     const existing = await this.registry();
     if (replay) {
@@ -215,7 +226,8 @@ export class BotApps {
     try { return (await this.native.request<{ plugin?: NativePlugin }>(`/api/plugin-manager/plugins/_local/${WECHAT_PLUGIN}`)).plugin; }
     catch (error) { if (error instanceof ApiError && error.status === 404) return undefined; throw error; }
   }
-  private async action(name: 'arm' | 'disarm' | 'status'): Promise<AppRow['authorization']> {
+  private action(name: 'arm' | 'disarm' | 'status'): Promise<AppRow['authorization']> { return this.inTurn('acting', () => this.act(name)); }
+  private async act(name: 'arm' | 'disarm' | 'status'): Promise<AppRow['authorization']> {
     // The pinned engine hands the plugin its own step pointer (`operationState`) once any action of this
     // operation has run, and this plugin version refuses an input field it does not know — so every action
     // after the first fails ("input contains an unsupported field") until that pointer is cleared. The
