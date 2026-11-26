@@ -347,8 +347,13 @@
     const compCopy = node("span", "pf-row-copy");
     const compTitle = node("span", "pf-row-title", R.COMPUTER.TITLE);
     compTitle.id = uid("computer");
-    const compHint = node("span", "pf-row-hint");
+    // Its busy line carries the app's spinner (the sidebar's, from the shell) while a request is on its way: it can take seconds.
+    const compHint = node("span", "pf-row-hint"), compSpin = node("span", "pf-spin"), compHintText = node("span");
     compHint.hidden = true;
+    compSpin.hidden = true;
+    compSpin.setAttribute("aria-hidden", "true");
+    if (H.spin) compSpin.append(H.spin());
+    compHint.append(compSpin, compHintText);
     compCopy.append(compTitle, compHint);
     const compSwitch = button("g7-switch pf-switch", null, () => toggleComputer(P));
     compSwitch.setAttribute("role", "switch");
@@ -390,7 +395,7 @@
 
     root.append(duty, pin, pinLine, comp, compNote, compError, convs, node("div", "pf-rule"), fold.box, foot);
     Object.assign(P, { root, duty, dutyText, dutyNone, pinSwitch, pinHint, pinLine, fresh, slot, fold, remove,
-      comp, compHint, compSwitch, compNote, compWords, compStop, compCmd, compError, profileSeen: null });
+      comp, compHint, compSpin, compHintText, compSwitch, compNote, compWords, compStop, compCmd, compError, profileSeen: null });
     return P;
   }
 
@@ -512,8 +517,11 @@
   // GET /xbot-api/bots/:name/computer and PUT {enabled} (docs/xbot-api.md
   // 「这台电脑」); the rules and the words are profile-rules.js's. What it is
   // doing, by cat and apart from the page, as 置顶's saves:
-  //   { view, reading, busy: "" | "on" | "off", wait: {missing} | null,
+  //   { view, reading, busy: "" | "on" | "off", ending, wait: {missing} | null,
   //     said: {text, code} | null, n, applied, timer }
+  // ending: the cat was replying when off was asked (the shell's replying
+  // hook: the status poll's running turns, or the open chat's live reply);
+  // off ends that reply, and the busy line says so while it does.
   // view is the server's last answer, drawn while it is asked again, never
   // kept as the truth: a new page for the cat starts without it. Answers are
   // numbered: one asked for before a later answer arrived is not drawn, and
@@ -524,7 +532,7 @@
   const WAIT_MS = 2000;
   function computerOf(key) {
     let cs = computers.get(key);
-    if (!cs) computers.set(key, (cs = { view: null, reading: false, busy: "", wait: null, said: null, n: 0, applied: 0, timer: 0 }));
+    if (!cs) computers.set(key, (cs = { view: null, reading: false, busy: "", ending: false, wait: null, said: null, n: 0, applied: 0, timer: 0 }));
     return cs;
   }
   const computerPath = (name) => "/xbot-api/bots/" + enc(name) + "/computer";
@@ -557,6 +565,8 @@
   // the switch's description while it is shown.
   function paintComputer(P) {
     const cs = computerOf(P.key), row = R.computerRow(cs.view, cs), sw = P.compSwitch;
+    // The row leaving under the keyboard (switched off where this system has no driver): focus to 置顶's switch beside it.
+    if (!row.shown && !P.comp.hidden && P.comp.contains(document.activeElement)) P.pinSwitch.focus();
     P.comp.hidden = !row.shown;
     const note = row.shown ? row.note : null, error = row.shown ? row.error : "";
     if (row.shown) {
@@ -564,7 +574,8 @@
       if (row.busy) sw.setAttribute("aria-busy", "true"); else sw.removeAttribute("aria-busy");
       if (row.can) sw.removeAttribute("aria-disabled"); else sw.setAttribute("aria-disabled", "true");
       P.comp.classList.toggle("pf-locked", !row.can && !row.busy);
-      setText(P.compHint, row.hint);
+      setText(P.compHintText, row.hint);
+      P.compSpin.hidden = !row.spin;
       P.compHint.hidden = !row.hint;
     }
     // 不等了 leaving under the keyboard: focus goes to the switch, not to the page.
@@ -614,6 +625,7 @@
     // A turn on asked for again by the wait, rather than by the owner just now.
     const again = enabled && !!cs.wait;
     cs.busy = enabled ? "on" : "off";
+    cs.ending = !enabled && !!(H.replying && H.replying(name));
     cs.said = null;
     if (!enabled) endWait(cs);
     const n = ++cs.n;
@@ -622,6 +634,7 @@
     try { view = R.computerView(await H.api(computerPath(name), { method: "PUT", body: { enabled }, serverError: true })); }
     catch (err) { failed = err; }
     cs.busy = "";
+    cs.ending = false;
     cs.applied = Math.max(cs.applied, n);
     if (failed || !view) {
       endWait(cs);
@@ -676,11 +689,26 @@
     cs.wait = null;
     if (cs.timer) { clearTimeout(cs.timer); cs.timer = 0; }
   }
-  // 不等了: nothing was switched, so nothing is sent; the switch stays off.
+  // 不等了: nothing was switched, so the switch stays off at once. The server
+  // is told (PUT {enabled: false}: it asks the driver it started for this to
+  // end) without the row turning busy; its answer, the plain off view, is
+  // drawn if nothing newer was. Its failure is no failure of the owner's: it
+  // is not said, the row is read again instead, and shows what is true.
   function stopWaiting(P) {
-    endWait(computerOf(P.key));
+    const key = P.key, cs = computerOf(key), name = P.data.name || P.sel.id;
+    endWait(cs);
     paintComputer(P);
     P.compSwitch.focus();
+    const n = ++cs.n;
+    H.api(computerPath(name), { method: "PUT", body: { enabled: false }, serverError: true })
+      .then((answer) => R.computerView(answer), () => null)
+      .then((view) => {
+        if (cs.busy || n <= cs.applied) return;
+        if (!view) { readComputer(key, name); return; }
+        cs.applied = n;
+        cs.view = view;
+        repaintComputer(key);
+      });
   }
 
   // ------------------------------------------------------------ 成员 (a group)

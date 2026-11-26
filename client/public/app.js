@@ -7971,6 +7971,17 @@
     // screen (the wait for a macOS grant reads again only while it is).
     copy: (text) => copyText(text),
     open: () => panel.classList.contains("open"),
+    // The busy line's spinner (the sidebar's own), and whether this cat is in
+    // the middle of a reply anywhere: the status poll's running turns (its own
+    // chat and every group, the turns switching it off ends) or the reply the
+    // open chat is drawing now, which the poll may not have seen yet.
+    spin: () => spinIcon(11),
+    replying: (name) => {
+      const st = stStatus.map[name];
+      if (st && Array.isArray(st.active) && st.active.length > 0) return true;
+      const id = botCatId(name), now = live.presence();
+      return !!id && !!now && Array.isArray(now.replies) && now.replies.some((r) => r.catId === id);
+    },
   });
   // One programmatic edit of the draft (an @ suggestion): rendered like
   // typing, one undo step, the caret after it.

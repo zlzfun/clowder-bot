@@ -108,6 +108,10 @@ html[data-theme="dark"] .pf-head.tinted .pf-portrait::before {
    as a disabled control does elsewhere; the line under it says why. The
    lines: what needs the owner (the install command as 新建's chip, 不等了
    as 资料's small link), then a change that failed. */
+/* While a request is on its way (switching off can take seconds while the
+   cat's reply ends) the busy line carries the sidebar's own spinner. */
+.pf-computer .pf-row-hint:not([hidden]) { display: flex; align-items: center; gap: 6px; }
+.pf-spin:not([hidden]) { flex: none; display: flex; }
 .pf-row.pf-locked { cursor: default; }
 .pf-locked .pf-switch[aria-disabled="true"] { cursor: default; opacity: .45; }
 .pf-cnote { margin-top: var(--x-s2); }

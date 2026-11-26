@@ -122,7 +122,11 @@
     INSTALL: "npm run computer:install",
     OPENING: "正在打开…",
     CLOSING: "正在关掉…",
+    // Off also ends the reply the cat is in the middle of (it keeps the tools it started with): said while that takes.
+    CLOSING_REPLY: "正在关掉，它正在写的回复会停下…",
     WAITING: "等你在系统设置里打开…",
+    // On where this system has no driver (the switch came along with the data from a Mac): it can only be switched off.
+    UNSUPPORTED: "现在还用不了：这个系统还不能让猫猫操作电脑。",
     STOP: "不等了",
     YES: "打开",
   });
@@ -161,22 +165,27 @@
   function computerError(err, enabling) {
     const message = trim(err && err.message);
     if (err instanceof TypeError || message === "连不上 clowder-bot") return "连不上 clowder-bot";
-    return plain(message) ? message : enabling ? "没能打开，请再试一次" : "没能关掉，请再试一次";
+    return plain(message) ? message : enabling ? "没能打开，请再试一次。" : "没能关掉，请再试一次。";
   }
   // The row as it is drawn, from the last view and what this page is doing
-  // for the cat: busy "on" | "off" while a change is on its way, wait
+  // for the cat: busy "on" | "off" while a change is on its way (ending: the
+  // cat was replying when off was asked, and that reply is being ended), wait
   // {missing} while turning on waits for a grant, said {text, code} the last
   // change that failed. The switch shows `on` as the server last said it,
   // never what was asked for. Lines only where something is wrong or pending:
   //   note   what is true and needs the owner (with the install command, or 不等了)
   //   error  the failed change (left out where the note already says it)
+  // spin: a request is on its way (it can take seconds), as opposed to the
+  // wait, which is the owner's to end. No driver for this system: nothing,
+  // unless the cat is on (then it is there to be switched off).
   function computerRow(view, flow) {
     const f = flow || {};
-    if (!view || !view.supported) return { shown: false };
+    if (!view || (!view.supported && !view.on)) return { shown: false };
     const on = view.on, waiting = !!f.wait && !on;
-    const out = { shown: true, on, busy: !!f.busy || waiting, can: !f.busy && !waiting && (on || view.installed),
-      hint: f.busy === "on" ? COMPUTER.OPENING : f.busy === "off" ? COMPUTER.CLOSING : waiting ? COMPUTER.WAITING : "", note: null, error: "" };
-    if (waiting && view.installed) out.note = { text: grantPlace(f.wait.missing) + "。", stop: true };
+    const out = { shown: true, on, busy: !!f.busy || waiting, spin: !!f.busy, can: !f.busy && !waiting && (on || (view.supported && view.installed)),
+      hint: f.busy === "on" ? COMPUTER.OPENING : f.busy === "off" ? (f.ending ? COMPUTER.CLOSING_REPLY : COMPUTER.CLOSING) : waiting ? COMPUTER.WAITING : "", note: null, error: "" };
+    if (!view.supported) out.note = { text: COMPUTER.UNSUPPORTED };
+    else if (waiting && view.installed) out.note = { text: grantPlace(f.wait.missing) + "。", stop: true };
     else if (!view.installed) out.note = { text: (on ? "现在还用不了：找不到操作电脑用的驱动，" : "还没装上操作电脑用的驱动，") + "在 clowder-bot 目录里运行：", command: COMPUTER.INSTALL };
     else if (on && view.permissions === "needed") out.note = { text: "现在还用不了：" + grantPlace(view.missing) + "。" };
     if (f.said && f.said.text && !(f.said.code === "computer_absent" && !view.installed)) out.error = f.said.text;
