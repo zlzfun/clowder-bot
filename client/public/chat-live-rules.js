@@ -77,6 +77,9 @@
     return false;
   }
 
+  // Two steps that read the same: the same tool on the same target, or both on this computer.
+  const sameStep = (a, b) => (a.area === "computer" && b.area === "computer") || (a.area === b.area && a.tool === b.tool && a.target === b.target);
+
   // One live event for this reply. true when what the chat shows may change.
   function apply(r, ev, now = 0) {
     if (!r || !ev || r.done && ev.kind !== "done") return false;
@@ -90,8 +93,12 @@
         r.phase = "thinking"; r.step = null;
         return true;
       case "step": {
-        const step = { tool: str(ev.tool), target: str(ev.target) };
-        if (r.phase === "step" && r.step && r.step.tool === step.tool && r.step.target === step.target) return false;
+        // area "computer": the step used this computer (the server says so,
+        // whichever Agent named the tool). To the owner those steps are one
+        // thing, 在用电脑, however many clicks and looks it takes: the next one
+        // changes nothing on screen.
+        const step = { tool: str(ev.tool), target: str(ev.target), area: ev.area === "computer" ? "computer" : "" };
+        if (r.phase === "step" && r.step && sameStep(r.step, step)) return false;
         r.phase = "step"; r.step = step;
         return true;
       }
@@ -302,7 +309,10 @@
     if (!t || /[\\/]/.test(t)) return "";
     return clip(t, 24);
   }
-  function stepWords(tool, rawTarget) {
+  // area "computer" (the step event's own field): 在用电脑, with no tool name
+  // and no target (the tool names are never parsed for it).
+  function stepWords(tool, rawTarget, area) {
+    if (area === "computer") return "在用电脑";
     const kind = verb(tool), t = target(rawTarget);
     switch (kind) {
       case "look": return t ? "在看 " + t : "在看文件";
@@ -326,7 +336,7 @@
   // The quiet line for a reply's current state ("" when there is none).
   function phrase(r) {
     if (!r || r.done) return "";
-    if (r.phase === "step" && r.step) return stepWords(r.step.tool, r.step.target);
+    if (r.phase === "step" && r.step) return stepWords(r.step.tool, r.step.target, r.step.area);
     if (r.phase === "thinking") return "在想…";
     return "";
   }

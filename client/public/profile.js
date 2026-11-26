@@ -6,9 +6,10 @@
 //                            colour as a quiet wash behind it; a cat's is
 //                            the button to 编辑资料), the name; a group's
 //                            name is edited in place, with 「N 只猫猫」.
-//   catPage()                资料: 职责, 置顶, 新对话 and 历史对话, then one
-//                            folded 高级 (它用什么思考, 模型与画像, 任务与执行,
-//                            导出对话 / 复制名字 / 运行面板), 删除猫猫 last.
+//   catPage()                资料: 职责, 置顶, 可以用这台电脑 (item 52), 新对话
+//                            and 历史对话, then one folded 高级 (它用什么思考,
+//                            模型与画像, 任务与执行, 导出对话 / 复制名字 /
+//                            运行面板), 删除猫猫 last.
 //   groupPage()              成员: faces and names, 添加猫猫, 移出, how to talk
 //                            in a group, a folded 高级 with 任务, 删除群聊.
 //   groupMenu()              a sidebar group row's menu: 改名, 删除群聊.
@@ -17,10 +18,11 @@
 // frequent repaints (an open fold, a confirm in progress and focus survive);
 // another chat builds its own. Requests: PATCH /xbot-api/groups/:id
 // {name} or {add} / {remove} (what the owner means, applied by the server to
-// the roster as it is now) and DELETE /xbot-api/groups/:id (docs/xbot-api.md); 新对话
+// the roster as it is now) and DELETE /xbot-api/groups/:id (docs/xbot-api.md),
+// GET and PUT /xbot-api/bots/:name/computer {enabled} for 这台电脑; 新对话
 // opens chat-history.js's own dialog, the same one as the header's ⋯ menu. A
 // change is shown only once the server has answered; nothing here stops work,
-// routes messages or keeps a copy of the groups.
+// routes messages or keeps a copy of the groups or of who may use the computer.
 (() => {
   "use strict";
   const R = window.ClowderProfileRules;
@@ -335,6 +337,45 @@
     const pinLine = node("p", "pf-line");
     pinLine.hidden = true;
 
+    // 这台电脑 (item 52): 置顶's twin under it, absent until the server has
+    // said what it is (and wherever there is no driver for this system). The
+    // lines under it are there only when something needs the owner: the
+    // driver to install, the macOS grants turning it on waits for, a grant or
+    // the driver gone while it is on, a change that failed.
+    const comp = node("div", "pf-row pf-computer");
+    comp.hidden = true;
+    const compCopy = node("span", "pf-row-copy");
+    const compTitle = node("span", "pf-row-title", R.COMPUTER.TITLE);
+    compTitle.id = uid("computer");
+    // Its busy line carries the app's spinner (the sidebar's, from the shell) while a request is on its way: it can take seconds.
+    const compHint = node("span", "pf-row-hint"), compSpin = node("span", "pf-spin"), compHintText = node("span");
+    compHint.hidden = true;
+    compSpin.hidden = true;
+    compSpin.setAttribute("aria-hidden", "true");
+    if (H.spin) compSpin.append(H.spin());
+    compHint.append(compSpin, compHintText);
+    compCopy.append(compTitle, compHint);
+    const compSwitch = button("g7-switch pf-switch", null, () => toggleComputer(P));
+    compSwitch.setAttribute("role", "switch");
+    compSwitch.setAttribute("aria-labelledby", compTitle.id);
+    compSwitch.setAttribute("aria-checked", "false");
+    comp.append(compCopy, compSwitch);
+    comp.addEventListener("click", (ev) => { if (!compSwitch.contains(ev.target)) compSwitch.click(); });
+    const compNote = node("div", "pf-cnote");
+    compNote.hidden = true;
+    compNote.id = uid("computer-note");
+    const compText = node("p", "pf-line pf-cnote-text"), compWords = node("span");
+    const compStop = button("text-btn pf-link pf-cstop", R.COMPUTER.STOP, () => stopWaiting(P));
+    compText.append(compWords, compStop);
+    const compCmd = commandChip(R.COMPUTER.INSTALL);
+    compNote.append(compText, compCmd);
+    const compError = node("p", "pf-line");
+    compError.hidden = true;
+    compError.id = uid("computer-error");
+    // A new page for the cat asks again; only a change or a wait in progress keeps what it was last told.
+    const cs = computerOf(key);
+    if (!cs.busy && !cs.wait) cs.view = null;
+
     // 对话: start a new one (chat-history.js's 新对话 dialog, which asks the
     // server and says why it cannot while the cat is busy), or open a saved
     // one (workspace.js's 历史对话).
@@ -352,8 +393,9 @@
     const remove = button("text-btn danger pf-remove", "删除猫猫", () => H.deleteCat(P.data.name || sel.id));
     foot.append(remove);
 
-    root.append(duty, pin, pinLine, convs, node("div", "pf-rule"), fold.box, foot);
-    Object.assign(P, { root, duty, dutyText, dutyNone, pinSwitch, pinHint, pinLine, fresh, slot, fold, remove });
+    root.append(duty, pin, pinLine, comp, compNote, compError, convs, node("div", "pf-rule"), fold.box, foot);
+    Object.assign(P, { root, duty, dutyText, dutyNone, pinSwitch, pinHint, pinLine, fresh, slot, fold, remove,
+      comp, compHint, compSpin, compHintText, compSwitch, compNote, compWords, compStop, compCmd, compError, profileSeen: null });
     return P;
   }
 
@@ -387,6 +429,11 @@
     P.dutyNone.hidden = !!persona;
     setText(P.dutyText, persona);
     paintPin(P);
+    // 这台电脑 is asked again each time the profile itself has been read (the
+    // drawer opened, a save, the cat chosen again), never on the drawer's
+    // routine repaints; until it answers the row is not there.
+    if (read && data !== P.profileSeen) { P.profileSeen = data; readComputer(P.key, name); }
+    paintComputer(P);
     // 历史对话 is workspace.js's node (the same one while the conversation is the same).
     const convs = H.conversations(P.sel);
     if (convs ? P.slot.firstChild !== convs || P.slot.childNodes.length !== 1 : P.slot.firstChild) P.slot.replaceChildren(...(convs ? [convs] : []));
@@ -464,6 +511,204 @@
     st.busy = false;
     const shown = pageOf(key);
     if (shown) paintPin(shown);
+  }
+
+  // ------------------------------------------------------------ 这台电脑
+  // GET /xbot-api/bots/:name/computer and PUT {enabled} (docs/xbot-api.md
+  // 「这台电脑」); the rules and the words are profile-rules.js's. What it is
+  // doing, by cat and apart from the page, as 置顶's saves:
+  //   { view, reading, busy: "" | "on" | "off", ending, wait: {missing} | null,
+  //     said: {text, code} | null, n, applied, timer }
+  // ending: the cat was replying when off was asked (the shell's replying
+  // hook: the status poll's running turns, or the open chat's live reply);
+  // off ends that reply, and the busy line says so while it does.
+  // view is the server's last answer, drawn while it is asked again, never
+  // kept as the truth: a new page for the cat starts without it. Answers are
+  // numbered: one asked for before a later answer arrived is not drawn, and
+  // nothing is read while a change is on its way (its answer is the view).
+  // The only repeated request is the wait for a macOS grant, every 2 s while
+  // that cat's 资料 is showing.
+  const computers = new Map();
+  const WAIT_MS = 2000;
+  function computerOf(key) {
+    let cs = computers.get(key);
+    if (!cs) computers.set(key, (cs = { view: null, reading: false, busy: "", ending: false, wait: null, said: null, n: 0, applied: 0, timer: 0 }));
+    return cs;
+  }
+  const computerPath = (name) => "/xbot-api/bots/" + enc(name) + "/computer";
+  const showing = (P) => P.root.isConnected && (!H.open || H.open());
+  function repaintComputer(key) { const P = pageOf(key); if (P) paintComputer(P); }
+
+  // A command to run, copyable: quick-create.js's chip and its look
+  // (quick-create.css): a terminal's prompt mark, the command, 复制.
+  function commandChip(command) {
+    const chip = node("span", "qc-cmd pf-cmd");
+    chip.append(H.icon("terminal"), node("code", "", command));
+    const copy = button("qc-copy", "复制");
+    copy.setAttribute("aria-label", "复制 " + command);
+    let timer = 0;
+    copy.addEventListener("click", async () => {
+      let ok = false;
+      try { ok = !!(H.copy && (await H.copy(command))); } catch (e) { ok = false; }
+      copy.textContent = ok ? "已复制" : "没复制上";
+      clearTimeout(timer);
+      timer = setTimeout(() => { copy.textContent = "复制"; }, 1600);
+    });
+    chip.append(copy);
+    return chip;
+  }
+
+  // The switch shows `on` as the server last said it and nothing else: while
+  // a change is on its way, or turning on waits for a grant, it keeps that
+  // state, busy and inert (not disabled, so focus stays on it); it cannot be
+  // switched on where the driver is not installed. Each line under the row is
+  // the switch's description while it is shown.
+  function paintComputer(P) {
+    const cs = computerOf(P.key), row = R.computerRow(cs.view, cs), sw = P.compSwitch;
+    // The row leaving under the keyboard (switched off where this system has no driver): focus to 置顶's switch beside it.
+    if (!row.shown && !P.comp.hidden && P.comp.contains(document.activeElement)) P.pinSwitch.focus();
+    P.comp.hidden = !row.shown;
+    const note = row.shown ? row.note : null, error = row.shown ? row.error : "";
+    if (row.shown) {
+      sw.setAttribute("aria-checked", String(row.on));
+      if (row.busy) sw.setAttribute("aria-busy", "true"); else sw.removeAttribute("aria-busy");
+      if (row.can) sw.removeAttribute("aria-disabled"); else sw.setAttribute("aria-disabled", "true");
+      P.comp.classList.toggle("pf-locked", !row.can && !row.busy);
+      setText(P.compHintText, row.hint);
+      P.compSpin.hidden = !row.spin;
+      P.compHint.hidden = !row.hint;
+    }
+    // 不等了 leaving under the keyboard: focus goes to the switch, not to the page.
+    const leaving = !(note && note.stop) && document.activeElement === P.compStop;
+    P.compNote.hidden = !note;
+    if (note) {
+      setText(P.compWords, note.text);
+      P.compStop.hidden = !note.stop;
+      P.compCmd.hidden = !note.command;
+    }
+    sayAs(P.compError, error ? { text: error, bad: true } : null);
+    const told = [note ? P.compNote.id : "", error ? P.compError.id : ""].filter(Boolean).join(" ");
+    if (told) sw.setAttribute("aria-describedby", told); else sw.removeAttribute("aria-describedby");
+    if (leaving && row.shown) sw.focus();
+    if (cs.wait && !cs.busy) waitAgain(P.key);
+  }
+
+  // Off asks nothing. On asks first, every time, what it means.
+  function toggleComputer(P) {
+    const cs = computerOf(P.key), row = R.computerRow(cs.view, cs);
+    if (!row.shown || !row.can) return;
+    const name = P.data.name || P.sel.id;
+    if (row.on) changeComputer(P.key, name, false);
+    else askComputer(P.key, name);
+  }
+  function askComputer(key, name) {
+    const words = R.computerConsent(name);
+    // Focus comes back to the switch of the page showing this cat then.
+    const L = dialog(words.title, () => { const p = pageOf(key); return p ? p.compSwitch : null; });
+    L.body.append(node("p", "pf-lead", words.text));
+    const cancel = button("secondary", "取消", () => L.close());
+    const go = node("button", "primary", R.COMPUTER.YES);
+    go.type = "submit";
+    L.actions.append(cancel, go);
+    L.card.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      if (!L.alive) return;
+      L.close();
+      changeComputer(key, name, true);
+    });
+    cancel.focus();
+  }
+
+  async function changeComputer(key, name, enabled) {
+    const cs = computerOf(key);
+    if (cs.busy) return;
+    // A turn on asked for again by the wait, rather than by the owner just now.
+    const again = enabled && !!cs.wait;
+    cs.busy = enabled ? "on" : "off";
+    cs.ending = !enabled && !!(H.replying && H.replying(name));
+    cs.said = null;
+    if (!enabled) endWait(cs);
+    const n = ++cs.n;
+    repaintComputer(key);
+    let view = null, failed = null;
+    try { view = R.computerView(await H.api(computerPath(name), { method: "PUT", body: { enabled }, serverError: true })); }
+    catch (err) { failed = err; }
+    cs.busy = "";
+    cs.ending = false;
+    cs.applied = Math.max(cs.applied, n);
+    if (failed || !view) {
+      endWait(cs);
+      if (failed) cs.said = { text: R.computerError(failed, enabled), code: String(failed.code || "") };
+      repaintComputer(key);
+      // What is true now, read again (a read that fails keeps the last answer).
+      await readComputer(key, name);
+      return;
+    }
+    cs.view = view;
+    // Nothing was switched: macOS has not given the driver its grants. Wait
+    // for them — unless 不等了 was pressed while this was on its way.
+    if (enabled && R.waitsForGrant(view) && (!again || cs.wait)) cs.wait = { missing: view.missing };
+    else endWait(cs);
+    repaintComputer(key);
+  }
+
+  async function readComputer(key, name) {
+    const cs = computerOf(key);
+    if (cs.reading || cs.busy) return;
+    cs.reading = true;
+    const n = ++cs.n;
+    let view = null;
+    try { view = R.computerView(await H.api(computerPath(name), { serverError: true })); } catch (e) { view = null; }
+    cs.reading = false;
+    if (cs.busy || n <= cs.applied) return;
+    cs.applied = n;
+    // A read that fails keeps the last answer; with none, nothing is said about the computer.
+    if (view) cs.view = view;
+    if (cs.wait && view) {
+      if (view.on || !view.installed || !view.supported) endWait(cs);
+      else if (view.permissions === "needed") cs.wait.missing = view.missing;
+    }
+    repaintComputer(key);
+    // The grants are there: the same request once more.
+    if (cs.wait && view && view.permissions === "granted") await changeComputer(key, name, true);
+  }
+
+  // Waiting for a grant: read again in 2 s, only while this cat's 资料 is
+  // showing; drawn again later, the page picks the wait up (paintComputer).
+  function waitAgain(key) {
+    const cs = computerOf(key);
+    if (!cs.wait || cs.timer) return;
+    cs.timer = setTimeout(() => {
+      cs.timer = 0;
+      const P = pageOf(key);
+      if (!cs.wait || cs.busy || !P || !showing(P)) return;
+      readComputer(key, P.data.name || P.sel.id).then(() => { if (cs.wait && !cs.busy && pageOf(key) === P && showing(P)) waitAgain(key); });
+    }, WAIT_MS);
+  }
+  function endWait(cs) {
+    cs.wait = null;
+    if (cs.timer) { clearTimeout(cs.timer); cs.timer = 0; }
+  }
+  // 不等了: nothing was switched, so the switch stays off at once. The server
+  // is told (PUT {enabled: false}: it asks the driver it started for this to
+  // end) without the row turning busy; its answer, the plain off view, is
+  // drawn if nothing newer was. Its failure is no failure of the owner's: it
+  // is not said, the row is read again instead, and shows what is true.
+  function stopWaiting(P) {
+    const key = P.key, cs = computerOf(key), name = P.data.name || P.sel.id;
+    endWait(cs);
+    paintComputer(P);
+    P.compSwitch.focus();
+    const n = ++cs.n;
+    H.api(computerPath(name), { method: "PUT", body: { enabled: false }, serverError: true })
+      .then((answer) => R.computerView(answer), () => null)
+      .then((view) => {
+        if (cs.busy || n <= cs.applied) return;
+        if (!view) { readComputer(key, name); return; }
+        cs.applied = n;
+        cs.view = view;
+        repaintComputer(key);
+      });
   }
 
   // ------------------------------------------------------------ 成员 (a group)

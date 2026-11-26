@@ -50,7 +50,8 @@ const TECHNICAL: Array<[string, RegExp]> = [['模型', /模型/], ['推理强度
 // - one DOM container of index.html: 设置 → 关于 (div.setpane[data-spane="about"]).
 // A technical noun one line outside these is reported (see the tests below).
 const WHOLE = new Set(['agents.js', 'cat-templates.js', 'cat-template-rules.js']);
-const FUNCTIONS: Record<string, string[]> = { 'app.js': ['agentTrigger', 'agentPart', 'configPart', 'catConfigSection'] };
+// profile-rules.js computerConsent: turning on 这台电脑 says that what the cat sees is sent to the model it uses (item 52, the owner's approved words).
+const FUNCTIONS: Record<string, string[]> = { 'app.js': ['agentTrigger', 'agentPart', 'configPart', 'catConfigSection'], 'profile-rules.js': ['computerConsent'] };
 const CONTAINERS: Record<string, string[]> = { 'index.html': ['<div class="setpane" data-spane="about">'] };
 // Strings matched, never shown: someone typing an old word still finds the action.
 const MATCHED = new Set(['palette.js:群组']);

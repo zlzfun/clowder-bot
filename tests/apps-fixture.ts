@@ -73,10 +73,11 @@ export class NativeAppsScript {
       label: armed ? 'Visible WeChat reading authorized' : 'Visible WeChat reading not authorized', currentAction: action === 'arm' ? 'disarm' : action === 'disarm' ? 'arm' : 'status', advance: true };
   }
 
+  /** These rows as `GET /api/capabilities` lists them (tests/native-fixture.ts answers that route: it holds the rest of the registry). */
+  items(): unknown[] { return this.rows.map(row => this.view(row)); }
   /** `undefined`: not one of these routes. */
   handle(url: URL, method: string, body: any): unknown {
     const parts = url.pathname.split('/').map(decodeURIComponent), missing = (id: string) => new ApiError(404, `MCP "${id}" not found`, { error: `MCP "${id}" not found` });
-    if (url.pathname === '/api/capabilities' && method === 'GET') return { items: this.rows.map(row => this.view(row)), catFamilies: [], projectPath: '/fixture' };
     if (url.pathname === '/api/capabilities/mcp/install' && method === 'POST') {
       const existing = this.rows.find(row => row.id === body.id);
       const server: Server = { transport: body.transport ?? existing?.mcpServer.transport ?? 'stdio', command: body.command ?? existing?.mcpServer.command ?? '', args: body.args ?? existing?.mcpServer.args ?? [],

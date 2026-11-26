@@ -1,5 +1,6 @@
 import type { NativeEvent } from './types.js';
 import { clip } from './text.js';
+import { computerTool } from './computer.js';
 
 /**
  * Display-only projection of the native per-turn events the engine already
@@ -12,7 +13,8 @@ import { clip } from './text.js';
 export type LiveEvent =
   | { kind: 'start'; messageId: string; catId: string }
   | { kind: 'thinking'; messageId: string; catId: string }
-  | { kind: 'step'; messageId: string; catId: string; tool: string; target?: string }
+  // `area: 'computer'`: the step used this computer (the registry entry's tools, whichever Agent named them).
+  | { kind: 'step'; messageId: string; catId: string; tool: string; target?: string; area?: 'computer' }
   /** `end` is the native length (UTF-16 units) of the whole reply after this piece. */
   | { kind: 'text'; messageId: string; catId: string; text: string; end?: number; replace?: true }
   /** The reply stopped being produced. How it ended (finished, stopped, failed) is the transcript's to say. */
@@ -82,7 +84,7 @@ export function liveEvent(event: NativeEvent, threadId: string): LiveEvent | nul
       const tool = text(event.toolName, 120);
       if (!messageId || !tool) return null;
       const target = stepTarget(tool, event.toolInput);
-      return { kind: 'step', messageId, catId, tool, ...(target ? { target } : {}) };
+      return { kind: 'step', messageId, catId, tool, ...(target ? { target } : {}), ...(computerTool(tool) ? { area: 'computer' as const } : {}) };
     }
     case 'system_info': {
       const content = text(event.content, 20_000);

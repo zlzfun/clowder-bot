@@ -97,6 +97,8 @@
     if (!reply) return "";
     if (reply.phase === "thinking") return "在想…";
     if (reply.phase === "step") {
+      // A step on this computer (the live event's area, never the tool's name).
+      if (reply.area === "computer") return "在用电脑…";
       const kind = typeof verb === "function" ? str(verb(reply.tool)) : "";
       if (LOOKING.has(kind)) return "在查资料…";
       if (kind === "lookup") return "在查找…";
@@ -110,7 +112,7 @@
     // Started, or writing words (also before the first word: the typing bubble).
     return "正在输入…";
   }
-  // now: {stopping, replies: [{catId, phase, tool, unsure}]}; name(catId): a
+  // now: {stopping, replies: [{catId, phase, tool, area, unsure}]}; name(catId): a
   // cat's name; group: a group chat (says who). "" when no cat is replying.
   // A reply whose stream was lost and that nothing has confirmed since
   // (unsure) makes no claim at all: the header says nothing about it until

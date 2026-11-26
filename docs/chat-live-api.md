@@ -18,7 +18,7 @@
 | --- | --- | --- | --- |
 | `start` | `system_info` 内层 `invocation_created` | `messageId`（取 `lifecycleResponseMessageId`）、`catId` | 这只猫开始写这条回复，此时还没有字 |
 | `thinking` | `system_info` 内层 `thinking`（Claude Code），或 `status` 且内容为 `thinking`（Codex） | `messageId`、`catId` | 在想；思考内容不下发 |
-| `step` | `tool_use` | `messageId`、`catId`、`tool`（原生工具名）、`target?` | 正在做一步。`target` 只从已知含义的字段取：读写文件的工具取文件名，抓取网页取主机名，搜索取查询词，Grep/Glob 取匹配式，Task/Agent 取任务标题，Codex 的 `file_change` 取第一个改动文件的文件名（都压成一行、最多 40 字）。命令行从不下发，包括 Bash 自带的说明；其他工具不取任何字段；模型写的查询词或标题里带绝对路径时整项不下发 |
+| `step` | `tool_use` | `messageId`、`catId`、`tool`（原生工具名）、`target?`、`area?` | 正在做一步。`target` 只从已知含义的字段取：读写文件的工具取文件名，抓取网页取主机名，搜索取查询词，Grep/Glob 取匹配式，Task/Agent 取任务标题，Codex 的 `file_change` 取第一个改动文件的文件名（都压成一行、最多 40 字）。命令行从不下发，包括 Bash 自带的说明；其他工具不取任何字段；模型写的查询词或标题里带绝对路径时整项不下发。用的是「这台电脑」那条登记的工具时带 `area: "computer"`（工具名在 Claude Code 里是 `mcp__computer__…`，在 Codex 里是 `mcp:computer/…`），界面只显示「在用电脑」，不取工具名和任何参数（见 [接口范围](xbot-api.md)「这台电脑」） |
 | `text` | `text` 且 `origin: 'stream'` | `messageId`、`catId`、`text`（这一片）、`end?`（这一片之后整条回复的原生长度）、`replace?` | 正文增量。`textMode: 'replace'` 时带 `replace: true`，表示整条换成这一片 |
 | `done` | `done`，或未标为 `transient` 的 `error` | `messageId`、`catId` | 这只猫的这条回复不再继续写了。它**不表示成功**：原生在停止和失败之后同样发 `done`（上游 `PerCatTerminalDispositionCollector`：单凭 `done` 不能证明成功）。结局（完成、已停止、没完成）以随后读取的会话为准。标为 `transient` 的错误不算结束 |
 

@@ -416,6 +416,11 @@ function drawer(opts: { cats?: Any[]; groups?: Any[]; route?: (path: string, met
     groups: () => s.groups,
     groupRow: (id: string) => s.rows[id] || null,
     fallbackFocus: () => null,
+    // 这台电脑 (item 52): the install command's 复制, and whether the drawer is open.
+    copy: async (text: string) => { log.push('copied:' + text); return !s.copyFails; },
+    open: () => s.open !== false,
+    spin: () => made('svg', 'st-spin'),
+    replying: (name: string) => !!(s.replying && s.replying[name]),
   });
   const panel = doc.createElement('div');
   doc.body.append(panel);
@@ -448,9 +453,11 @@ test('资料: 职责 (or the way to write one), 置顶 as a switch, 新对话 wi
   button(page, '编辑资料').click();
   assert.deepEqual(d.log, ['edit:快手']);
   d.P.catPage(TUANZI, PROFILE);
-  // The order a messenger's profile reads in.
+  // The order a messenger's profile reads in (item 52: 可以用这台电脑, its note and its failure line under 置顶).
   const order = page.children.map(n => n.className);
-  assert.deepEqual(order, ['psec pf-duty', 'pf-row pf-pin', 'pf-line', 'psec pf-convs', 'pf-rule', 'task-details pf-adv', 'pf-foot']);
+  assert.deepEqual(order, ['psec pf-duty', 'pf-row pf-pin', 'pf-line', 'pf-row pf-computer', 'pf-cnote', 'pf-line', 'psec pf-convs', 'pf-rule', 'task-details pf-adv', 'pf-foot']);
+  // This server cannot say what the computer is (the read failed): nothing about it is shown.
+  assert.equal(shown(one(page, 'pf-computer')), false);
   // Item 46: 新对话 and 历史对话 name themselves (对话 is for a screen reader); what 新对话 does is said in its dialog.
   assert.equal(seenText(one(page, 'pf-convs')), '新对话');
   assert.equal(named(page, 'pf-note').length, 0);
@@ -618,14 +625,15 @@ test('说话简短 is a default, not a setting: 资料 has no control, line or h
   const page = d.show(d.P.catPage(TUANZI, { name: '快手' }));
   for (const data of [PROFILE, { ...PROFILE, concise: true }, { ...PROFILE, concise: false }, { ...PROFILE, concise: 'yes' }, { ...PROFILE, concise: null }] as Any[]) {
     assert.equal(d.P.catPage(TUANZI, data), page, 'the same page, drawn again');
-    // The page as it was before item 38: nothing added for it, and nothing left behind.
-    assert.deepEqual(page.children.map(n => n.className), ['psec pf-duty', 'pf-row pf-pin', 'pf-line', 'psec pf-convs', 'pf-rule', 'task-details pf-adv', 'pf-foot'], JSON.stringify(data.concise));
+    // The page as it was before item 38: nothing added for it, and nothing left behind
+    // (item 52's 可以用这台电脑 is the only row added since, with its own lines).
+    assert.deepEqual(page.children.map(n => n.className), ['psec pf-duty', 'pf-row pf-pin', 'pf-line', 'pf-row pf-computer', 'pf-cnote', 'pf-line', 'psec pf-convs', 'pf-rule', 'task-details pf-adv', 'pf-foot'], JSON.stringify(data.concise));
     const switches = all(page).filter(n => n.getAttribute('role') === 'switch');
-    assert.deepEqual(switches, [one(page, 'pf-switch')], 'one switch');
-    assert.equal(d.doc.getElementById(switches[0]!.getAttribute('aria-labelledby')!)?.textContent, '置顶', 'and it is 置顶');
-    assert.equal(named(page, 'pf-row').length, 1);
-    assert.equal(named(page, 'pf-line').length, 1, 'one status line, 置顶\'s');
-    assert.equal(shown(one(page, 'pf-line')), false);
+    assert.deepEqual(switches, named(page, 'pf-switch'), 'the rows\' switches only');
+    assert.deepEqual(switches.map(n => d.doc.getElementById(n.getAttribute('aria-labelledby')!)?.textContent), ['置顶', '可以用这台电脑'], 'and they are 置顶 and 可以用这台电脑');
+    assert.deepEqual(named(page, 'pf-row').map(n => n.className), ['pf-row pf-pin', 'pf-row pf-computer']);
+    assert.equal(named(page, 'pf-line').length, 3, '置顶\'s status line, 这台电脑\'s note and its failure line');
+    assert.equal(named(page, 'pf-line').some(shown), false);
     // Not shown and not even hidden in the tree; every aria reference points at something there.
     assert.doesNotMatch(page.textContent, /说话简短|简短|先说结论|几句话说完|在新对话里生效|没能保存/);
     for (const n of all(page)) {
@@ -661,9 +669,10 @@ test('using 资料 never asks to change how a cat talks: whatever is pressed on 
   await settle();
   // Everything did what it does, through the shell's own hooks…
   for (const done of ['pin:快手:true', 'new:bot:快手', 'edit:快手', 'export:快手', 'copy:快手', 'delete:快手']) assert.ok(d.log.includes(done), done);
-  // …and the page itself sent nothing: no PATCH {concise}, no request to /xbot-api/bots/ of any kind.
+  // …and the page itself sent nothing: no PATCH {concise}, no request to the cat's profile of any kind.
+  // (Item 52: what it does ask is whether the cat may use this computer, a read, each time the profile was read.)
   assert.deepEqual(d.calls.filter((c: Call) => c.body && typeof c.body === 'object' && 'concise' in c.body), []);
-  assert.deepEqual(d.calls, []);
+  assert.deepEqual(d.calls.filter((c: Call) => !(c.method === 'GET' && c.path === '/xbot-api/bots/' + encodeURIComponent('快手') + '/computer')), []);
 });
 
 test('新对话 on 资料 opens the shared dialog (the header ⋯ menu\'s own) for this cat, with focus to come back to the button; the page itself sends nothing', async () => {
@@ -676,7 +685,7 @@ test('新对话 on 资料 opens the shared dialog (the header ⋯ menu\'s own) f
   await settle();
   assert.deepEqual(d.log, ['new:bot:快手']);
   assert.equal(d.s.opener, fresh, 'the dialog returns focus here');
-  assert.equal(d.calls.length, 0, 'the request, its idle check and its refusals belong to chat-history.js');
+  assert.equal(d.calls.filter((c: Call) => !c.path.endsWith('/computer')).length, 0, 'the request, its idle check and its refusals belong to chat-history.js');
 });
 
 // The drawer with the real chat-history.js behind its 新对话, wired the way
@@ -1074,6 +1083,589 @@ test('leaving the group name with Tab lets focus go on (an unchanged name, or a 
   assert.equal(d.doc.activeElement, one(head, 'pf-name'));
 });
 
+// ---------------------------------------------------------------- 这台电脑 (item 52)
+// GET/PUT /xbot-api/bots/:name/computer answered the way server/native/computer.ts
+// does: turning on while a macOS grant is missing switches nothing and answers
+// with the grants still needed; turning on with no driver is refused; turning
+// off always works. Every answer is a new object.
+type View = { supported: boolean; installed: boolean; on: boolean; permissions: string; missing?: string[] };
+const READY: View = { supported: true, installed: true, on: false, permissions: 'granted' };
+const gate = () => { let open!: () => void; const p = new Promise<void>((r) => { open = r; }); return { p, open }; };
+function computerDrawer(start: Partial<View> = {}) {
+  const srv: Any = { view: { ...READY, ...start }, getGate: null, putGate: null, getFails: null, putFails: null };
+  const path = (name = '快手') => '/xbot-api/bots/' + encodeURIComponent(name) + '/computer';
+  const d = drawer({
+    route: async (p, method, body) => {
+      if (!p.endsWith('/computer')) return undefined;
+      if (method === 'GET') { if (srv.getGate) await srv.getGate; if (srv.getFails) throw srv.getFails; return srv.view; }
+      if (srv.putGate) await srv.putGate;
+      if (srv.putFails) { const e = srv.putFails; srv.putFails = null; throw e; }
+      if (srv.putAnswer) return srv.putAnswer;
+      if (body.enabled) {
+        if (!srv.view.installed) throw Object.assign(fail(422, '还没有装上操作电脑用的驱动。'), { code: 'computer_absent' });
+        if (srv.view.permissions !== 'needed') srv.view.on = true;
+      } else srv.view.on = false;
+      return srv.view;
+    },
+  });
+  const asked = (method: string, name = '快手') => d.calls.filter((c: Call) => c.path === path(name) && c.method === method);
+  return { ...d, srv, page: (data: Any = PROFILE) => d.show(d.P.catPage(TUANZI, data)), gets: (name?: string) => asked('GET', name).length, puts: (name?: string) => asked('PUT', name).map((c: Call) => c.body.enabled) };
+}
+// The row as it reads: on screen (seenText), the switch's state, and the lines under it.
+function computerRow(page: El) {
+  const row = one(page, 'pf-computer'), sw = one(row, 'pf-switch'), note = one(page, 'pf-cnote'), error = note.nextSibling as El;
+  return {
+    shown: shown(row), row, sw, note, error, stop: one(note, 'pf-cstop'), chip: one(note, 'qc-cmd'),
+    on: sw.getAttribute('aria-checked'), busy: sw.getAttribute('aria-busy'), locked: sw.getAttribute('aria-disabled'),
+    hint: seenText(one(row, 'pf-row-hint')), said: seenText(note), failed: seenText(error),
+  };
+}
+
+test('这台电脑 rules: the view only in its own shape, each state\'s words, both names macOS gives the grant, the consent in one sentence, a refusal in the server\'s words', () => {
+  const R = load(RULES).window.ClowderProfileRules;
+  for (const bad of [null, 'yes', {}, { supported: true, installed: true }, { supported: 'true', installed: true, on: false }]) assert.equal(R.computerView(bad), null, JSON.stringify(bad));
+  assert.deepEqual(plain(R.computerView({ supported: true, installed: true, on: false, permissions: 'needed', missing: ['screen_recording', 'microphone'] })),
+    { supported: true, installed: true, on: false, permissions: 'needed', missing: ['screen_recording'] });
+  assert.deepEqual(plain(R.computerView({ ...READY, permissions: 'needed' })).missing, ['accessibility', 'screen_recording'], 'missing without names: both');
+  assert.equal(R.computerView({ ...READY, permissions: 'maybe' }).permissions, 'unknown');
+  assert.deepEqual(plain(R.computerView({ ...READY, missing: ['accessibility'] })).missing, [], 'nothing is missing unless the grants are needed');
+  const row = (view: Partial<View> | null, flow: Any = {}) => plain(R.computerRow(view && R.computerView({ ...READY, ...view }), flow));
+  assert.deepEqual(row(null), { shown: false });
+  assert.deepEqual(row({ supported: false }), { shown: false });
+  assert.deepEqual(row({ supported: false, on: false }), { shown: false }, 'no driver for this system and off: nothing at all');
+  const quiet = { shown: true, busy: false, spin: false, can: true, hint: '', note: null, error: '' };
+  assert.deepEqual(row({}), { ...quiet, on: false });
+  assert.deepEqual(row({ on: true }), { ...quiet, on: true });
+  assert.deepEqual(row({ on: true, permissions: 'unknown' }), { ...quiet, on: true }, 'the driver not running is normal');
+  assert.deepEqual(row({ installed: false, permissions: 'unknown' }), { ...quiet, on: false, can: false, note: { text: '还没装上操作电脑用的驱动，在 clowder-bot 目录里运行：', command: 'npm run computer:install' } });
+  assert.deepEqual(row({ installed: false, on: true, permissions: 'unknown' }), { ...quiet, on: true, note: { text: '现在还用不了：找不到操作电脑用的驱动，在 clowder-bot 目录里运行：', command: 'npm run computer:install' } }, 'a stale on can still be switched off');
+  assert.deepEqual(row({ on: true, permissions: 'needed', missing: ['screen_recording'] }).note, { text: '现在还用不了：到系统设置 › 隐私与安全性，在「屏幕录制」里打开 CuaDriver。' });
+  // Waiting for the grants: not on, busy, says where, with 不等了.
+  assert.deepEqual(row({ permissions: 'needed', missing: ['accessibility', 'screen_recording'] }, { wait: { missing: ['accessibility', 'screen_recording'] } }),
+    { shown: true, on: false, busy: true, spin: false, can: false, hint: '等你在系统设置里打开…', error: '',
+      note: { text: '到系统设置 › 隐私与安全性，在「辅助功能」（或「设备控制与数据访问」）和「屏幕录制」里打开 CuaDriver。', stop: true } });
+  assert.deepEqual(row({}, { busy: 'on' }), { ...quiet, on: false, busy: true, spin: true, can: false, hint: '正在打开…' });
+  assert.deepEqual(row({ on: true }, { busy: 'off' }), { ...quiet, on: true, busy: true, spin: true, can: false, hint: '正在关掉…' });
+  // Off while the cat is replying ends that reply: the busy line says so.
+  assert.deepEqual(row({ on: true }, { busy: 'off', ending: true }), { ...quiet, on: true, busy: true, spin: true, can: false, hint: '正在关掉，它正在写的回复会停下…' });
+  assert.equal(row({}, { busy: 'on', ending: true }).hint, '正在打开…', 'only off ends a reply');
+  assert.equal(row({}, { said: { text: '没能打开，请再试一次。', code: '' } }).error, '没能打开，请再试一次。');
+  assert.equal(row({ installed: false }, { said: { text: '还没有装上操作电脑用的驱动。', code: 'computer_absent' } }).error, '', 'the note already says it');
+  // On where this system has no driver (data moved from a Mac): there to be switched off, saying why it cannot work.
+  assert.deepEqual(row({ supported: false, installed: false, on: true, permissions: 'unknown' }), { ...quiet, on: true, note: { text: '现在还用不了：这个系统还不能让猫猫操作电脑。' } });
+  assert.deepEqual(row({ supported: false, installed: false, on: true, permissions: 'unknown' }, { busy: 'off' }).hint, '正在关掉…');
+  // Accessibility by both of its names, so either system's list can be found.
+  assert.equal(R.grantPlace(['accessibility']), '到系统设置 › 隐私与安全性，在「辅助功能」（或「设备控制与数据访问」）里打开 CuaDriver');
+  const consent = R.computerConsent('快手');
+  assert.deepEqual(plain(consent), { title: '让「快手」用这台电脑？', text: '它能看到并操作这台电脑上的应用，看到的画面会发给它用的模型。' });
+  assert.equal(consent.text.match(/[。？！]/g).length, 1, 'one sentence');
+  assert.equal(R.COMPUTER.TITLE, '可以用这台电脑');
+  // The server's own sentence; else what did not happen; a lost connection as the app says it.
+  const half = '没能把电脑接上，也没能撤回干净：请到每只猫的资料里确认「可以用这台电脑」是关着的。';
+  assert.equal(R.computerError(Object.assign(fail(502, half), { code: 'computer_half_registered' }), true), half);
+  assert.equal(R.computerError(fail(503, '操作电脑用的驱动没有启动起来，请再试一次。'), true), '操作电脑用的驱动没有启动起来，请再试一次。');
+  const still = '已经关掉了，但它正在进行的这一轮还没有停下来，停下之前它还能用这台电脑。请在对话里点停止，或者稍后再关一次。';
+  assert.equal(R.computerError(Object.assign(fail(502, still), { code: 'computer_still_running' }), false), still);
+  assert.equal(R.computerError(fail(400, 'Invalid input: expected boolean'), true), '没能打开，请再试一次。');
+  assert.equal(R.computerError(fail(502), false), '没能关掉，请再试一次。');
+  assert.equal(R.computerError(new Error('连不上 clowder-bot'), false), '连不上 clowder-bot');
+  // It is the owner's own machine.
+  const rules = read('client/public/profile-rules.js') + read('client/public/profile.js');
+  assert.doesNotMatch(rules, /猫的电脑|Bot 的电脑|云电脑/);
+});
+
+test('这台电脑 in 资料: nothing until the server answers, nothing where there is no driver for this system (and it is off) or the read failed; installed it says nothing more off or on; asked again only when the profile was read again', async () => {
+  const c = computerDrawer();
+  const first = gate();
+  c.srv.getGate = first.p;
+  // Before the profile is read nothing is asked; then once.
+  const page = c.page({ name: '快手' });
+  assert.equal(c.gets(), 0);
+  c.page();
+  assert.equal(c.gets(), 1);
+  assert.equal(computerRow(page).shown, false, 'no state drawn while the answer is on its way');
+  first.open();
+  c.srv.getGate = null;
+  await settle();
+  let r = computerRow(page);
+  assert.equal(r.shown, true);
+  assert.deepEqual([r.on, r.busy, r.locked, r.hint, r.said, r.failed], ['false', null, null, '', '', '']);
+  assert.equal(seenText(r.row), '可以用这台电脑', 'the row says its name and nothing else');
+  assert.equal(r.sw.getAttribute('role'), 'switch');
+  assert.equal(c.doc.getElementById(r.sw.getAttribute('aria-labelledby')!)?.textContent, '可以用这台电脑');
+  assert.equal(r.sw.getAttribute('aria-describedby'), null);
+  // The drawer's routine repaints ask nothing; a profile read again asks again.
+  c.page(); c.page();
+  assert.equal(c.gets(), 1);
+  c.srv.view.on = true;
+  c.page({ ...PROFILE });
+  await settle();
+  assert.equal(c.gets(), 2);
+  r = computerRow(page);
+  assert.deepEqual([r.on, r.said, r.failed], ['true', '', '']);
+  // A group has none.
+  const g = c.show(c.P.groupPage(GROUP, c.group()));
+  assert.equal(named(g, 'pf-computer').length, 0);
+  assert.equal(c.gets(), 2);
+  // No driver for this system, whatever the registry says; a read that fails; an answer that is not a view.
+  for (const [what, setup] of [['unsupported', (x: Any) => { x.srv.view = { supported: false, installed: false, on: false, permissions: 'unknown' }; }],
+    ['read failed', (x: Any) => { x.srv.getFails = fail(500, '服务出了点问题，请稍后再试。'); }],
+    ['not a view', (x: Any) => { x.srv.view = { status: 'ok' }; }]] as Array<[string, (x: Any) => void]>) {
+    const x = computerDrawer();
+    setup(x);
+    const p = x.page();
+    await settle();
+    assert.equal(x.gets(), 1, what);
+    assert.equal(shown(one(p, 'pf-computer')), false, what);
+    assert.equal(shown(one(p, 'pf-cnote')), false, what);
+    assert.doesNotMatch(seenText(p), /电脑|驱动|CuaDriver/, what);
+  }
+});
+
+test('这台电脑 without its driver: off, it cannot be switched on and says how to install it (the command copyable); on, the switch stays on with what is wrong, and turning it off still works', async () => {
+  const c = computerDrawer({ installed: false, permissions: 'unknown' });
+  const page = c.page();
+  await settle();
+  let r = computerRow(page);
+  assert.deepEqual([r.shown, r.on, r.locked, r.busy], [true, 'false', 'true', null]);
+  assert.ok(has(r.row, 'pf-locked'), 'the row is no target');
+  assert.equal(r.said, '还没装上操作电脑用的驱动，在 clowder-bot 目录里运行：npm run computer:install复制');
+  assert.equal(shown(r.stop), false);
+  assert.equal(all(r.chip).find(n => n.tagName === 'CODE')?.textContent, 'npm run computer:install');
+  assert.equal(r.sw.getAttribute('aria-describedby'), r.note.id, 'the switch is described by why');
+  // Nothing turns it on: no dialog, no request.
+  r.sw.click(); r.row.click();
+  assert.equal(c.layer(), null);
+  assert.deepEqual(c.puts(), []);
+  // 复制 copies the command, and says whether it did.
+  const copy = button(r.chip, '复制');
+  assert.equal(copy.getAttribute('aria-label'), '复制 npm run computer:install');
+  copy.click();
+  await settle();
+  assert.ok(c.log.includes('copied:npm run computer:install'));
+  assert.equal(copy.textContent, '已复制');
+  c.advance(1600);
+  assert.equal(copy.textContent, '复制');
+  c.s.copyFails = true;
+  copy.click();
+  await settle();
+  assert.equal(copy.textContent, '没复制上');
+  // A stale on (the driver was removed): on, with what is wrong; off works, without asking.
+  const o = computerDrawer({ installed: false, on: true, permissions: 'unknown' });
+  const p2 = o.page();
+  await settle();
+  r = computerRow(p2);
+  assert.deepEqual([r.on, r.locked], ['true', null]);
+  assert.equal(has(r.row, 'pf-locked'), false);
+  assert.match(r.said, /^现在还用不了：找不到操作电脑用的驱动，在 clowder-bot 目录里运行：npm run computer:install/);
+  r.sw.click();
+  assert.equal(o.layer(), null, 'turning off asks nothing');
+  await settle();
+  assert.deepEqual(o.puts(), [false]);
+  r = computerRow(p2);
+  assert.deepEqual([r.on, r.locked], ['false', 'true']);
+  assert.match(r.said, /^还没装上操作电脑用的驱动/);
+  // On with a grant taken away: on, naming the grant and where it is; nothing is read again on its own.
+  const g = computerDrawer({ on: true, permissions: 'needed', missing: ['screen_recording'] });
+  const p3 = g.page();
+  await settle();
+  r = computerRow(p3);
+  assert.deepEqual([r.on, r.locked, r.busy], ['true', null, null]);
+  assert.equal(r.said, '现在还用不了：到系统设置 › 隐私与安全性，在「屏幕录制」里打开 CuaDriver。');
+  assert.equal(shown(r.chip), false);
+  g.advance(10_000);
+  await settle();
+  assert.equal(g.gets(), 1, 'no polling outside the wait');
+});
+
+test('这台电脑: turning on asks first, every time, in one sentence; nothing is sent until the owner agrees; the switch is on only once the server says so; off asks nothing', async () => {
+  const c = computerDrawer();
+  c.s.sel = TUANZI;
+  const page = c.page();
+  await settle();
+  let r = computerRow(page);
+  r.sw.focus();
+  r.sw.click();
+  let layer = c.layer()!;
+  assert.ok(layer, 'a dialog');
+  assert.equal(visibleText(one(layer, 'pf-card')), '让「快手」用这台电脑？它能看到并操作这台电脑上的应用，看到的画面会发给它用的模型。取消打开');
+  assert.equal(c.doc.activeElement, button(layer, '取消'));
+  assert.deepEqual(c.puts(), [], 'nothing sent while it asks');
+  // 取消 (and Esc): nothing sent, focus back on the switch.
+  button(layer, '取消').click();
+  assert.equal(c.layer(), null);
+  assert.equal(c.doc.activeElement, r.sw);
+  r.row.click();
+  one(c.layer()!, 'pf-card').key('Escape');
+  assert.equal(c.layer(), null);
+  assert.deepEqual(c.puts(), []);
+  // 打开: the PUT goes; while it is on its way the switch is still off, busy and inert.
+  const put = gate();
+  c.srv.putGate = put.p;
+  r.sw.click();
+  layer = c.layer()!;
+  button(layer, '打开').click();
+  assert.equal(c.layer(), null, 'the row says what happens next');
+  assert.deepEqual(c.puts(), [true]);
+  r = computerRow(page);
+  assert.deepEqual([r.on, r.busy, r.locked, r.hint], ['false', 'true', 'true', '正在打开…']);
+  assert.equal(c.doc.activeElement, r.sw, 'focus stays on the switch');
+  r.sw.click();
+  assert.equal(c.layer(), null, 'nothing more while it is on its way');
+  assert.deepEqual(c.puts(), [true]);
+  put.open();
+  c.srv.putGate = null;
+  await settle();
+  r = computerRow(page);
+  assert.deepEqual([r.on, r.busy, r.locked, r.hint, r.said, r.failed], ['true', null, null, '', '', '']);
+  // Off: no dialog.
+  r.sw.click();
+  assert.equal(c.layer(), null);
+  await settle();
+  assert.deepEqual(c.puts(), [true, false]);
+  assert.equal(computerRow(page).on, 'false');
+  // On again: it asks again (nothing remembers that it was seen).
+  r.sw.click();
+  assert.ok(c.layer(), 'asked every time');
+  button(c.layer()!, '打开').click();
+  await settle();
+  assert.deepEqual(c.puts(), [true, false, true]);
+  assert.equal(computerRow(page).on, 'true');
+  // What the server answers is what shows, also when it is not what was asked for:
+  // off with nothing to wait for stays off, with no wait and nothing invented.
+  const late = computerDrawer();
+  const lp = late.page();
+  await settle();
+  late.srv.putAnswer = { ...READY, on: false };
+  computerRow(lp).sw.click();
+  button(late.layer()!, '打开').click();
+  await settle();
+  r = computerRow(lp);
+  assert.deepEqual([r.on, r.busy, r.hint, r.said], ['false', null, '', '']);
+  late.advance(10_000); await settle();
+  assert.equal(late.gets(), 1, 'no wait began');
+});
+
+test('这台电脑 while a macOS grant is missing: nothing is switched, the row names the grants for CuaDriver and where, reads again every 2 s while 资料 shows, sends the same request once they are granted and goes on by itself; 不等了 stops it at once and tells the server, whose failure is not the owner\'s', async () => {
+  const c = computerDrawer({ permissions: 'needed', missing: ['accessibility', 'screen_recording'] });
+  c.s.sel = TUANZI;
+  const page = c.page();
+  await settle();
+  let r = computerRow(page);
+  assert.deepEqual([r.on, r.said], ['false', ''], 'off, and the grants are not its business until it is turned on');
+  r.sw.click();
+  button(c.layer()!, '打开').click();
+  await settle();
+  assert.deepEqual(c.puts(), [true]);
+  r = computerRow(page);
+  assert.deepEqual([r.on, r.busy, r.locked, r.hint], ['false', 'true', 'true', '等你在系统设置里打开…'], 'not on while it waits');
+  assert.equal(shown(one(r.row, 'st-spin')), false, 'no spinner: the wait is the owner\'s, not a request');
+  assert.equal(r.said, '到系统设置 › 隐私与安全性，在「辅助功能」（或「设备控制与数据访问」）和「屏幕录制」里打开 CuaDriver。不等了');
+  assert.equal(shown(r.stop), true);
+  assert.equal(shown(r.chip), false);
+  const reads = c.gets();
+  // Every 2 s a read; still missing: nothing sent.
+  c.advance(1999); await settle();
+  assert.equal(c.gets(), reads);
+  c.advance(1); await settle();
+  assert.equal(c.gets(), reads + 1);
+  assert.deepEqual(c.puts(), [true]);
+  // One granted, one to go: the line follows.
+  c.srv.view.missing = ['screen_recording'];
+  c.advance(2000); await settle();
+  assert.equal(computerRow(page).said, '到系统设置 › 隐私与安全性，在「屏幕录制」里打开 CuaDriver。不等了');
+  // Not showing (the drawer closed): no reads; shown again, it picks the wait up.
+  c.s.open = false;
+  c.advance(10_000); await settle();
+  const closed = c.gets();
+  c.advance(10_000); await settle();
+  assert.equal(c.gets(), closed, 'no reads while 资料 is not on screen');
+  c.s.open = true;
+  c.page();
+  c.advance(2000); await settle();
+  assert.equal(c.gets(), closed + 1);
+  // Both granted: the same PUT once more, and it is on.
+  c.srv.view.permissions = 'granted';
+  delete c.srv.view.missing;
+  assert.equal(computerRow(page).on, 'false', 'not before the server says so');
+  c.advance(2000); await settle();
+  assert.deepEqual(c.puts(), [true, true]);
+  r = computerRow(page);
+  assert.deepEqual([r.on, r.busy, r.locked, r.hint, r.said], ['true', null, null, '', '']);
+  const done = c.gets();
+  c.advance(10_000); await settle();
+  assert.equal(c.gets(), done, 'the wait is over: no more reads');
+
+  // 不等了: the wait ends at once, the switch stays off and takes the focus, and the server is told
+  // (PUT off, so it ends the driver it started for this) without the row turning busy.
+  const s = computerDrawer({ permissions: 'needed', missing: ['screen_recording'] });
+  const p2 = s.page();
+  await settle();
+  computerRow(p2).sw.click();
+  button(s.layer()!, '打开').click();
+  await settle();
+  r = computerRow(p2);
+  const told = gate();
+  s.srv.putGate = told.p;
+  r.stop.focus();
+  r.stop.click();
+  r = computerRow(p2);
+  assert.deepEqual([r.on, r.busy, r.locked, r.hint, r.said], ['false', null, null, '', ''], 'off at once, not busy while the server is told');
+  assert.equal(s.doc.activeElement, r.sw);
+  assert.deepEqual(s.puts(), [true, false]);
+  told.open();
+  s.srv.putGate = null;
+  await settle();
+  r = computerRow(p2);
+  assert.deepEqual([r.on, r.busy, r.said, r.failed], ['false', null, '', '']);
+  const after = s.gets();
+  s.srv.view.permissions = 'granted';
+  s.advance(10_000); await settle();
+  assert.equal(s.gets(), after, 'no more reads');
+  assert.deepEqual(s.puts(), [true, false], 'and nothing more sent');
+  // 不等了 pressed while the request sent for a grant is on its way: an answer that still waits starts no new wait.
+  const t = computerDrawer({ permissions: 'needed', missing: ['screen_recording'] });
+  const p3 = t.page();
+  await settle();
+  computerRow(p3).sw.click();
+  button(t.layer()!, '打开').click();
+  await settle();
+  const put = gate();
+  t.srv.putGate = put.p;
+  t.srv.view.permissions = 'granted';
+  t.advance(2000); await settle();
+  assert.deepEqual(t.puts(), [true, true]);
+  assert.equal(computerRow(p3).hint, '正在打开…');
+  assert.ok(shown(one(computerRow(p3).row, 'st-spin')), 'with the spinner: a request is on its way');
+  t.srv.view.permissions = 'needed';
+  computerRow(p3).stop.click();
+  put.open();
+  await settle();
+  r = computerRow(p3);
+  assert.deepEqual([r.on, r.busy, r.said], ['false', null, '']);
+  t.advance(10_000); await settle();
+  assert.deepEqual(t.puts(), [true, true, false], 'the off that ends the driver, and no new wait');
+  // 不等了 whose request fails: nothing is said (nothing the owner asked for failed); the row is read again and shows what is true.
+  const f = computerDrawer({ permissions: 'needed', missing: ['screen_recording'] });
+  const p4 = f.page();
+  await settle();
+  computerRow(p4).sw.click();
+  button(f.layer()!, '打开').click();
+  await settle();
+  f.srv.putFails = fail(502, '没能关掉，请再试一次。');
+  const before = f.gets();
+  computerRow(p4).stop.click();
+  await settle();
+  r = computerRow(p4);
+  assert.deepEqual([r.shown, r.on, r.busy, r.said, r.failed], [true, 'false', null, '', '']);
+  assert.equal(f.gets(), before + 1, 'read again instead');
+  assert.deepEqual(f.puts(), [true, false]);
+});
+
+test('这台电脑: switching off while the cat is replying ends that reply — the busy line says so, with the spinner, for the seconds it takes, nothing more is sent meanwhile; a turn not seen to end is said, and the row shows the switch off', async () => {
+  const c = computerDrawer({ on: true });
+  c.s.sel = TUANZI;
+  const page = c.page();
+  await settle();
+  // Idle: the plain busy line, with the spinner; no question asked.
+  let put = gate();
+  c.srv.putGate = put.p;
+  let r = computerRow(page);
+  r.sw.click();
+  assert.equal(c.layer(), null, 'off asks nothing');
+  r = computerRow(page);
+  assert.deepEqual([r.on, r.busy, r.locked, r.hint], ['true', 'true', 'true', '正在关掉…']);
+  assert.ok(shown(one(r.row, 'st-spin')));
+  put.open();
+  c.srv.putGate = null;
+  await settle();
+  assert.equal(computerRow(page).on, 'false');
+  // On again; switched off while it replies (the shell says so): the line says the reply will stop.
+  c.srv.view.on = true;
+  c.page({ ...PROFILE });
+  await settle();
+  c.s.replying = { '快手': true };
+  put = gate();
+  c.srv.putGate = put.p;
+  computerRow(page).sw.click();
+  r = computerRow(page);
+  assert.deepEqual([r.on, r.busy, r.locked, r.hint], ['true', 'true', 'true', '正在关掉，它正在写的回复会停下…']);
+  assert.ok(shown(one(r.row, 'st-spin')));
+  // Seconds pass (the server waits for that turn to leave the queue): the line holds, nothing else is asked, the switch keeps what the server last said.
+  const asked = c.calls.length;
+  for (let i = 0; i < 6; i++) {
+    c.advance(1000);
+    await settle();
+    r = computerRow(page);
+    assert.deepEqual([r.on, r.busy, r.hint], ['true', 'true', '正在关掉，它正在写的回复会停下…'], 'second ' + (i + 1));
+  }
+  // The reply ending meanwhile, and the drawer's repaints, change nothing until the answer.
+  c.s.replying = {};
+  c.page();
+  c.page({ ...PROFILE });
+  assert.equal(computerRow(page).hint, '正在关掉，它正在写的回复会停下…');
+  assert.equal(c.calls.length, asked, 'no request while it waits');
+  put.open();
+  c.srv.putGate = null;
+  await settle();
+  r = computerRow(page);
+  assert.deepEqual([r.on, r.busy, r.hint, r.failed], ['false', null, '', '']);
+  assert.equal(shown(one(r.row, 'st-spin')), false);
+  // The turn was not seen to end: the server's sentence (it says the switch is off), and a fresh read shows it off.
+  c.srv.view.on = true;
+  c.page({ ...PROFILE });
+  await settle();
+  c.s.replying = { '快手': true };
+  const still = '已经关掉了，但它正在进行的这一轮还没有停下来，停下之前它还能用这台电脑。请在对话里点停止，或者稍后再关一次。';
+  c.srv.putFails = Object.assign(fail(502, still), { code: 'computer_still_running' });
+  c.srv.view.on = false; // the block was written before the turn was given up on
+  const reads = c.gets();
+  computerRow(page).sw.click();
+  await settle();
+  r = computerRow(page);
+  assert.equal(c.gets(), reads + 1, 'read again');
+  assert.deepEqual([r.on, r.busy, r.hint, r.failed], ['false', null, '', still]);
+  // The shell's hooks: the status poll's running turns, or the reply the open chat draws for this cat; the sidebar's spinner.
+  const app = read('client/public/app.js');
+  assert.match(app, /replying: \(name\) => \{\n\s+const st = stStatus\.map\[name\];\n\s+if \(st && Array\.isArray\(st\.active\) && st\.active\.length > 0\) return true;\n\s+const id = botCatId\(name\), now = live\.presence\(\);\n\s+return !!id && !!now && Array\.isArray\(now\.replies\) && now\.replies\.some\(\(r\) => r\.catId === id\);/);
+  assert.match(app, /spin: \(\) => spinIcon\(11\),/);
+  assert.match(read('client/public/profile.css'), /\.pf-computer \.pf-row-hint:not\(\[hidden\]\) \{ display: flex;/);
+});
+
+test('这台电脑 on where this system has no driver (the data came from a Mac): the row is there, on, saying it cannot work here, with no install command; switching it off works and asks nothing, and then the row goes with focus on 置顶', async () => {
+  const c = computerDrawer({ supported: false, installed: false, on: true, permissions: 'unknown' });
+  const page = c.page();
+  await settle();
+  let r = computerRow(page);
+  assert.deepEqual([r.shown, r.on, r.locked, r.busy], [true, 'true', null, null]);
+  assert.equal(r.said, '现在还用不了：这个系统还不能让猫猫操作电脑。');
+  assert.equal(shown(r.chip), false, 'no driver to install here');
+  assert.equal(r.sw.getAttribute('aria-describedby'), r.note.id);
+  r.sw.focus();
+  r.sw.click();
+  assert.equal(c.layer(), null, 'off asks nothing');
+  assert.equal(computerRow(page).hint, '正在关掉…');
+  await settle();
+  assert.deepEqual(c.puts(), [false]);
+  r = computerRow(page);
+  assert.equal(r.shown, false, 'off, and no driver for this system: nothing about the computer');
+  assert.equal(shown(r.note), false);
+  assert.equal(c.doc.activeElement, one(one(page, 'pf-pin'), 'pf-switch'), 'focus to the row beside it, not to the page');
+});
+
+test('这台电脑: a change that fails shows the server\'s sentence in full, and the row shows what a fresh read says is true', async () => {
+  const half = '没能把电脑接上，也没能撤回干净：请到每只猫的资料里确认「可以用这台电脑」是关着的。';
+  const c = computerDrawer();
+  const page = c.page();
+  await settle();
+  c.srv.putFails = Object.assign(fail(502, half), { code: 'computer_half_registered' });
+  computerRow(page).sw.click();
+  button(c.layer()!, '打开').click();
+  await settle();
+  let r = computerRow(page);
+  assert.equal(c.gets(), 2, 'read again after the failure');
+  assert.deepEqual([r.on, r.busy, r.locked], ['false', null, null]);
+  assert.equal(r.failed, half);
+  assert.equal(r.error.getAttribute('role'), 'alert');
+  assert.equal(r.sw.getAttribute('aria-describedby'), r.error.id);
+  // The read says it is on after all: that is what shows, with the sentence.
+  c.srv.putFails = fail(503, '操作电脑用的驱动没有启动起来，请再试一次。');
+  r.sw.click();
+  button(c.layer()!, '打开').click();
+  c.srv.view.on = true;
+  await settle();
+  r = computerRow(page);
+  assert.deepEqual([r.on, r.failed], ['true', '操作电脑用的驱动没有启动起来，请再试一次。']);
+  // The next change clears it; turning off can fail too.
+  c.srv.putFails = fail(502, '没能关掉，请再试一次。');
+  r.sw.click();
+  assert.equal(computerRow(page).failed, '', 'cleared by the new request');
+  await settle();
+  r = computerRow(page);
+  assert.deepEqual([r.on, r.failed], ['true', '没能关掉，请再试一次。']);
+  // The driver went away since the page read it: the note says so with the command, not the sentence a second time.
+  const a = computerDrawer();
+  const p2 = a.page();
+  await settle();
+  a.srv.view = { supported: true, installed: false, on: false, permissions: 'unknown' };
+  computerRow(p2).sw.click();
+  button(a.layer()!, '打开').click();
+  await settle();
+  r = computerRow(p2);
+  assert.deepEqual([r.on, r.locked, r.failed], ['false', 'true', '']);
+  assert.match(r.said, /^还没装上操作电脑用的驱动/);
+  // The read after a failure fails too: the last answer stays, with the failure.
+  const n = computerDrawer();
+  const p3 = n.page();
+  await settle();
+  n.srv.putFails = new Error('连不上 clowder-bot');
+  n.srv.getFails = new Error('连不上 clowder-bot');
+  computerRow(p3).sw.click();
+  button(n.layer()!, '打开').click();
+  await settle();
+  r = computerRow(p3);
+  assert.deepEqual([r.shown, r.on, r.failed], [true, 'false', '连不上 clowder-bot']);
+  // The request carries the server's own words for a 5xx (app.js keeps them only when asked).
+  assert.match(read('client/public/profile.js'), /H\.api\(computerPath\(name\), \{ method: "PUT", body: \{ enabled \}, serverError: true \}\)/);
+});
+
+test('这台电脑 belongs to its cat, not to the page: a change on its way or a wait goes on while another cat is shown, the page shown for the cat then draws it, and an earlier read never overwrites a later answer', async () => {
+  const OTHER = { type: 'bot', id: '墨点' };
+  const c = computerDrawer();
+  let page = c.page();
+  await settle();
+  const put = gate();
+  c.srv.putGate = put.p;
+  computerRow(page).sw.click();
+  button(c.layer()!, '打开').click();
+  // Another cat, then back: a new page for 快手, still opening, sends nothing more.
+  const other = c.show(c.P.catPage(OTHER, { name: '墨点', persona: 'x' }));
+  await settle();
+  assert.equal(computerRow(other).hint, '', 'the other cat is not the one opening');
+  assert.equal(c.gets('墨点'), 1);
+  page = c.page({ ...PROFILE });
+  let r = computerRow(page);
+  assert.deepEqual([r.shown, r.on, r.busy, r.hint], [true, 'false', 'true', '正在打开…']);
+  assert.equal(c.gets(), 1, 'no read while the change is on its way');
+  put.open();
+  c.srv.putGate = null;
+  await settle();
+  assert.equal(computerRow(page).on, 'true');
+  // A read asked before a change answered is not drawn over the change's answer.
+  const slow = gate();
+  c.srv.getGate = slow.p;
+  c.page({ ...PROFILE });
+  const reading = c.gets();
+  c.srv.getGate = null;
+  computerRow(page).sw.click();
+  await settle();
+  assert.equal(computerRow(page).on, 'false');
+  c.srv.view.on = true; // what the slow read will say (it was asked before the change)
+  slow.open();
+  await settle();
+  assert.equal(c.gets(), reading);
+  assert.equal(computerRow(page).on, 'false', 'the change\'s answer stays');
+  // A new page for an idle cat starts without the old answer and asks again.
+  c.show(c.P.catPage(OTHER, { name: '墨点', persona: 'x' }));
+  const getGate = gate();
+  c.srv.getGate = getGate.p;
+  page = c.page({ ...PROFILE });
+  assert.equal(computerRow(page).shown, false, 'nothing drawn from before');
+  getGate.open();
+  await settle();
+  assert.equal(computerRow(page).shown, true);
+});
+
+test('item 52 wiring: the shell passes the install command\'s 复制 and whether 资料 is on screen; the row\'s styles use existing tokens and 新建\'s own command chip', () => {
+  const app = read('client/public/app.js');
+  assert.match(app, /copy: \(text\) => copyText\(text\),\n\s+open: \(\) => panel\.classList\.contains\("open"\),\n/);
+  const css = read('client/public/profile.css');
+  assert.match(css, /\.pf-locked \.pf-switch\[aria-disabled="true"\] \{ cursor: default; opacity: \.45; \}/);
+  assert.match(read('client/public/quick-create.css'), /\n\.qc-cmd \{/);
+  const html = read('client/index.html');
+  assert.ok(html.indexOf('/quick-create.css') < html.indexOf('/profile.css'), 'the chip\'s look loads before the row\'s');
+});
+
 // ---------------------------------------------------------------- the @ list (mention.js)
 function composer(opts: { members?: string[] | null } = {}) {
   const env = load(['client/public/mention-rules.js', 'client/public/mention.js']);
@@ -1274,9 +1866,11 @@ test('the shell wires 资料页与群: scripts before app.js, styles before the 
   assert.match(app, /apply: composerEdit,/);
   assert.match(app, /function composerEdit\(text, caret\) \{[\s\S]*?composerRecord\(before, text, caret\);/);
   assert.match(app, /mention\.close\(\);/);
-  // Requests: only the documented group and conversation routes (置顶 is the shell's own request).
+  // Requests: only the documented group and conversation routes (置顶 is the shell's own request),
+  // and a cat's 这台电脑 (item 52) the only one under /xbot-api/bots/.
   const profile = read('client/public/profile.js');
-  assert.deepEqual([...new Set([...profile.matchAll(/"(\/xbot-api\/[^"]*)"/g)].map(m => m[1]))].sort(), ['/xbot-api/groups/']);
+  assert.deepEqual([...new Set([...profile.matchAll(/"(\/xbot-api\/[^"]*)"/g)].map(m => m[1]))].sort(), ['/xbot-api/bots/', '/xbot-api/groups/']);
+  assert.deepEqual([...profile.matchAll(/"\/xbot-api\/bots\/"[^;\n]*/g)].map(m => m[0]), ['"/xbot-api/bots/" + enc(name) + "/computer"']);
   assert.match(app, /newConversation: \(sel, opener\) => chatHistory\.newConversation\(sel, opener\),/);
   assert.match(read('client/public/chat-history.js'), /init, select, merge, top, starters, load, sync: syncMenu, openMenu, closeMenu, newConversation,/);
   assert.doesNotMatch(profile + read('client/public/mention.js'), /innerHTML\s*=(?!\s*body;)|localStorage|sessionStorage|\/stop"|\/cancel"/);
@@ -1284,7 +1878,8 @@ test('the shell wires 资料页与群: scripts before app.js, styles before the 
   for (const file of ['client/public/profile.js', 'client/public/profile-rules.js', 'client/public/mention.js', 'client/public/mention-rules.js']) {
     const words = [...read(file).matchAll(/"([^"\n]*\p{Script=Han}[^"\n]*)"/gu)].map(m => m[1]);
     assert.ok(words.length > 0, file);
-    for (const w of words) assert.doesNotMatch(w, /Bot|Agent|session|thread|原生|会话|线程/i, w);
+    // The product's own name is no engine word (item 52: the folder the install command runs in), as in tests/vocabulary.test.ts.
+    for (const w of words) assert.doesNotMatch(w!.replace(/clowder-bot/gi, ''), /Bot|Agent|session|thread|原生|会话|线程/i, w);
   }
   // Only existing tokens: no new colour literal (the cat's own colour comes from the server).
   for (const file of ['client/public/profile.css', 'client/public/mention.css'])

@@ -1,8 +1,12 @@
+import { resolve } from 'node:path';
 import { createApp } from './app.js';
+import { cuaDriver } from './native/computer.js';
+import { dataRoot } from '../shared/data-location.mjs';
 
 const port = Number(process.env.PORT ?? 3210);
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT 必须是有效端口号');
-const runtime = createApp();
+// The desktop driver, where scripts/install-computer-driver.mjs puts it (or the owner's own copy).
+const runtime = createApp({ computer: cuaDriver(resolve(dataRoot(resolve(import.meta.dirname, '..')), 'tools')) });
 const server = runtime.app.listen(port, '127.0.0.1', () => {
   console.log(`🐾 clowder-bot listening on http://127.0.0.1:${port} (native Clowder AI)`);
 });

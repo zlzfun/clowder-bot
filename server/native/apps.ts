@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ApiError } from '../errors.js';
 import type { ProductStore } from '../product-store.js';
 import type { NativeTransport } from './types.js';
+import { computerEntry } from './computer.js';
 
 // 应用 (docs/apps-api.md): a listing over two native mechanisms, with nothing of its own behind it.
 //   · 微信  = the engine's official plugin `official.wechat-visible-reader`, through the plugin manager:
@@ -178,7 +179,9 @@ export class BotApps {
   // ---- 自定义应用: the engine's external MCP registry -----------------------------------------------
   private async registry(): Promise<NativeCapability[]> {
     const board = await this.native.request<{ items?: NativeCapability[] }>('/api/capabilities');
-    return (board.items ?? []).filter(item => item.type === 'mcp' && item.source === 'external');
+    // 这台电脑's entry lives in the same registry (server/native/computer.ts) and has its own switch in a cat's 资料:
+    // it is not one of the owner's apps — not listed, not renamed, not removed from here.
+    return (board.items ?? []).filter(item => item.type === 'mcp' && item.source === 'external' && item.id !== computerEntry);
   }
   private async custom(id: string): Promise<NativeCapability> {
     const nativeId = id.startsWith('custom:') ? id.slice(7) : '';

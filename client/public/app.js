@@ -5994,7 +5994,8 @@
       section("它用什么思考", agentTrigger(data)),
       err,
     );
-    const showErr = (e, fallback) => { err.hidden = false; err.textContent = visibleError(e, fallback); };
+    // The line is the form's last, below 职责 and 它用什么思考: brought into view, or a refusal (导入资料's 503 computer_unconfirmed, a failed save) goes unseen.
+    const showErr = (e, fallback) => { err.hidden = false; err.textContent = visibleError(e, fallback); if (err.scrollIntoView) err.scrollIntoView({ block: "nearest" }); };
     modalForm.onsubmit = async (ev) => {
       ev.preventDefault();
       err.hidden = true;
@@ -6027,8 +6028,11 @@
       err.hidden = true;
       try {
         const tpl = JSON.parse(await f.text());
-        const res = await api("/xbot-api/bots/import", { method: "POST", body: tpl });
+        // serverError: a 5xx keeps the server's own words (503 computer_unconfirmed: the cat was not made, try again).
+        const res = await api("/xbot-api/bots/import", { method: "POST", body: tpl, serverError: true });
         closeModal();
+        // A creation's notice (item 52: the new cat could not be kept off this computer), said once its chat is open.
+        if (res && res.name && res.notice) holdNotice({ name: res.name, nativeId: res.native_id || "", text: res.notice });
         await refreshLists();
         if (res && res.name) await selectBot(res.name);
       } catch (e) { showErr(e, "导入失败"); }
@@ -6100,9 +6104,13 @@
       const body = { name: name, role: role };
       const group = (v.group || "").trim();
       if (group) body.group = group;
-      await api("/xbot-api/bots/" + encodeURIComponent(src) + "/fork", { method: "POST", body: body });
+      // serverError: a 5xx keeps the server's own words (503 computer_unconfirmed: the copy was not made, try again).
+      const res = await api("/xbot-api/bots/" + encodeURIComponent(src) + "/fork", { method: "POST", body: body, serverError: true });
+      const made = (res && res.name) || name;
+      // A creation's notice (item 52), said once the copy's chat is open.
+      if (res && res.notice) holdNotice({ name: made, nativeId: res.native_id || "", text: res.notice });
       await refreshLists();
-      await selectBot(name);
+      await selectBot(made);
     });
   }
 
@@ -7978,6 +7986,21 @@
     // A group's sidebar row now (polling may have drawn it anew), for focus to return to.
     groupRow: (id) => [...document.querySelectorAll("#roster .item[data-group]")].find((n) => n.dataset.group === id) || null,
     fallbackFocus: () => input,
+    // 这台电脑 (item 52): the install command's 复制, and whether 资料 is on
+    // screen (the wait for a macOS grant reads again only while it is).
+    copy: (text) => copyText(text),
+    open: () => panel.classList.contains("open"),
+    // The busy line's spinner (the sidebar's own), and whether this cat is in
+    // the middle of a reply anywhere: the status poll's running turns (its own
+    // chat and every group, the turns switching it off ends) or the reply the
+    // open chat is drawing now, which the poll may not have seen yet.
+    spin: () => spinIcon(11),
+    replying: (name) => {
+      const st = stStatus.map[name];
+      if (st && Array.isArray(st.active) && st.active.length > 0) return true;
+      const id = botCatId(name), now = live.presence();
+      return !!id && !!now && Array.isArray(now.replies) && now.replies.some((r) => r.catId === id);
+    },
   });
   // One programmatic edit of the draft (an @ suggestion): rendered like
   // typing, one undo step, the caret after it.

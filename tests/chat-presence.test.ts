@@ -118,6 +118,10 @@ test('the header says what the cat is doing in a messenger\'s few words, from th
   assert.equal(say(one('step', 'Task')), '在分头处理…');
   assert.equal(say(one('step', 'TodoWrite')), '在列计划…');
   assert.equal(say(one('step', 'SomethingNew')), '在处理…');
+  // Item 52: a step on this computer, by the live event's area (never the tool's name).
+  for (const tool of ['mcp__computer__click', 'mcp:computer/type_text', 'mcp__computer__find_element']) assert.equal(say({ replies: [{ catId: 'a', phase: 'step', tool, area: 'computer' }] }), '在用电脑…', tool);
+  assert.equal(say({ replies: [{ catId: 'a', phase: 'step', tool: 'mcp__computer__click', area: 'computer' }] }, true), '团子在用电脑…');
+  assert.equal(say(one('step', 'mcp__computer__click')), '在处理…', 'without the area: as any other tool');
   assert.equal(say({ ...one('text'), stopping: true }), '正在停止…');
   // Groups: who is writing.
   assert.equal(say(one('thinking'), true), '团子在想…');

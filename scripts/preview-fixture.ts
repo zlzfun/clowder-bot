@@ -12,8 +12,10 @@
 //   …  -d '{"page":12}'  (read conversations 12 messages at a time, to see earlier pages load)
 //   …  -d '{"wechat":"slow"}'  (应用: ok | slow | fail | timeout | absent | present | crashed | status-fails | status-ok)   -d '{"probe":"fail"}'  (no custom app answers; "ok" restores)
 //   …  -d '{"append":"off"}'  (a cat that is writing does not take in what is said meanwhile; it answers that afterwards)
+//   …  -d '{"computer":"needs"}'  (这台电脑: none = no driver for this system, absent = not installed, needs = waiting for the
+//                                  macOS grants, ready; the plain preview starts ready, the showcase with none)
 //   curl :3230/__preview   → {preview, scene: "plain" | "showcase", staged, zone, plays[], cats[]} (what this is; changes nothing)
-// Typed words steer the canned reply: 长, 文件/查/资料, 慢, 失败, 清单, 选一个, 确认一下, 记住, 提醒/定时; 谢谢/晚安/再见 gets one
+// Typed words steer the canned reply: 长, 文件/查/资料, 电脑 (steps on this computer when the cat has it on), 慢, 失败, 清单, 选一个, 确认一下, 记住, 提醒/定时; 谢谢/晚安/再见 gets one
 // emoji and nothing else (a reaction); a message that is itself one emoji gets the cat going on when it answers a question
 // of the cat's (确认一下 → 👍), and one emoji back otherwise;
 // in a group @名字 picks the cat and 大家/@all asks all of them; a message that names no cat is taken, as in the engine,
@@ -31,6 +33,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { createApp } from '../server/app.js';
+import type { ComputerDriver } from '../server/native/computer.js';
 import { ApiError } from '../server/errors.js';
 import type { NativeRuntime } from '../server/native/bridge.js';
 import type { NativeCat, NativeEvent, NativeMessage } from '../server/native/types.js';
@@ -332,6 +335,16 @@ export class PreviewNative extends NativeFixture {
       '```js', 'function greet(name) {', '  return `你好，${name}`;', '}', '```', '',
       '| 项目 | 状态 |', '| --- | --- |', '| 流式文字 | 正在写 |', '| 停止 | 随时可以 |', '',
       ...Array.from({ length: 6 }, (_, i) => `第 ${i + 1} 段。猫喜欢纸箱，是因为四面围合的空间让它觉得安全，瓦楞纸又保暖，钻进去像自带一个小暖窝；而且纸箱是家里的新东西，可以啃、可以挠、可以占领。`)].join('\n');
+    else if (/电脑/.test(text)) {
+      // The tools of the registry entry, named the way each Agent names them; a cat that does not have the entry has no such tools.
+      const name = (tool: string) => cat.clientId === 'openai' ? `mcp:computer/${tool}` : `mcp__computer__${tool}`;
+      if (this.capabilities.some(entry => entry.id === 'computer' && !entry.blockedCats?.includes(cat.id))) {
+        steps.push([name('launch_app'), { bundle_id: 'com.apple.calculator' }], [name('get_window_state'), { pid: 4242, window_id: 7 }],
+          [name('click'), { pid: 4242, window_id: 7, element_token: 's00000001:5' }], [name('click'), { pid: 4242, window_id: 7, element_token: 's00000001:8' }],
+          [name('get_window_state'), { pid: 4242, window_id: 7, include_screenshot: false }]);
+        think = 1500; reply = '在「计算器」里算好了：12 × 12 = **144**。';
+      } else reply = '我现在用不了这台电脑。';
+    }
     else if (/文件|查|资料/.test(text)) {
       if (cat.clientId === 'openai') steps.push(['command_execution', { command: "/bin/zsh -lc 'cat 说明.md'" }], ['file_change', { status: 'completed', changes: [{ path: '/preview/workspace/结果.md', kind: { type: 'add' } }] }]);
       else steps.push(['Read', { file_path: '/preview/workspace/说明.md' }], ['WebSearch', { query: '猫 为什么 喜欢 纸箱' }], ['Write', { file_path: '/preview/workspace/结果.md', content: '…' }]);
@@ -436,9 +449,18 @@ export class PreviewNative extends NativeFixture {
 }
 
 const native = new PreviewNative();
-const runtime = createApp({ native, workspace, dataFile: join(dir, 'presentation.json'), staticDir: join(dir, 'no-static'),
-  allowedOrigins: [`http://127.0.0.1:${port}`, `http://localhost:${port}`] });
 const showcase = process.env.PREVIEW_SCENE === 'showcase';
+// 这台电脑 without a real driver: what the adapter would be told in each state. `needs` stays until {"computer":"ready"} (the owner granting).
+const computerModes = ['none', 'absent', 'needs', 'ready'] as const;
+const computer: ComputerDriver & { mode: typeof computerModes[number] } = {
+  mode: showcase ? 'none' : 'ready',
+  get supported() { return this.mode !== 'none'; },
+  async locate() { return this.mode === 'needs' || this.mode === 'ready' ? { command: '/preview/CuaDriver.app/Contents/MacOS/cua-driver', args: ['mcp'] } : undefined; },
+  async permissions() { return this.mode === 'ready' ? { state: 'granted' } : this.mode === 'needs' ? { state: 'needed', missing: ['accessibility', 'screen_recording'] } : { state: 'unknown' }; },
+  async start() {}, async stop() {}, async quiet() {},
+};
+const runtime = createApp({ native, workspace, dataFile: join(dir, 'presentation.json'), staticDir: join(dir, 'no-static'),
+  allowedOrigins: [`http://127.0.0.1:${port}`, `http://localhost:${port}`], computer });
 if (showcase) native.runtimes = agentSets.showcase!;
 // The line under 你 names the device; here it says what this is instead of the machine's own name.
 runtime.store.state.deviceName = showcase ? '示例环境' : '预览环境';
@@ -452,12 +474,13 @@ let plays = new Map<string, { line: string; cat?: string; group?: string }>();
 // What this is, readable without changing anything: a tool that clicks through the staged chats (scripts/showcase-shots.mjs)
 // asks here first, so it can never be pointed at a real instance; the guide asks whether the staged chats are behind it.
 runtime.app.get('/__preview', (_req, res) => res.json({ preview: true, scene: showcase ? 'showcase' : 'plain', staged: plays.size > 0,
-  zone: Intl.DateTimeFormat().resolvedOptions().timeZone, plays: [...plays.keys()], cats: native.cats.map(cat => cat.name) }));
+  zone: Intl.DateTimeFormat().resolvedOptions().timeZone, plays: [...plays.keys()], cats: native.cats.map(cat => cat.name), computer: computer.mode }));
 runtime.app.post('/__preview', async (req, res) => {
   const input = req.body ?? {};
   if (typeof input.agents === 'string') { if (!agentSets[input.agents]) return res.status(400).json({ error: 'agents: ' + Object.keys(agentSets).join(' | ') }); native.runtimes = agentSets[input.agents]!; }
   if (typeof input.speed === 'number' && input.speed > 0 && input.speed <= 20) native.speed = input.speed;
   if (typeof input.approvals === 'string') native.hubFails = input.approvals === 'failing';
+  if (typeof input.computer === 'string') { if (!computerModes.includes(input.computer)) return res.status(400).json({ error: 'computer: ' + computerModes.join(' | ') }); computer.mode = input.computer; }
   // {"append": "off"}: a cat that is writing cannot take in what is said meanwhile; that message gets its own reply afterwards. "on" restores it.
   if (typeof input.append === 'string') native.appendable = input.append !== 'off';
   // 应用 (tests/apps-fixture.ts). {"wechat": "ok" | "slow" | "fail" | "timeout"}: what opening 微信 does next time (at once / stays
@@ -489,7 +512,7 @@ runtime.app.post('/__preview', async (req, res) => {
     try { await (cat ? runtime.bridge.direct(cat).then(thread => runtime.bridge.send(thread, { text: target.line }, cat)) : runtime.bridge.send(group!, { text: target.line })); }
     catch (error) { return res.status(502).json({ error: 'play: ' + (error instanceof Error ? error.message : 'not sent') }); }
   }
-  res.json({ agents: Object.entries(agentSets).find(([, set]) => set === native.runtimes)?.[0], speed: native.speed, approvals: native.hubFails ? 'failing' : 'working', cats: native.cats.map(cat => cat.name) });
+  res.json({ agents: Object.entries(agentSets).find(([, set]) => set === native.runtimes)?.[0], speed: native.speed, approvals: native.hubFails ? 'failing' : 'working', cats: native.cats.map(cat => cat.name), computer: computer.mode });
 });
 // The illustrated guide to what the app can do (showcase/), next to the staged chats it points at.
 if (existsSync(join(root, 'showcase'))) runtime.app.use('/tour', express.static(join(root, 'showcase'), { etag: false, lastModified: false, setHeaders: res => res.setHeader('Cache-Control', 'no-store') }));

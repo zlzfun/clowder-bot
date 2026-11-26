@@ -67,6 +67,7 @@
 | A002 | `server/product-store.ts` | 只保存 UI 元数据和原生引用；单进程原子写。 | 官方插件提供产品配置持久化时替换此存储。 |
 | D001 | `scripts/start-runtime.mjs`、`scripts/prepare-upstream.mjs` | 独立配置/数据/workspace/Redis/API/指标端口、专属 cookie/userId；用上游 bootstrap 生成 MCP。避免与用户现有 Clowder 实例串线。构建目录是数据目录里偏好仓库的链接工作树（见「偏好仓库」），数据默认在检出之外（见「数据位置」）。 | 官方嵌入部署或插件生命周期接管时移除本启动器。 |
 | A003 | `server/native/apps.ts`、`server/xbot/apps.ts` | 应用（2026-11-26）：把上游的外部 MCP 登记（安装、探活、改密钥、删除）和官方插件 `official.wechat-visible-reader` 的启停与授权操作，呈现为「自定义应用」和「微信」。不保存状态与密钥，只在 A002 里保存自定义应用的显示名。上游对安装请求不做校验，校验在适配层；插件操作前先调上游的重置路由，绕开下面「应用依赖的上游行为」里记的缺陷。见 [应用：第一版接口](apps-api.md)。 | 上游修复操作状态的缺陷后去掉动作前的重置；上游让插件的 MCP 与技能在本部署下生效后，应用可改由插件包承载。 |
+| D002 | `computer-driver.lock.json`、`scripts/install-computer-driver.mjs` | 「这台电脑」背后的桌面驱动（cua-driver 自带的已签名应用），固定到一个发布版本，按校验和、签名身份和公证安装到数据目录的 `tools/` 下。不随 Bot 启动，也不由 Bot 看管：驱动的 MCP 入口按需自己拉起后台进程。引擎里只有注册表中的一条登记（见 [接口范围](xbot-api.md)「这台电脑」）。 | 驱动只是暂定的选择（使用者 2026-11-26：「那我们也用cua-driver吧，暂时。」）。之后若并入「应用」，或上游提供自己的桌面能力，按那时的做法迁移。 |
 | U001 | `client/public/app.js`、`runtime.*` | UI 显示原生排队状态、订阅事件、选择原生执行工具；独立面板承接原生特有概念。 | 随 Bot 产品迭代，不向核心反向渗透。 |
 
 P001 是执行策略，不是文件系统、记忆库的多租户 ACL。这里只支持本机单用户产品。上游所有高级执行面并未被 Bot 代理公开；未来新增通道必须验证仍经过该准入入口。
@@ -142,6 +143,20 @@ cafile=/Users/<你>/.config/node-ca/system-ca.pem
 - **微信插件的 10 分钟授权只管一种读法**（读插件 0.1.0-alpha.7 与上游 `routes/callback-limb-routes.ts` 的代码，没有实际读过）：读「正打开的那段聊天」要授权；按联系人名字读最近 1–30 条只要插件启用，引擎核对这次调用出自猫对使用者亲自发的一条消息的回复，两个确认标记由猫自己填。所以同意点是启用，界面在「打开」之前就把这些说清楚。插件换版本时要重新读这两处代码，界面的说明跟着改。插件也不请求屏幕录制权限，只检查；没有权限时读取失败。
 
 向上游提的需求（尚未提交）：插件的 MCP 与技能在非 `runtime` 部署下对成员生效；装依赖时沿用宿主的证书与代理设置；不把 `operationState` 交给不认识它的插件（或由插件契约声明）；安装外部 MCP 时校验 id 与必填项、拒绝静默覆盖，并提供「不存在才创建」的原子安装（现在只能靠适配层给每个请求一个独有的 id 来避开合并）；探活的错误里不要带对方服务器回应的正文（可能含凭据），或提供脱敏后的诊断；请求头名称按不分大小写合并；插件生命周期事件；远程 MCP 的浏览器登录；按成员启用技能。
+
+## 电脑驱动（2026-11-26）
+
+「这台电脑」（[接口范围](xbot-api.md)）用的桌面驱动不是 Clowder AI 的一部分，也不进这个仓库：是 [trycua/cua](https://github.com/trycua/cua) 的 cua-driver（MIT）自带的应用 `CuaDriver.app`，用它的「独立」方式运行。
+
+- **固定版本。** `computer-driver.lock.json` 写着发布标签、版本、压缩包的 SHA-256 与大小、应用的 bundle id（`com.trycua.driver`）和签名团队（`YCK386LBJ7`，Developer ID「Cua AI, Inc.」）。现在固定的是 0.34.0，和 OpenBot 固定的是同一版；这一版在隔离运行时上实测过。上游发版很密（2026-11 一天数版），不跟最新。
+- **安装。** `npm run computer:install`：下载固定的压缩包（约 76 MB），核对大小和 SHA-256，只解出应用，核对签名（`codesign --verify --deep --strict`）、bundle id、签名团队、Gatekeeper（`spctl`）和版本，全部通过才放到 `<数据目录>/tools/CuaDriver.app`；任何一项不过就什么都不装，也不留下临时文件。`-- --from <文件>` 用已经下载好的压缩包（同样的核对），`-- --check` 只报告现状。适配层在使用前再核对一次签名身份，所以放一个同名的别的程序不会被当成驱动。
+- **授权。** macOS 把辅助功能（macOS 27 上叫「设备控制与数据访问」）和屏幕录制记在 `CuaDriver` 这个应用上，与 Bot 是从终端还是由 launchd 启动无关。第一次给某只猫打开「电脑」时，驱动自己打开系统设置请使用者授权；授权不全时适配层什么都不改。给屏幕录制打开开关时 macOS 会要求退出并重新打开 CuaDriver，属正常。授权按应用的签名身份记，不按它放在哪里：2026-11-26 在开发目录那一份上给的两项授权，对随后装进日常数据目录的那一份同样有效（装好后启动它读了一次状态，两项都在，没有弹出系统设置）。
+- **进程。** 驱动的后台进程由它自己的 MCP 入口在猫第一次调用工具时拉起，没有任何猫开着时适配层请它退出。Bot 的启动脚本不启动它，Bot 退出也不影响它。
+- **遥测。** 驱动默认会发不含内容的使用统计。登记里带着 `CUA_DRIVER_RS_TELEMETRY_ENABLED=0`、`CUA_DRIVER_RS_UPDATE_CHECK=0`，第一次登记时还执行一次 `cua-driver telemetry disable`（写在使用者的 `~/.cua-driver/config.json`）。
+- **换版本。** 改 `computer-driver.lock.json`（标签、版本、文件名、SHA-256、大小、压缩包里的应用路径），重新运行安装，再在隔离运行时上走一遍：开、授权、让测试猫操作一次计算器、关、新建一只猫确认它是关的。签名团队或 bundle id 变了要同时改适配层里核对的值（`server/native/computer.ts`），有测试把两处对在一起。
+- **卸载。** 把所有猫的「电脑」关掉；删除 `<数据目录>/tools/CuaDriver.app`；在系统设置里移除 CuaDriver 的两项授权；需要的话删除注册表里的 `computer` 登记（`DELETE /api/capabilities/mcp/computer?hard=true`）和 `~/.cua-driver`。
+
+已知限制见 [接口范围](xbot-api.md)「这台电脑」。只在 macOS 27、Apple 芯片上实测过。
 
 ## 当前已知限制
 

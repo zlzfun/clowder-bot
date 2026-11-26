@@ -468,3 +468,19 @@ test('once the engine has taken a change, nothing after it turns the answer into
   r.store.save = save;
   assert.equal((await r.call(path)).body.title, '远处');
 });
+
+test('这台电脑\'s entry lives in the same registry and is not one of the owner\'s apps: not listed, not readable, not changed or removed from 应用', async t => {
+  const r = await setup(t);
+  // As server/native/computer.ts registers it: an external MCP entry named `computer`, with its own per-cat block list.
+  r.native.capabilities.push({ id: 'computer', type: 'mcp', source: 'external', enabled: true, mcpServer: { transport: 'stdio', command: '/Applications/CuaDriver.app/Contents/MacOS/cua-driver', args: ['mcp'] }, blockedCats: ['someone'] });
+  assert.deepEqual((await r.call()).body.apps.map((a: any) => a.id), ['wechat']);
+  for (const [method, body] of [['GET', undefined], ['PATCH', { name: '别的' }], ['PATCH', { secrets: { A: '1' } }], ['DELETE', undefined]] as const)
+    assert.equal((await r.call('/custom%3Acomputer', method, body)).status, 404, method);
+  // An app the owner happens to call "computer" is its own row under its own id; the entry is untouched by it and by its removal.
+  const mine = await r.call('/custom', 'POST', { name: 'Computer', program: 'node', secrets: { A: '1' } });
+  assert.match(nativeOf(mine.body), /^computer-[0-9a-f]{8}$/);
+  assert.deepEqual((await r.call()).body.apps.map((a: any) => a.id), ['wechat', mine.body.id]);
+  await r.call(`/${encodeURIComponent(mine.body.id)}`, 'DELETE');
+  assert.deepEqual(r.native.capabilities, [{ id: 'computer', type: 'mcp', source: 'external', enabled: true, mcpServer: { transport: 'stdio', command: '/Applications/CuaDriver.app/Contents/MacOS/cua-driver', args: ['mcp'] }, blockedCats: ['someone'] }]);
+  assert.equal(r.sent(/mcp\/computer(\?|\/|$)/).length, 0, 'nothing 应用 sends names that entry');
+});
