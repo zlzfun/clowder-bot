@@ -164,15 +164,15 @@ export class Computer {
    * grants are there. The registry is only written after the grants are read.
    */
   private async enable(cat: NativeCat): Promise<ComputerView> {
-    if (!this.driver.supported) throw new ApiError(422, '这台电脑上还用不了这项功能', undefined, 'computer_unsupported');
+    if (!this.driver.supported) throw new ApiError(422, '这台电脑上还用不了这项功能。', undefined, 'computer_unsupported');
     const located = await this.driver.locate(true);
-    if (!located) throw new ApiError(422, '还没有装上操作电脑要用的驱动', undefined, 'computer_absent');
+    if (!located) throw new ApiError(422, '还没有装上操作电脑用的驱动。', undefined, 'computer_absent');
     let grants = await this.driver.permissions();
     if (grants.state === 'unknown') {
       await this.driver.start();
       grants = await this.driver.permissions();
       for (let waited = 0; waited < this.patience && grants.state === 'unknown'; waited += 300) { await wait(300); grants = await this.driver.permissions(); }
-      if (grants.state === 'unknown') throw new ApiError(503, '电脑驱动没有启动起来，请再试一次', undefined, 'computer_not_started');
+      if (grants.state === 'unknown') throw new ApiError(503, '操作电脑用的驱动没有启动起来，请再试一次。', undefined, 'computer_not_started');
     }
     if (grants.state !== 'granted') return this.view(cat);
     const entry = await this.entry();
@@ -181,7 +181,7 @@ export class Computer {
     else if (entry.mcpServer?.command !== located.command || JSON.stringify(entry.mcpServer?.args ?? []) !== JSON.stringify(located.args)) await this.install(located);
     // Written whatever was just read: an earlier request that timed out here may still be waiting in the engine, and the last write is the one that stands.
     await this.toggle({ scope: 'cat', catId: cat.id, enabled: true });
-    if (!this.isOn(await this.entry(), cat)) throw new ApiError(502, '没能打开，请再试一次');
+    if (!this.isOn(await this.entry(), cat)) throw new ApiError(502, '没能打开，请再试一次。');
     return this.view(cat);
   }
 
@@ -208,7 +208,7 @@ export class Computer {
       if (!real || anyOn(real)) throw new Error('on for a cat after the driver was set');
     } catch {
       const withdrawn = await this.native.request(`/api/capabilities/mcp/${computerEntry}?hard=true`, { method: 'DELETE' }).then(() => true, () => false);
-      throw new ApiError(502, withdrawn ? '没能把电脑接上，这一步已经撤回，可以再试一次' : '没能把电脑接上，而且没能撤回干净：请到每只猫的资料里确认「电脑」是关着的',
+      throw new ApiError(502, withdrawn ? '没能把电脑接上，这一步已经撤回，可以再试一次。' : '没能把电脑接上，也没能撤回干净：请到每只猫的资料里确认「可以用这台电脑」是关着的。',
         undefined, withdrawn ? 'computer_not_registered' : 'computer_half_registered');
     }
     this.unconfirmed.clear();
@@ -229,17 +229,18 @@ export class Computer {
   private async disable(cat: NativeCat): Promise<ComputerView> {
     let entry: Entry | undefined, read = true;
     try { entry = await this.entry(); } catch { read = false; }
-    // No entry, or only the placeholder: no cat was ever handed the tools.
-    if (read && !this.real(entry)) return this.view(cat);
+    // No entry, or only the placeholder: no cat was ever handed the tools. A driver started for a switch-on that was given up
+    // (the owner stopped waiting for the macOS grants) has nothing to do: it is asked to end.
+    if (read && !this.real(entry)) { await this.driver.stop().catch(() => {}); return this.view(cat); }
     let failure: unknown;
     try {
       await this.toggle({ scope: 'cat', catId: cat.id, enabled: false });
       entry = await this.entry();
-      if (this.isOn(entry, cat)) throw new ApiError(502, '没能关掉，请再试一次');
+      if (this.isOn(entry, cat)) throw new ApiError(502, '没能关掉，请再试一次。');
     } catch (error) { failure = error; }
     const ended = await this.stopRunning(cat).catch(() => ({ stopped: 0, failed: 1 }));
     if (failure) throw failure;
-    if (entry && !anyOn(entry)) void this.driver.stop().catch(() => {});
+    if (entry && !anyOn(entry)) await this.driver.stop().catch(() => {});
     if (ended.failed) throw new ApiError(502, '已经关掉了，但它正在进行的这一轮还没有停下来，停下之前它还能用这台电脑。请在对话里点停止，或者稍后再关一次。', undefined, 'computer_still_running');
     return this.view(cat);
   }
@@ -296,9 +297,9 @@ export class Computer {
         await this.toggle({ scope: 'cat', catId: cat.id, enabled: false }).catch(() => {});
       }
       if (!this.isOn(await this.entry(), cat)) return undefined;
-      return '猫猫建好了，但它现在可以用这台电脑：这项设置没能关上。到它的资料里把「电脑」关掉就可以。';
+      return '猫猫建好了，但它现在可以用这台电脑：这项设置没能关上。到它的资料里把「可以用这台电脑」关掉就可以。';
     } catch {
-      return '猫猫建好了，但没能确认它用不了这台电脑。到它的资料里看一眼「电脑」是不是关着。';
+      return '猫猫建好了，但没能确认它用不了这台电脑。到它的资料里看一眼「可以用这台电脑」是不是关着。';
     }
   }
 }

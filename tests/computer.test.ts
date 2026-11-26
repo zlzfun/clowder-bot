@@ -176,10 +176,13 @@ test('turning it off takes only this cat off, ends the turns it is in the middle
   await refused(computer.set(a, false), 503);
   assert.deepEqual(ended, ['cat-a']); native.lostAnswers.clear();
   assert.equal((await computer.view(a)).on, false);
-  // No entry at all: nobody was ever handed the tools, nothing is ended.
+  // No entry at all: nobody was ever handed the tools, no turn is ended — and a driver started for a switch-on the owner
+  // gave up on (it was waiting for the macOS grants) is asked to end.
   const bare = setup();
+  bare.driver.grants = { state: 'unknown' }; bare.driver.onceStarted = { state: 'needed', missing: ['accessibility'] };
+  assert.equal((await bare.computer.set(a, true)).permissions, 'needed');
   await bare.computer.set(a, false);
-  assert.deepEqual(bare.ended, []);
+  assert.deepEqual(bare.ended, []); assert.deepEqual(bare.driver.did, ['start', 'stop']); assert.equal(bare.native.capabilities.length, 0);
   // Off also works where the driver is gone: a stale "on" must be removable.
   stopping.failed = 0; await computer.set(a, true); driver.server = undefined;
   assert.deepEqual(await computer.view(a), { supported: true, installed: false, on: true, permissions: 'unknown' });
