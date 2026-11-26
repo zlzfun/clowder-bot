@@ -21,6 +21,7 @@
     "runtime:prepare": "node --env-file-if-exists=.env scripts/prepare-upstream.mjs",
     "runtime:start": "node --env-file-if-exists=.env scripts/start-runtime.mjs",
     "data:move": "node --env-file-if-exists=.env scripts/move-data.mjs",
+    "computer:install": "node --env-file-if-exists=.env scripts/install-computer-driver.mjs",
     "test:native": "BOT_NATIVE_TEST=1 node --env-file-if-exists=.env --import tsx --test tests/native-integration.test.ts && node --test scripts/test-native-policy.mjs",
     "verify:upstream": "node scripts/verify-upstream.mjs",
     "test:background-policy": "node --test scripts/test-background-policy.mjs",

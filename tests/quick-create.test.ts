@@ -709,6 +709,32 @@ test('the shell says a held notice once, when that cat\'s chat is actually open,
   assert.doesNotMatch(app, /quietNote\(created\.notice\)/);
 });
 
+test('item 52: a copy\'s or an import\'s notice is held like a new cat\'s and said once its chat is open; a notice of two sentences reads as two lines', () => {
+  const app = read('client/public/app.js');
+  // 导入资料 (编辑资料) and 复刻 (the panel's ⋯ menu) create a cat too, and the server may answer with a notice.
+  assert.match(app, /const imp = el\("button", "text-btn", "导入资料"\);/);
+  assert.match(app, /item\("copy", "复刻", \(\) => openFork\(name\)\);/);
+  assert.match(app, /const res = await api\("\/xbot-api\/bots\/import", \{ method: "POST", body: tpl, serverError: true \}\);\n\s+closeModal\(\);\n[^\n]*\n\s+if \(res && res\.name && res\.notice\) holdNotice\(\{ name: res\.name, nativeId: res\.native_id \|\| "", text: res\.notice \}\);\n\s+await refreshLists\(\);\n\s+if \(res && res\.name\) await selectBot\(res\.name\);/);
+  assert.match(app, /const res = await api\("\/xbot-api\/bots\/" \+ encodeURIComponent\(src\) \+ "\/fork", \{ method: "POST", body: body, serverError: true \}\);\n\s+const made = \(res && res\.name\) \|\| name;\n[^\n]*\n\s+if \(res && res\.notice\) holdNotice\(\{ name: made, nativeId: res\.native_id \|\| "", text: res\.notice \}\);\n\s+await refreshLists\(\);\n\s+await selectBot\(made\);/);
+  assert.doesNotMatch(app, /quietNote\(res\.notice\)/);
+  // Two sentences joined by a line break go to the toast as they are, and the toast's text keeps the break.
+  assert.match(app, /box\.replaceChildren\(busy \? spinIcon\(16\) : icon\("info"\), el\("span", "", text\)\);/);
+  assert.match(read('client/public/polish.css'), /\n\.toast > span \{ white-space: pre-line; \}\n/);
+  // A refusal (503 computer_unconfirmed: the cat was not made) reaches the owner in the server's words: both requests keep a
+  // 5xx's own sentence (serverError), and their dialogs say it through the shell's visibleError, the form left as it was
+  // (复刻's openModal keeps its fields and stays open; 编辑资料 stays open with its error line under the form).
+  const take = (name: string) => { const m = new RegExp(`\\n {2}function ${name}\\([^\\n]*\\) \\{\\n[\\s\\S]*?\\n {2}\\}\\n`).exec(app); assert.ok(m, name); return m![0]; };
+  const out: Any = {};
+  vm.runInNewContext(take('zhError') + take('visibleError') + 'out.visibleError = visibleError;', { out, EMPTY_REPLY: '', String, TypeError });
+  const sentence = '没能确认新猫用不了这台电脑，猫没有创建。请再试一次。';
+  const refused = Object.assign(new Error(sentence), { status: 503, code: 'computer_unconfirmed' });
+  assert.equal(out.visibleError(refused), sentence, '复刻');
+  assert.equal(out.visibleError(refused, '导入失败'), sentence, '导入资料');
+  assert.match(take('openModal'), /\} catch \(e\) \{\n\s+modalError\.hidden = false;\n\s+modalError\.textContent = visibleError\(e\);/);
+  assert.match(app, /const showErr = \(e, fallback\) => \{ err\.hidden = false; err\.textContent = visibleError\(e, fallback\); if \(err\.scrollIntoView\) err\.scrollIntoView\(\{ block: "nearest" \}\); \};/, '编辑资料\'s error line is the form\'s last: brought into view');
+  assert.match(app, /\} catch \(e\) \{ showErr\(e, "导入失败"\); \}/);
+});
+
 test('the no-chat line is the next step and the way to the list (item 46: no sentence repeating the heading), and opens the list', () => {
   const p = page({ cats: ['团子'] });
   const view = p.paint(p.Q.noChat());
@@ -2472,6 +2498,31 @@ test('review: the two 409s by code — name_taken marks the name; request_change
       assert.deepEqual(p.opened, ['宪宪']);
     }
   }
+});
+
+test('item 52: a cat refused because the server could not make sure it would not have this computer (503 computer_unconfirmed) says the server\'s sentence, leaves the form as it was, and the next try is a new request that is made', async () => {
+  const sentence = '没能确认新猫用不了这台电脑，猫没有创建。请再试一次。';
+  const { R } = page();
+  assert.deepEqual(plain(R.catError(fail(503, sentence, 'computer_unconfirmed'), '宪宪')), { kind: 'form', text: sentence });
+  assert.equal(R.catError(fail(503, '', 'computer_unconfirmed'), '宪宪').text, sentence, 'the same words when the server gives none');
+  let refuse = true;
+  const p = page({ route: (path, method) => { if (path === '/xbot-api/bots' && method === 'POST' && refuse) { refuse = false; throw fail(503, sentence, 'computer_unconfirmed'); } return undefined; } });
+  const stage = await p.stage();
+  const go = button(stage, '带它回家'), name = control(stage, '名字');
+  name.value = '宪宪 2';
+  go.click();
+  await settle();
+  assert.equal(visibleText(one(stage, 'qc-error')), sentence);
+  assert.equal(name.getAttribute('aria-invalid'), null, 'not blamed on the name');
+  assert.equal(name.value, '宪宪 2', 'the form as the owner left it');
+  assert.equal(p.doc.activeElement === go, true);
+  assert.deepEqual(p.opened, []);
+  go.click();
+  await settle();
+  const [first, second] = p.posts().map(c => c.body);
+  assert.deepEqual(second.simple, first.simple);
+  assert.notEqual(second.idempotencyKey, first.idempotencyKey, 'nothing was made: the next try is a new request');
+  assert.deepEqual(p.opened, ['宪宪 2']);
 });
 
 test('review: the card\'s tail holds the reason, what to do, the quiet note and the way on, and is there only when one of them is; no room is kept for it, so a cat that can come home leaves no empty band', async () => {

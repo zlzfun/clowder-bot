@@ -125,7 +125,8 @@
     const replies = [];
     for (const e of S.replies.values()) {
       if (e.r.done || e.gone || !e.r.catId) continue;
-      replies.push({ id: e.id, catId: e.r.catId, phase: e.r.phase, tool: e.r.step ? e.r.step.tool : "", unsure: !!e.unsure });
+      // area: "computer" for a step on this computer (the header says 在用电脑…, chat-presence-rules.js).
+      replies.push({ id: e.id, catId: e.r.catId, phase: e.r.phase, tool: e.r.step ? e.r.step.tool : "", area: e.r.step ? e.r.step.area || "" : "", unsure: !!e.unsure });
     }
     return { key: S.key, stopping: !!S.stopping, replies, waiting: S.waiting.map((w) => ({ queued: !!w.wait.queued })) };
   }

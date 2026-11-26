@@ -13,6 +13,7 @@ import { Activity } from './activity.js';
 import { Approvals } from './approvals.js';
 import { ChatPack } from './chat-pack.js';
 import { PageReading, soleEmoji } from './reactions.js';
+import { Computer, noComputer, type ComputerDriver } from './computer.js';
 
 export const encode = encodeURIComponent;
 // A regular conversation request. The native member receives its own name, role
@@ -72,9 +73,13 @@ export class BotBridge {
   readonly approvals: Approvals;
   /** The engine pack that makes every cat talk the way a chat is talked in; asked for before a cat is given something to answer. */
   readonly manner: ChatPack;
-  constructor(readonly native: NativeTransport, readonly store: ProductStore, readonly workspace: string) {
+  /** Which cats may use this computer (the engine's registry) and the driver behind it. Without a driver the feature is absent. */
+  readonly computer: Computer;
+  /** What the owner should hear about a cat a creation just returned, by that very object, until it is said (see noted). Request bookkeeping, in memory. */
+  private readonly creationNotices = new WeakMap<NativeCat, string>();
+  constructor(readonly native: NativeTransport, readonly store: ProductStore, readonly workspace: string, driver: ComputerDriver = noComputer) {
     this.workspaces = new Workspaces(this); this.nativeFiles = new NativeFiles(this); this.activity = new Activity(this);
-    this.approvals = new Approvals(this); this.manner = new ChatPack(native);
+    this.approvals = new Approvals(this); this.manner = new ChatPack(native); this.computer = new Computer(native, driver, cat => this.stopRunningTurns(cat));
   }
   cats(): Promise<NativeCat[]> { return this.native.request<{ cats: NativeCat[] }>('/api/cats').then(r => r.cats); }
   templates(): Promise<{ templates: RoleTemplate[]; clientDefaults: Record<string, { defaultModel: string; models: string[] }> }> { return this.native.request('/api/cat-templates'); }
@@ -408,6 +413,19 @@ export class BotBridge {
         active, queued };
     }), groups: this.store.state.groupThreadIds.map(id => ({id,thread_id:id,activity:views.find(view => view.threadId === id) ?? this.activity.unavailable(id)})), others: [] };
   }
+  /**
+   * A new cat, by whichever way it is made, starts without this computer:
+   * each native creation below goes through Computer.guard, which blocks the
+   * cat's id before the cat exists. What guard could not put right is kept
+   * for this creation's answer (creationNotice).
+   */
+  private noted(cat: NativeCat, notice?: string): NativeCat { if (notice) this.creationNotices.set(cat, notice); return cat; }
+  /** Said once, with the answer of the creation that returned this very cat. */
+  creationNotice(cat: NativeCat): string | undefined {
+    const notice = this.creationNotices.get(cat);
+    this.creationNotices.delete(cat);
+    return notice;
+  }
   async createBot(input: CreateBot, source?: NativeCat): Promise<NativeCat> {
     if (input.simple) {
       if (source || input.catConfig || input.sourceTemplate || input.runtimeId || input.templateId || input.persona !== undefined || input.description !== undefined)
@@ -418,17 +436,19 @@ export class BotBridge {
     if (input.catConfig) {
       if (source || input.runtimeId || input.templateId || input.persona !== undefined || input.description !== undefined)
         throw new ApiError(400, '创建配置不能与旧版字段混用');
-      const result = await this.native.request<{ cat: NativeCat; sourceTemplate: SourceTemplate | null }>('/api/bot-cat-templates/instantiate', {
+      // The engine's route names the cat after the request key (patches/0005-cat-templates.patch), so its id is known before it exists.
+      const key = input.idempotencyKey ?? randomUUID(), expected = `bot-${createHash('sha256').update(key).digest('hex').slice(0, 24)}`;
+      const { made: result, notice } = await this.computer.guard(expected, () => this.cats().then(cats => cats.some(known => known.id === expected)), () => this.native.request<{ cat: NativeCat; sourceTemplate: SourceTemplate | null }>('/api/bot-cat-templates/instantiate', {
         method: 'POST', body: { name: input.name, catConfig: input.catConfig,
-          ...(input.sourceTemplate ? { sourceTemplate: input.sourceTemplate } : {}), idempotencyKey: input.idempotencyKey ?? randomUUID() },
-      });
+          ...(input.sourceTemplate ? { sourceTemplate: input.sourceTemplate } : {}), idempotencyKey: key },
+      }));
       const cat = result.cat;
       if (!cat?.id || !cat.breedId) throw new ApiError(502, '引擎的创建结果缺少猫猫身份');
       const identity = avatarBreed(cat.breedId);
       Object.assign(this.store.bot(cat.id), { templateId: identity, avatarSeed: input.avatar_seed || `cat:${identity}`,
         timezone: input.timezone, ...(result.sourceTemplate ? { sourceTemplate: result.sourceTemplate } : {}) });
       this.store.save();
-      return this.withStartingArguments(cat);
+      return this.noted(await this.withStartingArguments(cat), notice);
     }
     if (input.sourceTemplate) throw new ApiError(400, '缺少创建配置');
     if ((await this.cats()).some(c => c.name.toLowerCase() === input.name.toLowerCase())) throw new ApiError(409, '已经有一只叫这个名字的猫猫了', undefined, 'name_taken');
@@ -443,17 +463,17 @@ export class BotBridge {
     const unavailable = runtimeUnavailable(runtime);
     if (unavailable) throw new ApiError(422, unavailable);
     const catId = `bot-${randomUUID().slice(0, 12)}`;
-    const { cat } = await this.native.request<{ cat: NativeCat }>('/api/cats', { method: 'POST', body: {
+    const { made: { cat }, notice } = await this.computer.guard(catId, async () => false, () => this.native.request<{ cat: NativeCat }>('/api/cats', { method: 'POST', body: {
       catId, name: input.name, displayName: input.name, nickname: input.name,
       color: template.color, mentionPatterns: [`@${input.name}`, `@${catId}`],
       roleDescription: input.persona?.trim() || source?.roleDescription || template.roleDescription,
       personality: source?.personality ?? template.personality,
       teamStrengths: input.description ?? source?.teamStrengths ?? template.teamStrengths,
       clientId: runtime.clientId, configurationSource: 'native_tool', defaultModel: '',
-    } });
+    } }));
     Object.assign(this.store.bot(cat.id), { templateId: template.id, avatarSeed: input.avatar_seed, timezone: input.timezone });
     this.store.save();
-    return this.withStartingArguments(cat);
+    return this.noted(await this.withStartingArguments(cat), notice);
   }
   /**
    * The CLI arguments a new cat starts with (memberCliArgs), written as their
@@ -556,14 +576,16 @@ export class BotBridge {
       for (const old of this.simpleRequests.keys()) { if (this.simpleRequests.size <= 50) break; this.simpleRequests.delete(old); }
     }
     const journey = 'clowder-bot-simple';
-    const { cat } = await this.native.request<{ cat: NativeCat }>('/api/cats', { method: 'POST',
+    const body = sent.body;
+    // A cat this key already made is a repeat of that request: it keeps whatever the owner set on it since (asked again inside the lock, not from the list read above).
+    const { made: { cat }, notice } = await this.computer.guard(catId, () => this.cats().then(cats => cats.some(known => known.id === catId)), () => this.native.request<{ cat: NativeCat }>('/api/cats', { method: 'POST',
       headers: { 'x-cat-cafe-onboarding-journey': journey, 'idempotency-key': `onboarding:${journey}:cat:${key}` },
-      body: sent.body }).catch(error => {
+      body }).catch(error => {
       if (error instanceof ApiError && error.status === 409) throw different(error.details);
       throw error;
-    });
+    }));
     if (!cat?.id) throw new ApiError(502, '没能确认猫猫是否建好，请刷新后查看');
-    return keep(cat, sent.face);
+    return this.noted(await keep(cat, sent.face), notice);
   }
   /** What a creation request comes to right now: which cat, which tool, which words. Refuses, before native is asked, what cannot be made. */
   private async resolveSimple(name: string, simple: NonNullable<CreateBot['simple']>, catId: string, custom: boolean, about: string | undefined, temper: string | undefined, input: string) {
@@ -700,6 +722,32 @@ export class BotBridge {
       catch (e) { if (!(e instanceof ApiError && e.status === 404)) throw e; }
     }
     return { status: 'ok', native: await this.queue(threadId) };
+  }
+  /** How long a cancelled turn is given to be gone from its conversation's queue, in ms. */
+  cancelPatience = 6000;
+  /**
+   * Ends the turns a cat is in the middle of: in its own conversation and in
+   * every group. Native cancellation, one conversation at a time. Cancelling
+   * is a request: a turn counts as ended only once the conversation's queue no
+   * longer lists it for this cat. A queue that cannot be read, a cancellation
+   * the engine did not take, a turn still listed after cancelPatience: not
+   * ended.
+   */
+  async stopRunningTurns(cat: NativeCat): Promise<{ stopped: number; failed: number }> {
+    const threads = new Set([this.store.bot(cat.id).activeThreadId, ...this.store.state.groupThreadIds].filter((id): id is string => !!id));
+    const running = async (threadId: string) => (await this.queue(threadId)).activeInvocations.some(run => run.catId === cat.id);
+    let stopped = 0, failed = 0;
+    for (const threadId of threads) {
+      try {
+        if (!await running(threadId)) continue;
+        const answer = await this.native.request<{ cancelled?: boolean }>(`/api/threads/${encode(threadId)}/cancel/${encode(cat.id)}`, { method: 'POST', body: {} })
+          .catch(error => { if (error instanceof ApiError && error.status === 404) return { cancelled: true }; throw error; });
+        let gone = answer.cancelled !== false && !await running(threadId);
+        for (let waited = 0; answer.cancelled !== false && !gone && waited < this.cancelPatience; waited += 300) { await new Promise(done => setTimeout(done, 300)); gone = !await running(threadId); }
+        if (gone) stopped++; else failed++;
+      } catch { failed++; }
+    }
+    return { stopped, failed };
   }
   async notes(threadId: string) {
     const { entries } = await this.native.request<{ entries: Array<{ key: string; value: string; updatedAt?: number }> }>(`/api/memory?threadId=${encode(threadId)}`);
