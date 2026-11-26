@@ -286,3 +286,28 @@ test('微信 on, but its status cannot be read: on, and no authorization is clai
   r.native.request = (async (path: string, options: any = {}) => { if (/\/actions\//.test(path)) throw new Error('boom'); return request(path, options); }) as any;
   assert.deepEqual([(await r.call('/wechat')).body.state, (await r.call('/wechat')).body.authorization], ['on', { active: false, remaining_ms: 0 }]);
 });
+
+test('requests that arrive together do not trip over each other: two adds get two ids, a status read cannot land between a reset and its action', async t => {
+  const r = await setup(t);
+  const [first, second] = await Promise.all([r.call('/custom', 'POST', { name: 'notes', program: 'node' }), r.call('/custom', 'POST', { name: 'notes', program: 'node', args: ['b'] })]);
+  assert.deepEqual([first.status, second.status], [201, 201]);
+  assert.deepEqual([first.body.id, second.body.id].sort(), ['custom:notes', 'custom:notes-2']);
+  assert.equal(r.apps.rows.filter(row => row.source === 'external').length, 2);
+  await r.call('/wechat/connect', 'POST', {});
+  // The engine answers each call a tick later, so unserialised pairs would interleave.
+  const request = r.native.request.bind(r.native);
+  r.native.request = (async (path: string, options: any = {}) => { await new Promise(done => setTimeout(done, 2)); return request(path, options); }) as any;
+  const answers = await Promise.all([r.call('/wechat'), r.call('/wechat/authorize', 'POST', {}), r.call('/wechat'), r.call(), r.call('/wechat/revoke', 'POST', {}), r.call('/wechat')]);
+  assert.deepEqual(answers.map(a => a.status), [200, 200, 200, 200, 200, 200], JSON.stringify(answers.map(a => a.body.error)));
+  assert.deepEqual((await r.call('/wechat')).body.authorization, { active: false, remaining_ms: 0 });
+});
+
+test('微信 that cannot be read does not take the custom apps off the list; asked for directly, the error is the error', async t => {
+  const r = await setup(t);
+  await r.call('/custom', 'POST', { name: 'notes', program: 'node' });
+  const request = r.native.request.bind(r.native);
+  r.native.request = (async (path: string, options: any = {}) => { if (/plugin-manager/.test(path)) throw Object.assign(new Error('engine said no'), { status: 500 }); return request(path, options); }) as any;
+  const list = await r.call();
+  assert.deepEqual(list.body.apps.map((a: any) => [a.id, a.state, a.reason]), [['wechat', 'unavailable', '没能读到它的状态'], ['custom:notes', 'unchecked', undefined]]);
+  assert.equal((await r.call('/wechat')).status, 500);
+});
