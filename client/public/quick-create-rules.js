@@ -411,6 +411,9 @@
     if (code === "faces_unavailable") return { kind: "unavailable", text: "刚才没能读到猫猫的资料，这次没有建。" };
     const said = message.replace(/\s+/g, " ").trim(), sentence = plain(said) ? said + (/[。！？]$/u.test(said) ? "" : "。") : "";
     if (code === "face_unavailable" || code === "face_tool") return { kind: "face", text: sentence || "刚才没能建好：" + (trim(tool) || "这个 Agent") + " 现在用不了。" };
+    // 503 computer_unconfirmed (item 52): the server could not make sure the new cat would not have this computer,
+    // so it made none. A refusal in the server's words; the form stays as it is for another try (a new request).
+    if (code === "computer_unconfirmed") return { kind: "form", text: sentence || "没能确认新猫用不了这台电脑，猫没有创建。请再试一次。" };
     // The two 409s, told apart by code: the name is taken (said on the name),
     // or this key already stood for another request (the server's sentence,
     // not blamed on the name; the next attempt is a new request). A 409 with

@@ -5991,7 +5991,8 @@
       section("它用什么思考", agentTrigger(data)),
       err,
     );
-    const showErr = (e, fallback) => { err.hidden = false; err.textContent = visibleError(e, fallback); };
+    // The line is the form's last, below 职责 and 它用什么思考: brought into view, or a refusal (导入资料's 503 computer_unconfirmed, a failed save) goes unseen.
+    const showErr = (e, fallback) => { err.hidden = false; err.textContent = visibleError(e, fallback); if (err.scrollIntoView) err.scrollIntoView({ block: "nearest" }); };
     modalForm.onsubmit = async (ev) => {
       ev.preventDefault();
       err.hidden = true;
@@ -6024,7 +6025,8 @@
       err.hidden = true;
       try {
         const tpl = JSON.parse(await f.text());
-        const res = await api("/xbot-api/bots/import", { method: "POST", body: tpl });
+        // serverError: a 5xx keeps the server's own words (503 computer_unconfirmed: the cat was not made, try again).
+        const res = await api("/xbot-api/bots/import", { method: "POST", body: tpl, serverError: true });
         closeModal();
         // A creation's notice (item 52: the new cat could not be kept off this computer), said once its chat is open.
         if (res && res.name && res.notice) holdNotice({ name: res.name, nativeId: res.native_id || "", text: res.notice });
@@ -6099,7 +6101,8 @@
       const body = { name: name, role: role };
       const group = (v.group || "").trim();
       if (group) body.group = group;
-      const res = await api("/xbot-api/bots/" + encodeURIComponent(src) + "/fork", { method: "POST", body: body });
+      // serverError: a 5xx keeps the server's own words (503 computer_unconfirmed: the copy was not made, try again).
+      const res = await api("/xbot-api/bots/" + encodeURIComponent(src) + "/fork", { method: "POST", body: body, serverError: true });
       const made = (res && res.name) || name;
       // A creation's notice (item 52), said once the copy's chat is open.
       if (res && res.notice) holdNotice({ name: made, nativeId: res.native_id || "", text: res.notice });

@@ -516,6 +516,38 @@ test('a creation\'s notice goes to the shell with the new cat, which says it onc
   assert.match(read('client/public/app.js'), /onCreated: async \(created\) => \{\s*\/\/[^\n]*\n\s*if \(created\.notice\) holdNotice\(\{ name: created\.name, nativeId: created\.native_id \|\| "", text: created\.notice \}\);\s*await refreshLists\(\);\s*await selectBot\(created\.name\);/);
 });
 
+test('item 52: a creation refused because the server could not make sure the new cat would not have this computer (503 computer_unconfirmed) says the server\'s sentence and keeps the form as it was; the next try is made', async () => {
+  const sentence = '没能确认新猫用不了这台电脑，猫没有创建。请再试一次。';
+  let refuse = true;
+  const srv = backend({ create: (body) => { if (refuse) { refuse = false; throw Object.assign(fail(503, sentence), { code: 'computer_unconfirmed' }); } return { name: body.name, native_id: 'cat_new' }; } });
+  // As the shell's apiFetch does (app.js): a 5xx loses its words and code unless the caller asks for them.
+  const api = async (path: string, opt: { method?: string; body?: unknown; serverError?: boolean } = {}) => {
+    try { return await srv.api(path, opt); }
+    catch (err: any) { if (err && err.status >= 500 && !opt.serverError) throw fail(err.status, '服务出了点问题，请稍后再试。'); throw err; }
+  };
+  const b = browser(), opener = b.doc.createElement('button'), created: unknown[] = [];
+  b.doc.body.append(opener);
+  b.T.openCreate({ api, opener, onCreated: (c: unknown) => { created.push(plain(c)); }, names: ['宪宪'] });
+  await settle();
+  const modal = () => named(b.doc.body, 'ct-modal')[0];
+  named(modal(), 'skrow')[1].click();
+  await settle();
+  control(modal(), '名字').value = '砚砚 2';
+  named(b.doc.body, 'ct-card')[0].dispatch('submit');
+  await settle();
+  const error = named(modal(), 'error')[0];
+  assert.equal(error.hidden, false);
+  assert.equal(error.textContent, sentence, 'the server\'s own sentence, not the shell\'s generic one');
+  assert.ok(modal(), 'the form stays');
+  assert.equal(control(modal(), '名字').value, '砚砚 2', 'as the owner left it');
+  assert.deepEqual(created, []);
+  named(b.doc.body, 'ct-card')[0].dispatch('submit');
+  await settle();
+  assert.deepEqual(created, [{ name: '砚砚 2', native_id: 'cat_new' }]);
+  assert.equal(modal(), undefined);
+  assert.match(read('client/public/cat-templates.js'), /api\("\/xbot-api\/bots", \{ method: "POST", body, serverError: true \}\)/);
+});
+
 test('the Agent field says an unread or unusable list in the words of 设置 → Agents', async () => {
   const note = (root: El) => named(all(root).find(n => n.tag === 'label' && n.textContent === 'Agent')!.parent!, 'ct-note')[0];
   let managed = 0;

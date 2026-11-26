@@ -749,7 +749,8 @@
       if (!attempt || attempt.print !== print) attempt = { print, key: requestKey() };
       body.idempotencyKey = attempt.key;
       let result;
-      try { result = await api("/xbot-api/bots", { method: "POST", body }); }
+      // serverError: a 5xx keeps the server's own words and code (503 computer_unconfirmed: the cat was not made, try again).
+      try { result = await api("/xbot-api/bots", { method: "POST", body, serverError: true }); }
       catch (err) {
         if (!alive) { saving = false; return; }
         busy(false);
