@@ -1,11 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { webcrypto } from 'node:crypto';
+import { once } from 'node:events';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import vm from 'node:vm';
+import express from 'express';
 import { ZodError } from 'zod';
 import { Doc, El, TextNode } from './fake-dom.js';
-import { parseCustomApp } from '../server/native/apps.js';
+import { createApp } from '../server/app.js';
+import { createXbotAppsRouter } from '../server/xbot/apps.js';
+import { BotApps, parseCustomApp } from '../server/native/apps.js';
+import { NativeFixture } from './native-fixture.js';
 import { WECHAT_DISCLOSURE } from './apps-fixture.js';
 
 // 应用 (apps-dialog-rules.js, apps-dialog.js; docs/xbot-frontend.md item 52):
@@ -401,6 +408,8 @@ test('Escape goes up one level, then closes; focus returns to where it came from
   await settle();
   assert.equal(title(), '我的笔记');
   assert.equal(page.doc.activeElement, page.doc.querySelector('.ap-title'), 'a page starts at its title');
+  // From the title, Tab moves on in reading order (the browser's own move; the trap only wraps at the two ends).
+  assert.equal(page.doc.activeElement.key('Tab').defaultPrevented, false);
   const esc = page.doc.activeElement.key('Escape');
   assert.ok(esc.defaultPrevented);
   assert.equal(title(), '应用');
@@ -914,6 +923,80 @@ test('what the dialog shows speaks the app\'s everyday words: no engine words an
   const said = words.join('\n');
   for (const word of [/(?<![\w-])bots?\b/i, /xbot/i, /(?<![\w-])threads?\b/i, /sessions?\b/i, /会话/, /线程/, /原生/, /调用/, /模型/, /Clowder AI/i, /插件管理/, /operation/i])
     assert.doesNotMatch(said.replace(new RegExp(WECHAT_DISCLOSURE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), ''), word);
+});
+
+// ---------------------------------------------------------------- against the real adapter
+// The dialog over the production router and the adapter (server/xbot/apps.ts, server/native/apps.ts) on the
+// scripted engine of tests/apps-fixture.ts, through real HTTP: what it sends is what the adapter accepts,
+// and what it shows is what the adapter answered.
+test('against the real adapter: 微信 opened and authorized (the countdown from its answer) and revoked; a program added with a secret, connected, its tools shown, removed', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'bot-apps-dialog-')), native = new NativeFixture();
+  const runtime = createApp({ native, dataFile: join(dir, 'presentation.json') });
+  const app = express();
+  app.use(express.json());
+  app.use('/xbot-api', createXbotAppsRouter(runtime.bridge, new BotApps(native, runtime.store, 'darwin')));
+  app.use((error: Any, _req: Any, res: Any, _next: Any) => res.status(error.status ?? (error.issues ? 400 : 500)).json({ error: error.issues ? error.issues.map((i: Any) => `${i.path.join('.')}: ${i.message}`).join('；') : error.message, ...(error.code ? { code: error.code } : {}) }));
+  const server = app.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(async () => { await runtime.close(); await new Promise<void>((r) => server.close(() => r())); rmSync(dir, { recursive: true, force: true }); });
+  const address = server.address() as Any;
+  // The shell's api(): the server's sentence and code on an error, a plain sentence when nothing answers.
+  const api = async (path: string, opt: Any = {}) => {
+    const res = await fetch(`http://127.0.0.1:${address.port}${path}`, { method: opt.method || 'GET', headers: opt.body ? { 'Content-Type': 'application/json' } : {}, body: opt.body ? JSON.stringify(opt.body) : undefined, signal: opt.signal })
+      .catch(() => { throw new Error('连不上 clowder-bot'); });
+    const data: Any = await res.json().catch(() => ({}));
+    if (!res.ok) throw Object.assign(new Error(data.error || 'request failed'), { status: res.status }, data.code ? { code: data.code } : {});
+    return data;
+  };
+  const page = load();
+  const until = async (ok: () => boolean, what: string) => {
+    for (let i = 0; i < 400 && !ok(); i++) await new Promise((r) => setTimeout(r, 5));
+    assert.ok(ok(), what);
+  };
+  page.window.ClowderApps.init({ api, icon: icon(page.doc), now: page.now });
+  page.window.ClowderApps.open({});
+  const body = () => page.doc.querySelector('.ap-body') as El;
+  const row = (id: string) => page.doc.querySelector(`.ap-row[data-app="${id}"]`) as El;
+  await until(() => !!row('wechat'), 'the list is read');
+  assert.equal(seen(row('wechat')), '微信未打开');
+  row('wechat').click();
+  buttonOf(body(), '打开').click();
+  await until(() => seen(one(body(), '.ap-state')) === '已打开', '微信 is on');
+  assert.deepEqual(one(body(), '.ap-facts').children.map((li) => seen(li)), [...R.WECHAT_FACTS]);
+  buttonOf(body(), '插件原文').click();
+  assert.match(seen(one(body(), '.ap-source-text')), /版本 0\.1\.0-alpha\.7不会保存截图。/);
+  buttonOf(body(), '授权 10 分钟').click();
+  await until(() => all(body(), '.ap-clock').length === 1, 'authorized');
+  // The engine's clock is not this page's (the test's clock is fixed): the remaining time it answered counts.
+  assert.match(seen(one(body(), '.ap-clock')), /^(10:00|9:59)$/);
+  assert.equal(native.apps.plugin!.live, 'running');
+  buttonOf(body(), '撤销').click();
+  await until(() => seen(one(body(), '.ap-auth-state')) === R.WECHAT_NOT_YET, 'revoked');
+  // A program, with one secret.
+  (page.doc.activeElement as El).key('Escape');
+  one(body(), '.ap-row-add').click();
+  const form = one(body(), 'form');
+  const [nameIn, programIn] = all(form, 'input') as Any[];
+  nameIn.value = 'Probe'; programIn.value = 'node';
+  (one(form, 'textarea') as Any).value = 'probe.mjs';
+  buttonOf(form, '添加环境变量').click();
+  const secret = one(form, '.ap-secret');
+  (one(secret, '.ap-secret-name') as Any).value = 'PROBE_TOKEN';
+  (one(secret, '.ap-secret-in') as Any).value = 'shh';
+  buttonOf(form, '添加').click();
+  await until(() => seen(page.doc.querySelector('.ap-title')) === 'Probe', 'its page');
+  assert.equal(seen(one(body(), '.ap-state')), '已连接');
+  assert.equal(seen(one(body(), '.ap-note')), '加好了。猫猫从下一条消息起就能用它。');
+  assert.deepEqual(all(body(), '.ap-tool-name').map((n) => seen(n)), ['app_probe']);
+  assert.deepEqual(all(body(), '.ap-names code').map((n) => seen(n)), ['PROBE_TOKEN']);
+  const row2 = native.apps.rows.find((r) => r.id === 'probe')!;
+  assert.deepEqual([row2.mcpServer.command, row2.mcpServer.args, row2.mcpServer.env], ['node', ['probe.mjs'], { PROBE_TOKEN: 'shh' }]);
+  buttonOf(body(), '移除').click();
+  buttonOf(page.doc.querySelector('.ap-confirm') as El, '移除').click();
+  await until(() => seen(page.doc.querySelector('.ap-title')) === '应用', 'back on the list');
+  assert.equal(row('custom:probe'), null);
+  assert.equal(native.apps.rows.some((r) => r.id === 'probe'), false);
+  page.window.ClowderApps.close();
 });
 
 // ---------------------------------------------------------------- the page and the shell

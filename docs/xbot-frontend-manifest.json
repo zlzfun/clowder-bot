@@ -1019,13 +1019,13 @@
       "target": "client/public/apps-dialog.js",
       "description": "应用 dialog (window.ClowderApps): one dialog over the chat on the original .modal/.modal-card with the list (微信, custom apps, 添加自定义应用) and one app's page; GET /xbot-api/apps on opening, one check per custom app (at most 3 at a time), 微信's open/close/authorize/revoke, the add form with idempotency keys, rename and secrets by PATCH, remove after a nested confirm; focus trap, Escape one level at a time, focus back to the opener, eased height, one polite live region; everything in flight is abandoned on close",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-26 (docs/xbot-frontend.md item 52)",
-      "sha256": "42628293e06ab3042e528b2ad796abbb7214c256b93f3cb236af1836614148a4"
+      "sha256": "7f233002d443a0d611ac12c3b8828971ef53b18a64b3e587f50f9b3fc023ad52"
     },
     {
       "target": "client/public/apps-dialog.css",
       "description": "应用 dialog styles: the card hanging from a fixed line (a sheet at 560px and below), XBot's settings-row vocabulary for the list, five state marks drawn as different shapes (filled dot, ring, spinner, bar, struck ring), the 微信 page's authorization block and countdown, the custom app's page and the add form; tokens only, 44px targets on a phone, no motion under reduced motion",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-26 (docs/xbot-frontend.md item 52)",
-      "sha256": "9a8ba95a9139cb543b8bec701e86e2d0098352128a5af8f02100f932bb8f7bc3"
+      "sha256": "445fd7804c3540ddc9181ebda84aec4e274e0a8a91e9756b2870e92e5ae00e52"
     }
   ]
 }

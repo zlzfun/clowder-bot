@@ -69,16 +69,17 @@
   const tileIcon = (kind) => (kind === "wechat" ? drawn("wechat") : icon(kind === "url" ? "globe" : "terminal"));
   const kindOf = (app) => (app && app.kind === "wechat" ? "wechat" : app && app.source && app.source.type === "url" ? "url" : "program");
 
-  // Tab and Shift+Tab stay inside a layer.
+  // Tab and Shift+Tab stay inside a layer: they wrap at its two ends (and from the layer itself, or from
+  // outside it); anywhere else inside (a page's title, a state line) the browser moves on in reading order.
   function trapTab(ev, box) {
     const live = [...box.querySelectorAll("button, input, select, textarea")]
       .filter((n) => !n.disabled && n.getAttribute("tabindex") !== "-1" && visible(n));
-    if (!live.length) return;
+    if (!live.length) { ev.preventDefault(); return; }
     const first = live[0], last = live[live.length - 1], here = document.activeElement;
-    if (ev.shiftKey ? here === first || !live.includes(here) : here === last || !live.includes(here)) {
-      ev.preventDefault();
-      (ev.shiftKey ? last : first).focus();
-    }
+    const edge = here === box || !box.contains(here) || (ev.shiftKey ? here === first : here === last);
+    if (!edge) return;
+    ev.preventDefault();
+    (ev.shiftKey ? last : first).focus();
   }
   // A change of the card's height, eased (180 ms) from the old height to the new; the top edge stays where it
   // is (the dialog hangs from a fixed line). At once when motion is reduced or nothing is laid out. Changed

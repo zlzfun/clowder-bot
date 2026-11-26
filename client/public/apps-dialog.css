@@ -26,8 +26,9 @@
 /* The head: ‹ back (on a page), the title, ×. */
 .ap-head { flex: none; display: flex; align-items: center; gap: var(--x-s2); min-height: 60px; padding: var(--x-s5) var(--x-s5) var(--x-s2) var(--x-s8); }
 .ap-head:has(> .ap-back:not([hidden])) { padding-left: var(--x-s5); }
+/* A little room round the title's text (taken back by the margin), so the name button's fill and ring are not cut by the ellipsis' clip. */
 .ap-card .ap-title {
-  flex: 1; min-width: 0; margin: 0; font-size: 20px; font-weight: 560; line-height: 1.3; letter-spacing: -0.01em;
+  flex: 1; min-width: 0; margin: -3px -3px -3px -7px; padding: 3px 3px 3px 7px; font-size: 20px; font-weight: 560; line-height: 1.3; letter-spacing: -0.01em;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 /* Focus is put on the title only to start reading a page there (it is not a control, not in the Tab order). */
@@ -182,10 +183,10 @@
 .ap-name-mark { flex: none; width: 15px; height: 15px; color: var(--x-muted); opacity: 0; transition: opacity var(--dur-pop-close) ease-out; }
 .ap-name:hover, .ap-name:focus-visible { background: var(--x-fill-1); }
 .ap-name:hover .ap-name-mark, .ap-name:focus-visible .ap-name-mark { opacity: 1; }
-.ap-name:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+.ap-name:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 @media (hover: none) { .ap-name-mark { opacity: 1; } }
 .ap-name-input {
-  width: calc(100% + 10px); min-height: 36px; margin: -4px 0 -4px -10px; padding: 4px 10px; border: 0; border-radius: var(--x-r-sm); outline: none;
+  width: calc(100% + 7px); min-height: 36px; margin: -4px 0 -4px -7px; padding: 4px 7px; border: 0; border-radius: var(--x-r-sm); outline: none;
   background: var(--x-fill-2); color: var(--x-text); font: inherit;
 }
 
