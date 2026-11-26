@@ -1182,7 +1182,7 @@ test('这台电脑 in 资料: nothing until the server answers, nothing where th
   assert.deepEqual([r.on, r.busy, r.locked, r.hint, r.said, r.failed], ['false', null, null, '', '', '']);
   assert.equal(seenText(r.row), '可以用这台电脑', 'the row says its name and nothing else');
   assert.equal(r.sw.getAttribute('role'), 'switch');
-  assert.equal(c.doc.getElementById(r.sw.getAttribute('aria-labelledby'))?.textContent, '可以用这台电脑');
+  assert.equal(c.doc.getElementById(r.sw.getAttribute('aria-labelledby')!)?.textContent, '可以用这台电脑');
   assert.equal(r.sw.getAttribute('aria-describedby'), null);
   // The drawer's routine repaints ask nothing; a profile read again asks again.
   c.page(); c.page();
