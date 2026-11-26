@@ -193,13 +193,16 @@ export class Computer {
    * If any step cannot be confirmed the entry is taken out again.
    */
   private async register(located: ComputerServer): Promise<void> {
+    // Ids already on a leftover entry's block list that are no cat yet: cats blocked before a creation that may still reach the engine (guard).
+    const before = await this.entry();
+    const unborn = new Set([...(before?.blockedCats ?? []).filter(id => !(id in (before?.cats ?? {}))), ...this.unconfirmed]);
     await this.install({ command: placeholder, args: [] });
     try {
       await this.toggle({ scope: 'project', enabled: false });
-      // …and the cats that may still be on their way into the engine: the one call only knows the cats that exist.
-      for (const id of this.unconfirmed) await this.toggle({ scope: 'cat', catId: id, enabled: false });
+      // The one call writes the list anew from the cats that exist, so the cats still on their way are put back on it.
+      for (const id of unborn) await this.toggle({ scope: 'cat', catId: id, enabled: false });
       const blocked = await this.entry();
-      if (anyOn(blocked) || [...this.unconfirmed].some(id => !blocked?.blockedCats?.includes(id))) throw new Error('still on for a cat');
+      if (anyOn(blocked) || [...unborn].some(id => !blocked?.blockedCats?.includes(id))) throw new Error('still on for a cat');
       await this.install(located);
       const real = await this.entry();
       if (!real || anyOn(real)) throw new Error('on for a cat after the driver was set');

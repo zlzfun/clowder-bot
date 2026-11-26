@@ -284,6 +284,20 @@ test('a creation that reaches the engine late does not start with the computer, 
     assert.ok(late); assert.equal((await fresh.bridge.computer.view(late)).on, false);
     assert.equal((await fresh.bridge.computer.view(fresh.native.cats[1]!)).on, false);
   } finally { await fresh.end(); }
+  // A placeholder left by a registration that broke off: the new cat's id is blocked on it, the creation is late, and the
+  // registration that follows writes the block list anew — the id that is no cat yet must still be on it.
+  const leftover = app();
+  try {
+    leftover.native.capabilities.push({ id: 'computer', type: 'mcp', source: 'external', enabled: true, mcpServer: { transport: 'stdio', command: '/usr/bin/true', args: [] } });
+    let release!: () => void;
+    leftover.native.catHold = { release: new Promise<void>(done => { release = done; }) };
+    await refused(leftover.bridge.createBot({ name: '迟到猫' }), 503);
+    assert.equal(leftover.native.capabilities[0]!.blockedCats?.length, 1, 'blocked before it exists');
+    assert.equal((await leftover.bridge.computer.set(leftover.native.cats[0]!, true)).on, true);
+    release(); await settle();
+    const late = leftover.native.cats.find(known => known.name === '迟到猫')!;
+    assert.ok(late); assert.equal((await leftover.bridge.computer.view(late)).on, false);
+  } finally { await leftover.end(); }
 });
 
 test('whether the cat already exists is asked inside the lock, after the switches before it', async () => {
