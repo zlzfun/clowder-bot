@@ -485,7 +485,7 @@ runtime.app.post('/__preview', async (req, res) => {
   if (typeof input.append === 'string') native.appendable = input.append !== 'off';
   // 应用 (tests/apps-fixture.ts). {"wechat": "ok" | "slow" | "fail" | "timeout"}: what opening 微信 does next time (at once / stays
   // starting for a few reads / fails / the request is cut while the engine goes on); {"wechat": "absent" | "present"}: the engine has
-  // no such plugin / has it, off; {"wechat": "crashed"}: enabled but its runtime is not running (the contract's `failed`, item 52's
+  // no such plugin / has it, off; {"wechat": "crashed"}: enabled but its runtime is not running (the contract's `failed`, item 53's
   // screenshots); {"wechat": "status-fails" | "status-ok"}: while on, the ten-minute authorization cannot be read / can again.
   // {"probe": "ok" | "fail"}: custom apps answer by their script again / none of them answers.
   if (typeof input.wechat === 'string') {

@@ -15,7 +15,7 @@ import { BotApps, parseCustomApp } from '../server/native/apps.js';
 import { NativeFixture } from './native-fixture.js';
 import { WECHAT_DISCLOSURE } from './apps-fixture.js';
 
-// 应用 (apps-dialog-rules.js, apps-dialog.js; docs/xbot-frontend.md item 52):
+// 应用 (apps-dialog-rules.js, apps-dialog.js; docs/xbot-frontend.md item 53):
 // the dialog the sidebar's 应用 opens — 微信 and the owner's custom apps over
 // /xbot-api/apps (docs/apps-api.md). The page scripts run here as the classic
 // browser scripts they are, in a VM over the small DOM of tests/fake-dom.ts,
@@ -1420,7 +1420,7 @@ test('review r1 (10): after 再检查 and after a secret is saved, focus lands o
 test('review r1 (11, 12): at 390px every control of the dialog is 44px to touch; a connected app with no tools says so once', async () => {
   const css = read('client/public/apps-dialog.css').replace(/\/\*[\s\S]*?\*\//g, '');
   const phone = /@media \(max-width: 560px\) \{([\s\S]*?)\n\}/.exec(css)![1]!;
-  for (const sel of ['.ap-way-acts > button', '.ap-secret-acts > button', '.ap-add .modal-actions > button', '.ap-confirm .modal-actions > button', '.ap-tool-btn', '.ap-name', '.ap-name-input', '.ap-kind', '.ap-fail > button']) // a guard; the heights themselves were measured in a browser at 390px (item 52)
+  for (const sel of ['.ap-way-acts > button', '.ap-secret-acts > button', '.ap-add .modal-actions > button', '.ap-confirm .modal-actions > button', '.ap-tool-btn', '.ap-name', '.ap-name-input', '.ap-kind', '.ap-fail > button']) // a guard; the heights themselves were measured in a browser at 390px (item 53)
     assert.ok(new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[^{]*\\{[^}]*min-height: 44px').test(phone), sel);
   const { row, body } = await opened((s) => s.add('custom:e', 'E', { type: 'url', url: 'https://e.dev/mcp', secrets: [] }, { state: 'on', tools: [] }));
   row('custom:e').click();

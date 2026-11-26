@@ -1,5 +1,5 @@
 // 应用 · 规则层：没有 DOM，也没有网络。apps-dialog.js 和测试共用。
-// The 应用 dialog (docs/xbot-frontend.md item 52) over the adapter's routes
+// The 应用 dialog (docs/xbot-frontend.md item 53) over the adapter's routes
 // (docs/apps-api.md): GET/POST/PATCH/DELETE /xbot-api/apps…. Here: what each
 // state is called and drawn as, what can be done in it, the starting poll and
 // the authorization countdown, the custom-app form's checks (mirroring the

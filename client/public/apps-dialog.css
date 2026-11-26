@@ -1,4 +1,4 @@
-/* 应用 (apps-dialog.js, docs/xbot-frontend.md item 52): one dialog over the
+/* 应用 (apps-dialog.js, docs/xbot-frontend.md item 53): one dialog over the
    chat, on the original .modal / .modal-card, .field, .primary, .secondary,
    .text-btn, .ghost and the status spinner (.st-spin); the nested confirm is
    the app's own (.modal-card with .note and .modal-actions, the danger
