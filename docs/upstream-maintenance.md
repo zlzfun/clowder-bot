@@ -118,7 +118,7 @@ node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=
 
 - **固定版本。** `computer-driver.lock.json` 写着发布标签、版本、压缩包的 SHA-256 与大小、应用的 bundle id（`com.trycua.driver`）和签名团队（`YCK386LBJ7`，Developer ID「Cua AI, Inc.」）。现在固定的是 0.34.0，和 OpenBot 固定的是同一版；这一版在隔离运行时上实测过。上游发版很密（2026-11 一天数版），不跟最新。
 - **安装。** `npm run computer:install`：下载固定的压缩包（约 76 MB），核对大小和 SHA-256，只解出应用，核对签名（`codesign --verify --deep --strict`）、bundle id、签名团队、Gatekeeper（`spctl`）和版本，全部通过才放到 `<数据目录>/tools/CuaDriver.app`；任何一项不过就什么都不装，也不留下临时文件。`-- --from <文件>` 用已经下载好的压缩包（同样的核对），`-- --check` 只报告现状。适配层在使用前再核对一次签名身份，所以放一个同名的别的程序不会被当成驱动。
-- **授权。** macOS 把辅助功能（macOS 27 上叫「设备控制与数据访问」）和屏幕录制记在 `CuaDriver` 这个应用上，与 Bot 是从终端还是由 launchd 启动无关。第一次给某只猫打开「电脑」时，驱动自己打开系统设置请使用者授权；授权不全时适配层什么都不改。给屏幕录制打开开关时 macOS 会要求退出并重新打开 CuaDriver，属正常。
+- **授权。** macOS 把辅助功能（macOS 27 上叫「设备控制与数据访问」）和屏幕录制记在 `CuaDriver` 这个应用上，与 Bot 是从终端还是由 launchd 启动无关。第一次给某只猫打开「电脑」时，驱动自己打开系统设置请使用者授权；授权不全时适配层什么都不改。给屏幕录制打开开关时 macOS 会要求退出并重新打开 CuaDriver，属正常。授权按应用的签名身份记，不按它放在哪里：2026-11-26 在开发目录那一份上给的两项授权，对随后装进日常数据目录的那一份同样有效（装好后启动它读了一次状态，两项都在，没有弹出系统设置）。
 - **进程。** 驱动的后台进程由它自己的 MCP 入口在猫第一次调用工具时拉起，没有任何猫开着时适配层请它退出。Bot 的启动脚本不启动它，Bot 退出也不影响它。
 - **遥测。** 驱动默认会发不含内容的使用统计。登记里带着 `CUA_DRIVER_RS_TELEMETRY_ENABLED=0`、`CUA_DRIVER_RS_UPDATE_CHECK=0`，第一次登记时还执行一次 `cua-driver telemetry disable`（写在使用者的 `~/.cua-driver/config.json`）。
 - **换版本。** 改 `computer-driver.lock.json`（标签、版本、文件名、SHA-256、大小、压缩包里的应用路径），重新运行安装，再在隔离运行时上走一遍：开、授权、让测试猫操作一次计算器、关、新建一只猫确认它是关的。签名团队或 bundle id 变了要同时改适配层里核对的值（`server/native/computer.ts`），有测试把两处对在一起。
