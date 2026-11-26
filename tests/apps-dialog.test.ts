@@ -173,8 +173,10 @@ test('what each state is called and drawn as: a mark and a word, never colour al
   assert.deepEqual(w({ state: 'off', reason: '上次没能启动' }), { mark: 'bad', word: '上次没能启动' });
   assert.deepEqual(w({ state: 'starting' }), { mark: 'busy', word: '正在启动…' });
   assert.deepEqual(w({ state: 'on', authorization: { active: false } }), { mark: 'on', word: '已打开' });
-  assert.deepEqual(w({ state: 'on', authorization: { active: true } }), { mark: 'on', word: '可以读' });
-  assert.deepEqual(plain(R.look({ kind: 'wechat', state: 'on', authorization: { active: true } }, '', true)), { mark: 'on', word: '已打开' }, 'on its own page the authorization block says whether cats may read');
+  // The ten minutes cover only the chat open in 微信: on is 已打开 with or without them (round 2, docs/apps-api.md 「两种读法」).
+  assert.deepEqual(w({ state: 'on', authorization: { active: true } }), { mark: 'on', word: '已打开' });
+  assert.deepEqual(w({ state: 'on' }), { mark: 'on', word: '已打开' }, 'its ten minutes unknown: still simply on');
+  assert.deepEqual([R.authKnown({ state: 'on' }), R.authKnown({ state: 'on', authorization: { active: false, remaining_ms: 0 } }), R.authKnown({ state: 'off', authorization: { active: false } })], [false, true, false]);
   assert.deepEqual(w({ state: 'failed', reason: '没能启动' }), { mark: 'bad', word: '没能启动' });
   assert.deepEqual(w({ state: 'unavailable', reason: '只在 Mac 上能用' }), { mark: 'off', word: '只在 Mac 上能用' });
   const c = (s: Any, check = '') => plain(R.look({ kind: 'custom', ...s }, check));
@@ -201,7 +203,11 @@ test('微信 offers only what can be done: open, close, try again; nothing while
   assert.deepEqual(acts({ state: 'starting' }), []);
   assert.deepEqual(acts({ state: 'starting' }, true), ['再看一次']);
   assert.deepEqual(acts({ state: 'on' }), ['关闭']);
-  assert.deepEqual(acts({ state: 'failed', reason: '没能启动' }), ['再试一次*', '关闭']);
+  assert.deepEqual(acts({ state: 'failed', reason: '没能启动' }), ['关闭', '再试一次*']);
+  // Opening is the point of consent: 打开 and 再试一次 sit after what opening allows; 关闭 and 再看一次 at the top by the state.
+  const where = (s: Any) => [...R.wechatActions({ kind: 'wechat', ...s }, true)].map((a: Any) => a.act + '@' + a.where);
+  assert.deepEqual([...where({ state: 'off' }), ...where({ state: 'off', reason: '上次没能启动' }), ...where({ state: 'failed' }), ...where({ state: 'on' }), ...where({ state: 'starting' })],
+    ['connect@consent', 'connect@consent', 'disconnect@hero', 'connect@consent', 'disconnect@hero', 'reread@hero']);
   assert.deepEqual(acts({ state: 'unavailable', reason: '只在 Mac 上能用' }), []);
   // A screen reader hears whose 打开 and 关闭 they are (the dialog's own × is 关闭 too); the shown word is in the name.
   for (const a of [...R.wechatActions({ state: 'failed' }), ...R.wechatActions({ state: 'off' })]) assert.ok(a.said.includes(a.label) && a.said !== a.label, a.said);
@@ -309,12 +315,33 @@ test('failed requests say what failed: the server\'s 4xx sentence as it said it 
   assert.equal(R.checked([]), '');
 });
 
-test('the consent words: what 授权 10 分钟 means and what 添加 means, all of it, before the press; MCP named in one place only', () => {
-  const facts = R.WECHAT_FACTS.join('');
-  // docs/apps-api.md: no screenshot kept; the text goes to the cat's thinking and stays in that chat's run record;
-  // reading by contact brings 微信 forward, may mark it read, tries to restore; it only reads; ten minutes, ends by itself, can end earlier.
-  for (const fact of ['截图不保存', '交给它思考用的 Agent', '执行记录', '短暂切到前面', '标为已读', '尽量回到原来的样子', '不发消息', '不点链接', '聊天记录库', '10 分钟后自动结束', '随时撤销', '每次都会先问你'])
-    assert.ok(facts.includes(fact), fact);
+test('the consent words (round 2): what 打开 allows, said before it — reading by name needs nothing more and has no time limit until 关闭; the open chat needs the ten minutes; and none of the four false sentences', () => {
+  // docs/apps-api.md 「两种读法」: opening is the point of consent.
+  const beforeOpen = [R.byName(false), R.BY_NAME_REACH, R.OPEN_LATER, ...R.WECHAT_READS].join('');
+  for (const fact of [
+    '对猫猫说出联系人的名字就行', '不用再授权', '没有时限', '直到你关闭', // by name: nothing more, no limit, until closed
+    '任何一只猫在回复你的消息时都能这样读', // who may: any cat, in its reply to the owner (nothing makes it ask)
+    '短暂切到前面', '标为已读', '尽量回到原来的样子', // what it does to 微信
+    '另外授权 10 分钟', '不会动微信', // the open chat
+    '只读', '不发消息', '不点链接', '聊天记录库', '截图认字', '截图不保存', // how it reads
+    '和你发给猫猫的话一样', '交给它思考用的 Agent', '执行记录',
+  ]) assert.ok(beforeOpen.includes(fact), fact);
+  assert.equal(R.byName(true).slice(0, 5), '现在就能读', 'once open: reading by name already works');
+  // The ten minutes' own facts: only that chat, does not operate 微信, ends by itself after ten minutes, 撤销 ends it earlier.
+  for (const fact of ['授权 10 分钟', '这一段', '只读它', '不会动微信', '10 分钟后自己结束', '随时撤销']) assert.ok(R.OPEN_ASK.includes(fact), fact);
+  assert.equal(R.OPEN_SAY.join(''), '在聊天里说「看一下微信」，猫猫读的就是这一段。');
+  assert.equal(R.WECHAT_SAY, '看一下微信');
+  // The permissions: what, where, what happens without; no system prompt promised, no program named.
+  for (const fact of ['系统设置 › 隐私与安全性', '「屏幕录制」', '按名字读还要「辅助功能」', '猫猫会说它没能读到', '启动 clowder-bot 的程序']) assert.ok(R.WECHAT_PERMISSIONS.includes(fact), fact);
+  assert.doesNotMatch(R.WECHAT_PERMISSIONS, /会请你|会弹|会问|Terminal|终端|iTerm|Cat Café/);
+  // The ten minutes ending is said as the ten minutes ending, not as all reading ending.
+  assert.match(R.SAID.ended, /正打开那段聊天的 10 分钟授权结束了；按名字读不受影响/);
+  // The four false sentences (and their old constants) are gone from both scripts.
+  for (const file of ['client/public/apps-dialog-rules.js', 'client/public/apps-dialog.js']) {
+    const src = read(file).replace(/\/\/[^\n]*/g, '');
+    for (const wrong of [/猫猫现在还不能读/, /每次都会先问你/, /猫猫现在可以读微信/, /"可以读"/, /macOS 会请你允许/, /第一次读的时候/, /读取授权已经结束/, /WECHAT_FACTS|WECHAT_NOT_YET|WECHAT_CAN|WECHAT_HOW|WECHAT_FIRST/])
+      assert.doesNotMatch(src, wrong, file + ': ' + wrong);
+  }
   assert.deepEqual(plain(R.consequences('program')), ['所有猫猫都能用它，以后新建的猫猫也能。', '猫猫每次用它都不会先问你。', '这个程序会在这台电脑上、以你的身份运行。', '填的环境变量会原样存在这台电脑上，不加密。']);
   assert.deepEqual(plain(R.consequences('url')), ['所有猫猫都能用它，以后新建的猫猫也能。', '猫猫每次用它都不会先问你。', '填的请求头会原样存在这台电脑上，不加密。']);
   assert.equal(R.CUSTOM_LEAD, '接入你自己的 MCP 服务。');
@@ -433,15 +460,29 @@ test('Escape goes up one level, then closes; focus returns to where it came from
   assert.equal(page.doc.activeElement, controls.at(-1));
 });
 
-test('微信 off: what it is, and 打开; a start that fails says so (with the engine\'s words on request) and can be tried again', async () => {
+// The page's words in reading order, each block on its own line (hidden parts and screen-reader-only words left out).
+const lines = (root: El) => all(root, 'h3, p, button').filter((n) => seen(n).trim()).map((n) => seen(n).trim());
+
+test('微信 off: what opening allows comes first — the two ways (by name: nothing more, no time limit, until 关闭; the open chat: also the ten minutes) and how it reads — then 打开, described by all of it, with the plugin\'s own words beside it', async () => {
   const { page, srv, row, body } = await opened();
   row('wechat').click();
   await settle();
   assert.equal(seen(one(body(), '.ap-state')), '未打开');
-  assert.equal(seen(one(body(), '.ap-about')), R.WECHAT_ABOUT);
-  assert.equal(all(body(), '.ap-auth').length, 0, 'no authorization while off');
+  assert.deepEqual(lines(one(body(), '.ap-wechat')), [
+    '未打开',
+    R.BY_NAME, R.byName(false), R.BY_NAME_REACH,
+    R.OPEN_CHAT, R.OPEN_LATER,
+    ...R.WECHAT_READS,
+    '打开', '插件原文',
+  ], 'everything opening allows, then 打开 — and nothing about the ten minutes\' button, the permissions or Plugin Hub yet');
   const open = buttonOf(body(), '打开');
   assert.equal(open.getAttribute('aria-label'), '打开微信');
+  const described = open.getAttribute('aria-describedby')!.split(' ').map((id) => seen(page.doc.getElementById(id)));
+  assert.deepEqual(described, [R.byName(false), R.BY_NAME_REACH, R.OPEN_LATER, ...R.WECHAT_READS], 'a screen reader hears all of it on the button');
+  // The plugin's own words with its version, one click away (an off 微信 carries them).
+  buttonOf(body(), '插件原文').click();
+  assert.equal(seen(one(body(), '.ap-source-text')), '版本 0.1.0-alpha.7' + WECHAT_DISCLOSURE);
+  buttonOf(body(), '插件原文').click();
   srv.on.set('POST /xbot-api/apps/wechat/connect', () => { srv.wechat = { ...srv.wechat, state: 'off', reason: '上次没能启动', detail: 'UNEXPECTED_RUNTIME_FAILURE · Plugin runtime reported UNEXPECTED_RUNTIME_FAILURE.' }; return srv.wechat; });
   open.click();
   assert.equal(seen(open), '正在打开…');
@@ -449,7 +490,10 @@ test('微信 off: what it is, and 打开; a start that fails says so (with the e
   await settle();
   assert.equal(seen(one(body(), '.ap-state')), '上次没能启动');
   assert.ok(one(body(), '.ap-state-word').classList.contains('bad'));
+  // 再试一次 opens again: it comes after the same words, and is described by them.
   const retry = buttonOf(body(), '再试一次');
+  assert.deepEqual(lines(one(body(), '.ap-wechat')).slice(-4), [...R.WECHAT_READS, '再试一次', '插件原文']);
+  assert.equal(retry.getAttribute('aria-describedby'), open.getAttribute('aria-describedby'));
   assert.equal(srv.sent('POST', /connect$/).length, 1);
   // The engine's words: there on request, never in the way.
   const box = page.doc.querySelector('.ap-detail-text') as El;
@@ -468,8 +512,8 @@ test('微信 starting is shown as starting (never on): read again every 2 s; aft
   await settle();
   assert.equal(seen(one(body(), '.ap-state')), '正在启动…');
   assert.ok(one(body(), '.ap-mark').classList.contains('busy'));
-  assert.equal(all(body(), '.ap-hero-acts button').length, 0, 'nothing to press while it starts');
-  assert.equal(all(body(), '.ap-auth').length, 0);
+  assert.equal(all(body(), '.ap-hero-acts button').length + all(body(), '.ap-consent button').length, 0, 'nothing to press while it starts');
+  assert.equal(all(body(), '.ap-way-part').length, 0, 'no ten minutes to give before it is on');
   assert.equal(seen(one(body(), '.ap-note')), R.WECHAT_SLOW);
   const reads = () => srv.sent('GET', /\/wechat$/).length;
   await page.advance(1999);
@@ -506,24 +550,27 @@ test('微信 starting is shown as starting (never on): read again every 2 s; aft
   assert.equal(seen(one(second.row('wechat'), '.ap-st-word')), '已打开');
 });
 
-test('微信 on: whether cats may read; the consent facts before 授权 10 分钟 (and the plugin\'s own words with its version); a live countdown from until, 撤销, one fresh read at zero', async () => {
+test('微信 on: reading by name already works (until 关闭); 授权 10 分钟 adds the open chat, with its own facts before it; authorized: the time left on that, 撤销 for that alone, the two things to say told apart; one fresh read at zero', async () => {
   const { page, srv, row, body, voice } = await opened((s) => { s.wechat = { ...s.wechat, state: 'on', authorization: { active: false, remaining_ms: 0 } }; });
+  assert.equal(seen(row('wechat')), '微信已打开', 'the row says it is open, nothing about who may read');
   row('wechat').click();
   await settle();
-  assert.equal(seen(one(body(), '.ap-auth-state')), R.WECHAT_NOT_YET);
-  const facts = one(body(), '.ap-facts');
-  assert.deepEqual(facts.children.map((li) => seen(li)), [...R.WECHAT_FACTS]);
+  assert.deepEqual(lines(one(body(), '.ap-wechat')), [
+    '已打开', '关闭',
+    R.BY_NAME, R.byName(true), R.BY_NAME_REACH,
+    R.OPEN_CHAT, R.OPEN_ASK, '授权 10 分钟', R.WECHAT_HUB,
+    ...R.WECHAT_READS, '插件原文', R.WECHAT_PERMISSIONS,
+  ]);
+  assert.equal(buttonOf(body(), '关闭').getAttribute('aria-label'), '关闭微信');
   const authorize = buttonOf(body(), '授权 10 分钟');
-  // Before the press, not in a tooltip: the facts come before the button, and describe it.
-  assert.equal(authorize.getAttribute('aria-describedby'), facts.id);
+  // Before the press, not in a tooltip: its own facts come before it, and describe it.
+  assert.equal(seen(page.doc.getElementById(authorize.getAttribute('aria-describedby')!)), R.OPEN_ASK);
   assert.ok(!authorize.dataset.tip && !authorize.getAttribute('title'));
   const source = page.doc.querySelector('.ap-source-text') as El;
   assert.equal(source.hidden, true);
   buttonOf(body(), '插件原文').click();
   assert.equal(seen(source), '版本 0.1.0-alpha.7' + WECHAT_DISCLOSURE, 'verbatim, with its version');
-  assert.equal(seen(one(body(), '.ap-foot')), R.WECHAT_HUB);
-  buttonOf(body(), '关闭');
-  assert.equal(buttonOf(body(), '关闭').getAttribute('aria-label'), '关闭微信');
+  buttonOf(body(), '插件原文').click();
   // Authorize: the countdown runs from the server's until, not from the click.
   srv.on.set('POST /xbot-api/apps/wechat/authorize', () => {
     srv.wechat = { ...srv.wechat, authorization: { active: true, remaining_ms: 595_000, until: new Date(page.now() + 595_000).toISOString() } };
@@ -532,45 +579,100 @@ test('微信 on: whether cats may read; the consent facts before 授权 10 分�
   authorize.focus();
   authorize.click();
   await settle();
-  assert.equal(seen(one(body(), '.ap-auth-state')), R.WECHAT_CAN);
-  assert.equal(seen(one(body(), '.ap-clock')), '9:55');
-  assert.equal((page.doc.querySelector('.ap-clock') as El).getAttribute('aria-hidden'), 'true');
-  assert.match(one(body(), '.ap-auth-state').textContent, /还剩 9 分 55 秒/);
-  assert.equal(page.doc.activeElement, one(body(), '.ap-can .ap-auth-state'), 'focus where the answer is');
-  assert.equal(seen(one(body(), '.ap-how')), R.WECHAT_HOW.join(''));
-  assert.equal(all(body(), '.ap-facts').length, 0);
-  assert.equal(all(body(), '.ap-foot').length, 0, 'cats can read: nothing to point at');
-  buttonOf(body(), '撤销');
+  // Authorized: inside the open chat's part, the time left on this authorization, 撤销 for it alone, and what to say for it;
+  // the by-name part is unchanged and says what to say for that. No Plugin Hub line (that refusal cannot happen now).
+  assert.deepEqual(lines(one(body(), '.ap-wechat')), [
+    '已打开', '关闭',
+    R.BY_NAME, R.byName(true), R.BY_NAME_REACH,
+    R.OPEN_CHAT, '授权还剩9:55', '撤销', R.OPEN_SAY.join(''),
+    ...R.WECHAT_READS, '插件原文', R.WECHAT_PERMISSIONS,
+  ]);
+  const clockBox = one(body(), '.ap-clock-box');
+  assert.equal(clockBox.textContent.replace(/授权还剩9:55$/, ''), R.OPEN_LEFT + '，还剩 9 分 55 秒', 'a screen reader hears whose time it is');
+  assert.equal(page.doc.activeElement, clockBox, 'focus where the answer is');
+  assert.equal(buttonOf(body(), '撤销').getAttribute('aria-label'), '撤销读这一段的授权');
+  assert.ok(seen(one(body(), '.ap-way-part.ap-can').parent).startsWith(R.OPEN_CHAT), '撤销 sits in the open chat\'s part');
   await page.advance(5_000);
   assert.equal(seen(one(body(), '.ap-clock')), '9:50');
   assert.equal(srv.sent('GET', /\/wechat$/).length, 0, 'the clock is this page\'s, no reads while it runs');
-  // The list row counts down too.
+  // The list row counts down too, as the authorization's time — never as whether cats can read.
   page.doc.activeElement.key('Escape');
-  assert.match(seen(row('wechat')), /可以读 · 9:50$/);
+  assert.equal(seen(row('wechat')), '微信已打开 · 授权还剩 9:50');
   row('wechat').click();
   await settle();
-  // At zero, one fresh read; the plugin ended it: said once.
+  // At zero, one fresh read; the plugin ended it: said once, as the ten minutes ending, not all reading.
   srv.on.set('GET /xbot-api/apps/wechat', () => ({ ...srv.wechat, authorization: { active: false, remaining_ms: 0 } }));
   await page.advance(590_000);
   assert.equal(srv.sent('GET', /\/wechat$/).length, 1);
-  assert.equal(seen(one(body(), '.ap-auth-state')), R.WECHAT_NOT_YET);
+  assert.equal(seen(one(body(), '.ap-way-part')), R.OPEN_ASK + '授权 10 分钟' + R.WECHAT_HUB);
+  assert.equal(seen(one(body(), '.ap-way-text')), R.byName(true), 'reading by name is still there');
   assert.equal(voice(), R.SAID.ended);
   await page.advance(600_000);
   assert.equal(srv.sent('GET', /\/wechat$/).length, 1, 'only one');
   void row;
 });
 
+test('微信 on whose ten-minute status could not be read (no `authorization`): unknown — never "not authorized", no countdown; one fresh read on request; 撤销 still there; the row is plain 已打开', async () => {
+  const { page, srv, row, body, voice } = await opened((s) => { s.wechat = { ...s.wechat, state: 'on', authorization: undefined }; });
+  assert.equal(seen(row('wechat')), '微信已打开', 'the on wording, no time');
+  row('wechat').click();
+  await settle();
+  assert.deepEqual(lines(one(body(), '.ap-wechat')), [
+    '已打开', '关闭',
+    R.BY_NAME, R.byName(true), R.BY_NAME_REACH,
+    R.OPEN_CHAT, R.OPEN_UNKNOWN, '再看一次', '撤销',
+    ...R.WECHAT_READS, '插件原文', R.WECHAT_PERMISSIONS,
+  ], 'reading by name and 关闭 as when on; the open chat: unknown, with no 授权 offer, no Plugin Hub line and no clock');
+  assert.equal(all(body(), '.ap-clock').length, 0);
+  // A fresh read that fails says so where it was asked; one that answers shows what the plugin said.
+  let n = 0;
+  srv.on.set('GET /xbot-api/apps/wechat', () => {
+    if (n++ === 0) throw fail(502);
+    return { ...srv.wechat, authorization: { active: true, remaining_ms: 300_000, until: new Date(page.now() + 300_000).toISOString() } };
+  });
+  buttonOf(body(), '再看一次').focus();
+  buttonOf(body(), '再看一次').click();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-way .ap-note')), '没能读到微信现在的状态：服务出了点问题，稍后再试。');
+  assert.equal(seen(page.doc.activeElement), '再看一次');
+  assert.equal(seen(one(body(), '.ap-state')), '已打开', 'nothing else changed');
+  buttonOf(body(), '再看一次').click();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-clock')), '5:00');
+  assert.equal(page.doc.activeElement, one(body(), '.ap-clock-box'));
+  assert.equal(srv.sent('GET', /\/wechat$/).length, 2, 'only when asked');
+  // At zero the one fresh read comes back unknown: not said to be over, and the unknown part returns.
+  srv.on.set('GET /xbot-api/apps/wechat', () => ({ ...srv.wechat, authorization: undefined }));
+  await page.advance(300_000);
+  assert.equal(srv.sent('GET', /\/wechat$/).length, 3);
+  assert.equal(seen(one(body(), '.ap-way-part')), R.OPEN_UNKNOWN + '再看一次撤销');
+  assert.notEqual(voice(), R.SAID.ended);
+  // 撤销 works either way; its answer carries the authorization again.
+  srv.on.delete('GET /xbot-api/apps/wechat');
+  const revoke = all(body(), '.ap-unknown button').find((b) => seen(b) === '撤销')!;
+  assert.equal(revoke.getAttribute('aria-label'), '撤销读这一段的授权');
+  revoke.focus();
+  revoke.click();
+  await settle();
+  assert.equal(srv.sent('POST', /revoke$/).length, 1);
+  assert.equal(seen(one(body(), '.ap-way-part')), R.OPEN_ASK + '授权 10 分钟' + R.WECHAT_HUB);
+  assert.equal(page.doc.activeElement, page.doc.getElementById(buttonOf(body(), '授权 10 分钟').getAttribute('aria-describedby')!));
+});
+
 test('the countdown stops with the dialog; opening again reads the state fresh; 撤销 ends it at once', async () => {
   const { page, srv, row, body } = await opened((s) => { s.wechat = { ...s.wechat, state: 'on', authorization: { active: true, remaining_ms: 300_000, until: new Date(1_700_000_000_000 + 300_000).toISOString() } }; });
-  assert.match(seen(row('wechat')), /可以读 · 5:00$/);
+  assert.match(seen(row('wechat')), /已打开 · 授权还剩 5:00$/);
   row('wechat').click();
   await settle();
   buttonOf(body(), '撤销').focus();
   buttonOf(body(), '撤销').click();
   await settle();
   assert.equal(srv.sent('POST', /revoke$/).length, 1);
-  assert.equal(seen(one(body(), '.ap-auth-state')), R.WECHAT_NOT_YET);
-  assert.equal(page.doc.activeElement, one(body(), '.ap-auth-state'));
+  // 撤销 ended the open chat only: what authorizing would do is back, reading by name is untouched.
+  assert.equal(page.doc.activeElement, page.doc.getElementById(buttonOf(body(), '授权 10 分钟').getAttribute('aria-describedby')!));
+  assert.equal(seen(page.doc.activeElement), R.OPEN_ASK);
+  assert.equal(seen(one(body(), '.ap-state')), '已打开');
+  assert.equal(seen(one(body(), '.ap-way-text')), R.byName(true));
   // Closed while authorized: no timer is left.
   srv.wechat = { ...srv.wechat, authorization: { active: true, remaining_ms: 100_000, until: new Date(page.now() + 100_000).toISOString() } };
   page.window.ClowderApps.close();
@@ -613,19 +715,22 @@ test('a 409 that says 微信 is not on leads to a fresh read and the server\'s s
   assert.equal(seen(one(other.body(), '.ap-note')), '没能打开微信：连不上 clowder-bot，稍后再试。');
 });
 
-test('微信 failed: why, try again or close; unavailable: why, and no button that cannot work', async () => {
+test('微信 failed: why; 关闭 at the top, 再试一次 after what opening allows (no Plugin Hub line: a cat does not find it); unavailable: why, and no button that cannot work', async () => {
   const failed = await opened((s) => { s.wechat = { ...s.wechat, state: 'failed', reason: '没能启动', detail: 'X' }; });
   failed.row('wechat').click();
   await settle();
-  assert.deepEqual(all(failed.body(), '.ap-hero-acts button').map((b) => seen(b)), ['再试一次', '关闭']);
+  assert.deepEqual(all(failed.body(), '.ap-hero-acts button').map((b) => seen(b)), ['关闭']);
   assert.equal(seen(one(failed.body(), '.ap-state')), '没能启动');
+  assert.deepEqual(lines(one(failed.body(), '.ap-wechat')), [
+    '没能启动', '详情', '关闭', R.BY_NAME, R.byName(false), R.BY_NAME_REACH, R.OPEN_CHAT, R.OPEN_LATER, ...R.WECHAT_READS, '再试一次', '插件原文',
+  ]);
   const none = await opened((s) => { s.wechat = { id: 'wechat', kind: 'wechat', title: '微信', state: 'unavailable', reason: '只在 Mac 上能用' }; });
   assert.equal(seen(none.row('wechat')), '微信只在 Mac 上能用');
   none.row('wechat').click();
   await settle();
   assert.equal(seen(one(none.body(), '.ap-state')), '只在 Mac 上能用');
   assert.deepEqual(all(none.body(), '.ap-view button').map((b) => seen(b)), [], 'not one button on the page');
-  assert.equal(all(none.body(), '.ap-foot').length, 0);
+  assert.deepEqual(lines(one(none.body(), '.ap-wechat')), ['只在 Mac 上能用', R.WECHAT_ABOUT], 'what it would be, and why not: nothing else');
   // The list could not read 微信's state (docs/apps-api.md): not something this computer lacks — drawn as unknown,
   // and reading it again is what can be done; a read that fails again says so.
   const unread = await opened((s) => { s.wechat = { id: 'wechat', kind: 'wechat', title: '微信', state: 'unavailable', reason: '没能读到它的状态' }; });
@@ -977,18 +1082,20 @@ test('against the real adapter: 微信 opened and authorized (the countdown from
   await until(() => !!row('wechat'), 'the list is read');
   assert.equal(seen(row('wechat')), '微信未打开');
   row('wechat').click();
-  buttonOf(body(), '打开').click();
-  await until(() => seen(one(body(), '.ap-state')) === '已打开', '微信 is on');
-  assert.deepEqual(one(body(), '.ap-facts').children.map((li) => seen(li)), [...R.WECHAT_FACTS]);
+  // An off 微信 carries the plugin's own words: one click away before 打开.
   buttonOf(body(), '插件原文').click();
   assert.match(seen(one(body(), '.ap-source-text')), /版本 0\.1\.0-alpha\.7不会保存截图。/);
+  buttonOf(body(), '打开').click();
+  await until(() => seen(one(body(), '.ap-state')) === '已打开', '微信 is on');
+  assert.equal(seen(one(body(), '.ap-way-text')), R.byName(true));
   buttonOf(body(), '授权 10 分钟').click();
   await until(() => all(body(), '.ap-clock').length === 1, 'authorized');
   // The engine's clock is not this page's (the test's clock is fixed): the remaining time it answered counts.
   assert.match(seen(one(body(), '.ap-clock')), /^(10:00|9:59)$/);
   assert.equal(native.apps.plugin!.live, 'running');
   buttonOf(body(), '撤销').click();
-  await until(() => seen(one(body(), '.ap-auth-state')) === R.WECHAT_NOT_YET, 'revoked');
+  await until(() => all(body(), '.ap-authorize').length === 1, 'revoked');
+  assert.equal(native.apps.plugin!.live, 'running', '撤销 left 微信 on (reading by name stays until 关闭)');
   // A program, with one secret.
   (page.doc.activeElement as El).key('Escape');
   one(body(), '.ap-row-add').click();

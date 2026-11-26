@@ -106,28 +106,44 @@
 .ap-note.bad { padding: var(--x-s3) var(--x-s5); border-radius: 10px; background: var(--x-danger-bg); color: var(--x-danger); }
 .ap-hint { margin: 0 0 var(--x-s5); font-size: var(--x-fs-sm); line-height: 1.6; color: var(--x-muted); }
 
-/* 微信: when on, the authorization is the centre of the page. */
-.ap-auth { border-radius: 16px; background: var(--x-fill-1); padding: var(--x-s7) var(--x-s7) var(--x-s6); }
-.ap-auth-state { margin: 0; font-size: 15px; font-weight: 600; line-height: 1.5; color: var(--x-text); }
-.ap-auth-state:focus { outline: none; }
-.ap-auth-state:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--x-r-xs); }
-.ap-facts { list-style: none; margin: var(--x-s4) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--x-s2); }
-.ap-facts li, .ap-conseq li { position: relative; padding-left: 14px; font-size: 13.5px; line-height: 1.6; color: var(--x-text-2); }
-.ap-facts li::before, .ap-conseq li::before {
+/* 微信: the two ways a cat reads it, one card in two parts (by name; the chat open in 微信), each with
+   what it takes and what it does; under them how it reads either way; then 打开 / 再试一次 — opening is
+   the point of consent — with the plugin's own words beside it. 关闭 sits at the top, by the state. */
+.ap-ways { border-radius: 16px; background: var(--x-fill-1); overflow: hidden; }
+.ap-way { padding: 14px var(--x-s7) var(--x-s6); }
+.ap-way + .ap-way { border-top: 1px solid var(--x-fill-2); }
+.ap-way > h3 { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.5; color: var(--x-text); }
+.ap-way-text { margin: var(--x-s1) 0 0; font-size: 13.5px; line-height: 1.6; color: var(--x-text-2); }
+.ap-way-text.quiet { font-size: var(--x-fs-sm); color: var(--x-muted); }
+.ap-way-text:focus { outline: none; }
+.ap-way-text:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--x-r-xs); }
+.ap-way-acts { display: flex; align-items: center; gap: var(--x-s3); margin-top: var(--x-s4); }
+.ap-hub { margin-top: var(--x-s3); }
+.ap-clock-row { display: flex; align-items: center; justify-content: space-between; gap: var(--x-s5); margin: var(--x-s1) 0 0; }
+.ap-clock-box { display: flex; align-items: baseline; gap: var(--x-s3); margin: 0; }
+.ap-clock-box:focus { outline: none; }
+.ap-clock-box:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--x-r-xs); }
+.ap-clock-lead { font-size: 13px; color: var(--x-muted); }
+.ap-clock { font-size: 36px; font-weight: 600; line-height: 1.2; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: var(--x-text); }
+.ap-say { font-weight: 600; color: var(--x-text); }
+.ap-way .ap-note { margin: var(--x-s4) 0 0; }
+.ap-reads { display: flex; flex-direction: column; gap: var(--x-s1); margin: var(--x-s5) 0 0; }
+.ap-reads .ap-way-text, .ap-conseq li { position: relative; margin: 0; padding-left: 14px; font-size: 13px; line-height: 1.6; color: var(--x-text-2); }
+.ap-reads .ap-way-text::before, .ap-conseq li::before {
   content: ""; position: absolute; left: 2px; top: calc(0.8em - 2px); width: 4px; height: 4px; border-radius: 50%; background: var(--x-faint);
 }
-.ap-auth-acts { display: flex; align-items: center; flex-wrap: wrap; gap: var(--x-s3) var(--x-s5); margin-top: var(--x-s6); }
+.ap-tail { display: flex; align-items: center; flex-wrap: wrap; gap: var(--x-s3) var(--x-s5); margin-top: var(--x-s6); }
+.ap-consent { display: flex; gap: var(--x-s3); }
+.ap-consent:empty, .ap-consent[hidden] { display: none; }
+/* Alone on its line (nothing to open), the plugin's words line up with the text above. */
+.ap-consent[hidden] + .ap-source { margin-left: -8px; }
+.ap-way-text, .ap-reads .ap-way-text, .ap-foot { text-wrap: pretty; }
+.ap-tail + .ap-note { margin: var(--x-s4) 0 0; }
 .ap-source { font-size: var(--x-fs-sm); color: var(--x-muted); }
-.ap-source-text { margin: var(--x-s4) 0 0; padding: var(--x-s4) var(--x-s5); border-radius: 10px; background: var(--x-card); }
+.ap-source-text { margin: var(--x-s4) 0 0; padding: var(--x-s4) var(--x-s5); border-radius: 10px; background: var(--x-fill-1); }
 .ap-source-text p { margin: 0; font-size: var(--x-fs-sm); line-height: 1.65; color: var(--x-text-2); }
 .ap-source-text .ap-source-ver { margin-bottom: var(--x-s1); font-size: var(--x-fs-cap); color: var(--x-muted); font-variant-numeric: tabular-nums; }
 .ap-source-text .ap-source-ver:empty { display: none; }
-.ap-clock-row { display: flex; align-items: center; justify-content: space-between; gap: var(--x-s5); margin: var(--x-s1) 0 0; }
-.ap-clock { margin: 0; font-size: 44px; font-weight: 600; line-height: 1.15; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: var(--x-text); }
-.ap-how { margin: var(--x-s5) 0 0; font-size: 13.5px; line-height: 1.65; color: var(--x-text-2); }
-.ap-how.quiet { margin-top: var(--x-s2); font-size: var(--x-fs-sm); color: var(--x-muted); }
-.ap-say { font-weight: 600; color: var(--x-text); }
-.ap-auth .ap-note { margin: var(--x-s5) 0 0; }
 .ap-again { margin-left: var(--x-s2); font-size: var(--x-fs-sm); color: inherit; text-decoration: underline; text-underline-offset: 3px; }
 .ap-foot { margin: var(--x-s5) 0 0; font-size: var(--x-fs-sm); line-height: 1.6; color: var(--x-muted); }
 
@@ -253,8 +269,8 @@
   .ap-head:has(> .ap-back:not([hidden])) { padding-left: var(--x-s3); }
   .ap-back, .ap-x { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
   .ap-body { padding: var(--x-s1) var(--x-s6) var(--x-s7); }
-  .ap-auth { padding: var(--x-s6); }
-  .ap-clock { font-size: 40px; }
+  .ap-way { padding: var(--x-s5) var(--x-s6) 14px; }
+  .ap-clock { font-size: 32px; }
   .ap-hero-tx { flex-basis: 160px; }
   .ap-hero-acts > button { min-height: 44px; }
   .ap-secret { grid-template-columns: minmax(0, 1fr) auto; }
@@ -263,7 +279,7 @@
   .ap-secret-name, .ap-secret-in, .ap-add .field input { min-height: 44px; }
   .ap-peek, .ap-drop { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
   .ap-swap, .ap-add-secret, .ap-detail-btn, .ap-source, .ap-remove, .ap-twin { min-height: 44px; }
-  .ap-auth-acts > .primary, .ap-clock-row > .secondary { min-height: 44px; }
+  .ap-way-acts > .primary, .ap-clock-row > .secondary, .ap-consent > button { min-height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .ap-view, .ap-wait-text { animation: none; }

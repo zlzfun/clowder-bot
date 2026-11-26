@@ -33,13 +33,15 @@
   const UNREAD = "没能读到它的状态";
   const unread = (app) => !!app && app.kind === "wechat" && app.state === "unavailable" && trim(app.reason) === UNREAD;
   // check: "running" while a check of this custom app is on its way, else "".
-  // page: 微信's own page, where whether cats may read is the authorization's own block (the row says 可以读).
-  function look(app, check, page) {
+  // 微信 on is 已打开 whether or not the ten-minute authorization is running: that authorization
+  // covers only reading the chat open in 微信, never whether cats can read at all (docs/apps-api.md
+  // 「两种读法」); the list row adds its time left, named as the authorization's.
+  function look(app, check) {
     if (!app) return { mark: "idle", word: "" };
     const reason = trim(app.reason);
     if (app.kind === "wechat") {
       if (app.state === "starting") return { mark: "busy", word: "正在启动…" };
-      if (app.state === "on") return { mark: "on", word: !page && app.authorization && app.authorization.active ? "可以读" : "已打开" };
+      if (app.state === "on") return { mark: "on", word: "已打开" };
       if (app.state === "failed") return { mark: "bad", word: reason || "没能启动" };
       if (unread(app)) return { mark: "idle", word: UNREAD };
       if (app.state === "unavailable") return { mark: "off", word: reason || "现在用不了" };
@@ -56,15 +58,18 @@
   // What can be done in each state; nothing that cannot work (unavailable: nothing).
   // gaveUp: the starting poll stopped after about two minutes (or a read failed): a manual re-read.
   // said: the button's name for a screen reader, which holds the word shown (the dialog's × is 关闭 too).
+  // where: "hero" — at the top, by the state (关闭, 再看一次); "consent" — after what opening allows,
+  // because opening is the point of consent (打开, and 再试一次 after a start that failed).
   function wechatActions(app, gaveUp) {
     if (!app) return [];
-    const open = (label) => ({ act: "connect", label, said: label === "打开" ? "打开微信" : "再试一次打开微信", main: true });
-    const shut = { act: "disconnect", label: "关闭", said: "关闭微信", main: false };
+    const open = (label) => ({ act: "connect", label, said: label === "打开" ? "打开微信" : "再试一次打开微信", main: true, where: "consent" });
+    const shut = { act: "disconnect", label: "关闭", said: "关闭微信", main: false, where: "hero" };
+    const reread = { act: "reread", label: "再看一次", said: "再看一次微信现在的状态", main: false, where: "hero" };
     if (app.state === "off") return [open(trim(app.reason) ? "再试一次" : "打开")];
-    if (app.state === "starting") return gaveUp ? [{ act: "reread", label: "再看一次", said: "再看一次微信现在的状态", main: false }] : [];
+    if (app.state === "starting") return gaveUp ? [reread] : [];
     if (app.state === "on") return [shut];
-    if (app.state === "failed") return [open("再试一次"), shut];
-    if (unread(app)) return [{ act: "reread", label: "再看一次", said: "再看一次微信现在的状态", main: false }];
+    if (app.state === "failed") return [shut, open("再试一次")];
+    if (unread(app)) return [reread];
     return [];
   }
   const BUSY = { connect: "正在打开…", disconnect: "正在关闭…", authorize: "正在授权…", revoke: "正在撤销…", reread: "正在读取…", check: "正在检查…" };
@@ -96,25 +101,41 @@
   // When the shown clock next changes.
   const tickIn = (ms) => { const r = ms % 1000; return ms <= 0 ? 0 : r === 0 ? 1000 : r; };
 
-  // The words around 微信. The consent facts are read before 授权 10 分钟 is pressed (docs/apps-api.md:
-  // no screenshot is kept; the recognised text goes to the cat's thinking — its Agent and the model behind
-  // it — and stays in that chat's run record; reading by contact brings 微信 forward, may mark it read and
-  // tries to restore; it only reads; ten minutes, ends by itself, can end earlier). The plugin's own words
-  // (disclosure, with its version) are one click away.
+  // The words around 微信 (docs/apps-api.md 「微信」 → 「两种读法」). A cat reads 微信 in two ways:
+  //   by name — a contact whose name matches exactly: needs only 微信 to be open; no other switch, no time
+  //     limit; any cat may do it in its reply to a message of the owner's (nothing makes it ask first);
+  //     it brings 微信 to the front, opens that chat (may clear its unread mark), then tries to put things back;
+  //   the open chat — the chat open in 微信 now: needs 微信 open AND the plugin's ten-minute authorization;
+  //     it does not operate 微信.
+  // So opening is the point of consent: what opening allows is on the page before 打开 (and before 再试一次
+  // after a start that failed). 关闭 ends both; 撤销 and the ten minutes end only the open chat. What is not
+  // true is never said: that a cat asks first; that cats cannot read for want of the ten minutes; that the
+  // ten minutes or 撤销 stop all reading; that macOS will ask for the permissions (the plugin only checks).
   const WECHAT_ABOUT = "让猫猫读这台 Mac 上微信里看得到的消息。";
-  const WECHAT_NOT_YET = "猫猫现在还不能读。";
-  const WECHAT_FACTS = Object.freeze([
-    "只读：不发消息、不点链接，也不读微信的聊天记录库。",
-    "读的时候会截图认字，截图不保存。",
-    "认出的文字会和你发给猫猫的话一样，交给它思考用的 Agent，并留在那段聊天的执行记录里。",
-    "按联系人读，猫猫每次都会先问你；读时微信会短暂切到前面，那段聊天可能被标为已读，读完尽量回到原来的样子。",
-    "10 分钟后自动结束，也可以随时撤销。",
-  ]);
-  const WECHAT_CAN = "猫猫现在可以读微信";
+  // The two ways, each with its own heading.
+  const BY_NAME = "按名字读某位联系人";
+  const OPEN_CHAT = "读微信里正打开的那段聊天";
+  // By name: what it takes (opening, nothing more, until 关闭), who may (any cat, replying to you), what it does to 微信.
+  const byName = (open) => (open ? "现在就能读" : "打开后就能读") + "：在聊天里对猫猫说出联系人的名字就行，不用再授权，也没有时限，直到你关闭。";
+  const BY_NAME_REACH = "任何一只猫在回复你的消息时都能这样读；读时微信会短暂切到前面，那段聊天可能被标为已读，读完尽量回到原来的样子。";
+  // The open chat: before opening, after opening (the authorization's own facts, before its button), while authorized.
+  const OPEN_LATER = "打开后还要另外授权 10 分钟；读这一段不会动微信。";
+  const OPEN_ASK = "授权 10 分钟，猫猫就能读这一段：只读它，不会动微信；10 分钟后自己结束，也可以随时撤销。";
   const WECHAT_SAY = "看一下微信";
-  const WECHAT_HOW = ["到聊天里对猫猫说「", WECHAT_SAY, "」，它会读微信里正打开的那段聊天；也可以说出联系人的名字。"];
-  const WECHAT_FIRST = "第一次读的时候，macOS 会请你允许「屏幕录制」和「辅助功能」。";
-  // A cat refused by the plugin repeats the plugin's words, which name its upstream screen.
+  const OPEN_SAY = ["在聊天里说「", WECHAT_SAY, "」，猫猫读的就是这一段。"];
+  const OPEN_LEFT = "这一段的授权";
+  // 微信 on without an `authorization` field: the plugin's status could not be read — unknown, never "not authorized".
+  const OPEN_UNKNOWN = "没能读到这 10 分钟授权现在的状态。";
+  const authKnown = (app) => !!app && app.state === "on" && !!app.authorization && typeof app.authorization === "object";
+  // How it reads, either way.
+  const WECHAT_READS = Object.freeze([
+    "只读：不发消息、不点链接，也不读微信的聊天记录库。读的时候截图认字，截图不保存。",
+    "认出的文字会和你发给猫猫的话一样，交给它思考用的 Agent，并留在那段聊天的执行记录里。",
+  ]);
+  // What reading needs from macOS (the plugin checks screen recording and never asks; the entry is the
+  // program that started clowder-bot, not named here because which one it is depends on how it was started).
+  const WECHAT_PERMISSIONS = "要读得到，需要在 系统设置 › 隐私与安全性 里给启动 clowder-bot 的程序打开「屏幕录制」，按名字读还要「辅助功能」；没有的话，猫猫会说它没能读到。";
+  // A cat refused for want of the ten minutes repeats the plugin's words, which name its upstream screen.
   const WECHAT_HUB = "猫猫提到「Plugin Hub」时，说的就是这里。";
   const WECHAT_SLOW = "第一次启动可能要半分钟以上。";
   const WECHAT_STILL = "已经两分钟了，还在启动。";
@@ -123,7 +144,7 @@
     started: "微信已经打开了。",
     startFailed: (reason) => "微信没能启动" + (trim(reason) ? "：" + trim(reason) : "") + "。",
     still: "微信还在启动。",
-    ended: "微信的读取授权已经结束。",
+    ended: "读微信里正打开那段聊天的 10 分钟授权结束了；按名字读不受影响。",
   });
 
   // ---- 自定义应用: the form ----
@@ -356,7 +377,7 @@
 
   root.ClowderAppsRules = Object.freeze({
     trim, WECHAT, path, UNREAD, unread, look, wechatActions, BUSY, POLL_EVERY, POLL_FOR, pollNext, deadline, clock, clockSaid, tickIn,
-    WECHAT_ABOUT, WECHAT_NOT_YET, WECHAT_FACTS, WECHAT_CAN, WECHAT_SAY, WECHAT_HOW, WECHAT_FIRST, WECHAT_HUB, WECHAT_SLOW, WECHAT_STILL, SAID,
+    WECHAT_ABOUT, BY_NAME, OPEN_CHAT, byName, BY_NAME_REACH, OPEN_LATER, OPEN_ASK, WECHAT_SAY, OPEN_SAY, OPEN_LEFT, OPEN_UNKNOWN, authKnown, WECHAT_READS, WECHAT_PERMISSIONS, WECHAT_HUB, WECHAT_SLOW, WECHAT_STILL, SAID,
     NAME_MAX, PROGRAM_MAX, ARGS_MAX, ARG_MAX, URL_MAX, SECRETS_MAX, VALUE_MAX, SECRETS_WORD, URL_SAID, EMPTY_SECRET,
     nameProblem, programProblem, argsOf, argsProblem, urlProblem, secretNameProblem, secretValueProblem, secretsOf, check, fingerprint,
     splitCommand, commandLine, slowFirstRun, CUSTOM_LEAD, consequences, added, SLOW_HINT, REMOVE_NOTE, removeTitle,
