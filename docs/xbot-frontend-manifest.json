@@ -27,7 +27,7 @@
       "file": "app.js",
       "target": "client/public/app.js",
       "sourceSha256": "1248f793493826bf044359c71e7d8772ccc3472d6021d6abb979dff9b6cb29bc",
-      "sha256": "56af6d07a38c33dde4ad194f39b4a19089574ebdd40afdebd58a083408690207",
+      "sha256": "47658e873c4f3b3d3a3b93e2b2f38ad6d201fbc4bfd4230f6a079ddaf191dbe6",
       "unchanged": false
     },
     {
@@ -921,9 +921,9 @@
     },
     {
       "target": "client/public/polish.css",
-      "description": "Styles for 6a: the found message's quiet ring that follows its bubble and a flash that reads in dark mode, 设置 → 关于's runtime link as a settings row, and the consistency fixes from the audit; existing tokens and keyframes only; a radio in a .choice pill inside a .field form (定时's 时间规则, 导出对话's 格式) is the ordinary small radio again instead of app.css's full-width .field input (review r15 of item 46); item 48: a message row's focus ring mixes --ring (拿铁's primary; fitted for 3:1 at 70% in every 配色)",
-      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 打磨 6a · one voice and a clean finish (docs/xbot-frontend.md item 33); the layout explains, not captions, on every other screen (docs/xbot-frontend.md item 46) by local Claude Code (claude-opus-5-5) on 2026-11-13; 配色 by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 48)",
-      "sha256": "174d1f10807a6f75b752c0026212f0907189ce9c21f035d98f16bf0936c35ca6"
+      "description": "Styles for 6a: the found message's quiet ring that follows its bubble and a flash that reads in dark mode, 设置 → 关于's runtime link as a settings row, and the consistency fixes from the audit; existing tokens and keyframes only; a radio in a .choice pill inside a .field form (定时's 时间规则, 导出对话's 格式) is the ordinary small radio again instead of app.css's full-width .field input (review r15 of item 46); item 48: a message row's focus ring mixes --ring (拿铁's primary; fitted for 3:1 at 70% in every 配色); item 52: the toast's text keeps a line break, so a creation's notice of two sentences reads as two lines",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 打磨 6a · one voice and a clean finish (docs/xbot-frontend.md item 33); the layout explains, not captions, on every other screen (docs/xbot-frontend.md item 46) by local Claude Code (claude-opus-5-5) on 2026-11-13; 配色 by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 48); item 52 by local Claude Code (claude-opus-5-5) on 2026-11-26 (docs/xbot-frontend.md item 52)",
+      "sha256": "adacb6262ff68329ed05fe8a54ca071cad79a1057ef721ef69257896ba7d5482"
     },
     {
       "target": "client/public/sidebar.js",

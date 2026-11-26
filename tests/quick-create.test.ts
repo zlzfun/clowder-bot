@@ -709,6 +709,19 @@ test('the shell says a held notice once, when that cat\'s chat is actually open,
   assert.doesNotMatch(app, /quietNote\(created\.notice\)/);
 });
 
+test('item 52: a copy\'s or an import\'s notice is held like a new cat\'s and said once its chat is open; a notice of two sentences reads as two lines', () => {
+  const app = read('client/public/app.js');
+  // 导入资料 (编辑资料) and 复刻 (the panel's ⋯ menu) create a cat too, and the server may answer with a notice.
+  assert.match(app, /const imp = el\("button", "text-btn", "导入资料"\);/);
+  assert.match(app, /item\("copy", "复刻", \(\) => openFork\(name\)\);/);
+  assert.match(app, /const res = await api\("\/xbot-api\/bots\/import", \{ method: "POST", body: tpl \}\);\n\s+closeModal\(\);\n[^\n]*\n\s+if \(res && res\.name && res\.notice\) holdNotice\(\{ name: res\.name, nativeId: res\.native_id \|\| "", text: res\.notice \}\);\n\s+await refreshLists\(\);\n\s+if \(res && res\.name\) await selectBot\(res\.name\);/);
+  assert.match(app, /const res = await api\("\/xbot-api\/bots\/" \+ encodeURIComponent\(src\) \+ "\/fork", \{ method: "POST", body: body \}\);\n\s+const made = \(res && res\.name\) \|\| name;\n[^\n]*\n\s+if \(res && res\.notice\) holdNotice\(\{ name: made, nativeId: res\.native_id \|\| "", text: res\.notice \}\);\n\s+await refreshLists\(\);\n\s+await selectBot\(made\);/);
+  assert.doesNotMatch(app, /quietNote\(res\.notice\)/);
+  // Two sentences joined by a line break go to the toast as they are, and the toast's text keeps the break.
+  assert.match(app, /box\.replaceChildren\(busy \? spinIcon\(16\) : icon\("info"\), el\("span", "", text\)\);/);
+  assert.match(read('client/public/polish.css'), /\n\.toast > span \{ white-space: pre-line; \}\n/);
+});
+
 test('the no-chat line is the next step and the way to the list (item 46: no sentence repeating the heading), and opens the list', () => {
   const p = page({ cats: ['团子'] });
   const view = p.paint(p.Q.noChat());

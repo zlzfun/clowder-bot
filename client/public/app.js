@@ -6026,6 +6026,8 @@
         const tpl = JSON.parse(await f.text());
         const res = await api("/xbot-api/bots/import", { method: "POST", body: tpl });
         closeModal();
+        // A creation's notice (item 52: the new cat could not be kept off this computer), said once its chat is open.
+        if (res && res.name && res.notice) holdNotice({ name: res.name, nativeId: res.native_id || "", text: res.notice });
         await refreshLists();
         if (res && res.name) await selectBot(res.name);
       } catch (e) { showErr(e, "导入失败"); }
@@ -6097,9 +6099,12 @@
       const body = { name: name, role: role };
       const group = (v.group || "").trim();
       if (group) body.group = group;
-      await api("/xbot-api/bots/" + encodeURIComponent(src) + "/fork", { method: "POST", body: body });
+      const res = await api("/xbot-api/bots/" + encodeURIComponent(src) + "/fork", { method: "POST", body: body });
+      const made = (res && res.name) || name;
+      // A creation's notice (item 52), said once the copy's chat is open.
+      if (res && res.notice) holdNotice({ name: made, nativeId: res.native_id || "", text: res.notice });
       await refreshLists();
-      await selectBot(name);
+      await selectBot(made);
     });
   }
 

@@ -44,6 +44,9 @@ a.setrow.about-link > .ic { flex: none; color: var(--x-muted); }
    centred with left: 50%, it could only use half the column, so on a phone
    two sentences ran down seven narrow lines. Short toasts look the same. */
 .toast { width: max-content; max-width: min(560px, calc(100% - 32px)); }
+/* A notice of two sentences comes joined by a line break (item 52: a default
+   not written and the computer not kept off): each starts its own line. */
+.toast > span { white-space: pre-line; }
 
 /* ---- Audit: siblings that differed. */
 /* The drawer's pages share one left edge: 文件 sat 4px further left (16px)
