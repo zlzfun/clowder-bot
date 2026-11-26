@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { ApiError } from '../errors.js';
 import type { NativeCat, NativeTransport } from './types.js';
 
@@ -29,8 +29,12 @@ export interface ComputerServer { command: string; args: string[]; env?: Record<
 export interface ComputerDriver {
   /** False where this app has no driver to offer (anything but macOS today). */
   readonly supported: boolean;
-  /** How a cat's Agent starts the driver's tools, or undefined when the driver is not installed. */
-  locate(): Promise<ComputerServer | undefined>;
+  /**
+   * How a cat's Agent starts the driver's tools, or undefined when the driver
+   * is not installed. `fresh`: check the program's identity now, not from an
+   * earlier look (asked before the registry is pointed at it).
+   */
+  locate(fresh?: boolean): Promise<ComputerServer | undefined>;
   /** The driver's own macOS grants. */
   permissions(): Promise<ComputerGrants>;
   /** Starts the driver's background process. While a grant is missing the driver opens System Settings itself. */
@@ -46,34 +50,44 @@ const run = (file: string, args: string[], env: NodeJS.ProcessEnv = process.env,
   new Promise<{ ok: boolean; out: string; err: string }>(done => execFile(file, args, { env, timeout, maxBuffer: 1 << 20 },
     (error, stdout, stderr) => done({ ok: !error, out: String(stdout), err: String(stderr) })));
 
+/** The one identity accepted as the driver: cua-driver's bundle id, signed by its Developer ID team (computer-driver.lock.json pins the same pair). */
+export const driverRequirement = 'identifier "com.trycua.driver" and anchor apple generic and certificate leaf[subject.OU] = "YCK386LBJ7"';
+
 /**
  * cua-driver in its standalone mode: `CuaDriver.app` is its own macOS identity
  * (Developer ID "Cua AI, Inc."), so the grants are given to it and hold however
  * this app was started. `toolsDir` is where scripts/install-computer-driver.mjs
  * puts it; a copy the owner installed themselves is found too. Only a build
- * with that signature is used: a path alone must not decide which program
- * drives the desktop.
+ * that satisfies driverRequirement is used, by its real absolute path: a name
+ * or a link alone must not decide which program drives the desktop, and what
+ * is checked here is the very path the engine is given to run.
  */
 export function cuaDriver(toolsDir: string, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): ComputerDriver {
   const calm = { CUA_DRIVER_RS_TELEMETRY_ENABLED: '0', CUA_DRIVER_RS_UPDATE_CHECK: '0' };
+  // A relative place would be read against this process's directory here and against the engine's there: not accepted.
   const places = [env.BOT_COMPUTER_DRIVER_APP, join(toolsDir, 'CuaDriver.app'), '/Applications/CuaDriver.app', join(homedir(), 'Applications', 'CuaDriver.app')]
-    .filter((place): place is string => !!place);
+    .filter((place): place is string => !!place && isAbsolute(place));
   const cli = (app: string) => join(app, 'Contents', 'MacOS', 'cua-driver');
-  let known: { app: string; at: number } | undefined;
-  async function app(): Promise<string | undefined> {
-    if (known && Date.now() - known.at < 60_000 && existsSync(cli(known.app))) return known.app;
+  // What the program was when it was last checked: a change to the file is a different program.
+  const mark = (app: string) => { try { const s = statSync(cli(app)); return `${s.dev}:${s.ino}:${s.size}:${s.mtimeMs}`; } catch { return undefined; } };
+  let known: { app: string; mark: string; at: number } | undefined;
+  async function app(fresh = false): Promise<string | undefined> {
+    if (!fresh && known && Date.now() - known.at < 60_000 && mark(known.app) === known.mark) return known.app;
     known = undefined;
     for (const place of places) {
-      if (!existsSync(cli(place))) continue;
-      const [signed, valid] = await Promise.all([run('/usr/bin/codesign', ['-dv', '--verbose=2', place], env, 20_000), run('/usr/bin/codesign', ['--verify', '--strict', place], env, 20_000)]);
-      if (valid.ok && /^Identifier=com\.trycua\.driver$/m.test(signed.err) && /^TeamIdentifier=YCK386LBJ7$/m.test(signed.err)) { known = { app: place, at: Date.now() }; return place; }
+      let real: string;
+      try { real = realpathSync(place); } catch { continue; }
+      const before = mark(real);
+      if (!before) continue;
+      const valid = await run('/usr/bin/codesign', ['--verify', '--deep', '--strict', `-R=${driverRequirement}`, real], env, 30_000);
+      if (valid.ok && mark(real) === before) { known = { app: real, mark: before, at: Date.now() }; return real; }
     }
     return undefined;
   }
   const driver = async (...args: string[]) => { const found = await app(); return found ? run(cli(found), args, { ...env, ...calm }) : undefined; };
   return {
     supported: platform === 'darwin',
-    async locate() { const found = platform === 'darwin' ? await app() : undefined; return found ? { command: cli(found), args: ['mcp'], env: calm } : undefined; },
+    async locate(fresh) { const found = platform === 'darwin' ? await app(fresh) : undefined; return found ? { command: cli(found), args: ['mcp'], env: calm } : undefined; },
     async permissions() {
       const result = await driver('permissions', 'status', '--json');
       let read: Record<string, unknown>;
@@ -91,7 +105,9 @@ export function cuaDriver(toolsDir: string, env: NodeJS.ProcessEnv = process.env
 
 /** What a cat's 资料 shows about the computer. `on` is the registry's word; the rest says whether that can work right now. */
 export interface ComputerView { supported: boolean; installed: boolean; on: boolean; permissions: ComputerGrants['state']; missing?: ComputerGrant[] }
-interface Entry { id?: string; type?: string; source?: string; enabled?: boolean; cats?: Record<string, boolean>; mcpServer?: { command?: string; args?: string[] } }
+interface Entry { id?: string; type?: string; source?: string; enabled?: boolean; cats?: Record<string, boolean>; blockedCats?: string[]; mcpServer?: { command?: string; args?: string[] } }
+/** Ends the turns a cat is in the middle of, wherever it is working; says how many it could not end. */
+export type StopRunning = (cat: NativeCat) => Promise<{ stopped: number; failed: number }>;
 
 // What the entry points at while it is being registered: a program that offers no tools.
 const placeholder = '/usr/bin/true';
@@ -100,8 +116,12 @@ const wait = (ms: number) => new Promise(done => setTimeout(done, ms));
 
 export class Computer {
   private tail: Promise<unknown> = Promise.resolve();
-  /** `patience`: how long a driver that was just started is given to answer, in ms. */
-  constructor(private readonly native: NativeTransport, readonly driver: ComputerDriver, private readonly patience = 6000) {}
+  /**
+   * `stopRunning`: how a cat's running turns are ended (the bridge's native cancel).
+   * `patience`: how long a driver that was just started is given to answer, in ms.
+   */
+  constructor(private readonly native: NativeTransport, readonly driver: ComputerDriver,
+    private readonly stopRunning: StopRunning = async () => ({ stopped: 0, failed: 0 }), private readonly patience = 6000) {}
 
   private async entry(): Promise<Entry | undefined> {
     const { items } = await this.native.request<{ items?: Entry[] }>('/api/capabilities');
@@ -113,7 +133,14 @@ export class Computer {
   private install(server: ComputerServer) {
     return this.native.request('/api/capabilities/mcp/install', { method: 'POST', body: { id: computerEntry, transport: 'stdio', ...server } });
   }
-  private isOn(entry: Entry | undefined, cat: NativeCat) { return !!entry && entry.enabled !== false && entry.mcpServer?.command !== placeholder && entry.cats?.[cat.id] === true; }
+  private real(entry: Entry | undefined): entry is Entry { return !!entry && entry.mcpServer?.command !== placeholder; }
+  private isOn(entry: Entry | undefined, cat: NativeCat) { return this.real(entry) && entry.enabled !== false && entry.cats?.[cat.id] === true; }
+  /** One change at a time: a switch, and a cat being made, are several native steps that must not interleave. */
+  private serial<T>(work: () => Promise<T>): Promise<T> {
+    const next = this.tail.then(work);
+    this.tail = next.catch(() => {});
+    return next;
+  }
 
   async view(cat: NativeCat): Promise<ComputerView> {
     // Whether the cat is on is the registry's to say, also where the driver is gone or this is not a Mac: a stale "on" must still be seen and switched off.
@@ -123,12 +150,7 @@ export class Computer {
       ...(grants.state === 'needed' ? { missing: grants.missing } : {}) };
   }
 
-  /** One change at a time: registering the entry is several native steps that must not interleave with another switch. */
-  set(cat: NativeCat, enabled: boolean): Promise<ComputerView> {
-    const next = this.tail.then(() => enabled ? this.enable(cat) : this.disable(cat));
-    this.tail = next.catch(() => {});
-    return next;
-  }
+  set(cat: NativeCat, enabled: boolean): Promise<ComputerView> { return this.serial(() => enabled ? this.enable(cat) : this.disable(cat)); }
 
   /**
    * Turning it on. Returns the view as it is afterwards: `on: false` with
@@ -138,7 +160,7 @@ export class Computer {
    */
   private async enable(cat: NativeCat): Promise<ComputerView> {
     if (!this.driver.supported) throw new ApiError(422, '这台电脑上还用不了这项功能', undefined, 'computer_unsupported');
-    const located = await this.driver.locate();
+    const located = await this.driver.locate(true);
     if (!located) throw new ApiError(422, '还没有装上操作电脑要用的驱动', undefined, 'computer_absent');
     let grants = await this.driver.permissions();
     if (grants.state === 'unknown') {
@@ -148,12 +170,13 @@ export class Computer {
       if (grants.state === 'unknown') throw new ApiError(503, '电脑驱动没有启动起来，请再试一次', undefined, 'computer_not_started');
     }
     if (grants.state !== 'granted') return this.view(cat);
-    let entry = await this.entry();
-    if (!entry || entry.mcpServer?.command === placeholder) { await this.register(located); entry = await this.entry(); }
+    const entry = await this.entry();
+    if (!this.real(entry)) await this.register(located);
     // The driver was moved or reinstalled: the engine keeps who is blocked when an entry is installed over.
-    else if (entry.mcpServer?.command !== located.command || JSON.stringify(entry.mcpServer?.args ?? []) !== JSON.stringify(located.args)) { await this.install(located); entry = await this.entry(); }
-    if (!this.isOn(entry, cat)) { await this.toggle({ scope: 'cat', catId: cat.id, enabled: true }); entry = await this.entry(); }
-    if (!this.isOn(entry, cat)) throw new ApiError(502, '没能打开，请再试一次');
+    else if (entry.mcpServer?.command !== located.command || JSON.stringify(entry.mcpServer?.args ?? []) !== JSON.stringify(located.args)) await this.install(located);
+    // Written whatever was just read: an earlier request that timed out here may still be waiting in the engine, and the last write is the one that stands.
+    await this.toggle({ scope: 'cat', catId: cat.id, enabled: true });
+    if (!this.isOn(await this.entry(), cat)) throw new ApiError(502, '没能打开，请再试一次');
     return this.view(cat);
   }
 
@@ -180,25 +203,63 @@ export class Computer {
     void this.driver.quiet().catch(() => {});
   }
 
-  /** Turning it off works whatever the driver's state: it only takes the cat off the entry. With no cat left on, the driver's background process is asked to end. */
+  /**
+   * Turning it off, whatever the driver's state. The block is written even
+   * when the cat already reads as off (an earlier "on" that timed out here may
+   * still be waiting in the engine; written after it, this one stands). A turn
+   * the cat is in the middle of was given the tools when it started and keeps
+   * them until it ends, so a cat that was on has its running turns ended too:
+   * off means off now. With no cat left on, the driver's background process is
+   * asked to end.
+   */
   private async disable(cat: NativeCat): Promise<ComputerView> {
-    let entry = await this.entry();
-    if (this.isOn(entry, cat)) {
-      await this.toggle({ scope: 'cat', catId: cat.id, enabled: false });
-      entry = await this.entry();
-      if (this.isOn(entry, cat)) throw new ApiError(502, '没能关掉，请再试一次');
-    }
+    let entry: Entry | undefined, wasOn = true;
+    try { entry = await this.entry(); wasOn = this.isOn(entry, cat); } catch { /* unread: treated as possibly on */ }
+    if (entry === undefined && !wasOn) return this.view(cat);
+    await this.toggle({ scope: 'cat', catId: cat.id, enabled: false });
+    entry = await this.entry();
+    if (this.isOn(entry, cat)) throw new ApiError(502, '没能关掉，请再试一次');
     if (entry && !anyOn(entry)) void this.driver.stop().catch(() => {});
+    if (wasOn) {
+      const ended = await this.stopRunning(cat).catch(() => ({ stopped: 0, failed: 1 }));
+      if (ended.failed) throw new ApiError(502, '已经关掉了，但它正在进行的这一轮没能停下，停下之前它还能用这台电脑。请在对话里点停止。', undefined, 'computer_still_running');
+    }
     return this.view(cat);
   }
 
   /**
-   * A cat that was just created starts without the computer. The engine does
-   * this itself while the entry is off for every cat; once one cat has it on,
-   * a new cat would start with it too, so it is taken off here. Returns what
-   * the owner has to hear when that could not be done or confirmed.
+   * A cat is made without the computer. `create` is the native creation of the
+   * cat whose id will be `catId`. While the entry is off for every cat the
+   * engine blocks a new cat itself; once one cat has it on a new cat would
+   * start with it too, so its id is put on the block list BEFORE it exists
+   * (the engine accepts an id it does not know yet) and the creation only
+   * goes ahead once that is confirmed. This holds when the creation's answer
+   * is lost or a later step of the caller fails: the cat was blocked first.
+   * Switches wait meanwhile, so none can turn a cat on between the look and
+   * the creation. Afterwards the made cat is looked at once more (its id may
+   * not be the expected one); what could not be put right comes back as
+   * words for the owner (`notice`), with this creation's own answer. A cat
+   * that already existed — a repeated request — is left exactly as it is.
    */
-  async keepOff(cat: NativeCat): Promise<string | undefined> {
+  guard<T extends { cat?: NativeCat }>(catId: string, exists: boolean, create: () => Promise<T>): Promise<{ made: T; notice?: string }> {
+    if (exists) return create().then(made => ({ made }));
+    return this.serial(async () => {
+      let entry: Entry | undefined;
+      try { entry = await this.entry(); } catch { throw new ApiError(503, '没能确认新猫用不了这台电脑，猫没有创建。请再试一次。', undefined, 'computer_unconfirmed'); }
+      // No entry, or nobody on (a placeholder counts as nobody): the engine's own rule keeps the new cat off, or there is nothing to keep it from.
+      if (!this.real(entry) || !anyOn(entry)) return { made: await create() };
+      try {
+        await this.toggle({ scope: 'cat', catId, enabled: false });
+        if (!(await this.entry())?.blockedCats?.includes(catId)) throw new Error('not listed');
+      } catch { throw new ApiError(503, '没能确认新猫用不了这台电脑，猫没有创建。请再试一次。', undefined, 'computer_unconfirmed'); }
+      const made = await create();
+      const notice = made.cat?.id ? await this.keepOff(made.cat) : undefined;
+      return { made, ...(notice ? { notice } : {}) };
+    });
+  }
+
+  /** The made cat, looked at once more and taken off if it is on. Returns the words for the owner when that could not be done or confirmed. */
+  private async keepOff(cat: NativeCat): Promise<string | undefined> {
     try {
       for (let attempt = 0; attempt < 2; attempt++) {
         if (!this.isOn(await this.entry(), cat)) return undefined;
