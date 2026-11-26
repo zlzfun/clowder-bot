@@ -1,6 +1,8 @@
+diff --git a/packages/api/src/domains/cats/services/agents/invocation/invoke-single-cat.ts b/packages/api/src/domains/cats/services/agents/invocation/invoke-single-cat.ts
+index 514c735a..c8cb59c1 100644
 --- a/packages/api/src/domains/cats/services/agents/invocation/invoke-single-cat.ts
 +++ b/packages/api/src/domains/cats/services/agents/invocation/invoke-single-cat.ts
-@@ -1430,6 +1430,17 @@
+@@ -1693,6 +1693,17 @@ export async function prepareInvocationExecutionBinding(
  }
  
  export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationParams): AsyncIterable<AgentMessage> {
@@ -15,9 +17,12 @@
 +    yield { type: 'done', catId: params.catId, timestamp: Date.now() };
 +    return;
 +  }
+   const invocationDeps = params.scopedMemberLaunch ? scopedMemberInvocationDeps(deps) : deps;
    const services = new InvocationServiceScope();
    try {
-     const service = params.executionBinding ? params.service : services.pin(params.service);
+diff --git a/packages/api/src/domains/cats/services/agents/invocation/thread-participant-policy.ts b/packages/api/src/domains/cats/services/agents/invocation/thread-participant-policy.ts
+new file mode 100644
+index 00000000..8e561001
 --- /dev/null
 +++ b/packages/api/src/domains/cats/services/agents/invocation/thread-participant-policy.ts
 @@ -0,0 +1,18 @@

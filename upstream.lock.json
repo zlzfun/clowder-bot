@@ -1,8 +1,8 @@
 {
   "repository": "https://github.com/zts212653/clowder-ai.git",
-  "commit": "42017e0cea07e3e259e7fb183be70433f05e131c",
+  "commit": "fe632f8febdaaf189b0b3aaa078c6d36032da492",
   "source": "upstream/clowder-ai",
-  "build": ".runtime/clowder-ai-schedules",
+  "build": ".runtime/clowder-ai-fe632f8f",
   "nodeMajor": 24,
   "pnpm": "9.15.4",
   "patches": [
