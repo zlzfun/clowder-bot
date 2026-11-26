@@ -1096,6 +1096,17 @@ test('against the real adapter: 微信 opened and authorized (the countdown from
   buttonOf(body(), '撤销').click();
   await until(() => all(body(), '.ap-authorize').length === 1, 'revoked');
   assert.equal(native.apps.plugin!.live, 'running', '撤销 left 微信 on (reading by name stays until 关闭)');
+  // The plugin's status cannot be read: the adapter leaves `authorization` out, and the page says unknown — then a fresh read.
+  native.apps.statusFails = true;
+  page.window.ClowderApps.close();
+  page.window.ClowderApps.open({});
+  await until(() => !!row('wechat'), 'the list is read again');
+  assert.equal(seen(row('wechat')), '微信已打开');
+  row('wechat').click();
+  assert.deepEqual(all(body(), '.ap-way-part').map((n) => seen(n)), [R.OPEN_UNKNOWN + '再看一次撤销']);
+  native.apps.statusFails = false;
+  buttonOf(body(), '再看一次').click();
+  await until(() => all(body(), '.ap-authorize').length === 1, 'read again: not authorized, as the plugin answered');
   // A program, with one secret.
   (page.doc.activeElement as El).key('Escape');
   one(body(), '.ap-row-add').click();
