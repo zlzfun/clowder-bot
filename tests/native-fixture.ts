@@ -69,14 +69,60 @@ export class NativeFixture implements NativeTransport {
   /** Installed engine packs in the order the engine lists them (F129) — the first is the one it applies: the manifest and, for this fixture, the default behaviours read from the source. */
   packs: Array<{ name: string; version: string; description: string; packType: string; behaviors: string[] }> = [];
   /**
-   * The engine's capability registry as far as an MCP entry goes (read on the isolated runtime, 2026-11-26): installing an
-   * entry leaves it on for every cat; who may not use it is a block list; a `project` toggle without a cat blocks or
-   * unblocks every cat in one call; installing over an entry keeps its block list; a cat created while an entry is
-   * blocked for every existing cat starts blocked too, otherwise it starts with it.
+   * The engine's capability registry as far as an MCP entry goes (read on the isolated runtime and in the pinned
+   * source, 2026-11-26): installing an entry leaves it on for every cat; who may not use it is a block list, which
+   * takes an id whether or not that cat exists yet; a `project` toggle without a cat blocks or unblocks every cat in
+   * one call; installing over an entry merges into it and keeps its block list; a cat created while an entry is
+   * blocked for every existing cat starts blocked too, otherwise it starts with it unless its id was already listed;
+   * deleting is soft (disabled) unless `hard=true`. Writes are applied one after another in the order they arrived,
+   * and reads do not wait for them.
    */
   capabilities: Array<{ id: string; type: 'mcp'; source: 'external'; enabled: boolean; mcpServer: Record<string, unknown>; blockedCats?: string[] }> = [];
-  /** Registry routes that refuse, by `METHOD path` (a query string is left out) or `PATCH:<scope>` for one kind of toggle. */
+  /** Registry routes that refuse before anything changes, by `METHOD path` (a query string is left out) or `PATCH:<scope>` for one kind of toggle. */
   capabilityFailures = new Set<string>();
+  /** Routes (same keys, also `POST /api/cats`) whose change is made and whose answer is then lost: the caller gets 503. */
+  lostAnswers = new Set<string>();
+  /**
+   * The next registry write with this key is left waiting in the engine: the caller gets 503 at once (its request
+   * timed out), the write is applied when `release` settles, and every later write waits behind it.
+   */
+  capabilityHold?: { key: string; release: Promise<void> };
+  /** The next cat creation is left waiting in the engine the same way: 503 to the caller, the cat is made when `release` settles. */
+  catHold?: { release: Promise<void> };
+  /**
+   * What the engine answers to a cancellation, and after how many further reads of that conversation's queue the turn
+   * is gone. Infinity, the default: the queue stays as the test set it (cancelling is a request, not the end of the turn).
+   */
+  cancelAnswer: Record<string, unknown> = { ok: true, cancelled: true };
+  cancelEndsAfterReads = Infinity;
+  private ending = new Map<string, number>();
+  private capabilityWrites: Promise<unknown> = Promise.resolve();
+  private capabilityWrite(method: string, url: URL, parts: string[], body: any): () => unknown {
+    const found = (id: string) => this.capabilities.find(entry => entry.id === id);
+    if (url.pathname === '/api/capabilities/mcp/install' && method === 'POST') return () => {
+      const { id, ...server } = body, existing = found(id);
+      if (existing) existing.mcpServer = { ...existing.mcpServer, ...server, ...(existing.mcpServer.env || server.env ? { env: { ...(existing.mcpServer.env as object), ...server.env } } : {}) };
+      else this.capabilities.push({ id, type: 'mcp', source: 'external', enabled: true, mcpServer: server });
+      return { ok: true, capability: found(id), probe: { connectionStatus: 'connected', tools: [] } };
+    };
+    if (url.pathname === '/api/capabilities' && method === 'PATCH') return () => {
+      const entry = found(body.capabilityId);
+      if (!entry || body.capabilityType !== 'mcp' || body.source !== 'external') throw new ApiError(404, `Capability "${body.capabilityId}" (type=${body.capabilityType}) not found`);
+      const blocked = new Set(entry.blockedCats ?? []);
+      if (body.scope === 'project') { blocked.clear(); if (!body.enabled) for (const cat of this.cats) blocked.add(cat.id); }
+      else if (body.scope === 'cat' && body.catId) { if (body.enabled) blocked.delete(body.catId); else blocked.add(body.catId); }
+      else throw new ApiError(400, 'Unsupported toggle in this fixture');
+      if (blocked.size) entry.blockedCats = [...blocked]; else delete entry.blockedCats;
+      return { ok: true, capability: entry };
+    };
+    if (parts[3] === 'mcp' && parts[4] && method === 'DELETE') return () => {
+      const entry = found(parts[4]!);
+      if (!entry) throw new ApiError(404, `MCP "${parts[4]}" not found`);
+      if (url.searchParams.get('hard') === 'true') { this.capabilities = this.capabilities.filter(known => known !== entry); return { ok: true, mode: 'removed' }; }
+      entry.enabled = false; return { ok: true, mode: 'disabled' };
+    };
+    throw new Error(`Unconfigured fixture route: ${method} ${url.pathname}`);
+  }
   async request<T>(path: string, options: { method?: string; body?: any } = {}): Promise<T> {
     const method = options.method ?? 'GET', body = options.body;
     this.calls.push({ path, method, body });
@@ -101,30 +147,38 @@ export class NativeFixture implements NativeTransport {
     else if (path === '/api/cats' && method === 'GET') result = { cats: this.cats };
     else if (path === '/api/cats' && method === 'POST') {
       const cat = { ...body, id: body.catId, breedId: body.catId, configurationRevision: 'r1' } as NativeCat;
-      for (const entry of this.capabilities) if (this.cats.length && this.cats.every(known => entry.blockedCats?.includes(known.id))) entry.blockedCats!.push(cat.id);
-      this.cats.push(cat); result = { cat };
+      const make = () => {
+        for (const entry of this.capabilities) if (this.cats.length && this.cats.every(known => entry.blockedCats?.includes(known.id)) && !entry.blockedCats!.includes(cat.id)) entry.blockedCats!.push(cat.id);
+        this.cats.push(cat);
+      };
+      const held = this.catHold;
+      if (held) { this.catHold = undefined; void held.release.then(make); throw new ApiError(503, 'Clowder AI 请求中断。发送结果可能已持久化，请刷新后确认。'); }
+      make(); result = { cat };
+      if (this.lostAnswers.has('POST /api/cats')) throw new ApiError(503, 'Clowder AI 请求中断。发送结果可能已持久化，请刷新后确认。');
+    }
+    else if (parts[2] === 'cats' && parts[3] && method === 'DELETE') {
+      // The engine takes a deleted cat off every block list.
+      this.cats = this.cats.filter(known => known.id !== parts[3]);
+      for (const entry of this.capabilities) if (entry.blockedCats) { entry.blockedCats = entry.blockedCats.filter(id => id !== parts[3]); if (!entry.blockedCats.length) delete entry.blockedCats; }
+      result = { deleted: true, id: parts[3] };
     }
     else if (url.pathname.startsWith('/api/capabilities')) {
-      if (this.capabilityFailures.has(`${method} ${url.pathname}`) || (method === 'PATCH' && this.capabilityFailures.has(`PATCH:${body?.scope}`))) throw new ApiError(500, 'capability store failed');
-      const found = (id: string) => this.capabilities.find(entry => entry.id === id);
+      const key = `${method} ${url.pathname}`, kind = method === 'PATCH' ? `PATCH:${body?.scope}` : key;
+      if (this.capabilityFailures.has(key) || this.capabilityFailures.has(kind)) throw new ApiError(500, 'capability store failed');
       if (url.pathname === '/api/capabilities' && method === 'GET')
         result = { items: this.capabilities.map(entry => ({ ...entry, cats: Object.fromEntries(this.cats.map(cat => [cat.id, !entry.blockedCats?.includes(cat.id)])) })) };
-      else if (url.pathname === '/api/capabilities/mcp/install' && method === 'POST') {
-        const { id, ...mcpServer } = body, existing = found(id);
-        if (existing) existing.mcpServer = mcpServer; else this.capabilities.push({ id, type: 'mcp', source: 'external', enabled: true, mcpServer });
-        result = { ok: true, capability: found(id), probe: { connectionStatus: 'connected', tools: [] } };
-      } else if (url.pathname === '/api/capabilities' && method === 'PATCH') {
-        const entry = found(body.capabilityId);
-        if (!entry || body.capabilityType !== 'mcp' || body.source !== 'external') throw new ApiError(404, `Capability "${body.capabilityId}" (type=${body.capabilityType}) not found`);
-        const blocked = new Set(entry.blockedCats ?? []);
-        if (body.scope === 'project') { blocked.clear(); if (!body.enabled) for (const cat of this.cats) blocked.add(cat.id); }
-        else if (body.scope === 'cat' && body.catId) { if (body.enabled) blocked.delete(body.catId); else blocked.add(body.catId); }
-        else throw new ApiError(400, 'Unsupported toggle in this fixture');
-        if (blocked.size) entry.blockedCats = [...blocked]; else delete entry.blockedCats;
-        result = { ok: true, capability: entry };
-      } else if (parts[3] === 'mcp' && parts[4] && method === 'DELETE') {
-        this.capabilities = this.capabilities.filter(entry => entry.id !== parts[4]); result = { ok: true, mode: 'removed' };
-      } else throw new Error(`Unconfigured fixture route: ${method} ${path}`);
+      else {
+        const apply = this.capabilityWrite(method, url, parts, body), held = this.capabilityHold;
+        if (held && (held.key === key || held.key === kind)) {
+          this.capabilityHold = undefined;
+          this.capabilityWrites = this.capabilityWrites.then(() => held.release).then(apply).catch(() => {});
+          throw new ApiError(503, 'Clowder AI 请求中断。发送结果可能已持久化，请刷新后确认。');
+        }
+        const done = this.capabilityWrites.then(apply);
+        this.capabilityWrites = done.catch(() => {});
+        result = await done;
+        if (this.lostAnswers.has(key) || this.lostAnswers.has(kind)) throw new ApiError(503, 'Clowder AI 请求中断。发送结果可能已持久化，请刷新后确认。');
+      }
     } else if (parts[2] === 'cats' && parts[3] && method === 'PATCH') {
       const cat = this.cats.find(c => c.id === parts[3]); if (!cat) throw new ApiError(404, 'Missing cat'); Object.assign(cat, body); result = { cat };
     } else if (path === '/api/threads' && method === 'POST') {
@@ -136,10 +190,24 @@ export class NativeFixture implements NativeTransport {
     } else if (parts[2] === 'threads' && parts[3] && parts.length === 4) {
       const thread = this.threads.get(parts[3]); if (!thread) throw new ApiError(404, 'Missing thread');
       if (method === 'PATCH') Object.assign(thread, body); result = thread;
-    } else if (parts[4] === 'queue') result = this.queues.get(parts[3]!) ?? { queue: [], activeInvocations: [] };
+    } else if (parts[4] === 'queue') {
+      // A cancelled turn leaves the queue only once the engine has cleaned up after it.
+      const queue = this.queues.get(parts[3]!);
+      for (const [key, reads] of this.ending) {
+        const [threadId, catId] = key.split('|');
+        if (threadId !== parts[3]) continue;
+        if (reads > 0) { this.ending.set(key, reads - 1); continue; }
+        this.ending.delete(key);
+        if (queue) queue.activeInvocations = queue.activeInvocations.filter((run: any) => run.catId !== catId);
+      }
+      result = queue ?? { queue: [], activeInvocations: [] };
+    }
     else if (parts[4] === 'artifacts') result = {threadId:parts[3],artifacts:this.artifactRows.get(parts[3]!) ?? []};
     else if (parts[4] === 'sessions') result = { sessions: [] };
-    else if (parts[4] === 'cancel') result = { ok: true, cancelled: true };
+    else if (parts[4] === 'cancel') {
+      if (this.cancelAnswer.cancelled !== false) this.ending.set(`${parts[3]}|${parts[5]}`, this.cancelEndsAfterReads);
+      result = this.cancelAnswer;
+    }
     else if (parts[2] === 'messages' && method === 'GET') {
       // The newest page, or the one before a cursor (`<order>:<message id>`), like native: `limit` at most, and whether older ones remain.
       const all = this.messages.get(url.searchParams.get('threadId')!) ?? [], cursor = url.searchParams.get('before');

@@ -45,6 +45,8 @@ const versionOf = app => quiet('/usr/bin/plutil', ['-extract', 'CFBundleShortVer
 const sha256 = async file => { const hash = createHash('sha256'); await pipeline(createReadStream(file), hash); return hash.digest('hex'); };
 
 if (process.platform !== 'darwin') stop('这一版只有 macOS 的电脑驱动。');
+// `--from` names a file; without one it is a mistake, not a reason to download.
+if (args.includes('--from') && (!value('--from') || value('--from').startsWith('--'))) stop('用法：npm run computer:install -- --from <压缩包的路径>');
 const current = existsSync(installed) ? { version: versionOf(installed), problem: refusal(installed) } : undefined;
 if (args.includes('--check')) {
   console.log(!current ? `还没有安装（会装到 ${installed}）。` : current.problem ? `${installed} 不能用：${current.problem}。` : `已安装 ${current.version}（固定版本 ${lock.version}）：${installed}`);
@@ -54,6 +56,8 @@ if (current && !current.problem && current.version === lock.version) { console.l
 
 mkdirSync(tools, { recursive: true });
 const work = mkdtempSync(join(tools, '.install-'));
+// Set when the work directory holds the only copy of the old driver: then it is not cleared away.
+let keep = false;
 try {
   let archive = value('--from') ? resolve(value('--from')) : undefined;
   if (archive && !existsSync(archive)) refuse(`找不到 ${archive}`);
@@ -75,11 +79,19 @@ try {
   const fresh = join(unpacked, 'CuaDriver.app'), problem = refusal(fresh);
   if (problem) refuse(`解出来的应用不能用：${problem}。没有安装。`);
   if (versionOf(fresh) !== lock.version) refuse(`应用的版本是 ${versionOf(fresh)}，不是固定的 ${lock.version}。没有安装。`);
-  // The old copy goes only after the new one passed every check.
-  if (existsSync(installed)) rmSync(installed, { recursive: true, force: true });
-  renameSync(fresh, installed);
+  // The old copy is set aside only after the new one passed every check, and comes back if the new one cannot take its place.
+  // (Stopped between the two moves, the old copy is still there: in this run's work directory under tools/, named previous.app.)
+  const previous = existsSync(installed) ? join(work, 'previous.app') : undefined;
+  if (previous) renameSync(installed, previous);
+  try { renameSync(fresh, installed); }
+  catch (error) {
+    if (!previous) refuse(`没能放到 ${installed}：${error.message}。`);
+    try { renameSync(previous, installed); }
+    catch { keep = true; refuse(`没能放到 ${installed}：${error.message}。原来的那份也没能放回去，它在 ${previous}，请手动移回。`); }
+    refuse(`没能放到 ${installed}：${error.message}。原来的那份还在。`);
+  }
   console.log(`已安装 cua-driver ${lock.version}：${installed}\n在一只猫的资料里打开「电脑」，macOS 会请你给 CuaDriver 两项授权（辅助功能、屏幕录制）。`);
 } catch (error) {
   if (!(error instanceof Refused)) throw error;
   console.error(error.message); process.exitCode = 1;
-} finally { rmSync(work, { recursive: true, force: true }); }
+} finally { if (!keep) rmSync(work, { recursive: true, force: true }); }
