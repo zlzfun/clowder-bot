@@ -84,9 +84,10 @@ export function createXbotCoreRouter(bridge: BotBridge) {
       if ((value.catConfig || value.simple) && !value.idempotencyKey) ctx.addIssue({ code: 'custom', path: ['idempotencyKey'], message: '创建猫猫需要请求标识' });
     }).parse(req.body);
     const cat = await bridge.createBot(input);
-    // The cat exists either way; a second native step (its starting CLI arguments) may not have gone through.
-    res.status(201).json({ name: cat.name, native_id: cat.id, ...(bridge.startingArgumentsMissing(cat)
-      ? { notice: '猫猫建好了，但有一项默认设置没写进去：在对话里让它设提醒可能不生效。到它的资料 → 高级里重新选一次「它用什么思考」就能补上。' } : {}) });
+    // The cat exists either way; a second native step (its starting CLI arguments, keeping it off this computer) may not have gone through.
+    const notices = [bridge.startingArgumentsMissing(cat) ? '猫猫建好了，但有一项默认设置没写进去：在对话里让它设提醒可能不生效。到它的资料 → 高级里重新选一次「它用什么思考」就能补上。' : undefined,
+      bridge.creationNotice(cat)].filter(Boolean);
+    res.status(201).json({ name: cat.name, native_id: cat.id, ...(notices.length ? { notice: notices.join('\n') } : {}) });
   });
   router.patch('/bots/:name', async (req, res) => {
     const cat = await bot(req.params.name);
@@ -109,7 +110,8 @@ export function createXbotCoreRouter(bridge: BotBridge) {
     const input = z.object({ name: label, role: z.string().min(1).max(32768), group: z.string().max(80).optional() }).strict().parse(req.body);
     if (input.group && !store.state.folders.includes(input.group)) throw new ApiError(400, '分组不存在');
     const cat = await bridge.createBot({ name: input.name, persona: input.role }, await bot(req.params.name));
-    store.bot(cat.id).folder = input.group; store.save(); res.json({ name: cat.name });
+    const notice = bridge.creationNotice(cat);
+    store.bot(cat.id).folder = input.group; store.save(); res.json({ name: cat.name, ...(notice ? { notice } : {}) });
   });
   router.delete('/bots/:name', async (req, res) => {
     const cat = await bot(req.params.name);
@@ -257,7 +259,8 @@ export function createXbotCoreRouter(bridge: BotBridge) {
     if (input.avatar) validateAvatar(Buffer.from(input.avatar, 'base64'), input.avatar_mime ?? '');
     const cat = await bridge.createBot(input);
     if (input.avatar) Object.assign(store.bot(cat.id), { avatarData: input.avatar, avatarMime: input.avatar_mime, avatarUpdated: Date.now() });
-    store.save(); res.json({ name: cat.name });
+    const notice = bridge.creationNotice(cat);
+    store.save(); res.json({ name: cat.name, ...(notice ? { notice } : {}) });
   });
   router.get('/bots/:name/export', async (req, res) => {
     const cat = await bot(req.params.name), thread = await bridge.direct(cat);

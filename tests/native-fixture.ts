@@ -68,6 +68,15 @@ export class NativeFixture implements NativeTransport {
   routingUnavailable: string[] = [];
   /** Installed engine packs in the order the engine lists them (F129) — the first is the one it applies: the manifest and, for this fixture, the default behaviours read from the source. */
   packs: Array<{ name: string; version: string; description: string; packType: string; behaviors: string[] }> = [];
+  /**
+   * The engine's capability registry as far as an MCP entry goes (read on the isolated runtime, 2026-11-26): installing an
+   * entry leaves it on for every cat; who may not use it is a block list; a `project` toggle without a cat blocks or
+   * unblocks every cat in one call; installing over an entry keeps its block list; a cat created while an entry is
+   * blocked for every existing cat starts blocked too, otherwise it starts with it.
+   */
+  capabilities: Array<{ id: string; type: 'mcp'; source: 'external'; enabled: boolean; mcpServer: Record<string, unknown>; blockedCats?: string[] }> = [];
+  /** Registry routes that refuse, by `METHOD path` (a query string is left out) or `PATCH:<scope>` for one kind of toggle. */
+  capabilityFailures = new Set<string>();
   async request<T>(path: string, options: { method?: string; body?: any } = {}): Promise<T> {
     const method = options.method ?? 'GET', body = options.body;
     this.calls.push({ path, method, body });
@@ -92,7 +101,30 @@ export class NativeFixture implements NativeTransport {
     else if (path === '/api/cats' && method === 'GET') result = { cats: this.cats };
     else if (path === '/api/cats' && method === 'POST') {
       const cat = { ...body, id: body.catId, breedId: body.catId, configurationRevision: 'r1' } as NativeCat;
+      for (const entry of this.capabilities) if (this.cats.length && this.cats.every(known => entry.blockedCats?.includes(known.id))) entry.blockedCats!.push(cat.id);
       this.cats.push(cat); result = { cat };
+    }
+    else if (url.pathname.startsWith('/api/capabilities')) {
+      if (this.capabilityFailures.has(`${method} ${url.pathname}`) || (method === 'PATCH' && this.capabilityFailures.has(`PATCH:${body?.scope}`))) throw new ApiError(500, 'capability store failed');
+      const found = (id: string) => this.capabilities.find(entry => entry.id === id);
+      if (url.pathname === '/api/capabilities' && method === 'GET')
+        result = { items: this.capabilities.map(entry => ({ ...entry, cats: Object.fromEntries(this.cats.map(cat => [cat.id, !entry.blockedCats?.includes(cat.id)])) })) };
+      else if (url.pathname === '/api/capabilities/mcp/install' && method === 'POST') {
+        const { id, ...mcpServer } = body, existing = found(id);
+        if (existing) existing.mcpServer = mcpServer; else this.capabilities.push({ id, type: 'mcp', source: 'external', enabled: true, mcpServer });
+        result = { ok: true, capability: found(id), probe: { connectionStatus: 'connected', tools: [] } };
+      } else if (url.pathname === '/api/capabilities' && method === 'PATCH') {
+        const entry = found(body.capabilityId);
+        if (!entry || body.capabilityType !== 'mcp' || body.source !== 'external') throw new ApiError(404, `Capability "${body.capabilityId}" (type=${body.capabilityType}) not found`);
+        const blocked = new Set(entry.blockedCats ?? []);
+        if (body.scope === 'project') { blocked.clear(); if (!body.enabled) for (const cat of this.cats) blocked.add(cat.id); }
+        else if (body.scope === 'cat' && body.catId) { if (body.enabled) blocked.delete(body.catId); else blocked.add(body.catId); }
+        else throw new ApiError(400, 'Unsupported toggle in this fixture');
+        if (blocked.size) entry.blockedCats = [...blocked]; else delete entry.blockedCats;
+        result = { ok: true, capability: entry };
+      } else if (parts[3] === 'mcp' && parts[4] && method === 'DELETE') {
+        this.capabilities = this.capabilities.filter(entry => entry.id !== parts[4]); result = { ok: true, mode: 'removed' };
+      } else throw new Error(`Unconfigured fixture route: ${method} ${path}`);
     } else if (parts[2] === 'cats' && parts[3] && method === 'PATCH') {
       const cat = this.cats.find(c => c.id === parts[3]); if (!cat) throw new ApiError(404, 'Missing cat'); Object.assign(cat, body); result = { cat };
     } else if (path === '/api/threads' && method === 'POST') {

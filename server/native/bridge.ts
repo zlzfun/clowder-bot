@@ -13,6 +13,7 @@ import { Activity } from './activity.js';
 import { Approvals } from './approvals.js';
 import { ChatPack } from './chat-pack.js';
 import { PageReading, soleEmoji } from './reactions.js';
+import { Computer, noComputer, type ComputerDriver } from './computer.js';
 
 export const encode = encodeURIComponent;
 // A regular conversation request. The native member receives its own name, role
@@ -72,9 +73,13 @@ export class BotBridge {
   readonly approvals: Approvals;
   /** The engine pack that makes every cat talk the way a chat is talked in; asked for before a cat is given something to answer. */
   readonly manner: ChatPack;
-  constructor(readonly native: NativeTransport, readonly store: ProductStore, readonly workspace: string) {
+  /** Which cats may use this computer (the engine's registry) and the driver behind it. Without a driver the feature is absent. */
+  readonly computer: Computer;
+  /** What the owner should hear about a cat that was just created, by cat, until it is said (see createBot). Request bookkeeping, in memory. */
+  private readonly creationNotices = new Map<string, string>();
+  constructor(readonly native: NativeTransport, readonly store: ProductStore, readonly workspace: string, driver: ComputerDriver = noComputer) {
     this.workspaces = new Workspaces(this); this.nativeFiles = new NativeFiles(this); this.activity = new Activity(this);
-    this.approvals = new Approvals(this); this.manner = new ChatPack(native);
+    this.approvals = new Approvals(this); this.manner = new ChatPack(native); this.computer = new Computer(native, driver);
   }
   cats(): Promise<NativeCat[]> { return this.native.request<{ cats: NativeCat[] }>('/api/cats').then(r => r.cats); }
   templates(): Promise<{ templates: RoleTemplate[]; clientDefaults: Record<string, { defaultModel: string; models: string[] }> }> { return this.native.request('/api/cat-templates'); }
@@ -408,7 +413,28 @@ export class BotBridge {
         active, queued };
     }), groups: this.store.state.groupThreadIds.map(id => ({id,thread_id:id,activity:views.find(view => view.threadId === id) ?? this.activity.unavailable(id)})), others: [] };
   }
+  /**
+   * A new cat, by whichever way it is made. Every new cat starts without this
+   * computer (Computer.keepOff): a second native step after the cat exists,
+   * like its starting arguments. When that step could not be done or
+   * confirmed the cat is still returned, and creationNotice has the words.
+   */
   async createBot(input: CreateBot, source?: NativeCat): Promise<NativeCat> {
+    const cat = await this.makeBot(input, source);
+    const notice = await this.computer.keepOff(cat);
+    if (notice) {
+      this.creationNotices.set(cat.id, notice);
+      for (const old of this.creationNotices.keys()) { if (this.creationNotices.size <= 50) break; this.creationNotices.delete(old); }
+    }
+    return cat;
+  }
+  /** Said once, with the creation's answer. */
+  creationNotice(cat: NativeCat): string | undefined {
+    const notice = this.creationNotices.get(cat.id);
+    this.creationNotices.delete(cat.id);
+    return notice;
+  }
+  private async makeBot(input: CreateBot, source?: NativeCat): Promise<NativeCat> {
     if (input.simple) {
       if (source || input.catConfig || input.sourceTemplate || input.runtimeId || input.templateId || input.persona !== undefined || input.description !== undefined)
         throw new ApiError(400, '快速创建只需要名字，不能与其他配置混用');
