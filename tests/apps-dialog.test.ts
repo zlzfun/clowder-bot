@@ -29,6 +29,20 @@ const settle = async (turns = 12) => { for (let i = 0; i < turns; i++) await new
 type Any = any;
 
 // ---------------------------------------------------------------- the page in a VM
+// The small DOM lets anything take focus; a browser does not. Here, as in a browser, focus is refused by
+// what is hidden, inert or disabled, and by anything that is neither a control nor given a tabindex
+// (review r1, finding 7: a waiting place that cannot hold focus is no waiting place).
+const browserFocusable = (n: El) => {
+  for (let x: El | null = n; x; x = x.parent) if (x.hidden || x.inert) return false;
+  if (n.disabled) return false;
+  return n.hasAttribute('tabindex') || ['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'A'].includes(n.tagName);
+};
+{
+  const focus = El.prototype.focus;
+  El.prototype.focus = function (this: El) { if (browserFocusable(this)) focus.call(this); };
+}
+// Where focus is now, as a browser would report it: something hidden, disabled or detached has lost it.
+const focusIsUsable = (doc: Doc) => { const a = doc.activeElement as El; return a !== doc.body && a.isConnected && browserFocusable(a); };
 function load() {
   const doc = new Doc();
   const window: Any = { crypto: webcrypto, matchMedia: () => ({ matches: false }) };
@@ -70,6 +84,7 @@ function server(page: ReturnType<typeof load>) {
     // method + ' ' + path → (call) => answer | Promise (throw to fail). Checked before the defaults.
     on: new Map<string, (c: Call) => Any>(),
     starts: 0, // reads that a started 微信 stays starting
+    deaf: false, // true: an aborted request still answers later (a late success after the page gave up on it)
   };
   const app = (c: Any) => {
     const { checked, ...row } = c;
@@ -78,11 +93,16 @@ function server(page: ReturnType<typeof load>) {
   S.add = (id: string, title: string, source: Any, checked: Any = { state: 'on', tools: [{ name: 'app_probe', description: 'Returns a fixed marker.' }] }) => {
     S.custom.push({ id, kind: 'custom', title, source, checked });
   };
+  // The list as the adapter would answer it now (a copy: what was true when the request was answered).
+  S.listNow = () => plain({ apps: [S.wechat, ...S.custom.map((x: Any) => ({ id: x.id, kind: 'custom', title: x.title, source: x.source, state: x.checked && x.checked.state === 'off' ? 'off' : 'unchecked', ...(x.checked && x.checked.state === 'off' ? { reason: '已停用' } : {}) }))] });
   function answer(c: Call): Any {
     const hook = S.on.get(c.method + ' ' + c.path);
-    if (hook) return hook(c);
+    return hook ? hook(c) : S.fallback(c);
+  }
+  // The default answer, for a hook that wants to hold or wrap it.
+  S.fallback = (c: Call): Any => {
     const base = '/xbot-api/apps';
-    if (c.method === 'GET' && c.path === base) return { apps: [S.wechat, ...S.custom.map((x: Any) => ({ id: x.id, kind: 'custom', title: x.title, source: x.source, state: x.checked && x.checked.state === 'off' ? 'off' : 'unchecked', ...(x.checked && x.checked.state === 'off' ? { reason: '已停用' } : {}) }))] };
+    if (c.method === 'GET' && c.path === base) return S.listNow();
     const id = decodeURIComponent(c.path.slice(base.length + 1).split('/')[0]!);
     if (id === 'wechat') {
       const act = c.path.split('/').pop();
@@ -120,7 +140,7 @@ function server(page: ReturnType<typeof load>) {
     const c: Call = { method: opt.method || 'GET', path, body: opt.body ? plain(opt.body) : undefined, signal: opt.signal };
     S.calls.push(c);
     return new Promise((resolve, reject) => {
-      if (c.signal) c.signal.addEventListener('abort', () => reject(fail(undefined, '连不上 clowder-bot')));
+      if (c.signal && !S.deaf) c.signal.addEventListener('abort', () => reject(fail(undefined, '连不上 clowder-bot')));
       Promise.resolve().then(() => answer(c)).then((v) => resolve(v === undefined ? {} : plain(v)), reject);
     });
   };
@@ -324,7 +344,7 @@ test('the consent words (round 2): what 打开 allows, said before it — readin
     '短暂切到前面', '标为已读', '尽量回到原来的样子', // what it does to 微信
     '另外授权 10 分钟', '不会动微信', // the open chat
     '只读', '不发消息', '不点链接', '聊天记录库', '截图认字', '截图不保存', // how it reads
-    '和你发给猫猫的话一样', '交给它思考用的 Agent', '执行记录',
+    '和你发给猫猫的话一样', '交给它用的 Agent 和模型', '执行记录', // where the text goes: both recipients
   ]) assert.ok(beforeOpen.includes(fact), fact);
   assert.equal(R.byName(true).slice(0, 5), '现在就能读', 'once open: reading by name already works');
   // The ten minutes' own facts: only that chat, does not operate 微信, ends by itself after ten minutes, 撤销 ends it earlier.
@@ -461,6 +481,8 @@ test('Escape goes up one level, then closes; focus returns to where it came from
 });
 
 // The page's words in reading order, each block on its own line (hidden parts and screen-reader-only words left out).
+// What a screen reader hears describing a button.
+const said = (doc: Doc, b: El) => (b.getAttribute('aria-describedby') || '').split(' ').filter(Boolean).map((id) => seen(doc.getElementById(id))).join('');
 const lines = (root: El) => all(root, 'h3, p, button').filter((n) => seen(n).trim()).map((n) => seen(n).trim());
 
 test('微信 off: what opening allows comes first — the two ways (by name: nothing more, no time limit, until 关闭; the open chat: also the ten minutes) and how it reads — then 打开, described by all of it, with the plugin\'s own words beside it', async () => {
@@ -478,10 +500,10 @@ test('微信 off: what opening allows comes first — the two ways (by name: not
   const open = buttonOf(body(), '打开');
   assert.equal(open.getAttribute('aria-label'), '打开微信');
   const described = open.getAttribute('aria-describedby')!.split(' ').map((id) => seen(page.doc.getElementById(id)));
-  assert.deepEqual(described, [R.byName(false), R.BY_NAME_REACH, R.OPEN_LATER, ...R.WECHAT_READS], 'a screen reader hears all of it on the button');
+  assert.deepEqual(described, [R.BY_NAME, R.byName(false), R.BY_NAME_REACH, R.OPEN_CHAT, R.OPEN_LATER, ...R.WECHAT_READS], 'a screen reader hears all of it on the button, each way under its heading');
   // The plugin's own words with its version, one click away (an off 微信 carries them).
   buttonOf(body(), '插件原文').click();
-  assert.equal(seen(one(body(), '.ap-source-text')), '版本 0.1.0-alpha.7' + WECHAT_DISCLOSURE);
+  assert.equal(seen(one(body(), '.ap-source-text')), '版本 0.1.0-alpha.7' + WECHAT_DISCLOSURE + R.SOURCE_NOTE);
   buttonOf(body(), '插件原文').click();
   srv.on.set('POST /xbot-api/apps/wechat/connect', () => { srv.wechat = { ...srv.wechat, state: 'off', reason: '上次没能启动', detail: 'UNEXPECTED_RUNTIME_FAILURE · Plugin runtime reported UNEXPECTED_RUNTIME_FAILURE.' }; return srv.wechat; });
   open.click();
@@ -564,12 +586,12 @@ test('微信 on: reading by name already works (until 关闭); 授权 10 分钟 
   assert.equal(buttonOf(body(), '关闭').getAttribute('aria-label'), '关闭微信');
   const authorize = buttonOf(body(), '授权 10 分钟');
   // Before the press, not in a tooltip: its own facts come before it, and describe it.
-  assert.equal(seen(page.doc.getElementById(authorize.getAttribute('aria-describedby')!)), R.OPEN_ASK);
+  assert.equal(said(page.doc, authorize), R.OPEN_CHAT + R.OPEN_ASK + R.WECHAT_READS.join(''), 'which reading, what it does, how it reads');
   assert.ok(!authorize.dataset.tip && !authorize.getAttribute('title'));
   const source = page.doc.querySelector('.ap-source-text') as El;
   assert.equal(source.hidden, true);
   buttonOf(body(), '插件原文').click();
-  assert.equal(seen(source), '版本 0.1.0-alpha.7' + WECHAT_DISCLOSURE, 'verbatim, with its version');
+  assert.equal(seen(source), '版本 0.1.0-alpha.7' + WECHAT_DISCLOSURE + R.SOURCE_NOTE, 'verbatim, with its version, and our one correction');
   buttonOf(body(), '插件原文').click();
   // Authorize: the countdown runs from the server's until, not from the click.
   srv.on.set('POST /xbot-api/apps/wechat/authorize', () => {
@@ -656,7 +678,7 @@ test('微信 on whose ten-minute status could not be read (no `authorization`): 
   await settle();
   assert.equal(srv.sent('POST', /revoke$/).length, 1);
   assert.equal(seen(one(body(), '.ap-way-part')), R.OPEN_ASK + '授权 10 分钟' + R.WECHAT_HUB);
-  assert.equal(page.doc.activeElement, page.doc.getElementById(buttonOf(body(), '授权 10 分钟').getAttribute('aria-describedby')!));
+  assert.equal(seen(page.doc.activeElement), R.OPEN_ASK);
 });
 
 test('the countdown stops with the dialog; opening again reads the state fresh; 撤销 ends it at once', async () => {
@@ -669,7 +691,6 @@ test('the countdown stops with the dialog; opening again reads the state fresh; 
   await settle();
   assert.equal(srv.sent('POST', /revoke$/).length, 1);
   // 撤销 ended the open chat only: what authorizing would do is back, reading by name is untouched.
-  assert.equal(page.doc.activeElement, page.doc.getElementById(buttonOf(body(), '授权 10 分钟').getAttribute('aria-describedby')!));
   assert.equal(seen(page.doc.activeElement), R.OPEN_ASK);
   assert.equal(seen(one(body(), '.ap-state')), '已打开');
   assert.equal(seen(one(body(), '.ap-way-text')), R.byName(true));
@@ -1043,8 +1064,407 @@ test('what the dialog shows speaks the app\'s everyday words: no engine words an
   page.doc.activeElement.key('Escape');
   one(body(), '.ap-row-add').click(); await settle(); grab();
   const said = words.join('\n');
+  // Not ours: the plugin's own words, quoted. One exception of ours: the consent sentence that names where the
+  // 微信 text goes, the Agent and its model — the truth about that outranks the everyday-words rule (review r1, 6).
+  assert.ok(said.includes(R.WECHAT_READS[1]!));
+  const ours = [WECHAT_DISCLOSURE, R.WECHAT_READS[1]!].reduce((text, q) => text.split(q).join(''), said);
   for (const word of [/(?<![\w-])bots?\b/i, /xbot/i, /(?<![\w-])threads?\b/i, /sessions?\b/i, /会话/, /线程/, /原生/, /调用/, /模型/, /Clowder AI/i, /插件管理/, /operation/i])
-    assert.doesNotMatch(said.replace(new RegExp(WECHAT_DISCLOSURE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), ''), word);
+    assert.doesNotMatch(ours, word);
+});
+
+// ---------------------------------------------------------------- review r1 (Codex, read-only, 2026-11-26)
+// Each test here failed on the page as it was before the fix it covers.
+const on = (left?: number) => (s: Any) => {
+  s.wechat = { ...s.wechat, state: 'on', authorization: left === undefined ? { active: false, remaining_ms: 0 } : { active: true, remaining_ms: left, until: new Date(1_700_000_000_000 + left).toISOString() } };
+};
+const stuck = (root: El) => all(root, 'button, input, textarea').filter((n) => n.disabled || (n as Any).readOnly).map((n) => n.tagName + ':' + (seen(n) || n.getAttribute('aria-label') || ''));
+
+test('review r1 (1): a 微信 read that started before a write never paints over the write\'s answer — the countdown\'s read held across 关闭, and a list read held across 关闭', async () => {
+  const { page, srv, row, body } = await opened(on(5_000));
+  row('wechat').click();
+  await settle();
+  const stale = { ...srv.wechat }, gate = hold();
+  srv.on.set('GET /xbot-api/apps/wechat', () => gate.promise.then(() => stale));
+  await page.advance(5_000);
+  assert.equal(srv.sent('GET', /\/wechat$/).length, 1, 'the countdown\'s one read is on its way');
+  buttonOf(body(), '关闭').click();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-state')), '未打开');
+  gate.release();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-state')), '未打开', 'the read that began before 关闭 is not evidence after it');
+  assert.equal(all(body(), '.ap-clock').length, 0);
+  page.doc.activeElement.key('Escape');
+  assert.equal(seen(row('wechat')), '微信未打开');
+  // The list's own read is a read of 微信 too.
+  const listGate = hold();
+  const second = await opened((s) => {
+    on()(s);
+    s.add('custom:x', 'X', { type: 'program', program: 'node', args: [], secrets: [] });
+    s.on.set('GET /xbot-api/apps/custom%3Ax', () => { s.custom = []; throw fail(404, '没有这个应用'); });
+    let lists = 0;
+    s.on.set('GET /xbot-api/apps', () => { const now = s.listNow(); return lists++ === 0 ? now : listGate.promise.then(() => now); });
+  });
+  assert.equal(second.srv.sent('GET', /^\/xbot-api\/apps$/).length, 2, 'x was gone: the list is being read again');
+  second.row('wechat').click();
+  await settle();
+  buttonOf(second.body(), '关闭').click();
+  await settle();
+  listGate.release();
+  await settle();
+  assert.equal(seen(one(second.body(), '.ap-state')), '未打开');
+});
+
+test('review r1 (2): a read of 微信 that fails is not evidence — after a failed 撤销 whose re-read fails too, and when the zero-time read fails, the open chat is unknown (no countdown, 再看一次, 撤销) and the row has no time', async () => {
+  const { page, srv, row, body } = await opened(on(300_000));
+  row('wechat').click();
+  await settle();
+  srv.on.set('POST /xbot-api/apps/wechat/revoke', () => { throw fail(undefined, '连不上 clowder-bot'); });
+  srv.on.set('GET /xbot-api/apps/wechat', () => { throw fail(undefined, '连不上 clowder-bot'); });
+  buttonOf(body(), '撤销').click();
+  await settle();
+  assert.equal(all(body(), '.ap-clock').length, 0, 'the last known countdown is not shown as if it were current');
+  assert.equal(seen(one(body(), '.ap-way-part')), R.OPEN_UNKNOWN + '再看一次撤销');
+  assert.equal(seen(one(body(), '.ap-way .ap-note')), '没能撤销：连不上 clowder-bot，稍后再试。', 'what failed, where it was tried');
+  assert.equal(seen(one(body(), '.ap-state')), '已打开', 'reading by name and 关闭 as before');
+  const reads = srv.sent('GET', /\/wechat$/).length;
+  await page.advance(600_000);
+  assert.equal(srv.sent('GET', /\/wechat$/).length, reads, 'nothing counts down, nothing is read by itself');
+  page.doc.activeElement.key('Escape');
+  assert.equal(seen(row('wechat')), '微信已打开', 'the row has no time');
+  // The zero-time read fails.
+  const zero = await opened(on(5_000));
+  zero.row('wechat').click();
+  await settle();
+  zero.srv.on.set('GET /xbot-api/apps/wechat', () => { throw fail(502); });
+  await zero.page.advance(5_000);
+  assert.equal(all(zero.body(), '.ap-clock').length, 0, 'no 0:00 left standing');
+  assert.equal(seen(one(zero.body(), '.ap-way-part')), R.OPEN_UNKNOWN + '再看一次撤销');
+});
+
+test('review r1 (3): a custom app\'s check belongs to what it checked — a changed source on a list read, a failed 再检查 and a write whose answer was lost each put it back to 未检查 / 没能检查, with no tools', async () => {
+  const yGate = hold();
+  const { srv, row, body } = await opened((s) => {
+    s.add('custom:a', 'A', { type: 'program', program: 'node', args: ['a.js'], secrets: ['K'] });
+    s.add('custom:y', 'Y', { type: 'program', program: 'node', args: [], secrets: [] });
+    s.on.set('GET /xbot-api/apps/custom%3Ay', () => yGate.promise.then(() => { s.custom = s.custom.filter((x: Any) => x.id !== 'custom:y'); throw fail(404, '没有这个应用'); }));
+  });
+  assert.equal(seen(one(row('custom:a'), '.ap-st-word')), '已连接');
+  // Changed elsewhere: another program, other secret names. y turns out gone, so the list is read again.
+  srv.custom[0].source = { type: 'program', program: 'missing-new-program', args: [], secrets: ['OTHER'] };
+  yGate.release();
+  await settle();
+  assert.equal(seen(one(row('custom:a'), '.ap-st-word')), '未检查', 'what was checked is not what is there now');
+  row('custom:a').click();
+  await settle();
+  assert.equal(all(body(), '.ap-tool').length, 0, 'no tools from the old program');
+  assert.equal(seen(one(body(), '.ap-cmd')), 'missing-new-program');
+  // A failed 再检查.
+  const b = await opened((s) => s.add('custom:b', 'B', { type: 'program', program: 'node', args: [], secrets: ['K'] }));
+  b.row('custom:b').click();
+  await settle();
+  b.srv.on.set('GET /xbot-api/apps/custom%3Ab', () => { throw fail(500); });
+  buttonOf(b.body(), '再检查').click();
+  await settle();
+  assert.equal(seen(one(b.body(), '.ap-state')), '没能检查');
+  assert.equal(all(b.body(), '.ap-tool').length, 0);
+  // A secret write whose answer was lost.
+  const c = await opened((s) => s.add('custom:c', 'C', { type: 'program', program: 'node', args: [], secrets: ['K'] }));
+  c.row('custom:c').click();
+  await settle();
+  c.srv.on.set('PATCH /xbot-api/apps/custom%3Ac', () => { throw fail(undefined, '连不上 clowder-bot'); });
+  buttonOf(c.body(), '换一个值').click();
+  (c.page.doc.activeElement as Any).value = 'new';
+  buttonOf(c.body(), '保存').click();
+  await settle();
+  assert.equal(seen(one(c.body(), '.ap-state')), '没能检查', 'it may now run with the new value or the old one');
+  assert.equal(all(c.body(), '.ap-tool').length, 0);
+});
+
+test('review r1 (4): one write at a time per app — a rename started while a secret is being saved waits its turn, nothing is left locked; a rename made by leaving the field', async () => {
+  const gates: Array<ReturnType<typeof hold>> = [];
+  const { page, srv, row, body, title } = await opened((s) => {
+    s.add('custom:a', 'A', { type: 'program', program: 'node', args: [], secrets: ['K'] });
+    s.on.set('PATCH /xbot-api/apps/custom%3Aa', (c: Call) => { const g = hold(); gates.push(g); return g.promise.then(() => s.fallback(c)); });
+  });
+  row('custom:a').click();
+  await settle();
+  buttonOf(body(), '换一个值').click();
+  (page.doc.activeElement as Any).value = 'v2';
+  buttonOf(body(), '保存').click();
+  await settle();
+  one(page.doc.querySelector('.ap-title') as El, '.ap-name').click();
+  const input = page.doc.activeElement as Any;
+  input.value = 'A2';
+  input.key('Enter');
+  await settle();
+  assert.equal(srv.sent('PATCH', /custom%3Aa$/).length, 1, 'the rename waits for the secret');
+  assert.equal(srv.sent('PATCH', /custom%3Aa$/)[0].signal.aborted, false, 'the secret save is not cut off');
+  gates[0]!.release();
+  await settle();
+  assert.equal(srv.sent('PATCH', /custom%3Aa$/).length, 2);
+  assert.deepEqual(srv.sent('PATCH', /custom%3Aa$/).map((c: Call) => Object.keys(c.body)[0]), ['secrets', 'name']);
+  gates[1]!.release();
+  await settle();
+  assert.equal(title(), 'A2');
+  assert.deepEqual(stuck(one(body(), '.ap-app')), [], 'no control is left disabled or read-only');
+  // Leaving the field saves too.
+  one(page.doc.querySelector('.ap-title') as El, '.ap-name').click();
+  const field = page.doc.activeElement as Any;
+  field.value = 'A3';
+  field.dispatch('blur');
+  await settle();
+  gates[2]!.release();
+  await settle();
+  assert.deepEqual(srv.sent('PATCH', /custom%3Aa$/)[2].body, { name: 'A3' });
+  assert.equal(title(), 'A3');
+  assert.deepEqual(stuck(one(body(), '.ap-app')), []);
+});
+
+test('review r1 (5): a screen reader hears, on 打开 and on 授权 10 分钟, the same facts a sighted person sees before pressing — which reading each sentence is about, and how it reads', async () => {
+  const { page, row, body } = await opened();
+  row('wechat').click();
+  await settle();
+  const open = said(page.doc, buttonOf(body(), '打开'));
+  for (const fact of [R.BY_NAME, '不用再授权', '没有时限', '直到你关闭', '任何一只猫', '短暂切到前面', '标为已读', R.OPEN_CHAT, '另外授权 10 分钟', '不会动微信', '只读', '截图不保存', 'Agent 和模型', '执行记录'])
+    assert.ok(open.includes(fact), '打开: ' + fact);
+  const second = await opened(on());
+  second.row('wechat').click();
+  await settle();
+  const authorize = said(second.page.doc, buttonOf(second.body(), '授权 10 分钟'));
+  for (const fact of [R.OPEN_CHAT, '只读它', '不会动微信', '10 分钟后自己结束', '随时撤销', '截图不保存', 'Agent 和模型', '执行记录'])
+    assert.ok(authorize.includes(fact), '授权 10 分钟: ' + fact);
+  assert.ok(authorize.indexOf(R.OPEN_CHAT) < authorize.indexOf('这一段'), '「这一段」 comes after the heading that names it');
+});
+
+test('review r1 (6): the consent sentence names both recipients (the Agent and the model); 「插件原文」 keeps the plugin\'s words verbatim with one line of ours that corrects them', async () => {
+  assert.equal(R.WECHAT_READS[1], '认出的文字会和你发给猫猫的话一样，交给它用的 Agent 和模型，并留在那段聊天的执行记录里。');
+  const { page, row, body } = await opened();
+  row('wechat').click();
+  await settle();
+  buttonOf(body(), '插件原文').click();
+  const box = one(body(), '.ap-source-text');
+  assert.ok(seen(box).includes(WECHAT_DISCLOSURE), 'verbatim');
+  assert.equal(seen(one(box, '.ap-source-note')), R.SOURCE_NOTE);
+  for (const fact of ['不会每次问你', '按名字读', '猫猫自己确认']) assert.ok(R.SOURCE_NOTE.includes(fact), fact);
+  // Only where the plugin says it: another version's words get no correction they do not need.
+  const other = await opened((s) => { s.wechat = { ...s.wechat, disclosure: '不会保存截图。', version: '0.2.0' }; });
+  other.row('wechat').click();
+  await settle();
+  buttonOf(other.body(), '插件原文').click();
+  assert.equal(all(other.body(), '.ap-source-note').length, 0);
+  void page;
+});
+
+test('review r1 (7): a pending write keeps focus on something that can hold it, and a pending removal can be left — Escape abandons it in the page, the list is read again, nothing is said about an outcome nobody knows', async () => {
+  const gate = hold();
+  const { page, srv, row, body, title } = await opened((s) => {
+    s.add('custom:a', 'A', { type: 'program', program: 'node', args: [], secrets: ['K'] });
+    s.on.set('DELETE /xbot-api/apps/custom%3Aa', (c: Call) => gate.promise.then(() => s.fallback(c)));
+  });
+  row('custom:a').click();
+  await settle();
+  buttonOf(body(), '移除').click();
+  const confirm = page.doc.querySelector('.ap-confirm') as El;
+  const go = buttonOf(confirm, '移除');
+  go.focus();
+  go.click();
+  await settle();
+  assert.ok(focusIsUsable(page.doc) && confirm.contains(page.doc.activeElement), 'focus waits inside the confirmation, on something that can hold it');
+  // Escape while it is pending: the confirmation goes, the request is given up here, the list is read again.
+  const lists = srv.sent('GET', /^\/xbot-api\/apps$/).length;
+  page.doc.activeElement.key('Escape');
+  await settle();
+  assert.equal(page.doc.querySelector('.ap-confirm'), null);
+  assert.equal(srv.sent('DELETE', /custom%3Aa$/)[0].signal.aborted, true);
+  assert.equal(srv.sent('GET', /^\/xbot-api\/apps$/).length, lists + 1);
+  assert.equal(title(), 'A', 'still in the list: still on its page');
+  assert.equal(seen(page.doc.activeElement), '移除');
+  for (const words of ['移除了', '没能确认', '没能移除', '已经不在']) assert.ok(!seen(page.doc.body).includes(words), words);
+  // The secret editor's 保存, pending.
+  const sGate = hold();
+  srv.on.set('PATCH /xbot-api/apps/custom%3Aa', (c: Call) => sGate.promise.then(() => srv.fallback(c)));
+  buttonOf(body(), '换一个值').click();
+  (page.doc.activeElement as Any).value = 'v';
+  const save = buttonOf(body(), '保存');
+  save.focus();
+  save.click();
+  await settle();
+  assert.ok(focusIsUsable(page.doc) && one(body(), '.ap-secret-edit').contains(page.doc.activeElement), 'focus waits in the editor');
+  sGate.release();
+  await settle();
+});
+
+test('review r1 (8): an update that hides or replaces what has focus puts focus on the line that says the new state — 撤销 when the time runs out or the status turns unknown, a tool when the list is replaced', async () => {
+  for (const [answer, line] of [[{ active: false, remaining_ms: 0 }, R.OPEN_ASK], [undefined, R.OPEN_UNKNOWN]] as const) {
+    const { page, srv, row, body } = await opened(on(5_000));
+    row('wechat').click();
+    await settle();
+    srv.on.set('GET /xbot-api/apps/wechat', () => ({ ...srv.wechat, authorization: answer }));
+    buttonOf(body(), '撤销').focus();
+    await page.advance(5_000);
+    assert.ok(focusIsUsable(page.doc), 'focus is somewhere it can be');
+    assert.equal(seen(page.doc.activeElement), line);
+  }
+  const tools = (names: string[]) => names.map((name) => ({ name, description: 'About ' + name }));
+  const { page, srv, row, body } = await opened((s) => s.add('custom:t', 'T', { type: 'url', url: 'https://t.dev/mcp', secrets: [] }, { state: 'on', tools: tools(['a', 'b']) }));
+  row('custom:t').click();
+  await settle();
+  all(body(), '.ap-tool-btn')[1]!.focus();
+  srv.custom[0].checked = { state: 'on', tools: tools(['a', 'b', 'c']) };
+  buttonOf(body(), '再检查').click();
+  await settle();
+  assert.ok(focusIsUsable(page.doc));
+  srv.custom[0].checked = { state: 'failed', reason: '连不上这个网址' };
+  all(body(), '.ap-tool-btn')[0]!.focus();
+  buttonOf(body(), '再检查').click();
+  await settle();
+  assert.ok(focusIsUsable(page.doc), 'the tools went with the connection: focus did not go with them');
+});
+
+test('review r1 (9): an app found gone while its removal is being confirmed — the confirmation goes first, then the page, and focus lands on a list control that is still there', async () => {
+  const gate = hold();
+  const { page, row, body, title } = await opened((s) => {
+    s.add('custom:a', 'A', { type: 'program', program: 'node', args: [], secrets: [] });
+    s.add('custom:b', 'B', { type: 'program', program: 'node', args: [], secrets: [] });
+    s.on.set('GET /xbot-api/apps/custom%3Aa', () => gate.promise.then(() => { s.custom = s.custom.filter((x: Any) => x.id !== 'custom:a'); throw fail(404, '没有这个应用'); }));
+  });
+  row('custom:a').click();
+  await settle();
+  buttonOf(body(), '移除').click();
+  assert.ok(page.doc.querySelector('.ap-confirm'));
+  gate.release();
+  await settle();
+  assert.equal(page.doc.querySelector('.ap-confirm'), null, 'the confirmation of an app that is not there goes');
+  assert.equal(title(), '应用');
+  assert.equal((page.doc.querySelector('.ap-modal') as El).inert, false);
+  assert.ok(focusIsUsable(page.doc) && one(body(), '.ap-list').contains(page.doc.activeElement), 'focus on a list control that is still there');
+  assert.equal(page.doc.activeElement, row('custom:b'));
+  // On the list itself: a row found gone while it has focus hands focus to the row now in its place.
+  const late = hold();
+  const list = await opened((s) => {
+    s.add('custom:c', 'C', { type: 'program', program: 'node', args: [], secrets: [] });
+    s.add('custom:d', 'D', { type: 'program', program: 'node', args: [], secrets: [] });
+    s.on.set('GET /xbot-api/apps/custom%3Ac', () => late.promise.then(() => { s.custom = s.custom.filter((x: Any) => x.id !== 'custom:c'); throw fail(404, '没有这个应用'); }));
+  });
+  list.row('custom:c').focus();
+  late.release();
+  await settle();
+  assert.ok(focusIsUsable(list.page.doc));
+  assert.equal(list.page.doc.activeElement, list.row('custom:d'));
+});
+
+test('review r1 (4, 2): an opening check skipped while a removal was on its way runs once the removal fails; a failed list read leaves 微信\'s ten minutes unknown', async () => {
+  const gates = new Map<string, ReturnType<typeof hold>>();
+  const del = hold();
+  const { srv, row, body, page, voice } = await opened((s) => {
+    on(300_000)(s);
+    for (const x of ['a', 'b', 'c', 'd']) {
+      s.add('custom:' + x, x.toUpperCase(), { type: 'program', program: 'node', args: [], secrets: [] });
+      if (x !== 'd') { const g = hold(); gates.set(x, g); s.on.set('GET /xbot-api/apps/custom%3A' + x, (c: Call) => g.promise.then(() => s.fallback(c))); }
+    }
+    s.on.set('DELETE /xbot-api/apps/custom%3Ad', () => del.promise.then(() => { throw fail(500); }));
+  });
+  assert.equal(srv.sent('GET', /custom%3Ad$/).length, 0, 'three at a time: d waits');
+  row('custom:d').click();
+  await settle();
+  buttonOf(body(), '移除').click();
+  buttonOf(page.doc.querySelector('.ap-confirm') as El, '移除').click();
+  await settle();
+  gates.get('a')!.release();
+  await settle();
+  assert.equal(srv.sent('GET', /custom%3Ad$/).length, 0, 'not checked while its removal is on its way');
+  del.release();
+  await settle();
+  assert.equal(srv.sent('GET', /custom%3Ad$/).length, 1, 'the removal failed: d is checked after all');
+  gates.get('b')!.release();
+  gates.get('c')!.release();
+  await settle();
+  assert.match(voice(), /^检查好了/, 'and the opening round is said when it ends');
+  // A list read that fails is a failed read of 微信 too.
+  page.doc.activeElement.key('Escape'); // the confirmation, which says the removal failed
+  page.doc.activeElement.key('Escape'); // d's page
+  assert.match(seen(row('wechat')), /授权还剩/);
+  srv.on.set('GET /xbot-api/apps', () => { throw fail(undefined, '连不上 clowder-bot'); });
+  srv.on.set('GET /xbot-api/apps/custom%3Aa', () => { srv.custom = srv.custom.filter((x: Any) => x.id !== 'custom:a'); throw fail(404, '没有这个应用'); });
+  row('custom:a').click();
+  await settle();
+  buttonOf(body(), '再检查').click();
+  await settle();
+  assert.equal(seen(row('wechat')), '微信已打开', 'no time: it is not known now');
+});
+
+test('review r1 (10): after 再检查 and after a secret is saved, focus lands on the line that says the outcome', async () => {
+  const { page, srv, row, body } = await opened((s) => s.add('custom:a', 'A', { type: 'program', program: 'node', args: [], secrets: ['K'] }));
+  row('custom:a').click();
+  await settle();
+  buttonOf(body(), '再检查').focus();
+  buttonOf(body(), '再检查').click();
+  await settle();
+  assert.equal(page.doc.activeElement, one(body(), '.ap-state'));
+  assert.equal(seen(page.doc.activeElement), '已连接');
+  srv.on.set('GET /xbot-api/apps/custom%3Aa', () => { throw fail(500); });
+  buttonOf(body(), '再检查').focus();
+  buttonOf(body(), '再检查').click();
+  await settle();
+  assert.equal(seen(page.doc.activeElement), '没能检查：服务出了点问题，稍后再试。');
+  srv.on.delete('GET /xbot-api/apps/custom%3Aa');
+  buttonOf(body(), '换一个值').click();
+  (page.doc.activeElement as Any).value = 'v';
+  buttonOf(body(), '保存').focus();
+  buttonOf(body(), '保存').click();
+  await settle();
+  assert.equal(seen(page.doc.activeElement), '「K」已保存。');
+});
+
+test('review r1 (11, 12): at 390px every control of the dialog is 44px to touch; a connected app with no tools says so once', async () => {
+  const css = read('client/public/apps-dialog.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  const phone = /@media \(max-width: 560px\) \{([\s\S]*?)\n\}/.exec(css)![1]!;
+  for (const sel of ['.ap-way-acts > button', '.ap-secret-acts > button', '.ap-add .modal-actions > button', '.ap-confirm .modal-actions > button', '.ap-tool-btn', '.ap-name', '.ap-name-input', '.ap-kind', '.ap-fail > button']) // a guard; the heights themselves were measured in a browser at 390px (item 52)
+    assert.ok(new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[^{]*\\{[^}]*min-height: 44px').test(phone), sel);
+  const { row, body } = await opened((s) => s.add('custom:e', 'E', { type: 'url', url: 'https://e.dev/mcp', secrets: [] }, { state: 'on', tools: [] }));
+  row('custom:e').click();
+  await settle();
+  assert.equal(seen(all(body(), '.ap-sec h3')[0]!), '工具 · 0');
+  assert.equal(all(body(), '.ap-tool').length, 0, 'not also 「它没有提供工具。」');
+  assert.equal(all(body(), '.ap-tools').length, 0, 'nor an empty box under it');
+});
+
+test('review r1 (notes): a late success after the page gave up — after closing, after abandoning a removal — paints nothing and sends nothing', async () => {
+  const gate = hold();
+  const first = await opened((s) => {
+    s.deaf = true;
+    s.add('custom:a', 'A', { type: 'program', program: 'node', args: [], secrets: [] });
+    s.on.set('GET /xbot-api/apps/custom%3Aa', () => gate.promise.then(() => ({ id: 'custom:a', kind: 'custom', title: 'A', state: 'failed', reason: '旧的回答', source: { type: 'program', program: 'node', args: [], secrets: [] } })));
+  });
+  first.page.window.ClowderApps.close();
+  first.srv.on.delete('GET /xbot-api/apps/custom%3Aa');
+  first.page.window.ClowderApps.open({});
+  await settle();
+  const calls = first.srv.calls.length;
+  gate.release();
+  await settle();
+  assert.equal(first.srv.calls.length, calls, 'nothing sent because of it');
+  assert.equal(seen(one(first.row('custom:a'), '.ap-st-word')), '已连接', 'the new dialog keeps its own answer');
+  // A removal given up on, whose DELETE then succeeds after all.
+  const del = hold();
+  const { page, srv, row, body } = await opened((s) => {
+    s.deaf = true;
+    s.add('custom:b', 'B', { type: 'program', program: 'node', args: [], secrets: [] });
+    s.on.set('DELETE /xbot-api/apps/custom%3Ab', (c: Call) => del.promise.then(() => s.fallback(c)));
+  });
+  row('custom:b').click();
+  await settle();
+  buttonOf(body(), '移除').click();
+  buttonOf(page.doc.querySelector('.ap-confirm') as El, '移除').click();
+  await settle();
+  page.doc.activeElement.key('Escape');
+  await settle();
+  const before = srv.calls.length, words = seen(page.doc.body);
+  del.release();
+  await settle();
+  assert.equal(srv.calls.length, before);
+  assert.equal(seen(page.doc.body), words, 'nothing appears because of a request the page let go of');
 });
 
 // ---------------------------------------------------------------- against the real adapter

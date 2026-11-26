@@ -90,7 +90,7 @@
 .ap-tile.lg > .icon { width: 26px; height: 26px; }
 .ap-hero-tx { flex: 1 1 200px; min-width: 0; min-height: 48px; display: flex; flex-direction: column; justify-content: center; }
 .ap-state { display: flex; align-items: center; gap: var(--x-s3); margin: 0; font-size: 15px; font-weight: 560; line-height: 1.5; color: var(--x-text); }
-.ap-state:focus { outline: none; }
+.ap-state:focus, .ap-note:focus, .ap-secret-edit:focus { outline: none; }
 .ap-state:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--x-r-xs); }
 .ap-state-word { min-width: 0; }
 .ap-about { margin: 2px 0 0; font-size: 13px; line-height: 1.6; color: var(--x-muted); }
@@ -144,7 +144,8 @@
 .ap-source-text p { margin: 0; font-size: var(--x-fs-sm); line-height: 1.65; color: var(--x-text-2); }
 .ap-source-text .ap-source-ver { margin-bottom: var(--x-s1); font-size: var(--x-fs-cap); color: var(--x-muted); font-variant-numeric: tabular-nums; }
 .ap-source-text .ap-source-ver:empty { display: none; }
-.ap-again { margin-left: var(--x-s2); font-size: var(--x-fs-sm); color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+/* Ours, under the quotation: a hairline sets it apart from the plugin's words. */
+.ap-source-text .ap-source-note { margin-top: var(--x-s3); padding-top: var(--x-s3); border-top: 1px solid var(--x-fill-2); color: var(--x-text); }
 .ap-foot { margin: var(--x-s5) 0 0; font-size: var(--x-fs-sm); line-height: 1.6; color: var(--x-muted); }
 
 /* A custom app: what it is, its secrets by name, its tools. */
@@ -175,8 +176,7 @@
 .ap-small { min-height: 30px; padding: 4px 12px; font-size: 13px; }
 .ap-tool { border-top: 1px solid var(--x-fill-2); }
 .ap-tool:first-child { border-top: 0; }
-.ap-tool > .ap-tool-name, .ap-tool.none { display: block; padding: var(--x-s3) 14px; }
-.ap-tool.none { font-size: var(--x-fs-sm); color: var(--x-muted); }
+.ap-tool > .ap-tool-name { display: block; padding: var(--x-s3) 14px; }
 .ap-tool-name { font: 12.5px/1.6 var(--x-mono); color: var(--x-text); overflow-wrap: anywhere; }
 .ap-tool-btn {
   display: flex; align-items: center; gap: var(--x-s3); width: 100%; padding: var(--x-s3) var(--x-s4) var(--x-s3) 14px;
@@ -279,7 +279,9 @@
   .ap-secret-name, .ap-secret-in, .ap-add .field input { min-height: 44px; }
   .ap-peek, .ap-drop { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
   .ap-swap, .ap-add-secret, .ap-detail-btn, .ap-source, .ap-remove, .ap-twin { min-height: 44px; }
-  .ap-way-acts > .primary, .ap-clock-row > .secondary, .ap-consent > button { min-height: 44px; }
+  .ap-way-acts > button, .ap-clock-row > button, .ap-consent > button, .ap-secret-acts > button { min-height: 44px; }
+  .ap-add .modal-actions > button, .ap-confirm .modal-actions > button, .ap-fail > button { min-height: 44px; }
+  .ap-tool-btn, .ap-name, .ap-name-input, .ap-kind, .ap-add .field textarea { min-height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .ap-view, .ap-wait-text { animation: none; }

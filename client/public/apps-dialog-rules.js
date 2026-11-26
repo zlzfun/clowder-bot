@@ -127,11 +127,16 @@
   // 微信 on without an `authorization` field: the plugin's status could not be read — unknown, never "not authorized".
   const OPEN_UNKNOWN = "没能读到这 10 分钟授权现在的状态。";
   const authKnown = (app) => !!app && app.state === "on" && !!app.authorization && typeof app.authorization === "object";
-  // How it reads, either way.
+  // How it reads, either way. The second line names both places the text goes (the Agent and its model):
+  // where the owner's 微信 text ends up outranks the everyday-words rule (tests/vocabulary.test.ts, CONSENT).
   const WECHAT_READS = Object.freeze([
     "只读：不发消息、不点链接，也不读微信的聊天记录库。读的时候截图认字，截图不保存。",
-    "认出的文字会和你发给猫猫的话一样，交给它思考用的 Agent，并留在那段聊天的执行记录里。",
+    "认出的文字会和你发给猫猫的话一样，交给它用的 Agent 和模型，并留在那段聊天的执行记录里。",
   ]);
+  // 「插件原文」 is quoted verbatim; where this version says reading by contact is authorized each time, one line
+  // of ours says what is true (两种读法: nothing asks each time; reading by name, the cat confirms by itself).
+  const SOURCE_NOTE = "上面说按联系人读取要你逐次授权，实际不是这样：不会每次问你，按名字读时是猫猫自己确认的。";
+  const sourceNote = (disclosure) => (/逐次授权/.test(String(disclosure || "")) ? SOURCE_NOTE : "");
   // What reading needs from macOS (the plugin checks screen recording and never asks; the entry is the
   // program that started clowder-bot, not named here because which one it is depends on how it was started).
   const WECHAT_PERMISSIONS = "要读得到，需要在 系统设置 › 隐私与安全性 里给启动 clowder-bot 的程序打开「屏幕录制」，按名字读还要「辅助功能」；没有的话，猫猫会说它没能读到。";
@@ -252,6 +257,8 @@
     if (value && typeof value === "object") return "{" + Object.keys(value).sort().map((k) => JSON.stringify(k) + ":" + fingerprint(value[k])).join(",") + "}";
     return JSON.stringify(value === undefined ? null : value);
   }
+  // The same thing to check: program or address, its arguments, and the names of its secrets.
+  const sameSource = (a, b) => fingerprint(a || null) === fingerprint(b || null);
 
   // A whole command line pasted where the program goes, split for the owner — only when the split is
   // the one a shell would make and nothing else could be meant: words and quotes, no pipes, redirections,
@@ -377,9 +384,9 @@
 
   root.ClowderAppsRules = Object.freeze({
     trim, WECHAT, path, UNREAD, unread, look, wechatActions, BUSY, POLL_EVERY, POLL_FOR, pollNext, deadline, clock, clockSaid, tickIn,
-    WECHAT_ABOUT, BY_NAME, OPEN_CHAT, byName, BY_NAME_REACH, OPEN_LATER, OPEN_ASK, WECHAT_SAY, OPEN_SAY, OPEN_LEFT, OPEN_UNKNOWN, authKnown, WECHAT_READS, WECHAT_PERMISSIONS, WECHAT_HUB, WECHAT_SLOW, WECHAT_STILL, SAID,
+    WECHAT_ABOUT, BY_NAME, OPEN_CHAT, byName, BY_NAME_REACH, OPEN_LATER, OPEN_ASK, WECHAT_SAY, OPEN_SAY, OPEN_LEFT, OPEN_UNKNOWN, authKnown, WECHAT_READS, SOURCE_NOTE, sourceNote, WECHAT_PERMISSIONS, WECHAT_HUB, WECHAT_SLOW, WECHAT_STILL, SAID,
     NAME_MAX, PROGRAM_MAX, ARGS_MAX, ARG_MAX, URL_MAX, SECRETS_MAX, VALUE_MAX, SECRETS_WORD, URL_SAID, EMPTY_SECRET,
-    nameProblem, programProblem, argsOf, argsProblem, urlProblem, secretNameProblem, secretValueProblem, secretsOf, check, fingerprint,
+    nameProblem, programProblem, argsOf, argsProblem, urlProblem, secretNameProblem, secretValueProblem, secretsOf, check, fingerprint, sameSource,
     splitCommand, commandLine, slowFirstRun, CUSTOM_LEAD, consequences, added, SLOW_HINT, REMOVE_NOTE, removeTitle,
     sentence, ADD_UNSURE, addError, wechatError, checkError, patchError, removeError, listError, checked,
   });

@@ -216,11 +216,13 @@
       apps: new Map(),           // id → the latest App the server answered
       readAt: new Map(),         // id → when it was answered (this page's clock)
       checks: new Map(),         // id → {status: "queued" | "running", ctrl, token}
+      lanes: new Map(),          // id → the promise its writes run in, one after another
+      writes: new Map(),         // id → how many writes are waiting or on their way
       queue: [], round: null,
       ctrls: new Set(), timers: new Set(),
       poll: null,                // 微信 starting: {started, timer, reading, gaveUp, error}
       count: null,               // 微信 authorized: {end, timer, zeroRead}
-      wbusy: "", wnote: "", anote: null,
+      wbusy: "", wnote: "", anote: null, wgen: 0, // wgen: 微信's evidence generation (readWechat)
       notes: new Map(),          // id → {text, bad} shown on its page
       draft: null, from: null, layer: null,
     };
@@ -357,6 +359,8 @@
       L.top.hidden = L.mine.hidden = !has;
       if (!has) return;
       const ids = [R.WECHAT, ...S.order].filter((id) => S.apps.has(id));
+      // A row that goes while it has focus hands focus to the row now in its place (or 添加自定义应用).
+      const lostAt = [...L.mine.children].findIndex((b) => b === document.activeElement && !ids.includes(b.dataset.app || "add") && b !== L.add);
       for (const [id, r] of L.rows) if (!ids.includes(id)) { r.b.remove(); L.rows.delete(id); }
       for (const id of ids) if (!L.rows.has(id)) L.rows.set(id, makeRow(id));
       const w = L.rows.get(R.WECHAT);
@@ -369,6 +373,7 @@
         L.mine.replaceChildren(...want);
         if (here && here.isConnected && document.activeElement !== here) here.focus();
       }
+      if (lostAt >= 0 && view === L) want[Math.min(lostAt, want.length - 1)].focus();
       for (const id of ids) paintRow(id);
     }
 
@@ -378,12 +383,15 @@
       S.reading = true;
       if (why === "again") S.listError = "";
       paintList();
+      const gen = wechatGen();
       let data;
       try { data = await call("/xbot-api/apps"); }
       catch (err) {
         if (!S.alive) return false;
         S.reading = false;
         if (!S.order) S.listError = R.listError(err);
+        // The list's read is a read of 微信 too: failed, it is no evidence of the ten minutes.
+        if (stillFresh(gen) && authUnknown()) paintWechatPage();
         paintList();
         return false;
       }
@@ -392,18 +400,20 @@
       S.listError = "";
       const apps = Array.isArray(data && data.apps) ? data.apps.filter((a) => a && a.id) : [];
       const custom = apps.filter((a) => a.kind === "custom");
+      // A check's answer belongs to what it checked: kept only while the app is still what was checked.
       for (const a of custom) {
         const known = S.apps.get(a.id);
-        if (known && a.state === "unchecked" && known.state !== "unchecked") S.apps.set(a.id, Object.assign({}, known, { title: a.title, source: a.source }));
+        if (known && a.state === "unchecked" && known.state !== "unchecked" && R.sameSource(known.source, a.source)) S.apps.set(a.id, Object.assign({}, known, { title: a.title }));
         else S.apps.set(a.id, a);
       }
       const keep = new Set(custom.map((a) => a.id));
-      for (const id of [...S.apps.keys()]) if (id !== R.WECHAT && !keep.has(id)) forget(id);
+      const next = view && view.name === "app" && !keep.has(view.id) ? survivor(view.id, keep) : null;
+      for (const id of [...S.apps.keys()]) if (id !== R.WECHAT && !keep.has(id)) { dismissLayer(id); forget(id); }
       S.order = custom.map((a) => a.id);
       const w = apps.find((a) => a.id === R.WECHAT);
-      if (w) setApp(w, "list");
+      if (w && stillFresh(gen)) setApp(w, "list");
       paintList();
-      if (view && view.name === "app" && !S.apps.has(view.id)) { S.from = null; goList(); }
+      if (view && view.name === "app" && !S.apps.has(view.id)) { S.from = next; goList(); }
       if (!S.checkedOnce) {
         S.checkedOnce = true;
         const ids = S.order.filter((id) => S.apps.get(id).state !== "off");
@@ -445,10 +455,42 @@
       const running = () => [...S.checks.values()].filter((c) => c.status === "running").length;
       while (S.alive && running() < 3 && S.queue.length) {
         const id = S.queue.shift(), c = S.checks.get(id);
-        if (c && c.status === "queued") runCheck(id);
+        if (!c || c.status !== "queued") continue;
+        // A write is waiting or on its way: its own answer is the check (it settles the opening round itself).
+        if (S.writes.get(id)) { S.checks.delete(id); continue; }
+        runCheck(id);
       }
     }
-    // A write in flight for an app supersedes its check: the write's own answer is the newer one.
+    // One write at a time per app (a rename, a secret, a removal): a later one waits for the earlier, and its
+    // editor says it is saving meanwhile. A write never cuts another off, so none is left half-shown.
+    function inTurn(id, work) {
+      S.writes.set(id, (S.writes.get(id) || 0) + 1);
+      const run = (S.lanes.get(id) || Promise.resolve()).then(() => (S.alive && S.apps.has(id) ? work() : undefined));
+      const after = run.catch(() => undefined).then(() => {
+        const n = (S.writes.get(id) || 1) - 1;
+        if (n > 0) S.writes.set(id, n); else S.writes.delete(id);
+        if (!S.alive) return;
+        // An opening check skipped for these writes that their answers did not settle (a removal that failed): now.
+        if (!n && S.round && S.round.left.has(id) && !S.checks.has(id) && S.apps.has(id)) { queueCheck(id); pump(); }
+        if (view && view.id === id) view.paint();
+      });
+      S.lanes.set(id, after);
+      return run;
+    }
+    // What a check found no longer holds (a failed check, a write whose answer was lost): not known to answer.
+    function invalidate(id) {
+      const known = S.apps.get(id);
+      if (known) S.apps.set(id, Object.assign({}, known, { state: "unchecked", reason: "没能检查", tools: undefined, detail: undefined }));
+    }
+    // The row after a vanishing app among those that stay (else 添加自定义应用): where focus goes.
+    function survivor(id, stays) {
+      const order = S.order || [], at = order.indexOf(id);
+      const rest = order.filter((x) => x !== id && (!stays || stays.has(x)));
+      return rest.length ? rest[Math.min(Math.max(at, 0), rest.length - 1)] : "add";
+    }
+    // A confirmation belongs to its app: when the app goes, so does its confirmation (and a removal on its way is let go).
+    function dismissLayer(id) { if (S.layer && S.layer.id === id) S.layer.dismiss(); }
+    // A write for an app supersedes its check: the write's own answer is the newer one.
     function claim(id) {
       const c = S.checks.get(id);
       if (c && c.ctrl) { try { c.ctrl.abort(); } catch { /* done */ } }
@@ -473,8 +515,7 @@
       if (app) { setApp(app, "check"); settled(id); return; }
       const what = R.checkError(error);
       if (what.kind === "gone") { goneApp(id); return; }
-      const known = S.apps.get(id);
-      if (known) S.apps.set(id, Object.assign({}, known, { state: "unchecked", reason: "没能检查", tools: undefined, detail: undefined }));
+      invalidate(id);
       S.notes.set(id, { text: what.text, bad: true });
       paintRow(id);
       if (view && view.id === id) view.paint();
@@ -487,12 +528,14 @@
       S.round = null;
       announce(R.checked([...r.ids].map((x) => S.apps.get(x)).filter(Boolean)));
     }
-    // Gone from the engine (removed elsewhere): the list is read again.
+    // Gone from the engine (removed elsewhere): its confirmation first, then its page; focus on a row that
+    // stays (or 添加自定义应用); the list is read again.
     function goneApp(id) {
-      const was = S.apps.get(id);
+      const was = S.apps.get(id), next = survivor(id);
+      dismissLayer(id);
       forget(id);
       paintList();
-      if (view && view.id === id) { S.from = null; goList(); }
+      if (view && view.id === id) { S.from = next; goList(); }
       if (was) announce("「" + R.trim(was.title) + "」已经不在了。");
       readList("gone");
     }
@@ -528,27 +571,49 @@
         if (S.poll !== P) return;
         P.timer = 0;
         P.reading = true;
-        const app = await readWechat("poll");
+        await readWechat("poll");
         if (S.poll !== P) return;
         P.reading = false;
-        if (app && app.state === "starting") nextPoll();
+        // Still starting by the latest evidence (a read overtaken by a write is not evidence): read again.
+        const shown = S.apps.get(R.WECHAT);
+        if (!P.error && shown && shown.state === "starting") nextPoll();
       }, wait);
     }
+    // 微信's evidence has one owner. Every read of it (the list's included) remembers the generation it began
+    // in; every write's answer moves the generation on, so no read that began before it can paint over it. A read that fails is not evidence either: while 微信
+    // is known to be on, what is not known is the ten minutes, so the open chat becomes unknown (no countdown).
+    const wechatGen = () => S.wgen;
+    const stillFresh = (gen) => gen === S.wgen;
+    function authUnknown() {
+      const shown = S.apps.get(R.WECHAT);
+      if (!shown || shown.state !== "on" || !("authorization" in shown)) return false;
+      const rest = Object.assign({}, shown);
+      delete rest.authorization;
+      S.apps.set(R.WECHAT, rest);
+      syncCountdown();
+      return true;
+    }
     // 微信 read fresh. why: "poll", "zero" (the authorization ran out), "manual" (再看一次), "after" (a failed write).
+    // null: no answer to go by (failed, or begun before a write that has since answered).
     async function readWechat(why) {
       if (why === "manual") { S.wbusy = "reread"; S.wnote = ""; S.anote = null; hold(); paintWechatPage(); }
+      const gen = wechatGen();
       let app = null, error = null;
       try { app = await call(R.path(R.WECHAT)); } catch (err) { error = err; }
       if (!S.alive) return null;
       if (why === "manual") S.wbusy = "";
+      if (!stillFresh(gen)) {
+        if (why === "poll" && S.poll) S.poll.reading = false;
+        paintWechatPage();
+        return null;
+      }
       if (app) { setApp(app, why); return app; }
       const text = R.wechatError(error, "reread").text;
-      // A re-read asked for from the ten minutes' unknown status fails there, where it was asked.
-      const shown = S.apps.get(R.WECHAT), fromUnknown = !!shown && shown.state === "on" && !R.authKnown(shown);
+      const wasOn = authUnknown() || (S.apps.get(R.WECHAT) || {}).state === "on";
       if (why === "poll" && S.poll) { S.poll.reading = false; S.poll.error = text; }
-      else if (why === "manual" && fromUnknown) S.anote = { text, retry: false };
+      // Where 微信 is on, the failure is said in the open chat's part, beside its 再看一次.
+      else if (wasOn && why !== "after") S.anote = { text };
       else if (why === "manual") S.wnote = text;
-      else if (why === "zero") S.anote = { text, retry: true };
       paintWechatPage();
       return null;
     }
@@ -620,7 +685,6 @@
       const ask = node("div", "ap-way-part"), askText = text("ap-way-text", R.OPEN_ASK);
       askText.setAttribute("tabindex", "-1");
       const authorize = button("primary ap-authorize", "授权 10 分钟", () => wechatAct("authorize"));
-      authorize.setAttribute("aria-describedby", askText.id);
       const askRow = node("div", "ap-way-acts"), hub = node("p", "ap-way-text quiet ap-hub", R.WECHAT_HUB);
       askRow.append(authorize);
       ask.append(askText, askRow, hub);
@@ -656,6 +720,8 @@
       const reads = node("div", "ap-reads");
       const readTexts = R.WECHAT_READS.map((t) => text("ap-way-text", t));
       reads.append(...readTexts);
+      // 授权 10 分钟 is heard as it is seen: which reading it is (the heading names 「这一段」), what it does, how it reads.
+      authorize.setAttribute("aria-describedby", [openHead.id, askText.id, ...readTexts.map((p) => p.id)].join(" "));
       // 打开 / 再试一次 after all of that, the plugin's own words beside it.
       const tail = node("div", "ap-tail"), consent = node("div", "ap-consent");
       const sourceBox = node("div", "ap-source-text"), source = button("text-btn ap-source", "插件原文");
@@ -675,8 +741,8 @@
         name: "wechat", id: R.WECHAT, el, title: "微信", state, mark, word, about, detail, acts, note, ways, nameText, nameReach, openLater,
         ask, askText, authorize, hub, unknown, unknownText, reread, revokeAnyway, can, clockBox, clock: clockEl, clockSaid, revoke, authNote, reads, tail, consent, consentNote, source,
         sourceBox, perms, markKind: "",
-        // What opening allows: the button that opens is described by it.
-        consentIds: [nameText.id, nameReach.id, openLater.id, ...readTexts.map((p) => p.id)].join(" "),
+        // What opening allows, each way under its heading, then how it reads: the button that opens is described by it.
+        consentIds: [nameHead.id, nameText.id, nameReach.id, openHead.id, openLater.id, ...readTexts.map((p) => p.id)].join(" "),
         paint: () => paintWechat(V),
       };
       return V;
@@ -685,6 +751,8 @@
     function paintWechat(V) {
       const app = S.apps.get(R.WECHAT);
       if (!app) return;
+      // What has focus now; if this paint hides or replaces it, focus moves to the line that says the new state.
+      const had = document.activeElement, inside = !!had && V.el.contains(had);
       const lk = R.look(app);
       paintMark(V, lk.mark);
       setText(V.word, lk.word);
@@ -729,25 +797,34 @@
       setText(V.authorize, busy === "authorize" ? R.BUSY.authorize : "授权 10 分钟");
       for (const b of [V.revoke, V.revokeAnyway]) setText(b, busy === "revoke" ? R.BUSY.revoke : "撤销");
       setText(V.reread, busy === "reread" && on && !known ? R.BUSY.reread : "再看一次");
+      // What failed about the ten minutes, under them (a failed read leaves them unknown, with its own 再看一次).
       const A = S.anote;
-      V.authNote.replaceChildren();
-      if (A && on) {
-        V.authNote.append(node("span", "", A.text));
-        if (A.retry) V.authNote.append(button("text-btn ap-again", "再看一次", () => { S.anote = null; readWechat("manual"); }));
-      }
+      setText(V.authNote, A && on ? A.text : "");
       V.authNote.hidden = !(A && on);
       V.authNote.classList.toggle("bad", !!A);
-      if (A && on && !A.retry) V.authNote.setAttribute("role", "alert"); else V.authNote.removeAttribute("role");
-      // The plugin's own words, one click away (an off 微信 carries them too).
+      if (A && on) V.authNote.setAttribute("role", "alert"); else V.authNote.removeAttribute("role");
+      // The plugin's own words, one click away (an off 微信 carries them too), verbatim; where they say reading by
+      // contact is authorized each time, one line of ours under them says what is true.
       setText(V.sourceBox, "");
-      if (app.disclosure) V.sourceBox.append(node("p", "ap-source-ver", app.version ? "版本 " + app.version : ""), node("p", "ap-source-body", app.disclosure));
+      if (app.disclosure) {
+        V.sourceBox.append(node("p", "ap-source-ver", app.version ? "版本 " + app.version : ""), node("p", "ap-source-body", app.disclosure));
+        const fix = R.sourceNote(app.disclosure);
+        if (fix) V.sourceBox.append(node("p", "ap-source-note", fix));
+      }
       V.source.hidden = !app.disclosure;
       if (!app.disclosure) { V.sourceBox.hidden = true; V.source.setAttribute("aria-expanded", "false"); }
       V.tail.hidden = none || (!consenting && !app.disclosure);
       // What reading needs from macOS, once there is something to read with.
       V.perms.hidden = !on;
       paintClock();
-      if (lost) V.state.focus();
+      if (lost || (inside && (!had.isConnected || !V.el.contains(had) || !visible(had)))) stateLine(V).focus();
+    }
+    // The line that says how things stand now: for the ten minutes, the open chat's own line; otherwise the state.
+    function stateLine(V) {
+      if (!V.can.hidden) return V.clockBox;
+      if (!V.ask.hidden) return V.askText;
+      if (!V.unknown.hidden) return V.unknownText;
+      return V.state;
     }
     // The page's own actions for the state it is in; a button that stays keeps its focus.
     function paintActs(box, list) {
@@ -786,6 +863,8 @@
       try { app = await call(R.path(R.WECHAT) + WECHAT_PATHS[act], { method: "POST", body: {} }); }
       catch (err) { error = err; }
       if (!S.alive) return;
+      // Its answer is newer than every read begun before it (the countdown's, the poll's, the list's).
+      S.wgen++;
       S.wbusy = "";
       const held = focusWasHeld();
       if (app) {
@@ -801,7 +880,7 @@
       // A start the engine went on with is not a failure: its state says what it is doing.
       const goingOn = act === "connect" && what.kind === "unsure" && shown && (shown.state === "starting" || shown.state === "on");
       if (!goingOn) {
-        if ((act === "authorize" || act === "revoke") && shown && shown.state === "on") S.anote = { text: what.text, retry: false };
+        if ((act === "authorize" || act === "revoke") && shown && shown.state === "on") S.anote = { text: what.text };
         else S.wnote = what.text;
       }
       paintWechatPage();
@@ -814,7 +893,7 @@
       const app = S.apps.get(R.WECHAT), on = !!app && app.state === "on";
       let target = view.state;
       // The open chat's part as it now stands: its time left, what authorizing would do, or that its status is unknown.
-      const openPart = () => (!view.can.hidden ? view.clockBox : !view.ask.hidden ? view.askText : !view.unknown.hidden ? view.unknownText : view.state);
+      const openPart = () => stateLine(view);
       if (on && S.anote) target = !view.unknown.hidden ? view.reread : view.can.hidden ? view.authorize : view.revoke;
       else if (on && (act === "authorize" || act === "revoke" || act === "reread")) target = openPart();
       else if (S.wnote && act === "connect") target = actButton(view, "connect") || view.state;
@@ -836,6 +915,8 @@
       acts.append(again);
       hero.append(tile, tx, acts);
       const note = node("p", "ap-note"), hint = node("p", "ap-hint", R.SLOW_HINT);
+      // What came of 再检查 or a save is said here, and focus lands here to say it.
+      note.setAttribute("tabindex", "-1");
       // What it is: the program and its arguments, or the address (the tile above says which).
       const what = node("div", "ap-cmd"), whatText = node("code", "");
       what.append(whatText);
@@ -868,6 +949,8 @@
     function paintApp(V) {
       const app = S.apps.get(V.id);
       if (!app) return;
+      // What has focus now; if this paint hides or replaces it, focus moves to the state line.
+      const had = document.activeElement, inside = !!had && V.el.contains(had) && had !== V.again;
       const ck = checkOf(V.id), lk = R.look(app, ck), kind = kindOf(app), src = app.source || {};
       setText(V.nameText, R.trim(app.title) || V.id);
       paintMark(V, lk.mark);
@@ -877,7 +960,8 @@
       if (V.tileKind !== kind) { V.tileKind = kind; V.tile.replaceChildren(tileIcon(kind)); }
       const hadFocus = document.activeElement === V.again;
       V.again.hidden = app.state === "off";
-      V.again.disabled = !!ck;
+      // A write's answer is its own check: no second one while a write waits or is on its way.
+      V.again.disabled = !!ck || !!S.writes.get(V.id);
       setText(V.again, ck ? R.BUSY.check : app.state === "failed" ? "再试一次" : "再检查");
       if (hadFocus && V.again.disabled) card.focus();
       const n = S.notes.get(V.id);
@@ -901,9 +985,14 @@
       if (tools) paintTools(V, tools);
       if (V.editing) V.editing.input.setAttribute("aria-label", "名字");
       V.nameBtn.setAttribute("aria-describedby", V.word.id || (V.word.id = uid("word")));
+      // Focus that was on this page and now sits on nothing usable (hidden, replaced) goes to the state line.
+      const now = document.activeElement;
+      if (inside && !(now && now.isConnected && V.el.contains(now) && visible(now))) V.state.focus();
     }
     function paintNames(V, list) {
       const E = V.secretEdit;
+      // What has focus, taken before the rows are rebuilt (moving the open editor into its new row drops focus).
+      const here = V.names.contains(document.activeElement) ? document.activeElement : null;
       const items = list.map((name) => {
         const li = node("li", "ap-name-row");
         li.dataset.secret = name;
@@ -915,19 +1004,23 @@
         return li;
       });
       if (E && !E.name) { const li = node("li", "ap-name-row ap-adding"); li.append(E.box); items.push(li); }
-      const here = V.names.contains(document.activeElement) ? document.activeElement : null;
       V.names.replaceChildren(...items);
       if (here && !here.isConnected) {
         const again = here.getAttribute && here.getAttribute("aria-label");
         const twin = again ? [...V.names.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === again) : null;
-        (twin || card).focus();
+        (twin || V.state).focus();
       } else if (here && document.activeElement !== here) here.focus();
     }
     function paintTools(V, tools) {
       setText(V.toolsHead, "工具 · " + tools.length);
+      // None: the heading says 0, and that is all (no second sentence saying it again).
+      V.toolList.hidden = !tools.length;
       const sig = tools.map((t) => t.name + "\n" + (t.description || "")).join("\n\n");
       if (V.toolSig === sig) return;
       V.toolSig = sig;
+      // A tool with focus that is still there after the list is redrawn keeps it.
+      const here = V.toolList.contains(document.activeElement) ? document.activeElement : null;
+      const keepName = here ? (here.querySelector && here.querySelector("code") || here).textContent : "";
       const items = tools.map((t) => {
         const li = node("li", "ap-tool"), desc = R.trim(t.description);
         if (!desc) { li.append(node("code", "ap-tool-name", t.name)); return li; }
@@ -945,13 +1038,17 @@
         li.append(b, text);
         return li;
       });
-      if (!items.length) items.push(node("li", "ap-tool none", "它没有提供工具。"));
       V.toolList.replaceChildren(...items);
+      if (here) {
+        const twin = keepName ? [...V.toolList.querySelectorAll("button")].find((b) => b.textContent === keepName) : null;
+        if (twin) twin.focus();
+      }
     }
 
-    // 再检查 / 再试一次: one fresh read of its detail (the engine starts or reaches it once more).
+    // 再检查 / 再试一次: one fresh read of its detail (the engine starts or reaches it once more). A check that
+    // fails leaves nothing of the last one standing; focus lands on the line that says how it came out.
     async function recheck(id) {
-      if (checkOf(id)) return;
+      if (checkOf(id) || S.writes.get(id)) return;
       S.notes.delete(id);
       const T = claim(id);
       let app = null, error = null;
@@ -963,13 +1060,16 @@
       else {
         const what = R.checkError(error);
         if (what.kind === "gone") { goneApp(id); return; }
+        invalidate(id);
         S.notes.set(id, { text: what.text, bad: true });
         paintRow(id);
         if (view && view.id === id) view.paint();
       }
       settled(id);
-      if (held && view && view.id === id) (visible(view.again) ? view.again : view.state).focus();
+      if (held && view && view.id === id) outcome(view);
     }
+    // Where a result is said on an app's page: its note when there is one (what failed, what was saved), else its state.
+    function outcome(V) { (V.note.hidden ? V.state : V.note).focus(); }
 
     // The name, changed in place: Enter or leaving the field saves, Escape keeps the old one.
     function startRename(V) {
@@ -1009,16 +1109,20 @@
         E.input.focus();
         return;
       }
+      // Locked from now (it may wait for another write of this app first), and unlocked whatever comes back.
       E.busy = true;
       E.input.readOnly = true;
       S.notes.delete(V.id);
-      const T = claim(V.id);
-      let answer = null, error = null;
-      try { answer = await call(R.path(V.id), { method: "PATCH", body: { name: value } }, T.ctrl); } catch (err) { error = err; }
-      if (!T.mine()) return;
-      release(V.id, T.token);
+      let answer = null, error = null, mine = false;
+      await inTurn(V.id, async () => {
+        const T = claim(V.id);
+        try { answer = await call(R.path(V.id), { method: "PATCH", body: { name: value } }, T.ctrl); } catch (err) { error = err; }
+        mine = T.mine();
+        if (mine) release(V.id, T.token);
+      });
       E.busy = false;
       E.input.readOnly = false;
+      if (!mine) return;
       if (answer) {
         const back = document.activeElement === E.input || focusWasHeld();
         setApp(answer, "rename");
@@ -1043,6 +1147,8 @@
       if (!app) return;
       const kind = kindOf(app) === "url" ? "url" : "program", word = R.SECRETS_WORD[kind];
       const box = node("div", "ap-secret-edit"), err = node("p", "ap-err");
+      // Where focus waits while it saves (its buttons are disabled meanwhile).
+      box.setAttribute("tabindex", "-1");
       err.id = uid("err");
       err.setAttribute("role", "alert");
       let nameIn = null;
@@ -1093,35 +1199,43 @@
       }
       const vp = E.name ? R.secretValueProblem(E.value.input.value, true) : R.trim(E.value.input.value) ? R.secretValueProblem(E.value.input.value, false) : "填上值";
       if (vp) { setText(E.err, vp); E.value.input.setAttribute("aria-invalid", "true"); E.value.input.focus(); return; }
+      // Locked from now (it may wait for another write of this app first); focus waits on the editor itself.
       E.saving = true;
+      if (E.box.contains(document.activeElement)) E.box.focus();
       for (const input of [E.nameIn, E.value.input]) if (input) input.readOnly = true;
       E.save.disabled = E.drop.disabled = E.value.peek.disabled = true;
       setText(E.save, "正在保存…");
       S.notes.delete(V.id);
-      const T = claim(V.id);
-      let answer = null, error = null;
-      try { answer = await call(R.path(V.id), { method: "PATCH", body: { secrets: { [name]: R.trim(E.value.input.value) } } }, T.ctrl); } catch (err) { error = err; }
-      if (!T.mine()) return;
-      release(V.id, T.token);
+      let answer = null, error = null, mine = false;
+      await inTurn(V.id, async () => {
+        const T = claim(V.id);
+        try { answer = await call(R.path(V.id), { method: "PATCH", body: { secrets: { [name]: R.trim(E.value.input.value) } } }, T.ctrl); } catch (err) { error = err; }
+        mine = T.mine();
+        if (mine) release(V.id, T.token);
+      });
       E.saving = false;
-      const held = card.contains(document.activeElement) || focusWasHeld();
+      const unlock = () => {
+        for (const input of [E.nameIn, E.value.input]) if (input) input.readOnly = false;
+        E.save.disabled = E.drop.disabled = E.value.peek.disabled = false;
+        setText(E.save, "保存");
+      };
+      if (!mine) { unlock(); return; }
+      // Focus that waited in the editor (or nowhere) follows the answer; focus the owner moved elsewhere stays.
+      const held = E.box.contains(document.activeElement) || focusWasHeld();
       if (answer) {
         V.secretEdit = null;
         S.notes.set(V.id, { text: "「" + name + "」已保存。", bad: false });
         setApp(answer, "secret");
         settled(V.id);
-        if (held && view === V) {
-          const swap = [...V.names.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "换一个值：" + name);
-          (swap || V.state).focus();
-        }
+        if (held && view === V) V.note.focus();
         return;
       }
       const what = R.patchError(error, "secret");
       settled(V.id);
       if (what.kind === "gone") { goneApp(V.id); return; }
-      for (const input of [E.nameIn, E.value.input]) if (input) input.readOnly = false;
-      E.save.disabled = E.drop.disabled = E.value.peek.disabled = false;
-      setText(E.save, "保存");
+      // Unsure: it may now run with the new value or the old one, so what its last check found no longer holds.
+      if (what.kind === "unsure") invalidate(V.id);
+      unlock();
       setText(E.err, what.text);
       paintRow(V.id);
       if (view === V) paintApp(V);
@@ -1134,6 +1248,7 @@
       if (!app || S.layer) return;
       const shade = node("div", "modal ap-confirm-shade"), box = node("form", "modal-card ap-confirm");
       box.setAttribute("novalidate", "");
+      box.setAttribute("tabindex", "-1");
       box.setAttribute("role", "alertdialog");
       box.setAttribute("aria-modal", "true");
       const h2 = node("h2", "", R.removeTitle(app.title)), text = node("p", "note", R.REMOVE_NOTE), err = node("p", "error");
@@ -1150,14 +1265,28 @@
       shade.append(box);
       document.body.append(shade);
       root.inert = true;
-      let busy = false, downOnShade = false;
+      // The confirmation belongs to its app (S.layer.id): when the app goes, it goes first (dismiss).
+      let busy = false, downOnShade = false, left = false, ctrl = null, wake = null;
       const C = S.layer = {
+        id,
         remove() { shade.remove(); root.inert = false; if (S.layer === C) S.layer = null; },
+        dismiss() { giveUp(); C.remove(); },
       };
+      // Left while the removal is on its way: the request is let go of here. Whether the engine removed it is
+      // not known, so nothing is said about it; the list read again shows what is there.
+      function giveUp() {
+        if (!busy) return false;
+        busy = false;
+        left = true;
+        if (ctrl) { try { ctrl.abort(); } catch { /* done */ } }
+        if (wake) wake();
+        return true;
+      }
       function done(refocus) {
-        if (busy) return;
+        const pending = giveUp();
         C.remove();
         if (refocus && from && from.isConnected) from.focus();
+        if (pending) readList("abandoned");
       }
       shade.addEventListener("keydown", (ev) => {
         if (ev.key === "Escape") { ev.preventDefault(); done(true); }
@@ -1170,17 +1299,25 @@
         ev.preventDefault();
         if (busy) return;
         busy = true;
-        if (document.activeElement === go) box.focus();
+        left = false;
+        // Focus waits on the confirmation itself (it can hold focus) while its buttons are disabled.
+        if (box.contains(document.activeElement)) box.focus();
         no.disabled = go.disabled = true;
         setText(go, "正在移除…");
         err.hidden = true;
         let error = null;
-        try { await call(R.path(id), { method: "DELETE" }); } catch (e) { error = e; }
-        if (!S.alive) return;
-        busy = false;
+        // In turn with this app's other writes; Escape or the backdrop lets it go (giveUp), even while it waits.
+        const stop = new Promise((r) => { wake = r; });
+        await Promise.race([stop, inTurn(id, async () => {
+          if (left) return;
+          ctrl = typeof AbortController === "function" ? new AbortController() : null;
+          error = await Promise.race([stop, call(R.path(id), { method: "DELETE" }, ctrl).then(() => null, (e) => e)]);
+        })]);
+        if (!S.alive || left) return;
         let what = error ? R.removeError(error) : null;
-        // Unsure: the list read again says whether it is still there.
-        if (what && what.kind === "unsure") { await readList("removed"); if (!S.alive) return; if (!S.apps.has(id)) what = null; }
+        // Unsure: the list read again says whether it is still there (gone after all, it takes this confirmation away).
+        if (what && what.kind === "unsure") { await readList("removed"); if (!S.alive || left) return; }
+        busy = false;
         if (!what || what.kind === "gone") { C.remove(); removed(id); return; }
         no.disabled = go.disabled = false;
         setText(go, "移除");
@@ -1192,13 +1329,12 @@
     }
     // Gone from the engine: back to the list, focus on the row after it (or 添加自定义应用).
     function removed(id) {
-      const at = S.order ? S.order.indexOf(id) : -1;
+      const next = survivor(id);
       forget(id);
-      const nextId = S.order && S.order.length ? S.order[Math.min(Math.max(at, 0), S.order.length - 1)] : null;
       paintList();
-      S.from = nextId || "add";
+      S.from = next;
       if (view && view.name !== "list") goList();
-      else (nextId && L.rows.get(nextId) ? L.rows.get(nextId).b : L.add).focus();
+      else (next !== "add" && L.rows.get(next) ? L.rows.get(next).b : L.add).focus();
     }
 
     // ---------------------------------------------------------------- 添加自定义应用

@@ -1013,19 +1013,19 @@
       "target": "client/public/apps-dialog-rules.js",
       "description": "应用 rules without DOM (window.ClowderAppsRules): each app state as a mark and a word (微信 and custom apps, from docs/apps-api.md), what 微信 offers in each state, the starting poll (every 2 s, about 2 minutes), the authorization deadline from the server's until and the m:ss clock, the custom-app form's checks mirroring the adapter's, the idempotency fingerprint, splitting a pasted command line only when unambiguous, the consent and consequence words, and what each failed request says",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-26 (docs/xbot-frontend.md item 52)",
-      "sha256": "54dbeeef7171fd08e920ab2f5f60ef659132247900a0ea99847382c578a4270c"
+      "sha256": "13331dfeb38a3f848cc3713d14f69547446c5b2a8dd6571e8c80de5099785e43"
     },
     {
       "target": "client/public/apps-dialog.js",
       "description": "应用 dialog (window.ClowderApps): one dialog over the chat on the original .modal/.modal-card with the list (微信, custom apps, 添加自定义应用) and one app's page; GET /xbot-api/apps on opening, one check per custom app (at most 3 at a time), 微信's open/close/authorize/revoke, the add form with idempotency keys, rename and secrets by PATCH, remove after a nested confirm; focus trap, Escape one level at a time, focus back to the opener, eased height, one polite live region; everything in flight is abandoned on close",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-26 (docs/xbot-frontend.md item 52)",
-      "sha256": "1694a2bed5e324333001c4918133d42e920a0e8f0e9763f68fe8acf9e9d676ac"
+      "sha256": "dae1a7875d381b09ed83a7e1e7f146cce1d46ba48fa18c5fad09cf2221407465"
     },
     {
       "target": "client/public/apps-dialog.css",
       "description": "应用 dialog styles: the card hanging from a fixed line (a sheet at 560px and below), XBot's settings-row vocabulary for the list, five state marks drawn as different shapes (filled dot, ring, spinner, bar, struck ring), the 微信 page's authorization block and countdown, the custom app's page and the add form; tokens only, 44px targets on a phone, no motion under reduced motion",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-26 (docs/xbot-frontend.md item 52)",
-      "sha256": "deea53e5e48db5b962f439150baacea942a6b7417061850763f9843c3e0b1af1"
+      "sha256": "71227227f25d0b2c75e6a70edd20fff24d7da2caef2fb57f5423b5744934188f"
     }
   ]
 }
