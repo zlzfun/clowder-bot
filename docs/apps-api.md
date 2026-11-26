@@ -9,14 +9,16 @@
 | 微信 | 官方插件 `official.wechat-visible-reader`：插件管理的读取与启停，插件自己声明的「短时授权」操作 | 无 |
 | 自定义应用 | 能力登记表里的外部 MCP：安装、探活、改密钥、删除 | 使用者起的名字（`presentation.json` 的 `apps`，按原生 id） |
 
-装没装、开没开、连没连上、授没授权，每次都从引擎读回来。密钥只进引擎，不进 Bot 的存储，也不出现在任何回应里（只列名称）。
+装没装、开没开、连没连上、授没授权，每次都从引擎读回来。密钥只进引擎，不进 Bot 的存储，也不出现在任何回应里（只列名称；`detail` 也不带引擎的原话，见下）。
+
+一个引擎只接一个 Bot：两处同时改同一个应用，引擎没有可靠的「先到先得」，这一版不处理。
 
 ## Bot API
 
 - `GET /xbot-api/apps` → `{ apps: App[] }`。第一项总是微信，其后是登记表里的外部 MCP。不探活。微信的状态读不到时，它以 `unavailable`、`reason: 没能读到它的状态` 出现，其余应用照常列出（单独读 `GET /xbot-api/apps/wechat` 则照实报错）。
 - `GET /xbot-api/apps/:id` → `App`。自定义应用在这里探活一次（引擎启动或连接它、列出工具）。
-- `POST /xbot-api/apps/custom` → 201 `App`（已探活）。
-- `PATCH /xbot-api/apps/:id`（自定义）body `{ name?, secrets? }` → `App`（已探活）。
+- `POST /xbot-api/apps/custom` → 201 `App`（已探活；探不了时是 `unchecked`）。同一个 `idempotencyKey` 配上不同的内容：409 `idempotency_conflict`。
+- `PATCH /xbot-api/apps/:id`（自定义）body `{ name?, secrets? }` → `App`（已探活；密钥已经交给引擎而探不了时是 `unchecked`）。
 - `DELETE /xbot-api/apps/:id`（自定义）→ `{ removed: true }`。微信回 405 `app_builtin`。
 - `POST /xbot-api/apps/wechat/connect`、`/disconnect`、`/authorize`、`/revoke` → `App`（微信）。请求体为空对象。
 
@@ -28,10 +30,10 @@
 id, kind: "wechat" | "custom", title
 state: "off" | "starting" | "on" | "failed" | "unavailable" | "unchecked"
 reason?        不可用的原因，一句人话。failed、unavailable 一定有；上次启动失败后的 off、被引擎停用的 off 也有
-detail?        引擎自己的原话，供排查，不需要它也能操作
+detail?        供排查的技术线索，不需要它也能操作。微信：引擎的诊断码与说明。自定义：只有认得出的片段（HTTP 状态码、ENOENT 一类的错误码、timeout、MCP error 码），不是引擎的原话
 source?        自定义：{type:"program", program, args[], secrets[]} 或 {type:"url", url, secrets[]}；secrets 只是名称
 tools?         自定义、探活成功后：[{name, description?}]
-authorization? 微信、state 为 on 时：{active, remaining_ms, until?}
+authorization? 微信、state 为 on 且读到了插件的回答时：{active, remaining_ms, until?}。on 而没有这一项＝没能读到，是「不知道」，不是「没授权」
 disclosure?    微信：插件自己的隐私说明，原文
 version?       微信：插件版本
 ```
@@ -49,13 +51,13 @@ version?       微信：插件版本
 
 ### 微信
 
-- 打开（`connect`）＝启用插件。**打开本身就是一项授权**（见下面「两种读法」）：打开之后，猫按联系人名字读取不再需要别的开关。回应是启用之后读回来的状态：可能已经是 `on`，也可能是 `starting`。第一次启用要装依赖、可能超过一次请求的时间；这时引擎仍在继续，接口照实回 `starting`，由界面再读 `GET /xbot-api/apps/wechat` 直到离开 `starting`。启动失败时读回来的是 `off` 加 `reason: 上次没能启动`（引擎自己把意图退回了停用）。
+- 打开（`connect`）＝启用插件。**打开本身就是一项授权**（见下面「两种读法」）：打开之后，猫按联系人名字读取不再需要别的开关。回应是启用之后读回来的状态：可能已经是 `on`，也可能是 `starting`。第一次启用要装依赖、可能超过一次请求的时间；这时引擎仍在继续，接口照实回 `starting`，由界面再读 `GET /xbot-api/apps/wechat` 直到离开 `starting`。启动失败时引擎回 503 `RUNTIME_START_FAILED` 并自己把意图退回停用；接口不把它当错误，照样回 200 和读回来的状态：`off` 加 `reason: 上次没能启动`、`detail`。其他情况下的 503（请求没到引擎、引擎的生命周期服务不可用）仍是错误。
 - 关闭（`disconnect`）＝停用插件。两种读法都随之失效：猫再也找不到这个节点，10 分钟授权也被清掉（插件在启动和停止时都会清）。
 - 授权（`authorize`）＝执行插件自己声明的动作 `arm`：允许猫读**微信里正打开的那段聊天** 10 分钟，到点自动结束。它只管这一种读法。只在 `on` 时可用，否则 409 `app_not_on`。时长是插件清单里写定的，这一版不让改。
 - 撤销（`revoke`）＝动作 `disarm`。只结束上面这一种；按联系人名字读取不受影响，要停掉它只能关闭。
 - 不可用时 `connect`／`disconnect` 回 409 `app_unavailable`，`error` 是原因。
 - `authorization.remaining_ms` 是读取那一刻的剩余时间；`until` 是到期的 ISO 时间。界面按 `until` 自己倒数，到点后再读一次。
-- `authorization` 字段说的只是这 10 分钟授权；它为假不代表猫读不了微信。
+- `authorization` 字段说的只是这 10 分钟授权；它为假不代表猫读不了微信。应用开着而读不到插件的回答时，这一项整个不出现：之前的授权可能还在，界面不能显示成「未授权」，应当说没读到、给一次重读，并保留「撤销」（撤销不依赖读取，它的回应里带着撤销之后的状态）。
 
 #### 两种读法（读插件 0.1.0-alpha.7 的代码 `dist/handlers.js`、`dist/plugin-entrypoint.js` 与上游 `routes/callback-limb-routes.ts` 得到；没有实际读过一次）
 
@@ -93,11 +95,15 @@ version?       微信：插件版本
 - `secrets`：程序的是环境变量（名称为字母、数字、下划线，不以数字开头），网址的是请求头。至多 32 项，值 1–8192 字、不含换行。
 - 程序与网址同时给或都不给：400「请填要运行的程序，或者一个网址（二选一）」。
 
-添加之后的回应就是探活结果。**加上了但没连上也是 201**：应用已经在引擎里，`state` 是 `failed`，带原因；界面应当让使用者改密钥、再试或移除，而不是当作没加上。引擎的探活只等几秒（本机程序 2.5–7 秒，网址 8 秒），第一次要下载的 `npx` 包可能因此显示「几秒内没有回应」，稍后再读一次即可。
+添加之后的回应就是探活结果。**加上了但没连上也是 201**：应用已经在引擎里，`state` 是 `failed`，带原因；界面应当让使用者改密钥、再试或移除，而不是当作没加上。引擎收下之后，后面的任何一步都不会把回应变成失败：探活做不了是 `unchecked`「没能检查」；名字没能存下来时应用照样算加上，`title` 是它的原生 id（重启后看到的也是这个），可以再改名，同一个请求重发一次也会补上名字。引擎的探活只等几秒（本机程序 2.5–7 秒，网址 8 秒），第一次要下载的 `npx` 包可能因此显示「几秒内没有回应」，稍后再读一次即可。
 
-原生 id 由 Bot 生成：名字里有拉丁字母时用它（`My Notes` → `my-notes`，重名加 `-2`），否则是 `app-` 加 8 位十六进制。猫看到的工具名形如 `mcp__<id>__<工具>`。
+原生 id 由 Bot 生成：名字里的拉丁字母（至多 20 个字符，没有就用 `app`）加一段 8 位十六进制的码，如 `My Notes` → `my-notes-3fa91c2e`。猫看到的工具名形如 `mcp__<id>__<工具>`。码来自 `idempotencyKey`（没带就随机），所以：
 
-`PATCH` 的 `secrets` 是合并：给出的名称被替换或新增，其余保留；不能删除单个密钥（上游没有这个操作），要删就移除应用重加。`name` 只改 Bot 保存的名字。
+- 两个请求不会得到同一个 id。引擎对已存在的 id 是静默合并（后来的程序配上先来的密钥），所以不能靠「先看有没有、再装」来避免重名。
+- 同一个请求重发（回应丢了、Bot 重启过）会算出同一段码，从引擎的登记表里找到上一次装好的那一行并返回它，不会装第二个。Bot 不为此记任何东西。
+- 同一个 `idempotencyKey` 配上不同的程序、参数、网址或密钥名称：409 `idempotency_conflict`，什么也不装。
+
+`PATCH` 的 `secrets` 是合并：给出的名称被替换或新增，其余保留；不能删除单个密钥（上游没有这个操作），要删就移除应用重加。请求头的名称不分大小写：添加时两种写法算重复（400），修改时按已存的那个写法替换（引擎会把两种写法都留下，发出去时并成一个值）。环境变量区分大小写。`name` 只改 Bot 保存的名字；只改名字而没能存下来是 500「名字没能保存，请再试一次」，名字不变。
 
 移除是硬删除（上游的 `?hard=true`），不可恢复。引擎自带的 MCP 服务（`cat-cafe-*`）和插件带来的不在这个列表里，这些接口也碰不到它们（404）。
 
@@ -116,10 +122,10 @@ version?       微信：插件版本
 - `GET /api/capabilities`：`items[]` 里 `type: mcp, source: external` 的行就是自定义应用；`mcpServer` 带 `command`、`args`、`url`，`env`／`headers` 的值是 `••••••`，另有 `envKeys`。在 Bot 的部署标识下这个读取不写任何东西。
 - `POST /api/capabilities/mcp/install`：**不校验 id，不拒绝空命令，id 已存在时静默合并覆盖**。所以 id、必填项和重名都在适配层处理。本机程序安装时会探活并带回结果；网址型的 `probe` 是 `null`，适配层另问一次 `POST /api/mcp/:id/tools`。只带 `{id, headers}` 再装一次会合并请求头、保留其余配置。
 - `PATCH /api/capabilities/mcp/:id/env`：合并环境变量。
-- `POST /api/mcp/:id/tools`：`{connectionStatus: connected | disconnected | unknown, tools[], error?, latencyMs}`。
+- `POST /api/mcp/:id/tools`：`{connectionStatus: connected | disconnected | unknown, tools[], error?, latencyMs}`。`error` 可能带着对方服务器回应的正文（MCP SDK 把非 2xx 的正文拼进错误），而对方可能把收到的凭据原样写在里面，所以这段原话不出适配层：原因由它翻译，`detail` 只取认得出的片段。
 - `DELETE /api/capabilities/mcp/:id?hard=true` → `{ok, mode: "removed"}`；不存在时 404。
 - `GET /api/plugin-manager/plugins/_local/:pluginId` → `{plugin}`：`artifact`、`intent`、`live`、`lifecycleRevision`、`actions.setEnabled`、`diagnostic`、`activationFailed`、`configFields`（其中 `kind: operation` 的 `description` 就是隐私说明）。
-- `POST /api/plugin-manager/plugins/:pluginId/set-enabled` body `{enabled, expectedRevision}`；版本不对回 409 `STALE_REVISION`（适配层重读一次再试）。
+- `POST /api/plugin-manager/plugins/:pluginId/set-enabled` body `{enabled, expectedRevision}`；版本不对回 409 `STALE_REVISION`（适配层重读一次再试）；启动失败回 503 `RUNTIME_START_FAILED`，这时引擎已经记下失败并退回停用。
 - `POST /api/plugins/:pluginId/actions/:operation/:action` → `{ok, render: "status", data: {armed, remainingMs, expiresAt?}}`；插件没在运行时 409。
 - **上游缺陷**：这个操作只要执行过一次动作，引擎就会把自己的步骤指针（`operationState`）一起交给插件，而这一版插件拒绝不认识的输入字段，于是之后的每个动作都失败（502「input contains an unsupported field」），重启也不恢复。`POST /api/plugins/:pluginId/operations/:operation/reset` 只清这个指针，不动插件自己的授权（实测：授权后重置再读状态，仍是已授权）。适配层在每个动作前先重置。Bot 不使用这个指针，显示的内容都来自动作的回应。已登记为上游需求。
 - 上游没有插件状态的事件，界面靠再读一次。
@@ -136,6 +142,6 @@ version?       微信：插件版本
 
 ## 验证
 
-- `tests/apps-api.test.ts`（18 项）：列表与过滤、两种添加、失败也算添加、适配层的校验、id 规则、探活原因的翻译、改名与改密钥走哪条上游路由、移除、微信的每种状态、非 Mac、启停与版本重试、超时与失败的启动、授权的全过程（含每个动作前的重置）、同时到达的请求（两次添加各得一个 id；读状态不会插进「重置—动作」之间）、微信读不到时列表里其余应用照常。
+- `tests/apps-api.test.ts`（21 项）：列表与过滤、两种添加、失败也算添加、适配层的校验（含同一请求头的两种写法）、id 规则、探活原因的翻译、探活原话里的凭据不外泄、改名与改密钥走哪条上游路由（请求头按已存的写法替换）、移除、微信的每种状态、非 Mac、启停与版本重试、超时的启动、失败的启动（引擎回 503 而接口回读到的状态）、没到引擎的请求仍是错误、授权的全过程（含每个动作前的重置）、读不到授权时不说「未授权」、同时到达的请求（一个 Bot 里两次添加各得一个 id；两个 Bot 同时读完登记表再装也不会合并；读状态不会插进「重置—动作」之间）、同一请求重发（回应丢了、重启之后）找回同一个应用而同一标识配不同内容被拒绝、引擎收下之后的每一步失败都不变成「没加上」、微信读不到时列表里其余应用照常。
 - 隔离运行时实测（2026-11-26，固定提交加既有补丁）：经适配层添加本机程序型应用后，Claude 猫与 Codex 猫下一条消息即可调用其工具并拿到密钥；添加找不到的程序、连不上的网址，各自如实回 `failed`；微信的打开、授权 10 分钟、读状态、撤销、关闭均与引擎读回的一致。`tests/fixtures/probe-mcp.mjs` 是实测用的无依赖 MCP 服务（一个不读不写的工具）。
 - 没有验证的：真正读一次微信消息（要使用者本人同意，并给运行引擎的进程「屏幕录制」「辅助功能」权限）。「两种读法」一节来自读代码，两种读取都没有实际执行过。

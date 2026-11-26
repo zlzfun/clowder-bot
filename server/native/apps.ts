@@ -44,7 +44,8 @@ export interface AppRow {
   source?: { type: 'program'; program: string; args: string[]; secrets: string[] } | { type: 'url'; url: string; secrets: string[] };
   /** custom, after a check: what it offers the cats. */
   tools?: AppTool[];
-  /** 微信, while on: whether cats may read right now, and until when. */
+  /** 微信, while on: the plugin's ten-minute authorization (for reading the chat that is open in 微信), as the
+   *  plugin answered it. Absent while `on`: it could not be read — unknown, never "not authorized". */
   authorization?: { active: boolean; until?: string; remaining_ms: number };
   /** 微信: the plugin's own privacy statement, word for word, and the version it came from. */
   disclosure?: string;
@@ -87,8 +88,14 @@ export function parseCustomApp(body: unknown): CustomAppInput {
 }
 /** A program's secrets are environment variables, an address's are request headers; each has its own rule for names. */
 function secretNames(given: Record<string, string>, url: boolean): void {
-  const name = url ? headerName : envName;
-  for (const key of Object.keys(given)) if (!name.safeParse(key).success) throw new ApiError(400, `「${key}」不能用作${url ? '请求头' : '变量'}的名称`);
+  const name = url ? headerName : envName, seen = new Set<string>();
+  for (const key of Object.keys(given)) {
+    if (!name.safeParse(key).success) throw new ApiError(400, `「${key}」不能用作${url ? '请求头' : '变量'}的名称`);
+    // A header's name is the same name in any case; two spellings would both be sent and joined into one value.
+    const same = url ? key.toLowerCase() : key;
+    if (seen.has(same)) throw new ApiError(400, `「${key}」重复了（请求头的名称不分大小写）`);
+    seen.add(same);
+  }
 }
 export const customPatchSchema = z.object({
   name: appName.optional(),
@@ -111,20 +118,34 @@ export function probeReason(error: string | undefined, source: AppRow['source'])
   return '没连上';
 }
 
-/** A registry id a model can read in a tool name: the name's own letters when it has some, else a short code. */
-export function nativeIdFor(name: string, taken: ReadonlySet<string>, seed?: string): string {
-  const slug = name.normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32).replace(/-+$/, '');
-  const reserved = (id: string) => /^(cat-cafe|plugin)(-|$)/.test(id);
-  const code = seed ? createHash('sha256').update(seed).digest('hex').slice(0, 8) : randomBytes(4).toString('hex');
-  const base = /^[a-z][a-z0-9-]+$/.test(slug) && !reserved(slug) ? slug : `app-${code}`;
-  let id = base;
-  for (let n = 2; taken.has(id); n++) id = `${base}-${n}`;
-  return id;
+/** What of a probe error may leave as `detail`: only fragments that cannot carry a secret. The engine's error can
+ *  quote the answering server's own response body, and a server may echo the credential it was sent — so the raw
+ *  text never goes out; the reason above is derived from it, and this is what is left for diagnosing. */
+export function probeDetail(error: string | undefined): string | undefined {
+  const said = error ?? '', found = new Set<string>();
+  for (const [part] of said.matchAll(/\bHTTP \d{3}\b|\bstatus code \(?\d{3}\)?|\bMCP error -?\d+\b|\bConnection closed\b|\bfetch failed\b|\b[Tt]imed? ?out\b|\b(?:ENOENT|EACCES|EPERM|ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|EPIPE|EHOSTUNREACH|ENETUNREACH|UNABLE_TO_[A-Z_]+|[A-Z_]*SELF_SIGNED_CERT[A-Z_]*|CERT_[A-Z_]+)\b/g)) found.add(part);
+  return found.size ? [...found].join(' · ') : undefined;
+}
+
+/** The code at the end of every id this adapter gives: the request's own (from its idempotency key) or a random one. */
+const idCode = (seed?: string) => seed ? createHash('sha256').update(seed).digest('hex').slice(0, 8) : randomBytes(4).toString('hex');
+/** A registry id a model can read in a tool name: the name's own letters when it has some, then a code that makes
+ *  it this request's alone. The engine merges an install into an id that exists, so an id is never one a second
+ *  request (in this process or another) could also arrive at; the same request asked again arrives at the same id. */
+export function nativeIdFor(name: string, code: string): string {
+  const slug = name.normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 20).replace(/-+$/, '');
+  const reserved = /^(cat-cafe|plugin)(-|$)/.test(slug);
+  return `${/^[a-z][a-z0-9-]*$/.test(slug) && !reserved ? slug : 'app'}-${code}`;
+}
+/** Is this registry row what that request asked for? (Secret values cannot be compared: the engine never returns them.) */
+function sameRequest(entry: NativeCapability, input: CustomAppInput): boolean {
+  const server = entry.mcpServer ?? {}, names = (list: string[], fold: boolean) => list.map(name => fold ? name.toLowerCase() : name).sort().join('\n');
+  if ('url' in input) return server.url === input.url && names(Object.keys(server.headers ?? {}), true) === names(Object.keys(input.secrets), true);
+  return !server.url && server.command === input.program && JSON.stringify(server.args ?? []) === JSON.stringify(input.args)
+    && names(server.envKeys ?? Object.keys(server.env ?? {}), false) === names(Object.keys(input.secrets), false);
 }
 
 export class BotApps {
-  /** Request bookkeeping: an answer that was lost and asked again finds the app it made (memory only). */
-  private created = new Map<string, { nativeId: string; at: number }>();
   /** Two steps that must not interleave run one after another: picking a free id then installing it; clearing the operation state then acting. */
   private adding: Promise<unknown> = Promise.resolve();
   private acting: Promise<unknown> = Promise.resolve();
@@ -159,65 +180,96 @@ export class BotApps {
     return entry;
   }
   private title(nativeId: string): string { return this.store.state.apps?.[nativeId]?.title ?? nativeId; }
+  /** Keeps the name the owner gave (display metadata). `false`: it could not be written, and is not kept in memory
+   *  either — what is shown is what will still be there after a restart. */
+  private keepTitle(nativeId: string, title: string | undefined): boolean {
+    const apps = this.store.state.apps ??= {}, before = apps[nativeId];
+    if (title === undefined) delete apps[nativeId]; else apps[nativeId] = { title };
+    try { this.store.save(); return true; }
+    catch (error) {
+      if (before) apps[nativeId] = before; else delete apps[nativeId];
+      console.warn(`应用：没能保存「${nativeId}」的名字：${error instanceof Error ? error.message : String(error)}`);
+      return false;
+    }
+  }
   private customRow(entry: NativeCapability): AppRow {
     const off = (entry.globalEnabled ?? entry.enabled ?? true) === false;
     return { id: customId(entry.id), kind: 'custom', title: this.title(entry.id), state: off ? 'off' : 'unchecked',
       ...(off ? { reason: '已停用' } : {}), source: sourceOf(entry.mcpServer) };
   }
-  /** Asks the engine to start or reach the server once and list its tools; the answer is the state. */
-  private async checked(entry: NativeCapability, known?: NativeProbe | null): Promise<AppRow> {
+  /** Asks the engine to start or reach the server once and list its tools; the answer is the state.
+   *  `after`: this follows a change the engine has already made — a check that cannot be made is then said as
+   *  such (`unchecked`), never as a failure of the change. */
+  private async checked(entry: NativeCapability, known?: NativeProbe | null, after = false): Promise<AppRow> {
     const row = this.customRow(entry);
     if (row.state === 'off') return row;
-    const probe = known ?? await this.native.request<NativeProbe>(`/api/mcp/${encode(entry.id)}/tools`, { method: 'POST', body: {} });
+    let probe: NativeProbe;
+    try { probe = known ?? await this.native.request<NativeProbe>(`/api/mcp/${encode(entry.id)}/tools`, { method: 'POST', body: {} }); }
+    catch (error) { if (!after) throw error; return { ...row, state: 'unchecked', reason: '没能检查' }; }
     if (probe.connectionStatus === 'connected') return { ...row, state: 'on', tools: (probe.tools ?? []).map(tool => ({ name: tool.name, ...(tool.description ? { description: tool.description } : {}) })) };
     if (probe.connectionStatus !== 'disconnected') return { ...row, state: 'unchecked', reason: '没能检查' };
-    return { ...row, state: 'failed', reason: probeReason(probe.error, row.source), ...(probe.error ? { detail: probe.error.slice(0, 400) } : {}) };
+    const detail = probeDetail(probe.error);
+    return { ...row, state: 'failed', reason: probeReason(probe.error, row.source), ...(detail ? { detail } : {}) };
+  }
+  /** The row as the engine has it now; when that cannot be read, the one in hand. */
+  private async reread(entry: NativeCapability): Promise<NativeCapability> {
+    try { return (await this.registry()).find(item => item.id === entry.id) ?? entry; } catch { return entry; }
   }
   addCustom(input: CustomAppInput): Promise<AppRow> { return this.inTurn('adding', () => this.install(input)); }
   private async install(input: CustomAppInput): Promise<AppRow> {
-    const replay = input.idempotencyKey && this.created.get(input.idempotencyKey);
-    const existing = await this.registry();
-    if (replay) {
-      const entry = existing.find(item => item.id === replay.nativeId);
-      if (entry) return this.checked(entry);
+    const existing = await this.registry(), code = idCode(input.idempotencyKey);
+    if (input.idempotencyKey) {
+      // The same request asked again (its answer was lost, or this adapter restarted): its id ends in the same
+      // code, so the app it already made is found in the engine itself — nothing is remembered here.
+      const earlier = existing.find(item => item.id.endsWith(`-${code}`));
+      if (earlier) {
+        if (!sameRequest(earlier, input)) throw new ApiError(409, '这次提交和之前的一次用了同一个标识，内容却不一样，请重新提交', undefined, 'idempotency_conflict');
+        if (!this.store.state.apps?.[earlier.id]) this.keepTitle(earlier.id, input.name);
+        return this.checked(earlier, undefined, true);
+      }
     }
     // The engine neither checks an id nor refuses one that is taken (it merges into it), so both happen here.
-    const taken = new Set(existing.map(item => item.id));
-    const nativeId = nativeIdFor(input.name, taken, input.idempotencyKey);
+    let nativeId = nativeIdFor(input.name, code);
+    while (existing.some(item => item.id === nativeId)) nativeId = nativeIdFor(input.name, idCode());
     const body = 'url' in input
       ? { id: nativeId, transport: 'streamableHttp', url: input.url, ...(Object.keys(input.secrets).length ? { headers: input.secrets } : {}) }
       : { id: nativeId, transport: 'stdio', command: input.program, args: input.args, ...(Object.keys(input.secrets).length ? { env: input.secrets } : {}) };
     const installed = await this.native.request<{ ok?: boolean; capability?: NativeCapability; probe?: NativeProbe | null }>(
       '/api/capabilities/mcp/install', { method: 'POST', body });
     if (!installed.ok || !installed.capability) throw new ApiError(502, '没能添加，请再试一次');
-    // From here the app exists in the engine. The name is display metadata; a failure to keep it must not hide that.
-    (this.store.state.apps ??= {})[nativeId] = { title: input.name };
-    this.store.save();
-    if (input.idempotencyKey) {
-      const now = Date.now();
-      for (const [key, made] of this.created) if (now - made.at > 600_000) this.created.delete(key);
-      this.created.set(input.idempotencyKey, { nativeId, at: now });
-    }
+    // From here the app exists in the engine, and nothing below may turn that into "could not add": a name that
+    // cannot be kept leaves it shown by its id, a row that cannot be read back is the one the install answered,
+    // a check that cannot be made is `unchecked`.
+    this.keepTitle(nativeId, input.name);
     // The install answer carries no env key list and, for a URL, no probe: read the row back and check it.
-    const entry = (await this.registry()).find(item => item.id === nativeId) ?? installed.capability;
-    return this.checked(entry, installed.probe?.connectionStatus === 'connected' ? installed.probe : undefined);
+    const entry = await this.reread(installed.capability);
+    return this.checked(entry, installed.probe?.connectionStatus === 'connected' ? installed.probe : undefined, true);
   }
   async patchCustom(id: string, input: z.infer<typeof customPatchSchema>): Promise<AppRow> {
     const entry = await this.custom(id);
+    let changed = false;
     if (input.secrets && Object.keys(input.secrets).length) {
       const url = !!entry.mcpServer?.url;
       secretNames(input.secrets, url);
       // Both calls merge into what is stored: named secrets are replaced or added, the rest stay.
-      if (url) await this.native.request('/api/capabilities/mcp/install', { method: 'POST', body: { id: entry.id, headers: input.secrets } });
-      else await this.native.request(`/api/capabilities/mcp/${encode(entry.id)}/env`, { method: 'PATCH', body: { env: input.secrets } });
+      if (url) {
+        // A header is replaced under the spelling it is stored with; another case would be kept beside it and both sent.
+        const stored = new Map(Object.keys(entry.mcpServer?.headers ?? {}).map(name => [name.toLowerCase(), name]));
+        const headers = Object.fromEntries(Object.entries(input.secrets).map(([name, value]) => [stored.get(name.toLowerCase()) ?? name, value]));
+        await this.native.request('/api/capabilities/mcp/install', { method: 'POST', body: { id: entry.id, headers } });
+      } else await this.native.request(`/api/capabilities/mcp/${encode(entry.id)}/env`, { method: 'PATCH', body: { env: input.secrets } });
+      changed = true;
     }
-    if (input.name !== undefined) { (this.store.state.apps ??= {})[entry.id] = { title: input.name }; this.store.save(); }
-    return this.checked((await this.registry()).find(item => item.id === entry.id) ?? entry);
+    // The name alone could not be kept: nothing changed, and that is the answer. After the engine has taken the
+    // secrets it is not — the row comes back with the name it still has.
+    if (input.name !== undefined && !this.keepTitle(entry.id, input.name) && !changed) throw new ApiError(500, '名字没能保存，请再试一次');
+    return this.checked(await this.reread(entry), undefined, changed);
   }
   async removeCustom(id: string): Promise<{ removed: true }> {
     const entry = await this.custom(id);
     await this.native.request(`/api/capabilities/mcp/${encode(entry.id)}?hard=true`, { method: 'DELETE' });
-    if (this.store.state.apps?.[entry.id]) { delete this.store.state.apps[entry.id]; this.store.save(); }
+    // It is gone from the engine; a name left behind names nothing (and is dropped at the next chance).
+    if (this.store.state.apps?.[entry.id]) this.keepTitle(entry.id, undefined);
     return { removed: true };
   }
 
@@ -255,9 +307,10 @@ export class BotApps {
     }
     if (plugin.live === 'starting' || plugin.live === 'handshaking') return { ...base, ...about, state: 'starting' };
     if (plugin.live !== 'running' && plugin.live !== 'degraded') return { ...base, ...about, state: 'failed', reason: '没能启动', ...failure };
-    // Running. Whether cats may read right now is the plugin's own answer; without it nothing is claimed.
+    // Running. The ten-minute authorization is the plugin's own answer; without an answer nothing is claimed —
+    // not "not authorized" either, since a grant made earlier may still be running.
     try { return { ...base, ...about, state: 'on', authorization: await this.action('status') }; }
-    catch { return { ...base, ...about, state: 'on', authorization: { active: false, remaining_ms: 0 } }; }
+    catch { return { ...base, ...about, state: 'on' }; }
   }
   /** One native `set-enabled`, with the revision the engine asks for. Resolves to the state read back afterwards. */
   private async setEnabled(enabled: boolean): Promise<AppRow> {
@@ -269,9 +322,12 @@ export class BotApps {
       try {
         await this.native.request(`/api/plugin-manager/plugins/${WECHAT_PLUGIN}/set-enabled`, { method: 'POST', body: { enabled, expectedRevision: plugin.lifecycleRevision } });
       } catch (error) {
-        const native = error instanceof ApiError ? error : undefined;
+        const native = error instanceof ApiError ? error : undefined, code = (native?.details as { code?: string } | undefined)?.code;
         // Someone else changed it between the read and the write: look again, once.
-        if (native?.status === 409 && (native.details as { code?: string } | undefined)?.code === 'STALE_REVISION' && attempt === 0) continue;
+        if (native?.status === 409 && code === 'STALE_REVISION' && attempt === 0) continue;
+        // The engine tried and the start failed. It has recorded that itself (and turned the plugin back off);
+        // the answer is the state it left, which says so — not an error on top of it.
+        if (enabled && code === 'RUNTIME_START_FAILED') return this.wechat();
         // A first start installs the plugin's dependencies and can outlast one request. The engine goes on;
         // what it is doing now is read back and reported as it is, never as done.
         if (native?.status !== 503) throw error;

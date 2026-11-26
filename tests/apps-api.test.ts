@@ -7,7 +7,8 @@ import { once } from 'node:events';
 import express from 'express';
 import { createApp } from '../server/app.js';
 import { createXbotAppsRouter } from '../server/xbot/apps.js';
-import { BotApps, nativeIdFor, probeReason, WECHAT_PLUGIN } from '../server/native/apps.js';
+import { BotApps, nativeIdFor, parseCustomApp, probeDetail, probeReason, WECHAT_PLUGIN } from '../server/native/apps.js';
+import { ApiError } from '../server/errors.js';
 import { NativeFixture } from './native-fixture.js';
 import { WECHAT_DISCLOSURE } from './apps-fixture.js';
 
@@ -28,9 +29,10 @@ async function setup(t: any, platform: NodeJS.Platform = 'darwin') {
   };
   t.after(async () => { await runtime.close(); await new Promise<void>(r => server.close(() => r())); rmSync(dir, { recursive: true, force: true }); });
   const sent = (pattern: RegExp, method?: string) => native.calls.filter(c => pattern.test(c.path) && (!method || c.method === method));
-  return { ...runtime, native, apps: native.apps, call, sent, dataFile: join(dir, 'presentation.json') };
+  return { ...runtime, native, apps: native.apps, call, sent, dataFile: join(dir, 'presentation.json'), platform };
 }
 const wechatOf = (list: any) => list.body.apps.find((a: any) => a.id === 'wechat');
+const nativeOf = (app: any): string => app.id.slice('custom:'.length);
 
 test('the production app serves 应用 instead of the old "not supported here" stub', async t => {
   const dir = mkdtempSync(join(tmpdir(), 'bot-apps-mount-')), runtime = createApp({ native: new NativeFixture(), dataFile: join(dir, 'presentation.json') });
@@ -65,7 +67,7 @@ test('adding a program: the adapter picks a safe id, sends the engine\'s install
   const added = await r.call('/custom', 'POST', { name: '  我的笔记  ', program: ' node ', args: ['/x/server.mjs', '--flag'], secrets: { NOTES_TOKEN: 'tok-123' }, idempotencyKey: '0b0e4d5c-3f0a-4d3e-9c57-2f6f0d0a1b11' });
   assert.equal(added.status, 201);
   const install = r.sent(/mcp\/install$/, 'POST')[0]!.body;
-  assert.match(install.id, /^app-[0-9a-f]{8}$/, 'a name with no Latin letters gets a short code');
+  assert.match(install.id, /^app-[0-9a-f]{8}$/, 'a name with no Latin letters is just "app" and the request\'s code');
   assert.deepEqual({ ...install, id: 'x' }, { id: 'x', transport: 'stdio', command: 'node', args: ['/x/server.mjs', '--flag'], env: { NOTES_TOKEN: 'tok-123' } });
   assert.deepEqual(added.body, { id: `custom:${install.id}`, kind: 'custom', title: '我的笔记', state: 'on',
     source: { type: 'program', program: 'node', args: ['/x/server.mjs', '--flag'], secrets: ['NOTES_TOKEN'] }, tools: [{ name: 'app_probe', description: 'Returns a fixed marker.' }] });
@@ -82,8 +84,10 @@ test('adding a program: the adapter picks a safe id, sends the engine\'s install
 test('adding an address: headers are the secrets, the engine does not probe on install so the adapter asks once', async t => {
   const r = await setup(t);
   const added = await r.call('/custom', 'POST', { name: 'Linear', url: 'https://mcp.linear.app/mcp', secrets: { Authorization: 'Bearer abc' } });
-  assert.deepEqual(r.sent(/mcp\/install$/, 'POST')[0]!.body, { id: 'linear', transport: 'streamableHttp', url: 'https://mcp.linear.app/mcp', headers: { Authorization: 'Bearer abc' } });
-  assert.equal(r.sent(/\/api\/mcp\/linear\/tools$/, 'POST').length, 1);
+  const id = nativeOf(added.body);
+  assert.match(id, /^linear-[0-9a-f]{8}$/);
+  assert.deepEqual(r.sent(/mcp\/install$/, 'POST')[0]!.body, { id, transport: 'streamableHttp', url: 'https://mcp.linear.app/mcp', headers: { Authorization: 'Bearer abc' } });
+  assert.equal(r.sent(new RegExp(`/api/mcp/${id}/tools$`), 'POST').length, 1);
   assert.equal(added.body.state, 'on');
   assert.deepEqual(added.body.tools, [{ name: 'search', description: 'Search the service.' }, { name: 'fetch_page' }]);
   assert.deepEqual(added.body.source, { type: 'url', url: 'https://mcp.linear.app/mcp', secrets: ['Authorization'] });
@@ -93,15 +97,16 @@ test('an app that is added but does not answer is still added, and says why in p
   const r = await setup(t);
   const program = await r.call('/custom', 'POST', { name: 'tool', program: 'not-a-program-xyz' });
   assert.equal(program.status, 201);
-  assert.deepEqual([program.body.state, program.body.reason, program.body.detail], ['failed', '这台电脑上找不到「not-a-program-xyz」', 'spawn not-a-program-xyz ENOENT']);
+  assert.deepEqual([program.body.state, program.body.reason, program.body.detail], ['failed', '这台电脑上找不到「not-a-program-xyz」', 'ENOENT']);
   const remote = await r.call('/custom', 'POST', { name: 'far', url: 'http://127.0.0.1:9/mcp' });
   assert.deepEqual([remote.body.state, remote.body.reason, remote.body.detail], ['failed', '连不上这个网址', 'fetch failed']);
-  assert.deepEqual((await r.call()).body.apps.map((a: any) => a.id), ['wechat', 'custom:tool', 'custom:far'], 'both are in the engine and in the list');
+  assert.deepEqual((await r.call()).body.apps.map((a: any) => a.id), ['wechat', program.body.id, remote.body.id], 'both are in the engine and in the list');
   // A later check reads the engine again.
-  r.apps.probes['tool'] = { connectionStatus: 'connected', tools: [{ name: 'ok' }] };
-  assert.equal((await r.call('/custom%3Atool')).body.state, 'on');
-  r.apps.probes['tool'] = { connectionStatus: 'unknown' };
-  assert.deepEqual([(await r.call('/custom%3Atool')).body.state, (await r.call('/custom%3Atool')).body.reason], ['unchecked', '没能检查']);
+  const tool = nativeOf(program.body), path = `/${encodeURIComponent(program.body.id)}`;
+  r.apps.probes[tool] = { connectionStatus: 'connected', tools: [{ name: 'ok' }] };
+  assert.equal((await r.call(path)).body.state, 'on');
+  r.apps.probes[tool] = { connectionStatus: 'unknown' };
+  assert.deepEqual([(await r.call(path)).body.state, (await r.call(path)).body.reason], ['unchecked', '没能检查']);
 });
 
 test('the engine checks nothing on install, so the adapter refuses what must not reach it', async t => {
@@ -114,6 +119,8 @@ test('the engine checks nothing on install, so the adapter refuses what must not
     [{ name: 'x', url: 'ftp://example.com' }, /https/], [{ name: 'x', url: 'http://example.com/mcp' }, /https/],
     [{ name: 'x', url: 'https://user:pw@example.com/mcp' }, /https/], [{ name: 'x', url: 'https://a.example', secrets: { 'Bad Header': 'v' } }, /请求头/],
     [{ name: 'x', url: 'https://a.example', extra: 1 }, /./], [{ name: 'x', program: 'node', idempotencyKey: 'nope' }, /./],
+    // One header in two spellings would be stored twice and sent as one joined value.
+    [{ name: 'x', url: 'https://a.example', secrets: { Authorization: 'a', authorization: 'b' } }, /重复/],
   ];
   for (const [body, message] of bad) {
     const answer = await r.call('/custom', 'POST', body);
@@ -123,15 +130,15 @@ test('the engine checks nothing on install, so the adapter refuses what must not
   assert.equal((await r.call('/custom', 'POST', { name: 'x', url: 'http://localhost:8123/mcp' })).status, 201, 'plain http is for this computer only');
 });
 
-test('ids: readable when the name allows, never one the engine or another app already has', () => {
-  assert.equal(nativeIdFor('My Notes!', new Set()), 'my-notes');
-  assert.equal(nativeIdFor('My Notes', new Set(['my-notes', 'my-notes-2'])), 'my-notes-3');
-  assert.match(nativeIdFor('笔记', new Set()), /^app-[0-9a-f]{8}$/);
-  assert.match(nativeIdFor('cat-cafe-collab', new Set()), /^app-/, 'the engine\'s own namespace is not for apps');
-  assert.match(nativeIdFor('plugin', new Set()), /^app-/);
-  assert.match(nativeIdFor('9 lives', new Set()), /^app-/, 'an id starts with a letter');
-  assert.equal(nativeIdFor('笔记', new Set(), 'seed'), nativeIdFor('笔记', new Set(), 'seed'), 'the same request makes the same id');
-  assert.equal(nativeIdFor('a'.repeat(80), new Set()).length, 32);
+test('ids: the name\'s own letters when it has some, then a code that is this request\'s alone — never the engine\'s namespace', () => {
+  assert.equal(nativeIdFor('My Notes!', '1a2b3c4d'), 'my-notes-1a2b3c4d');
+  assert.equal(nativeIdFor('笔记', '1a2b3c4d'), 'app-1a2b3c4d');
+  assert.equal(nativeIdFor('cat-cafe-collab', '1a2b3c4d'), 'app-1a2b3c4d', 'the engine\'s own namespace is not for apps');
+  assert.equal(nativeIdFor('plugin', '1a2b3c4d'), 'app-1a2b3c4d');
+  assert.equal(nativeIdFor('9 lives', '1a2b3c4d'), 'app-1a2b3c4d', 'an id starts with a letter');
+  // Short enough to leave room for a tool's own name behind it.
+  assert.equal(nativeIdFor('a'.repeat(80), '1a2b3c4d'), `${'a'.repeat(20)}-1a2b3c4d`);
+  assert.equal(nativeIdFor('trailing ----- dashes and more words', '1a2b3c4d'), 'trailing-dashes-and-1a2b3c4d', 'cut at twenty, and never a doubled dash before the code');
 });
 
 test('probe errors are said plainly', () => {
@@ -143,19 +150,47 @@ test('probe errors are said plainly', () => {
   assert.equal(probeReason(undefined, program), '没连上');
 });
 
+test('the engine\'s probe error can quote the answering server\'s body — and a server may echo the credential: only fragments that cannot carry one go out', async t => {
+  assert.equal(probeDetail('Error POSTing to endpoint (HTTP 401): {"error":"Invalid credential Bearer sk-live-123"}'), 'HTTP 401');
+  assert.equal(probeDetail('SSE error: Non-200 status code (403)'), 'status code (403)');
+  assert.equal(probeDetail('spawn /Users/me/bin/thing ENOENT'), 'ENOENT');
+  assert.equal(probeDetail('Probe timeout after 7000ms'), 'timeout');
+  assert.equal(probeDetail('MCP error -32000: Connection closed'), 'MCP error -32000 · Connection closed');
+  assert.equal(probeDetail('fetch failed: connect ECONNREFUSED 127.0.0.1:9'), 'fetch failed · ECONNREFUSED');
+  assert.equal(probeDetail('something nobody listed, with sk-live-123 in it'), undefined);
+  assert.equal(probeDetail(undefined), undefined);
+  // Through the adapter: added, re-read and patched — the value never comes back, in any field.
+  const r = await setup(t);
+  const added = await r.call('/custom', 'POST', { name: 'far', url: 'https://a.example/mcp', secrets: { Authorization: 'Bearer sk-live-123' } });
+  r.apps.probes[nativeOf(added.body)] = { connectionStatus: 'disconnected', tools: [], error: 'Error POSTing to endpoint (HTTP 401): {"error":"Invalid credential Bearer sk-live-123"}' };
+  const path = `/${encodeURIComponent(added.body.id)}`;
+  const answers = [await r.call(path), await r.call(path, 'PATCH', { name: '远处' }), await r.call(path, 'PATCH', { secrets: { Authorization: 'Bearer sk-live-456' } }), await r.call()];
+  assert.deepEqual([answers[0]!.body.state, answers[0]!.body.reason, answers[0]!.body.detail], ['failed', '对方拒绝了，密钥可能不对', 'HTTP 401']);
+  for (const answer of answers) assert.equal(/sk-live/.test(JSON.stringify(answer.body)), false, JSON.stringify(answer.body));
+});
+
 test('renaming changes only the kept name; secrets go to the engine route that merges them (env for a program, headers for an address)', async t => {
   const r = await setup(t);
-  const program = (await r.call('/custom', 'POST', { name: 'notes', program: 'node', secrets: { A: '1' } })).body;
+  const program = (await r.call('/custom', 'POST', { name: 'notes', program: 'node', secrets: { A: '1' } })).body, notes = nativeOf(program);
   const renamed = await r.call(`/${encodeURIComponent(program.id)}`, 'PATCH', { name: '笔记' });
   assert.equal(renamed.body.title, '笔记'); assert.equal(r.sent(/\/env$/).length, 0);
   const patched = await r.call(`/${encodeURIComponent(program.id)}`, 'PATCH', { secrets: { A: '2', B: '3' } });
-  assert.deepEqual(r.sent(/mcp\/notes\/env$/, 'PATCH')[0]!.body, { env: { A: '2', B: '3' } });
+  assert.deepEqual(r.sent(new RegExp(`mcp/${notes}/env$`), 'PATCH')[0]!.body, { env: { A: '2', B: '3' } });
   assert.deepEqual(patched.body.source.secrets, ['A', 'B']);
-  assert.deepEqual(r.apps.rows.find(row => row.id === 'notes')!.mcpServer.env, { A: '2', B: '3' });
-  const remote = (await r.call('/custom', 'POST', { name: 'far', url: 'https://a.example/mcp', secrets: { Authorization: 'one', 'X-Keep': 'k' } })).body;
+  assert.deepEqual(r.apps.rows.find(row => row.id === notes)!.mcpServer.env, { A: '2', B: '3' });
+  // Environment names differ by case; these are two variables.
+  await r.call(`/${encodeURIComponent(program.id)}`, 'PATCH', { secrets: { a: '4' } });
+  assert.deepEqual(r.apps.rows.find(row => row.id === notes)!.mcpServer.env, { A: '2', B: '3', a: '4' });
+  const remote = (await r.call('/custom', 'POST', { name: 'far', url: 'https://a.example/mcp', secrets: { Authorization: 'one', 'X-Keep': 'k' } })).body, far = nativeOf(remote);
   await r.call(`/${encodeURIComponent(remote.id)}`, 'PATCH', { secrets: { Authorization: 'two' } });
-  assert.deepEqual(r.sent(/mcp\/install$/, 'POST').at(-1)!.body, { id: 'far', headers: { Authorization: 'two' } });
-  assert.deepEqual(r.apps.rows.find(row => row.id === 'far')!.mcpServer, { transport: 'streamableHttp', command: '', args: [], url: 'https://a.example/mcp', headers: { Authorization: 'two', 'X-Keep': 'k' } });
+  assert.deepEqual(r.sent(/mcp\/install$/, 'POST').at(-1)!.body, { id: far, headers: { Authorization: 'two' } });
+  assert.deepEqual(r.apps.rows.find(row => row.id === far)!.mcpServer, { transport: 'streamableHttp', command: '', args: [], url: 'https://a.example/mcp', headers: { Authorization: 'two', 'X-Keep': 'k' } });
+  // A header named in another case replaces the one that is stored (the engine would keep both, and both would be sent as one joined value).
+  const cased = await r.call(`/${encodeURIComponent(remote.id)}`, 'PATCH', { secrets: { authorization: 'three', 'x-new': 'n' } });
+  assert.deepEqual(r.sent(/mcp\/install$/, 'POST').at(-1)!.body, { id: far, headers: { Authorization: 'three', 'x-new': 'n' } });
+  assert.deepEqual(r.apps.rows.find(row => row.id === far)!.mcpServer.headers, { Authorization: 'three', 'X-Keep': 'k', 'x-new': 'n' });
+  assert.deepEqual(cased.body.source.secrets, ['Authorization', 'X-Keep', 'x-new']);
+  assert.equal((await r.call(`/${encodeURIComponent(remote.id)}`, 'PATCH', { secrets: { 'X-Keep': 'a', 'x-keep': 'b' } })).status, 400);
   assert.equal((await r.call(`/${encodeURIComponent(program.id)}`, 'PATCH', { secrets: { 'bad name': 'x' } })).status, 400);
   assert.equal((await r.call(`/${encodeURIComponent(program.id)}`, 'PATCH', {})).status, 400);
   assert.equal((await r.call('/custom%3Anope', 'PATCH', { name: 'x' })).status, 404);
@@ -243,18 +278,31 @@ test('微信 start that outlasts the request is reported as starting, a start th
   assert.equal(state, 'on');
   await r.call('/wechat/disconnect', 'POST', {});
   r.apps.start = 'fail';
+  // The pinned engine answers a failed start with 503 RUNTIME_START_FAILED after recording it; the adapter's answer is that record.
   const failed = await r.call('/wechat/connect', 'POST', {});
-  assert.deepEqual([failed.body.state, failed.body.reason], ['off', '上次没能启动']);
+  assert.deepEqual([failed.status, failed.body.state, failed.body.reason, failed.body.detail], [200, 'off', '上次没能启动', 'UNEXPECTED_RUNTIME_FAILURE · Plugin runtime reported UNEXPECTED_RUNTIME_FAILURE.']);
+  // …also when it was 再试一次 from a record left at "enabled, not running": off first, then the start that fails.
+  Object.assign(r.apps.plugin!, { intent: 'enabled', live: 'crashed' });
+  const again = await r.call('/wechat/connect', 'POST', {});
+  assert.deepEqual([again.status, again.body.state, again.body.reason], [200, 'off', '上次没能启动']);
+  // Any other refusal by the engine is an error, not a state.
+  r.apps.start = 'ok';
+  const real = r.native.request.bind(r.native);
+  r.native.request = (async (path: string, options: any = {}) => { if (/set-enabled$/.test(path)) throw new ApiError(503, 'Plugin lifecycle operation failed', { error: 'Plugin lifecycle operation failed', code: 'LIFECYCLE_UNAVAILABLE' }); return real(path, options); }) as any;
+  assert.equal((await r.call('/wechat/connect', 'POST', {})).status, 503);
+  r.native.request = real as any;
   // A record left at "enabled, not running" is turned off before it is turned on again.
   Object.assign(r.apps.plugin!, { intent: 'enabled', live: 'crashed' }); r.apps.start = 'ok';
   const before = r.sent(/set-enabled$/).length;
   assert.equal((await r.call('/wechat/connect', 'POST', {})).body.state, 'on');
   assert.deepEqual(r.sent(/set-enabled$/).slice(before).map(c => c.body.enabled), [false, true]);
-  // An engine that cannot be reached is an error, not a state.
-  r.apps.plugin!.intent = 'disabled'; r.apps.plugin!.live = 'stopped';
+  // A request that never reached the engine (the adapter's own 503, as NativeClient throws it) is read back, found
+  // unchanged, and is an error — not a state, and not the stale 「上次没能启动」 of an earlier attempt either.
+  Object.assign(r.apps.plugin!, { intent: 'disabled', live: 'stopped', activationFailed: true });
   const request = r.native.request.bind(r.native);
-  r.native.request = (async (path: string, options: any = {}) => { if (/set-enabled$/.test(path)) throw Object.assign(new Error('Clowder AI 请求中断'), { status: 503 }); return request(path, options); }) as any;
-  assert.notEqual((await r.call('/wechat/connect', 'POST', {})).status, 200);
+  r.native.request = (async (path: string, options: any = {}) => { if (/set-enabled$/.test(path)) throw new ApiError(503, 'Clowder AI 请求中断。发送结果可能已持久化，请刷新后确认。'); return request(path, options); }) as any;
+  const cutOff = await r.call('/wechat/connect', 'POST', {});
+  assert.deepEqual([cutOff.status, 'state' in cutOff.body], [503, false]);
 });
 
 test('微信 authorization: ten minutes from the plugin\'s own action, readable every time, revocable — the operation state is cleared before each action', async t => {
@@ -279,24 +327,48 @@ test('微信 authorization: ten minutes from the plugin\'s own action, readable 
   assert.deepEqual((await r.call('/wechat')).body.authorization, { active: false, remaining_ms: 0 });
 });
 
-test('微信 on, but its status cannot be read: on, and no authorization is claimed', async t => {
-  const r = await setup(t);
+test('微信 on, but its authorization cannot be read: on, and nothing is claimed about it — not "not authorized" either', async t => {
+  const r = await setup(t); let now = Date.parse('2026-11-26T02:00:00Z'); r.apps.now = () => now;
   await r.call('/wechat/connect', 'POST', {});
-  const request = r.native.request.bind(r.native);
-  r.native.request = (async (path: string, options: any = {}) => { if (/\/actions\//.test(path)) throw new Error('boom'); return request(path, options); }) as any;
-  assert.deepEqual([(await r.call('/wechat')).body.state, (await r.call('/wechat')).body.authorization], ['on', { active: false, remaining_ms: 0 }]);
+  await r.call('/wechat/authorize', 'POST', {});
+  r.apps.statusFails = true;
+  // The grant is still running in the plugin; the adapter cannot see it and says nothing rather than "inactive".
+  for (const row of [(await r.call('/wechat')).body, wechatOf(await r.call())]) {
+    assert.equal(row.state, 'on'); assert.equal('authorization' in row, false, JSON.stringify(row));
+  }
+  // Revoking does not depend on reading it, and its answer is the plugin's own.
+  assert.deepEqual((await r.call('/wechat/revoke', 'POST', {})).body.authorization, { active: false, remaining_ms: 0 });
+  now += 300_000; await r.call('/wechat/authorize', 'POST', {});
+  r.apps.statusFails = false; now += 60_000;
+  assert.deepEqual((await r.call('/wechat')).body.authorization, { active: true, remaining_ms: 540_000, until: '2026-11-26T02:15:00.000Z' }, 'readable again: what the plugin has, which was there all along');
 });
 
 test('requests that arrive together do not trip over each other: two adds get two ids, a status read cannot land between a reset and its action', async t => {
   const r = await setup(t);
-  const [first, second] = await Promise.all([r.call('/custom', 'POST', { name: 'notes', program: 'node' }), r.call('/custom', 'POST', { name: 'notes', program: 'node', args: ['b'] })]);
-  assert.deepEqual([first.status, second.status], [201, 201]);
-  assert.deepEqual([first.body.id, second.body.id].sort(), ['custom:notes', 'custom:notes-2']);
-  assert.equal(r.apps.rows.filter(row => row.source === 'external').length, 2);
-  await r.call('/wechat/connect', 'POST', {});
-  // The engine answers each call a tick later, so unserialised pairs would interleave.
+  // The engine answers each call a tick later, so steps that are not kept apart do interleave.
   const request = r.native.request.bind(r.native);
   r.native.request = (async (path: string, options: any = {}) => { await new Promise(done => setTimeout(done, 2)); return request(path, options); }) as any;
+  const [first, second] = await Promise.all([r.call('/custom', 'POST', { name: 'notes', program: 'node' }), r.call('/custom', 'POST', { name: 'notes', program: 'node', args: ['b'] })]);
+  assert.deepEqual([first.status, second.status], [201, 201]);
+  assert.notEqual(first.body.id, second.body.id);
+  assert.equal(r.apps.rows.filter(row => row.source === 'external').length, 2);
+  // Two adapters on one engine (two processes: nothing in memory is shared) that both read the registry before
+  // either installs: the engine merges an install into an id that exists, so the ids must already differ.
+  const one = new BotApps(r.native, r.store, r.platform), two = new BotApps(r.native, r.store, r.platform);
+  const reads: Array<() => void> = []; let held = 2;
+  r.native.request = (async (path: string, options: any = {}) => {
+    if (path === '/api/capabilities' && held > 0) { held--; const answer = await request(path, options); await new Promise<void>(done => { reads.push(done); if (reads.length === 2) for (const go of reads) go(); }); return answer; }
+    return request(path, options);
+  }) as any;
+  const [a, b] = await Promise.all([
+    one.addCustom(parseCustomApp({ name: 'shared', program: 'node', args: ['one'], secrets: { ONE: '1' } })),
+    two.addCustom(parseCustomApp({ name: 'shared', program: 'node', args: ['two'], secrets: { TWO: '2' } })),
+  ]);
+  assert.notEqual(a.id, b.id);
+  const rowOf = (app: any) => r.apps.rows.find(row => row.id === nativeOf(app))!.mcpServer;
+  assert.deepEqual([rowOf(a).args, rowOf(a).env, rowOf(b).args, rowOf(b).env], [['one'], { ONE: '1' }, ['two'], { TWO: '2' }], 'neither took the other\'s program or secrets');
+  r.native.request = (async (path: string, options: any = {}) => { await new Promise(done => setTimeout(done, 2)); return request(path, options); }) as any;
+  await r.call('/wechat/connect', 'POST', {});
   const answers = await Promise.all([r.call('/wechat'), r.call('/wechat/authorize', 'POST', {}), r.call('/wechat'), r.call(), r.call('/wechat/revoke', 'POST', {}), r.call('/wechat')]);
   assert.deepEqual(answers.map(a => a.status), [200, 200, 200, 200, 200, 200], JSON.stringify(answers.map(a => a.body.error)));
   assert.deepEqual((await r.call('/wechat')).body.authorization, { active: false, remaining_ms: 0 });
@@ -304,10 +376,90 @@ test('requests that arrive together do not trip over each other: two adds get tw
 
 test('微信 that cannot be read does not take the custom apps off the list; asked for directly, the error is the error', async t => {
   const r = await setup(t);
-  await r.call('/custom', 'POST', { name: 'notes', program: 'node' });
+  const notes = (await r.call('/custom', 'POST', { name: 'notes', program: 'node' })).body;
   const request = r.native.request.bind(r.native);
   r.native.request = (async (path: string, options: any = {}) => { if (/plugin-manager/.test(path)) throw Object.assign(new Error('engine said no'), { status: 500 }); return request(path, options); }) as any;
   const list = await r.call();
-  assert.deepEqual(list.body.apps.map((a: any) => [a.id, a.state, a.reason]), [['wechat', 'unavailable', '没能读到它的状态'], ['custom:notes', 'unchecked', undefined]]);
+  assert.deepEqual(list.body.apps.map((a: any) => [a.id, a.state, a.reason]), [['wechat', 'unavailable', '没能读到它的状态'], [notes.id, 'unchecked', undefined]]);
   assert.equal((await r.call('/wechat')).status, 500);
+});
+
+test('the same request asked again finds the app it made in the engine itself — after a lost answer, after a restart; changed content under the same key is refused', async t => {
+  const r = await setup(t), key = '5d0c0a3e-8f6b-4c1d-9a27-3b1f0e9d7c55';
+  const body = { name: 'notes', program: 'node', args: ['/x/a.mjs'], secrets: { TOKEN: 't' }, idempotencyKey: key };
+  // The engine installs it, but the answer is lost on the way back.
+  const request = r.native.request.bind(r.native); let lose = true;
+  r.native.request = (async (path: string, options: any = {}) => {
+    const answer = await request(path, options);
+    if (lose && /mcp\/install$/.test(path)) { lose = false; throw new ApiError(503, 'Clowder AI 请求中断。发送结果可能已持久化，请刷新后确认。'); }
+    return answer;
+  }) as any;
+  assert.equal((await r.call('/custom', 'POST', body)).status, 503);
+  assert.equal(r.apps.rows.filter(row => row.source === 'external').length, 1, 'it is in the engine all the same');
+  // Asked again by an adapter that remembers nothing (a restart): the same app, named now, and no second install.
+  const fresh = new BotApps(r.native, r.store, r.platform);
+  const again = await fresh.addCustom(parseCustomApp(body));
+  assert.deepEqual([again.title, again.state, again.source], ['notes', 'on', { type: 'program', program: 'node', args: ['/x/a.mjs'], secrets: ['TOKEN'] }]);
+  assert.equal(r.sent(/mcp\/install$/, 'POST').length, 1);
+  assert.equal((await r.call('/custom', 'POST', body)).body.id, again.id);
+  assert.equal(r.apps.rows.filter(row => row.source === 'external').length, 1);
+  // The key names one request: other content under it is refused, and nothing is installed or merged.
+  for (const other of [{ ...body, args: ['/x/b.mjs'] }, { ...body, program: 'deno' }, { ...body, secrets: { TOKEN: 't', MORE: 'm' } }, { name: 'notes', url: 'https://a.example/mcp', idempotencyKey: key }]) {
+    const refused = await r.call('/custom', 'POST', other);
+    assert.deepEqual([refused.status, refused.body.code], [409, 'idempotency_conflict'], JSON.stringify(other));
+  }
+  assert.equal(r.sent(/mcp\/install$/, 'POST').length, 1);
+  // Removed since: the same request adds it again, which is what was asked.
+  await r.call(`/${encodeURIComponent(again.id)}`, 'DELETE');
+  assert.equal((await r.call('/custom', 'POST', body)).status, 201);
+  // Without a key every request is its own.
+  const [x, y] = [await r.call('/custom', 'POST', { name: 'same', program: 'node' }), await r.call('/custom', 'POST', { name: 'same', program: 'node' })];
+  assert.notEqual(x.body.id, y.body.id);
+});
+
+test('once the engine has taken a change, nothing after it turns the answer into a failure: an unkept name, a row that cannot be read back, a check that cannot be made', async t => {
+  const r = await setup(t), key = '8a1f2b3c-4d5e-4f60-8a7b-9c0d1e2f3a4b';
+  const save = r.store.save.bind(r.store), request = r.native.request.bind(r.native);
+  const quiet = console.warn; console.warn = () => {}; t.after(() => { console.warn = quiet; });
+  // 1. The name cannot be written: added, shown by its id (what a restart would show), and said so nowhere as "could not add".
+  r.store.save = () => { throw new Error('ENOSPC'); };
+  const unnamed = await r.call('/custom', 'POST', { name: '笔记', program: 'node', idempotencyKey: key });
+  assert.equal(unnamed.status, 201);
+  assert.deepEqual([unnamed.body.state, unnamed.body.title], ['on', nativeOf(unnamed.body)]);
+  assert.equal(r.store.state.apps?.[nativeOf(unnamed.body)], undefined, 'nothing is kept in memory that is not on disk');
+  r.store.save = save;
+  // The same request again: the same app, and its name is kept this time.
+  const named = await r.call('/custom', 'POST', { name: '笔记', program: 'node', idempotencyKey: key });
+  assert.deepEqual([named.body.id, named.body.title], [unnamed.body.id, '笔记']);
+  assert.equal(r.sent(/mcp\/install$/, 'POST').length, 1);
+  // 2. The registry cannot be read back after the install: the row the install answered.
+  let installed = false;
+  r.native.request = (async (path: string, options: any = {}) => {
+    if (installed && path === '/api/capabilities') throw new ApiError(500, 'registry unreadable');
+    const answer = await request(path, options);
+    if (/mcp\/install$/.test(path)) installed = true;
+    return answer;
+  }) as any;
+  const blind = await r.call('/custom', 'POST', { name: 'blind', program: 'node', args: ['x'] });
+  assert.deepEqual([blind.status, blind.body.state, blind.body.source.program, blind.body.source.args], [201, 'on', 'node', ['x']]);
+  // 3. The check cannot be made (an address: the install does not probe): added, unchecked.
+  r.native.request = (async (path: string, options: any = {}) => { if (/\/api\/mcp\/[^/]+\/tools$/.test(path)) throw new ApiError(504, 'probe did not return'); return request(path, options); }) as any;
+  const unchecked = await r.call('/custom', 'POST', { name: 'far', url: 'https://a.example/mcp' });
+  assert.deepEqual([unchecked.status, unchecked.body.state, unchecked.body.reason], [201, 'unchecked', '没能检查']);
+  // 4. Secrets taken by the engine, then the check cannot be made: changed, unchecked — while a check asked for by itself still says it failed.
+  const path = `/${encodeURIComponent(unchecked.body.id)}`;
+  const patched = await r.call(path, 'PATCH', { secrets: { Authorization: 'Bearer a' } });
+  assert.deepEqual([patched.status, patched.body.state, patched.body.source.secrets], [200, 'unchecked', ['Authorization']]);
+  assert.equal((await r.call(path)).status, 504);
+  r.native.request = request as any;
+  // 5. A name alone that cannot be kept: nothing changed, and that is the answer; the old name stays.
+  await r.call(path, 'PATCH', { name: '远处' });
+  r.store.save = () => { throw new Error('ENOSPC'); };
+  const refused = await r.call(path, 'PATCH', { name: '更远' });
+  assert.deepEqual([refused.status, refused.body.error], [500, '名字没能保存，请再试一次']);
+  // With secrets the engine did take: the answer is the row, under the name it still has.
+  const half = await r.call(path, 'PATCH', { name: '更远', secrets: { Authorization: 'Bearer b' } });
+  assert.deepEqual([half.status, half.body.title], [200, '远处']);
+  r.store.save = save;
+  assert.equal((await r.call(path)).body.title, '远处');
 });
