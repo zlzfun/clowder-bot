@@ -28,6 +28,10 @@
   // Marks, never colour alone (apps-dialog.css): on — a filled dot; bad — an
   // outlined ring; busy — the status spinner; idle — a short bar; off — a
   // struck ring. The word always comes with it.
+  // 微信 as the list answers it when its state could not be read (docs/apps-api.md): not a thing this
+  // computer lacks, so it is not drawn as unusable, and reading it again can help.
+  const UNREAD = "没能读到它的状态";
+  const unread = (app) => !!app && app.kind === "wechat" && app.state === "unavailable" && trim(app.reason) === UNREAD;
   // check: "running" while a check of this custom app is on its way, else "".
   // page: 微信's own page, where whether cats may read is the authorization's own block (the row says 可以读).
   function look(app, check, page) {
@@ -37,6 +41,7 @@
       if (app.state === "starting") return { mark: "busy", word: "正在启动…" };
       if (app.state === "on") return { mark: "on", word: !page && app.authorization && app.authorization.active ? "可以读" : "已打开" };
       if (app.state === "failed") return { mark: "bad", word: reason || "没能启动" };
+      if (unread(app)) return { mark: "idle", word: UNREAD };
       if (app.state === "unavailable") return { mark: "off", word: reason || "现在用不了" };
       return reason ? { mark: "bad", word: reason } : { mark: "idle", word: "未打开" };
     }
@@ -59,6 +64,7 @@
     if (app.state === "starting") return gaveUp ? [{ act: "reread", label: "再看一次", said: "再看一次微信现在的状态", main: false }] : [];
     if (app.state === "on") return [shut];
     if (app.state === "failed") return [open("再试一次"), shut];
+    if (unread(app)) return [{ act: "reread", label: "再看一次", said: "再看一次微信现在的状态", main: false }];
     return [];
   }
   const BUSY = { connect: "正在打开…", disconnect: "正在关闭…", authorize: "正在授权…", revoke: "正在撤销…", reread: "正在读取…", check: "正在检查…" };
@@ -349,7 +355,7 @@
   }
 
   root.ClowderAppsRules = Object.freeze({
-    trim, WECHAT, path, look, wechatActions, BUSY, POLL_EVERY, POLL_FOR, pollNext, deadline, clock, clockSaid, tickIn,
+    trim, WECHAT, path, UNREAD, unread, look, wechatActions, BUSY, POLL_EVERY, POLL_FOR, pollNext, deadline, clock, clockSaid, tickIn,
     WECHAT_ABOUT, WECHAT_NOT_YET, WECHAT_FACTS, WECHAT_CAN, WECHAT_SAY, WECHAT_HOW, WECHAT_FIRST, WECHAT_HUB, WECHAT_SLOW, WECHAT_STILL, SAID,
     NAME_MAX, PROGRAM_MAX, ARGS_MAX, ARG_MAX, URL_MAX, SECRETS_MAX, VALUE_MAX, SECRETS_WORD, URL_SAID, EMPTY_SECRET,
     nameProblem, programProblem, argsOf, argsProblem, urlProblem, secretNameProblem, secretValueProblem, secretsOf, check, fingerprint,

@@ -1013,7 +1013,7 @@
       "target": "client/public/apps-dialog-rules.js",
       "description": "应用 rules without DOM (window.ClowderAppsRules): each app state as a mark and a word (微信 and custom apps, from docs/apps-api.md), what 微信 offers in each state, the starting poll (every 2 s, about 2 minutes), the authorization deadline from the server's until and the m:ss clock, the custom-app form's checks mirroring the adapter's, the idempotency fingerprint, splitting a pasted command line only when unambiguous, the consent and consequence words, and what each failed request says",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-26 (docs/xbot-frontend.md item 52)",
-      "sha256": "0a95e35d99b09889d131c528a657c947d97bde9762eac4973d3c803c9ad71f49"
+      "sha256": "9f0c90b3b8294239f4b78de1d2a9ecb6f8e8b94345be8af4c868ec4ba012ccfa"
     },
     {
       "target": "client/public/apps-dialog.js",

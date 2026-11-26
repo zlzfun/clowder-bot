@@ -626,6 +626,23 @@ test('微信 failed: why, try again or close; unavailable: why, and no button th
   assert.equal(seen(one(none.body(), '.ap-state')), '只在 Mac 上能用');
   assert.deepEqual(all(none.body(), '.ap-view button').map((b) => seen(b)), [], 'not one button on the page');
   assert.equal(all(none.body(), '.ap-foot').length, 0);
+  // The list could not read 微信's state (docs/apps-api.md): not something this computer lacks — drawn as unknown,
+  // and reading it again is what can be done; a read that fails again says so.
+  const unread = await opened((s) => { s.wechat = { id: 'wechat', kind: 'wechat', title: '微信', state: 'unavailable', reason: '没能读到它的状态' }; });
+  assert.ok(one(unread.row('wechat'), '.ap-mark').classList.contains('idle'));
+  unread.row('wechat').click();
+  await settle();
+  let reads = 0;
+  unread.srv.on.set('GET /xbot-api/apps/wechat', () => { if (reads++ === 0) throw fail(502, 'bad gateway'); return { ...unread.srv.wechat, state: 'off', reason: undefined, disclosure: WECHAT_DISCLOSURE, version: '0.1.0-alpha.7' }; });
+  buttonOf(unread.body(), '再看一次').click();
+  await settle();
+  assert.equal(seen(one(unread.body(), '.ap-note')), '没能读到微信现在的状态：服务出了点问题，稍后再试。');
+  buttonOf(unread.body(), '再看一次').click();
+  await settle();
+  assert.equal(seen(one(unread.body(), '.ap-state')), '未打开');
+  buttonOf(unread.body(), '打开');
+  assert.equal(unread.srv.sent('GET', /\/wechat$/).length, 2, 'only when asked');
+  assert.equal(plain(R.wechatActions({ kind: 'wechat', state: 'unavailable', reason: '这台电脑上还没有它的程序包' })).length, 0);
 });
 
 test('添加自定义应用: the form, the consequences right above 添加, client checks that explain the button; the body sent, and 201 with failed is added', async () => {
