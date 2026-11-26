@@ -89,9 +89,12 @@ export class NativeFixture implements NativeTransport {
   capabilityHold?: { key: string; release: Promise<void> };
   /** The next cat creation is left waiting in the engine the same way: 503 to the caller, the cat is made when `release` settles. */
   catHold?: { release: Promise<void> };
-  /** What the engine answers to a cancellation, and after how many further reads of that conversation's queue the turn is gone (Infinity: never). */
+  /**
+   * What the engine answers to a cancellation, and after how many further reads of that conversation's queue the turn
+   * is gone. Infinity, the default: the queue stays as the test set it (cancelling is a request, not the end of the turn).
+   */
   cancelAnswer: Record<string, unknown> = { ok: true, cancelled: true };
-  cancelEndsAfterReads = 0;
+  cancelEndsAfterReads = Infinity;
   private ending = new Map<string, number>();
   private capabilityWrites: Promise<unknown> = Promise.resolve();
   private capabilityWrite(method: string, url: URL, parts: string[], body: any): () => unknown {

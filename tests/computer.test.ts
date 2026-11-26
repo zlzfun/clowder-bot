@@ -376,7 +376,7 @@ test('turning the computer off ends the turn the cat is in the middle of, by nat
     await bridge.computer.set(cat, true);
     const running = () => native.queues.set(thread.id, { queue: [], activeInvocations: [{ catId: cat.id, invocationId: 'inv-1' }, { catId: 'cat-b', invocationId: 'inv-2' }] });
     const listed = () => native.queues.get(thread.id)!.activeInvocations.map((run: any) => run.catId);
-    bridge.cancelPatience = 1500;
+    bridge.cancelPatience = 1500; native.cancelEndsAfterReads = 0;
     running(); native.calls.length = 0;
     assert.equal((await bridge.computer.set(cat, false)).on, false);
     assert.deepEqual(native.calls.filter(call => call.path.includes('/cancel/')).map(call => `${call.method} ${call.path}`), [`POST /api/threads/${thread.id}/cancel/${cat.id}`]);
