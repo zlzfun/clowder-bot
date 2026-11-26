@@ -1113,13 +1113,14 @@ test('against the real adapter: 微信 opened and authorized (the countdown from
   assert.equal(seen(one(body(), '.ap-note')), '加好了。猫猫从下一条消息起就能用它。');
   assert.deepEqual(all(body(), '.ap-tool-name').map((n) => seen(n)), ['app_probe']);
   assert.deepEqual(all(body(), '.ap-names code').map((n) => seen(n)), ['PROBE_TOKEN']);
-  const row2 = native.apps.rows.find((r) => r.id === 'probe')!;
+  // The adapter gives every app an id of its own: the name's letters and a code (docs/apps-api.md).
+  const row2 = native.apps.rows.find((r) => /^probe-[0-9a-f]{8}$/.test(r.id))!;
   assert.deepEqual([row2.mcpServer.command, row2.mcpServer.args, row2.mcpServer.env], ['node', ['probe.mjs'], { PROBE_TOKEN: 'shh' }]);
   buttonOf(body(), '移除').click();
   buttonOf(page.doc.querySelector('.ap-confirm') as El, '移除').click();
   await until(() => seen(page.doc.querySelector('.ap-title')) === '应用', 'back on the list');
-  assert.equal(row('custom:probe'), null);
-  assert.equal(native.apps.rows.some((r) => r.id === 'probe'), false);
+  assert.equal(row('custom:' + row2.id), null);
+  assert.equal(native.apps.rows.some((r) => r.id === row2.id), false);
   page.window.ClowderApps.close();
 });
 

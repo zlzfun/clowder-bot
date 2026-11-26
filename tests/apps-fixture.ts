@@ -25,11 +25,15 @@ export class NativeAppsScript {
   probes: Record<string, { connectionStatus: string; tools?: Array<{ name: string; description?: string }>; error?: string }> = {};
   /** `null`: the engine has no such plugin at all (404). */
   plugin: ScriptedPlugin | null = { artifact: 'installed', intent: 'disabled', live: 'stopped', lifecycleRevision: 4, diagnostic: null, activationFailed: null, setEnabled: true };
-  /** What an enable does: `ok` runs at once; `slow` stays `starting` for this many reads; `fail` ends disabled with a diagnostic; `timeout` runs but the request is cut. */
+  /** What an enable does: `ok` runs at once; a number stays `starting` for that many reads; `fail` ends disabled with a
+   *  diagnostic and the request is answered 503 `RUNTIME_START_FAILED` (as the pinned engine does: plugin-manager-route-contract.ts);
+   *  `timeout` runs but the request is cut. */
   start: 'ok' | 'fail' | 'timeout' | number = 'ok';
   /** Reads left before a `starting` plugin is `running`. */
   pending = 0;
   private armedUntil = 0;
+  /** The plugin's `status` action cannot be answered (the plugin's storage, the host): 502, while a grant may be running. */
+  statusFails = false;
   /** The engine's own step pointer for the operation. While set, the plugin refuses every action. */
   operationState: string | null = null;
   now: () => number = () => Date.now();
@@ -106,8 +110,10 @@ export class NativeAppsScript {
       if (body.expectedRevision !== plugin.lifecycleRevision) throw new ApiError(409, `Expected lifecycle revision ${body.expectedRevision}, current ${plugin.lifecycleRevision}`, { error: 'stale', code: 'STALE_REVISION' });
       plugin.lifecycleRevision += 2; this.armedUntil = 0;
       if (!body.enabled) Object.assign(plugin, { intent: 'disabled', live: 'stopped' });
-      else if (this.start === 'fail') Object.assign(plugin, { intent: 'disabled', live: 'stopped', activationFailed: true, diagnostic: { code: 'UNEXPECTED_RUNTIME_FAILURE', message: 'Plugin runtime reported UNEXPECTED_RUNTIME_FAILURE.' } });
-      else {
+      else if (this.start === 'fail') {
+        Object.assign(plugin, { intent: 'disabled', live: 'stopped', activationFailed: true, diagnostic: { code: 'UNEXPECTED_RUNTIME_FAILURE', message: 'Plugin runtime reported UNEXPECTED_RUNTIME_FAILURE.' } });
+        throw new ApiError(503, 'Plugin runtime failed to start', { error: 'Plugin runtime failed to start', code: 'RUNTIME_START_FAILED' });
+      } else {
         Object.assign(plugin, { intent: 'enabled', activationFailed: null, diagnostic: null, live: typeof this.start === 'number' ? 'starting' : 'running' });
         if (typeof this.start === 'number') this.pending = this.start;
         if (this.start === 'timeout') throw new ApiError(503, 'Clowder AI 请求中断。发送结果可能已持久化，请刷新后确认。');
@@ -119,6 +125,7 @@ export class NativeAppsScript {
       const action = parts[6]!;
       if (this.plugin?.live !== 'running') throw new ApiError(409, 'Plugin has no loaded settings handler', { error: 'Plugin has no loaded settings handler' });
       if (this.operationState) throw new ApiError(502, `Action failed: wechat-visible-reader:${action} input contains an unsupported field`, { error: 'unsupported field' });
+      if (action === 'status' && this.statusFails) throw new ApiError(502, 'Action failed: wechat-visible-reader:status storage unavailable', { error: 'storage unavailable' });
       if (action === 'arm') this.armedUntil = this.now() + 600_000;
       if (action === 'disarm') this.armedUntil = 0;
       const answer = this.status(action);
