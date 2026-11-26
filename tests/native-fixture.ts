@@ -87,6 +87,12 @@ export class NativeFixture implements NativeTransport {
    * timed out), the write is applied when `release` settles, and every later write waits behind it.
    */
   capabilityHold?: { key: string; release: Promise<void> };
+  /** The next cat creation is left waiting in the engine the same way: 503 to the caller, the cat is made when `release` settles. */
+  catHold?: { release: Promise<void> };
+  /** What the engine answers to a cancellation, and after how many further reads of that conversation's queue the turn is gone (Infinity: never). */
+  cancelAnswer: Record<string, unknown> = { ok: true, cancelled: true };
+  cancelEndsAfterReads = 0;
+  private ending = new Map<string, number>();
   private capabilityWrites: Promise<unknown> = Promise.resolve();
   private capabilityWrite(method: string, url: URL, parts: string[], body: any): () => unknown {
     const found = (id: string) => this.capabilities.find(entry => entry.id === id);
@@ -138,8 +144,13 @@ export class NativeFixture implements NativeTransport {
     else if (path === '/api/cats' && method === 'GET') result = { cats: this.cats };
     else if (path === '/api/cats' && method === 'POST') {
       const cat = { ...body, id: body.catId, breedId: body.catId, configurationRevision: 'r1' } as NativeCat;
-      for (const entry of this.capabilities) if (this.cats.length && this.cats.every(known => entry.blockedCats?.includes(known.id)) && !entry.blockedCats!.includes(cat.id)) entry.blockedCats!.push(cat.id);
-      this.cats.push(cat); result = { cat };
+      const make = () => {
+        for (const entry of this.capabilities) if (this.cats.length && this.cats.every(known => entry.blockedCats?.includes(known.id)) && !entry.blockedCats!.includes(cat.id)) entry.blockedCats!.push(cat.id);
+        this.cats.push(cat);
+      };
+      const held = this.catHold;
+      if (held) { this.catHold = undefined; void held.release.then(make); throw new ApiError(503, 'Clowder AI 请求中断。发送结果可能已持久化，请刷新后确认。'); }
+      make(); result = { cat };
       if (this.lostAnswers.has('POST /api/cats')) throw new ApiError(503, 'Clowder AI 请求中断。发送结果可能已持久化，请刷新后确认。');
     }
     else if (parts[2] === 'cats' && parts[3] && method === 'DELETE') {
@@ -176,10 +187,24 @@ export class NativeFixture implements NativeTransport {
     } else if (parts[2] === 'threads' && parts[3] && parts.length === 4) {
       const thread = this.threads.get(parts[3]); if (!thread) throw new ApiError(404, 'Missing thread');
       if (method === 'PATCH') Object.assign(thread, body); result = thread;
-    } else if (parts[4] === 'queue') result = this.queues.get(parts[3]!) ?? { queue: [], activeInvocations: [] };
+    } else if (parts[4] === 'queue') {
+      // A cancelled turn leaves the queue only once the engine has cleaned up after it.
+      const queue = this.queues.get(parts[3]!);
+      for (const [key, reads] of this.ending) {
+        const [threadId, catId] = key.split('|');
+        if (threadId !== parts[3]) continue;
+        if (reads > 0) { this.ending.set(key, reads - 1); continue; }
+        this.ending.delete(key);
+        if (queue) queue.activeInvocations = queue.activeInvocations.filter((run: any) => run.catId !== catId);
+      }
+      result = queue ?? { queue: [], activeInvocations: [] };
+    }
     else if (parts[4] === 'artifacts') result = {threadId:parts[3],artifacts:this.artifactRows.get(parts[3]!) ?? []};
     else if (parts[4] === 'sessions') result = { sessions: [] };
-    else if (parts[4] === 'cancel') result = { ok: true, cancelled: true };
+    else if (parts[4] === 'cancel') {
+      if (this.cancelAnswer.cancelled !== false) this.ending.set(`${parts[3]}|${parts[5]}`, this.cancelEndsAfterReads);
+      result = this.cancelAnswer;
+    }
     else if (parts[2] === 'messages' && method === 'GET') {
       // The newest page, or the one before a cursor (`<order>:<message id>`), like native: `limit` at most, and whether older ones remain.
       const all = this.messages.get(url.searchParams.get('threadId')!) ?? [], cursor = url.searchParams.get('before');

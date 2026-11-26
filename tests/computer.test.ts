@@ -160,13 +160,26 @@ test('turning it off takes only this cat off, ends the turns it is in the middle
   assert.equal((await computer.set(b, false)).on, false);
   assert.deepEqual(on(), []); assert.deepEqual(driver.did, ['stop']); assert.deepEqual(ended, ['cat-a', 'cat-b']);
   assert.equal(native.capabilities.length, 1, 'the entry stays, blocked for every cat: a new cat then starts blocked by the engine itself');
-  // A cat that was not on has nothing to end.
+  // A cat that reads as off is treated the same: an earlier "off" may have blocked it and failed before its turn was ended.
   await computer.set(c, false);
-  assert.deepEqual(ended, ['cat-a', 'cat-b']);
-  // A turn that could not be ended is said: the switch is off, the running turn still has the computer.
+  assert.deepEqual(ended, ['cat-a', 'cat-b', 'cat-c']);
+  // A turn not seen to have ended is said: the switch is off, the running turn still has the computer.
   await computer.set(a, true); stopping.failed = 1;
   await refused(computer.set(a, false), 502, 'computer_still_running');
   assert.equal((await computer.view(a)).on, false);
+  // Asking again does not take the registry's word for it: the turn is ended this time.
+  stopping.failed = 0; ended.length = 0;
+  assert.equal((await computer.set(a, false)).on, false);
+  assert.deepEqual(ended, ['cat-a']);
+  // The block was written and its answer lost: the request fails, and the running turn was ended all the same.
+  await computer.set(a, true); ended.length = 0; native.lostAnswers.add('PATCH:cat');
+  await refused(computer.set(a, false), 503);
+  assert.deepEqual(ended, ['cat-a']); native.lostAnswers.clear();
+  assert.equal((await computer.view(a)).on, false);
+  // No entry at all: nobody was ever handed the tools, nothing is ended.
+  const bare = setup();
+  await bare.computer.set(a, false);
+  assert.deepEqual(bare.ended, []);
   // Off also works where the driver is gone: a stale "on" must be removable.
   stopping.failed = 0; await computer.set(a, true); driver.server = undefined;
   assert.deepEqual(await computer.view(a), { supported: true, installed: false, on: true, permissions: 'unknown' });
@@ -190,7 +203,7 @@ test('two switches at once register once', async () => {
   assert.deepEqual(on(), ['cat-a', 'cat-b']);
 });
 
-test('a new cat is blocked before it exists once a cat has the computer on; the engine does it while every cat is off', async () => {
+test('a new cat is blocked before it exists whenever the entry is there, also while every cat is off', async () => {
   const { native, bridge, patches, end } = app();
   try {
     // No entry at all: nothing to do, nothing said.
@@ -204,11 +217,11 @@ test('a new cat is blocked before it exists once a cat has the computer on; the 
     assert.deepEqual(order, ['PATCH /api/capabilities', 'POST /api/cats']);
     assert.deepEqual(patches(), [`cat=${second.id}:false`]);
     assert.equal((await bridge.computer.view(second)).on, false); assert.equal(bridge.creationNotice(second), undefined);
-    // Every cat off: the engine blocks the new cat itself, this app writes nothing.
+    // Every cat off: the engine would block the new cat itself, and it is blocked first all the same (see the late creation below).
     await bridge.computer.set(native.cats[0]!, false);
     native.calls.length = 0;
     const third = await bridge.createBot({ name: '新猫三' });
-    assert.equal((await bridge.computer.view(third)).on, false); assert.deepEqual(patches(), []);
+    assert.equal((await bridge.computer.view(third)).on, false); assert.deepEqual(patches(), [`cat=${third.id}:false`]);
   } finally { await end(); }
 });
 
@@ -244,6 +257,47 @@ test('a creation whose answer is lost, or whose later step fails, still leaves t
     const unsaved = native.cats.find(known => known.name === '存盘失败猫')!;
     assert.equal((await bridge.computer.view(unsaved)).on, false);
   } finally { await end(); }
+});
+
+test('a creation that reaches the engine late does not start with the computer, whatever was switched meanwhile', async () => {
+  // The entry exists and every cat is off: the creation's request times out here, the owner switches a cat on, then the engine makes the cat.
+  const { native, bridge, end } = app();
+  try {
+    await bridge.computer.set(native.cats[0]!, true); await bridge.computer.set(native.cats[0]!, false);
+    let release!: () => void;
+    native.catHold = { release: new Promise<void>(done => { release = done; }) };
+    await refused(bridge.createBot({ name: '迟到猫' }), 503);
+    await bridge.computer.set(native.cats[0]!, true);
+    release(); await settle();
+    const late = native.cats.find(known => known.name === '迟到猫')!;
+    assert.ok(late); assert.equal((await bridge.computer.view(late)).on, false);
+  } finally { await end(); }
+  // No entry yet: the same late creation, and the entry is registered for the first time meanwhile.
+  const fresh = app();
+  try {
+    let release!: () => void;
+    fresh.native.catHold = { release: new Promise<void>(done => { release = done; }) };
+    await refused(fresh.bridge.createBot({ name: '迟到猫' }), 503);
+    assert.equal((await fresh.bridge.computer.set(fresh.native.cats[0]!, true)).on, true);
+    release(); await settle();
+    const late = fresh.native.cats.find(known => known.name === '迟到猫')!;
+    assert.ok(late); assert.equal((await fresh.bridge.computer.view(late)).on, false);
+    assert.equal((await fresh.bridge.computer.view(fresh.native.cats[1]!)).on, false);
+  } finally { await fresh.end(); }
+});
+
+test('whether the cat already exists is asked inside the lock, after the switches before it', async () => {
+  const { native, computer } = setup();
+  await computer.set(a, true);
+  // A switch is under way; the creation request queues behind it. By the time its turn comes the cat exists and the owner has it on.
+  const made = cat('cat-new', '新来的');
+  const switching = computer.set(b, true).then(() => { native.cats.push(structuredClone(made)); });
+  native.calls.length = 0;
+  const guarded = computer.guard('cat-new', async () => native.cats.some(known => known.id === 'cat-new'), async () => ({ cat: made }));
+  await switching;
+  assert.deepEqual(await guarded, { made: { cat: made } });
+  assert.equal(native.calls.some(call => call.method === 'PATCH' && call.body?.catId === 'cat-new'), false, 'an existing cat is not touched');
+  assert.equal((await computer.view(made)).on, true);
 });
 
 test('a repeated creation request leaves the cat as the owner has it now', async () => {
@@ -320,11 +374,26 @@ test('turning the computer off ends the turn the cat is in the middle of, by nat
   try {
     const cat = native.cats[0]!, thread = await bridge.direct(cat);
     await bridge.computer.set(cat, true);
-    native.queues.set(thread.id, { queue: [], activeInvocations: [{ catId: cat.id, invocationId: 'inv-1' }] });
-    native.calls.length = 0;
+    const running = () => native.queues.set(thread.id, { queue: [], activeInvocations: [{ catId: cat.id, invocationId: 'inv-1' }, { catId: 'cat-b', invocationId: 'inv-2' }] });
+    const listed = () => native.queues.get(thread.id)!.activeInvocations.map((run: any) => run.catId);
+    bridge.cancelPatience = 1500;
+    running(); native.calls.length = 0;
     assert.equal((await bridge.computer.set(cat, false)).on, false);
     assert.deepEqual(native.calls.filter(call => call.path.includes('/cancel/')).map(call => `${call.method} ${call.path}`), [`POST /api/threads/${thread.id}/cancel/${cat.id}`]);
+    assert.deepEqual(listed(), ['cat-b'], 'the turn is gone from the queue; another cat\'s turn in the same conversation is not touched');
+    // The engine takes the cancellation and needs a moment to clean up: the answer waits until the turn is gone.
+    await bridge.computer.set(cat, true); running(); native.cancelEndsAfterReads = 2;
+    assert.equal((await bridge.computer.set(cat, false)).on, false);
+    assert.deepEqual(listed(), ['cat-b']);
+    // The turn never goes away: off in the registry, and said to be still running.
+    await bridge.computer.set(cat, true); running(); native.cancelEndsAfterReads = Infinity; bridge.cancelPatience = 400;
+    await refused(bridge.computer.set(cat, false), 502, 'computer_still_running');
+    assert.equal((await bridge.computer.view(cat)).on, false); assert.deepEqual(listed(), [cat.id, 'cat-b']);
+    // The engine answers that it cancelled nothing.
+    await bridge.computer.set(cat, true); running(); native.cancelEndsAfterReads = 0; native.cancelAnswer = { ok: true, cancelled: false };
+    await refused(bridge.computer.set(cat, false), 502, 'computer_still_running');
     // Idle: nothing is cancelled.
+    native.cancelAnswer = { ok: true, cancelled: true };
     native.queues.delete(thread.id); await bridge.computer.set(cat, true); native.calls.length = 0;
     await bridge.computer.set(cat, false);
     assert.equal(native.calls.some(call => call.path.includes('/cancel/')), false);

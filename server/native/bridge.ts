@@ -438,8 +438,7 @@ export class BotBridge {
         throw new ApiError(400, '创建配置不能与旧版字段混用');
       // The engine's route names the cat after the request key (patches/0005-cat-templates.patch), so its id is known before it exists.
       const key = input.idempotencyKey ?? randomUUID(), expected = `bot-${createHash('sha256').update(key).digest('hex').slice(0, 24)}`;
-      const repeated = (await this.cats()).some(known => known.id === expected);
-      const { made: result, notice } = await this.computer.guard(expected, repeated, () => this.native.request<{ cat: NativeCat; sourceTemplate: SourceTemplate | null }>('/api/bot-cat-templates/instantiate', {
+      const { made: result, notice } = await this.computer.guard(expected, () => this.cats().then(cats => cats.some(known => known.id === expected)), () => this.native.request<{ cat: NativeCat; sourceTemplate: SourceTemplate | null }>('/api/bot-cat-templates/instantiate', {
         method: 'POST', body: { name: input.name, catConfig: input.catConfig,
           ...(input.sourceTemplate ? { sourceTemplate: input.sourceTemplate } : {}), idempotencyKey: key },
       }));
@@ -464,7 +463,7 @@ export class BotBridge {
     const unavailable = runtimeUnavailable(runtime);
     if (unavailable) throw new ApiError(422, unavailable);
     const catId = `bot-${randomUUID().slice(0, 12)}`;
-    const { made: { cat }, notice } = await this.computer.guard(catId, false, () => this.native.request<{ cat: NativeCat }>('/api/cats', { method: 'POST', body: {
+    const { made: { cat }, notice } = await this.computer.guard(catId, async () => false, () => this.native.request<{ cat: NativeCat }>('/api/cats', { method: 'POST', body: {
       catId, name: input.name, displayName: input.name, nickname: input.name,
       color: template.color, mentionPatterns: [`@${input.name}`, `@${catId}`],
       roleDescription: input.persona?.trim() || source?.roleDescription || template.roleDescription,
@@ -578,8 +577,8 @@ export class BotBridge {
     }
     const journey = 'clowder-bot-simple';
     const body = sent.body;
-    // A cat this key already made is a repeat of that request: it keeps whatever the owner set on it since.
-    const { made: { cat }, notice } = await this.computer.guard(catId, !!existing, () => this.native.request<{ cat: NativeCat }>('/api/cats', { method: 'POST',
+    // A cat this key already made is a repeat of that request: it keeps whatever the owner set on it since (asked again inside the lock, not from the list read above).
+    const { made: { cat }, notice } = await this.computer.guard(catId, () => this.cats().then(cats => cats.some(known => known.id === catId)), () => this.native.request<{ cat: NativeCat }>('/api/cats', { method: 'POST',
       headers: { 'x-cat-cafe-onboarding-journey': journey, 'idempotency-key': `onboarding:${journey}:cat:${key}` },
       body }).catch(error => {
       if (error instanceof ApiError && error.status === 409) throw different(error.details);
@@ -724,22 +723,29 @@ export class BotBridge {
     }
     return { status: 'ok', native: await this.queue(threadId) };
   }
+  /** How long a cancelled turn is given to be gone from its conversation's queue, in ms. */
+  cancelPatience = 6000;
   /**
    * Ends the turns a cat is in the middle of: in its own conversation and in
-   * every group. Native cancellation, one conversation at a time; a
-   * conversation whose queue cannot be read or whose turn cannot be cancelled
-   * counts as not ended.
+   * every group. Native cancellation, one conversation at a time. Cancelling
+   * is a request: a turn counts as ended only once the conversation's queue no
+   * longer lists it for this cat. A queue that cannot be read, a cancellation
+   * the engine did not take, a turn still listed after cancelPatience: not
+   * ended.
    */
   async stopRunningTurns(cat: NativeCat): Promise<{ stopped: number; failed: number }> {
     const threads = new Set([this.store.bot(cat.id).activeThreadId, ...this.store.state.groupThreadIds].filter((id): id is string => !!id));
+    const running = async (threadId: string) => (await this.queue(threadId)).activeInvocations.some(run => run.catId === cat.id);
     let stopped = 0, failed = 0;
     for (const threadId of threads) {
       try {
-        const queue = await this.queue(threadId);
-        if (!queue.activeInvocations.some(run => run.catId === cat.id)) continue;
-        await this.native.request(`/api/threads/${encode(threadId)}/cancel/${encode(cat.id)}`, { method: 'POST', body: {} });
-        stopped++;
-      } catch (error) { if (!(error instanceof ApiError && error.status === 404)) failed++; }
+        if (!await running(threadId)) continue;
+        const answer = await this.native.request<{ cancelled?: boolean }>(`/api/threads/${encode(threadId)}/cancel/${encode(cat.id)}`, { method: 'POST', body: {} })
+          .catch(error => { if (error instanceof ApiError && error.status === 404) return { cancelled: true }; throw error; });
+        let gone = answer.cancelled !== false && !await running(threadId);
+        for (let waited = 0; answer.cancelled !== false && !gone && waited < this.cancelPatience; waited += 300) { await new Promise(done => setTimeout(done, 300)); gone = !await running(threadId); }
+        if (gone) stopped++; else failed++;
+      } catch { failed++; }
     }
     return { stopped, failed };
   }

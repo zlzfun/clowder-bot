@@ -69,7 +69,7 @@ export function cuaDriver(toolsDir: string, env: NodeJS.ProcessEnv = process.env
     .filter((place): place is string => !!place && isAbsolute(place));
   const cli = (app: string) => join(app, 'Contents', 'MacOS', 'cua-driver');
   // What the program was when it was last checked: a change to the file is a different program.
-  const mark = (app: string) => { try { const s = statSync(cli(app)); return `${s.dev}:${s.ino}:${s.size}:${s.mtimeMs}`; } catch { return undefined; } };
+  const mark = (app: string) => { try { const s = statSync(cli(app)); return `${s.dev}:${s.ino}:${s.size}:${s.mtimeMs}:${s.ctimeMs}`; } catch { return undefined; } };
   let known: { app: string; mark: string; at: number } | undefined;
   async function app(fresh = false): Promise<string | undefined> {
     if (!fresh && known && Date.now() - known.at < 60_000 && mark(known.app) === known.mark) return known.app;
@@ -106,7 +106,7 @@ export function cuaDriver(toolsDir: string, env: NodeJS.ProcessEnv = process.env
 /** What a cat's 资料 shows about the computer. `on` is the registry's word; the rest says whether that can work right now. */
 export interface ComputerView { supported: boolean; installed: boolean; on: boolean; permissions: ComputerGrants['state']; missing?: ComputerGrant[] }
 interface Entry { id?: string; type?: string; source?: string; enabled?: boolean; cats?: Record<string, boolean>; blockedCats?: string[]; mcpServer?: { command?: string; args?: string[] } }
-/** Ends the turns a cat is in the middle of, wherever it is working; says how many it could not end. */
+/** Ends the turns a cat is in the middle of, wherever it is working; `failed` counts those not seen to have ended. */
 export type StopRunning = (cat: NativeCat) => Promise<{ stopped: number; failed: number }>;
 
 // What the entry points at while it is being registered: a program that offers no tools.
@@ -116,6 +116,11 @@ const wait = (ms: number) => new Promise(done => setTimeout(done, ms));
 
 export class Computer {
   private tail: Promise<unknown> = Promise.resolve();
+  /**
+   * Ids of cats whose creation was sent while no entry existed and whose answer never came: the engine may still make
+   * them. They are blocked when the entry is first registered (see register). Request bookkeeping, in memory.
+   */
+  private readonly unconfirmed = new Set<string>();
   /**
    * `stopRunning`: how a cat's running turns are ended (the bridge's native cancel).
    * `patience`: how long a driver that was just started is given to answer, in ms.
@@ -191,7 +196,10 @@ export class Computer {
     await this.install({ command: placeholder, args: [] });
     try {
       await this.toggle({ scope: 'project', enabled: false });
-      if (anyOn(await this.entry())) throw new Error('still on for a cat');
+      // …and the cats that may still be on their way into the engine: the one call only knows the cats that exist.
+      for (const id of this.unconfirmed) await this.toggle({ scope: 'cat', catId: id, enabled: false });
+      const blocked = await this.entry();
+      if (anyOn(blocked) || [...this.unconfirmed].some(id => !blocked?.blockedCats?.includes(id))) throw new Error('still on for a cat');
       await this.install(located);
       const real = await this.entry();
       if (!real || anyOn(real)) throw new Error('on for a cat after the driver was set');
@@ -200,6 +208,7 @@ export class Computer {
       throw new ApiError(502, withdrawn ? '没能把电脑接上，这一步已经撤回，可以再试一次' : '没能把电脑接上，而且没能撤回干净：请到每只猫的资料里确认「电脑」是关着的',
         undefined, withdrawn ? 'computer_not_registered' : 'computer_half_registered');
     }
+    this.unconfirmed.clear();
     void this.driver.quiet().catch(() => {});
   }
 
@@ -208,52 +217,70 @@ export class Computer {
    * when the cat already reads as off (an earlier "on" that timed out here may
    * still be waiting in the engine; written after it, this one stands). A turn
    * the cat is in the middle of was given the tools when it started and keeps
-   * them until it ends, so a cat that was on has its running turns ended too:
-   * off means off now. With no cat left on, the driver's background process is
-   * asked to end.
+   * them until it ends, so its running turns are ended too, every time and
+   * whatever became of the write — an earlier "off" may have blocked the cat
+   * and failed before it could end them. Off means off now; a turn not seen
+   * to have ended is said. With no cat left on, the driver's background
+   * process is asked to end.
    */
   private async disable(cat: NativeCat): Promise<ComputerView> {
-    let entry: Entry | undefined, wasOn = true;
-    try { entry = await this.entry(); wasOn = this.isOn(entry, cat); } catch { /* unread: treated as possibly on */ }
-    if (entry === undefined && !wasOn) return this.view(cat);
-    await this.toggle({ scope: 'cat', catId: cat.id, enabled: false });
-    entry = await this.entry();
-    if (this.isOn(entry, cat)) throw new ApiError(502, '没能关掉，请再试一次');
+    let entry: Entry | undefined, read = true;
+    try { entry = await this.entry(); } catch { read = false; }
+    // No entry, or only the placeholder: no cat was ever handed the tools.
+    if (read && !this.real(entry)) return this.view(cat);
+    let failure: unknown;
+    try {
+      await this.toggle({ scope: 'cat', catId: cat.id, enabled: false });
+      entry = await this.entry();
+      if (this.isOn(entry, cat)) throw new ApiError(502, '没能关掉，请再试一次');
+    } catch (error) { failure = error; }
+    const ended = await this.stopRunning(cat).catch(() => ({ stopped: 0, failed: 1 }));
+    if (failure) throw failure;
     if (entry && !anyOn(entry)) void this.driver.stop().catch(() => {});
-    if (wasOn) {
-      const ended = await this.stopRunning(cat).catch(() => ({ stopped: 0, failed: 1 }));
-      if (ended.failed) throw new ApiError(502, '已经关掉了，但它正在进行的这一轮没能停下，停下之前它还能用这台电脑。请在对话里点停止。', undefined, 'computer_still_running');
-    }
+    if (ended.failed) throw new ApiError(502, '已经关掉了，但它正在进行的这一轮还没有停下来，停下之前它还能用这台电脑。请在对话里点停止，或者稍后再关一次。', undefined, 'computer_still_running');
     return this.view(cat);
   }
 
   /**
    * A cat is made without the computer. `create` is the native creation of the
-   * cat whose id will be `catId`. While the entry is off for every cat the
-   * engine blocks a new cat itself; once one cat has it on a new cat would
-   * start with it too, so its id is put on the block list BEFORE it exists
-   * (the engine accepts an id it does not know yet) and the creation only
-   * goes ahead once that is confirmed. This holds when the creation's answer
-   * is lost or a later step of the caller fails: the cat was blocked first.
-   * Switches wait meanwhile, so none can turn a cat on between the look and
-   * the creation. Afterwards the made cat is looked at once more (its id may
-   * not be the expected one); what could not be put right comes back as
-   * words for the owner (`notice`), with this creation's own answer. A cat
-   * that already existed — a repeated request — is left exactly as it is.
+   * cat whose id will be `catId`; `exists` says, asked inside the lock,
+   * whether that cat is already there (a repeated request: it is left exactly
+   * as the owner has it now). Whenever the entry exists the new id is put on
+   * its block list BEFORE the cat exists (the engine accepts an id it does
+   * not know yet) and the creation only goes ahead once that is confirmed —
+   * also while every cat is off, when the engine would block a new cat by
+   * itself: a creation that reaches the engine late, after a cat was switched
+   * on, would otherwise start with the computer. So the cat is blocked first
+   * whatever becomes of the creation's answer or of the caller's later steps.
+   * With no entry there is nothing to block against; a creation whose answer
+   * never came is remembered and blocked when the entry is first registered.
+   * Switches wait meanwhile. Afterwards the made cat is looked at once more
+   * (its id may not be the expected one); what could not be put right comes
+   * back as words for the owner (`notice`), with this creation's own answer.
    */
-  guard<T extends { cat?: NativeCat }>(catId: string, exists: boolean, create: () => Promise<T>): Promise<{ made: T; notice?: string }> {
-    if (exists) return create().then(made => ({ made }));
+  guard<T extends { cat?: NativeCat }>(catId: string, exists: () => Promise<boolean>, create: () => Promise<T>): Promise<{ made: T; notice?: string }> {
+    const unconfirmed = () => new ApiError(503, '没能确认新猫用不了这台电脑，猫没有创建。请再试一次。', undefined, 'computer_unconfirmed');
     return this.serial(async () => {
+      if (await exists()) return { made: await create() };
       let entry: Entry | undefined;
-      try { entry = await this.entry(); } catch { throw new ApiError(503, '没能确认新猫用不了这台电脑，猫没有创建。请再试一次。', undefined, 'computer_unconfirmed'); }
-      // No entry, or nobody on (a placeholder counts as nobody): the engine's own rule keeps the new cat off, or there is nothing to keep it from.
-      if (!this.real(entry) || !anyOn(entry)) return { made: await create() };
-      try {
-        await this.toggle({ scope: 'cat', catId, enabled: false });
-        if (!(await this.entry())?.blockedCats?.includes(catId)) throw new Error('not listed');
-      } catch { throw new ApiError(503, '没能确认新猫用不了这台电脑，猫没有创建。请再试一次。', undefined, 'computer_unconfirmed'); }
-      const made = await create();
-      const notice = made.cat?.id ? await this.keepOff(made.cat) : undefined;
+      try { entry = await this.entry(); } catch { throw unconfirmed(); }
+      if (entry) {
+        try {
+          await this.toggle({ scope: 'cat', catId, enabled: false });
+          if (!(await this.entry())?.blockedCats?.includes(catId)) throw new Error('not listed');
+        } catch { throw unconfirmed(); }
+      }
+      let made: T;
+      try { made = await create(); }
+      catch (error) {
+        // Refused outright (4xx): no such cat. Anything else: the engine may still make it.
+        if (!entry && !(error instanceof ApiError && error.status >= 400 && error.status < 500)) {
+          this.unconfirmed.add(catId);
+          for (const old of this.unconfirmed) { if (this.unconfirmed.size <= 200) break; this.unconfirmed.delete(old); }
+        }
+        throw error;
+      }
+      const notice = entry && made.cat?.id ? await this.keepOff(made.cat) : undefined;
       return { made, ...(notice ? { notice } : {}) };
     });
   }
