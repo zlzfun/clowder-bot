@@ -41,6 +41,8 @@ interface ProductState {
   files: Record<string, WorkspaceFile>;
   /** Explicit human read acknowledgements, scoped to native conversations. No message copies. */
   readCursors: Record<string, { messageId: string; orderTime: number }>;
+  /** 自定义应用: the name the owner gave it, by the native capability id. The app itself lives in the engine's registry. */
+  apps?: Record<string, { title: string }>;
 }
 const presentationSchema = z.object({
   version: z.literal(1),
@@ -59,6 +61,7 @@ const presentationSchema = z.object({
   projects: z.array(z.object({ id: z.string(), name: z.string(), path: z.string(), sharedPath: z.string(), createdAt: z.number() }).strict()).default([]),
   groupProjects: z.record(z.string(), z.string()).default({}),
   readCursors: z.record(z.string(), z.object({ messageId: z.string(), orderTime: z.number().finite() }).strict()).default({}),
+  apps: z.record(z.string(), z.object({ title: z.string().min(1).max(80) }).strict()).optional(),
   files: z.record(z.string(), z.object({ id: z.string(), threadId: z.string(), name: z.string(), size: z.number().int().nonnegative(),
     mime: z.string(), sha256: z.string().regex(/^[a-f0-9]{64}$/), kind: z.enum(['attachment', 'deliverable']), createdAt: z.number(),
     path: z.string(), sourcePath: z.string().optional(), sourceMessageId: z.string().optional(),

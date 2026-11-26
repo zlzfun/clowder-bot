@@ -66,6 +66,7 @@
 | P006 | `patches/0006-bot-schedules.patch` | 由 `CAT_CAFE_BOT_SCHEDULES=1` 启用：schedule 列表补充 reminder 归属、正文、版本与调度器就绪状态；owner 创建接受 UUID 并在原生定义表及审计事务去重；Bot 一次任务结束/错过后保留 disabled 定义和线程账本，拒绝恢复过期计划；通过原生原子 private input 投递完整任务正文；核心调度器启动后再等待可选插件激活。未新增调度器或存储。 | 上游提供同等字段、幂等、历史保留、正文投递及启动就绪保证后删除。 |
 | A002 | `server/product-store.ts` | 只保存 UI 元数据和原生引用；单进程原子写。 | 官方插件提供产品配置持久化时替换此存储。 |
 | D001 | `scripts/start-runtime.mjs`、`scripts/prepare-upstream.mjs` | 独立配置/数据/workspace/Redis/API/指标端口、专属 cookie/userId；用上游 bootstrap 生成 MCP。避免与用户现有 Clowder 实例串线。构建目录是数据目录里偏好仓库的链接工作树（见「偏好仓库」），数据默认在检出之外（见「数据位置」）。 | 官方嵌入部署或插件生命周期接管时移除本启动器。 |
+| A003 | `server/native/apps.ts`、`server/xbot/apps.ts` | 应用（2026-11-26）：把上游的外部 MCP 登记（安装、探活、改密钥、删除）和官方插件 `official.wechat-visible-reader` 的启停与授权操作，呈现为「自定义应用」和「微信」。不保存状态与密钥，只在 A002 里保存自定义应用的显示名。上游对安装请求不做校验，校验在适配层；插件操作前先调上游的重置路由，绕开下面「应用依赖的上游行为」里记的缺陷。见 [应用：第一版接口](apps-api.md)。 | 上游修复操作状态的缺陷后去掉动作前的重置；上游让插件的 MCP 与技能在本部署下生效后，应用可改由插件包承载。 |
 | U001 | `client/public/app.js`、`runtime.*` | UI 显示原生排队状态、订阅事件、选择原生执行工具；独立面板承接原生特有概念。 | 随 Bot 产品迭代，不向核心反向渗透。 |
 
 P001 是执行策略，不是文件系统、记忆库的多租户 ACL。这里只支持本机单用户产品。上游所有高级执行面并未被 Bot 代理公开；未来新增通道必须验证仍经过该准入入口。
@@ -110,6 +111,35 @@ node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=
 - 升级固定提交时：`tests/chat-pack.test.ts` 对照上游源码里的包模式（`packages/shared/src/schemas/pack.ts`）、默认行为编成的那一节（`PackCompiler.ts`）、「只应用列出的第一个包」（`getActivePackBlocks.ts`）和两条路由；上游改了其中任何一处，这项测试会先失败，再到隔离运行时上重新量一遍回复长度。
 - 固定的这版引擎一次只应用一个包（Phase A）：`PackStore.list()` 读目录得到的第一个，与安装先后无关。所以引擎里有别的包时适配层不安装自己的（按名字排在前面会把使用者的包顶掉），这条默认行为让位。上游做了多包合并或指定生效的包之后，这条限制可以去掉。
 - 需要上游解决、这里不打补丁的两件事：安装是先删后拷、不是原子的（替换的瞬间正好开始的一轮读不到包；拷到一半失败时清单在而行为不在，列表却照样列出）。适配层只做到：一次安装没有好好回来之前不把列表当证据，下次重装；这份记账不跨 Bot 重启。
+
+## 插件依赖与证书（2026-11-26）
+
+上游给目录来源的官方插件装依赖时，用的是一个清空了环境的 `npm ci`（只留 `PATH`，`HOME` 指到沙箱，源固定为 `registry.npmjs.org`；`packages/api/src/domains/plugin/manager/package-assets/builtin-package-materializer.ts`）。使用者在 shell 里的 `NODE_EXTRA_CA_CERTS`、`~/.npmrc` 都带不进去。
+
+在这台开发机上，Node 24 自带的根证书验不过 npm 官方源现在的证书链（`npmjs.org ← WE1 ← GTS Root R4 ← GlobalSign Root CA`，自带根证书里没有最后一张），于是所有带依赖的官方插件启动失败，插件管理里只看到 `UNEXPECTED_RUNTIME_FAILURE`，引擎日志里是 `BuiltinPluginPackageMaterializationError`。线上实例里几个长期「已启用但失败」的插件是同一个原因。
+
+处理（机器设置，不是补丁）：在这套 Node 的全局 npm 配置里指定证书文件。全局配置按 npm 的安装前缀找，不受 `HOME` 影响。
+
+```ini
+; /opt/homebrew/etc/npmrc
+cafile=/Users/<你>/.config/node-ca/system-ca.pem
+```
+
+验证：按上游同样的参数与环境在一个临时目录里跑 `npm ci --ignore-scripts --omit=dev`，加这一行之前报 `UNABLE_TO_GET_ISSUER_CERT_LOCALLY`，之后装上 95 个包；隔离运行时里 `dev.clowder.video-analysis`、`official.enterprise-workflow`、`official.wechat-visible-reader` 随后都启动成功。撤销就是删掉这个文件。线上实例用的是同一个 npm：留在「已启用」而失败的插件会在它下次重启时启动。
+
+已登记为上游需求：装依赖时沿用宿主的证书与代理设置，或让它可配置。
+
+## 应用依赖的上游行为（2026-11-26）
+
+固定提交在隔离运行时上的实测，与 [应用：第一版接口](apps-api.md) 相关的部分。升级固定提交时逐条重新核对。
+
+- **插件带的 MCP 与技能到不了猫**。Bot 启动引擎时的部署标识是 `clowder-bot`，上游的 `allowsImplicitCapabilityWrites` 因此为假，插件运行时不把自己的 MCP 写进能力登记表、也不挂载技能；剩下的调用时投影要求线程的项目目录等于能力根目录，而每只猫的对话在 `workspace/cats/<id>`。实测：自写的插件包（一个 stdio MCP、一条技能、一个密钥字段）能安装、配置、运行，但猫的会话里没有它的工具和技能。读取侧的 `GET /api/capabilities/snapshot?catId=` 仍把它显示为已启用，不能当作「已连接」的依据。把标识改成上游自己的 `runtime` 能打开这个开关，但那是上游自身安装的身份（共享 MCP 的部署标签、运行时部署登记、启动时的 CLI 配置再生成），与使用者自己的 Clowder AI 会串线，不采用。
+- **插件带的直接工具与外接节点到得了猫**：`tool` 贡献经 `plugin_list_tools`／`plugin_call`，`limb` 贡献经 `limb_list_available`。实测 `official.enterprise-workflow` 的两个工具和 `official.wechat-visible-reader` 的节点都被测试猫列出。
+- **外部 MCP 的安装接口不做校验**（任意 id、空命令都接受，id 已存在时合并覆盖）。
+- **插件操作的步骤指针缺陷**：见接口文档「上游的实际行为」最后一条。
+- **启用插件可能超过适配层一次请求的 30 秒**，上游继续执行；没有状态事件，只能再读。
+
+向上游提的需求（尚未提交）：插件的 MCP 与技能在非 `runtime` 部署下对成员生效；装依赖时沿用宿主的证书与代理设置；不把 `operationState` 交给不认识它的插件（或由插件契约声明）；安装外部 MCP 时校验 id 与必填项、拒绝静默覆盖；插件生命周期事件；远程 MCP 的浏览器登录；按成员启用技能。
 
 ## 当前已知限制
 

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { ApiError } from '../server/errors.js';
 import type { NativeTransport, NativeCat, NativeThread, NativeMessage, NativeEvent } from '../server/native/types.js';
 import type { NativeRuntime } from '../server/native/bridge.js';
+import { NativeAppsScript } from './apps-fixture.js';
 
 /** Protocol fixture only; never linked from production. Real contracts run in native-integration.test.ts. */
 // The engine's eight cat templates as the pinned upstream serves them (GET /api/cat-templates, read from the isolated runtime 2026-11-12).
@@ -68,6 +69,8 @@ export class NativeFixture implements NativeTransport {
   routingUnavailable: string[] = [];
   /** Installed engine packs in the order the engine lists them (F129) — the first is the one it applies: the manifest and, for this fixture, the default behaviours read from the source. */
   packs: Array<{ name: string; version: string; description: string; packType: string; behaviors: string[] }> = [];
+  /** The engine routes behind 应用 (capability registry, plugin manager), scripted: tests/apps-fixture.ts. */
+  apps = new NativeAppsScript();
   async request<T>(path: string, options: { method?: string; body?: any } = {}): Promise<T> {
     const method = options.method ?? 'GET', body = options.body;
     this.calls.push({ path, method, body });
@@ -75,6 +78,8 @@ export class NativeFixture implements NativeTransport {
     const url = new URL(path, 'http://fixture');
     const parts = url.pathname.split('/').map(decodeURIComponent);
     let result: unknown;
+    const scripted = this.apps.handle(url, method, body);
+    if (scripted !== undefined) return structuredClone(scripted) as T;
     if (path === '/api/health') result = { status: 'ok', callbackAuth: { backend: 'redis', durability: 'durable' } };
     else if (path === '/api/projects/mkdir' && method === 'POST') result = { createdPath: join(body.parentPath, body.name), name: body.name };
     else if (url.pathname === '/api/projects/browse') result = { current: url.searchParams.get('path'), entries: [] };

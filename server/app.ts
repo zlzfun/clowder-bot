@@ -10,6 +10,7 @@ import type { NativeTransport } from './native/types.js';
 import { createXbotCoreRouter } from './xbot/core.js';
 import { createXbotSettingsRouter } from './xbot/settings.js';
 import { createXbotSchedulesRouter } from './xbot/schedules.js';
+import { createXbotAppsRouter } from './xbot/apps.js';
 import { createWorkspaceRouter } from './xbot/workspaces.js';
 import { createMemoryRouter } from './xbot/memory.js';
 import { createActivityRouter } from './xbot/activity.js';
@@ -38,7 +39,7 @@ export function createApp(options: { dataFile?: string; native?: NativeTransport
   });
   app.use(express.json({ limit: '4mb' }));
   const core = createXbotCoreRouter(bridge);
-  app.use('/xbot-api', createMemoryRouter(native), createActivityRouter(bridge), createWorkspaceRouter(bridge), core.router, createXbotSchedulesRouter(bridge), createXbotSettingsRouter(bridge));
+  app.use('/xbot-api', createMemoryRouter(native), createActivityRouter(bridge), createWorkspaceRouter(bridge), core.router, createXbotSchedulesRouter(bridge), createXbotAppsRouter(bridge), createXbotSettingsRouter(bridge));
   app.use('/xbot-api', (_req, res) => res.status(404).json({ error: '这项功能在这里还用不了', code: 'not_adapted' }));
   app.get('/api/health', async (_req, res) => res.json({ ok: true, engine: 'clowder-ai', upstream: await native.request('/api/health') }));
   app.get('/api/state', async (_req, res) => res.json({ engine: 'clowder-ai', cats: await bridge.cats(), presentation: store.state }));
