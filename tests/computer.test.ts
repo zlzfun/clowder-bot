@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
@@ -207,4 +208,26 @@ test('the routes: GET reads, PUT switches and answers with the view; a creation 
     assert.equal(made.status, 201);
     assert.match((await made.json()).notice, /它现在可以用这台电脑/);
   } finally { server.close(); await runtime.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('the pinned driver: the lock names one release by checksum, and the installer installs nothing it cannot verify', { skip: process.platform !== 'darwin' }, () => {
+  const lock = JSON.parse(readFileSync(new URL('../computer-driver.lock.json', import.meta.url), 'utf8'));
+  assert.match(lock.darwin.sha256, /^[0-9a-f]{64}$/); assert.match(lock.tag, /^cua-driver-rs-v\d+\.\d+\.\d+$/);
+  assert.equal(lock.tag.endsWith(lock.version), true); assert.equal(lock.darwin.asset.includes(lock.version), true);
+  assert.equal(lock.bundleId, 'com.trycua.driver'); assert.equal(lock.teamIdentifier, 'YCK386LBJ7');
+  // The adapter accepts the same identity the installer pins.
+  const source = readFileSync(new URL('../server/native/computer.ts', import.meta.url), 'utf8');
+  assert.equal(source.includes('Identifier=com\\.trycua\\.driver') && source.includes(`TeamIdentifier=${lock.teamIdentifier}`), true);
+  const dir = mkdtempSync(join(tmpdir(), 'bot-driver-'));
+  const install = (...args: string[]) => spawnSync(process.execPath, [new URL('../scripts/install-computer-driver.mjs', import.meta.url).pathname, ...args],
+    { encoding: 'utf8', env: { ...process.env, BOT_DATA_DIR: dir } });
+  try {
+    const check = install('--check');
+    assert.equal(check.status, 1); assert.match(check.stdout, /还没有安装/);
+    writeFileSync(join(dir, 'fake.tar.gz'), 'not the driver');
+    const wrong = install('--from', join(dir, 'fake.tar.gz'));
+    assert.equal(wrong.status, 1); assert.match(wrong.stderr, /没有安装/);
+    assert.equal(existsSync(join(dir, 'tools', 'CuaDriver.app')), false);
+    assert.deepEqual(readdirSync(join(dir, 'tools')), [], 'nothing is left behind');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
