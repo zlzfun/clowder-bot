@@ -9,6 +9,8 @@ import { ProductStore } from '../server/product-store.js';
 import { bindAgent } from '../server/native/agents.js';
 
 // Explicit opt-in: this suite uses a running, dedicated Clowder AI + Redis deployment.
+// The engine deletes a member only against the revision it was last saved with.
+const removeCat = async (bridge: BotBridge, id: string) => bridge.native.request(`/api/cats/${id}`, { method: 'DELETE', body: { expectedRevision: (await bridge.cat(id)).configurationRevision } });
 const enabled = process.env.BOT_NATIVE_TEST === '1';
 test('native contracts: catalog, durable threads, notes, Socket.IO, sessions and queue', { skip: !enabled }, async () => {
   const native = new NativeClient(`http://127.0.0.1:${process.env.BOT_NATIVE_PORT || 4331}`, `http://127.0.0.1:${process.env.PORT || 3210}`);
@@ -54,9 +56,11 @@ test('native contracts: catalog, durable threads, notes, Socket.IO, sessions and
     assert.equal((await bridge.stop(thread.id)).status, 'ok');
   } finally {
     // Native soft-delete only this suite's synthetic thread; never flush data stores.
-    if (threadId) { await bridge.stop(threadId); await native.request(`/api/threads/${threadId}`, { method: 'DELETE' }); }
-    if (catId) await native.request(`/api/cats/${catId}`, { method: 'DELETE' });
-    await native.close();
+    // A failed clean-up must still close the socket, or the run never ends.
+    try {
+      if (threadId) { await bridge.stop(threadId); await native.request(`/api/threads/${threadId}`, { method: 'DELETE' }); }
+      if (catId) await removeCat(bridge, catId);
+    } finally { await native.close(); }
   }
 });
 
@@ -79,8 +83,9 @@ test('real native queue rejects an out-of-roster member without creating its ses
     const { sessions } = await native.request<any>(`/api/threads/${thread.id}/sessions`);
     assert.equal(sessions.filter((s: any) => s.catId === outsider.id).length, 0);
   } finally {
-    if (threadId) { await bridge.stop(threadId); await native.request(`/api/threads/${threadId}`, { method: 'DELETE' }); }
-    for (const catId of cats) await native.request(`/api/cats/${catId}`, { method: 'DELETE' });
-    await native.close();
+    try {
+      if (threadId) { await bridge.stop(threadId); await native.request(`/api/threads/${threadId}`, { method: 'DELETE' }); }
+      for (const catId of cats) await removeCat(bridge, catId);
+    } finally { await native.close(); }
   }
 });

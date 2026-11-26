@@ -53,6 +53,9 @@ test('a cat’s cards, lists, choices and diffs come through as chat blocks; wha
   assert.deepEqual(schedule('提议创建定时任务：每周五写周报', { type: 'cron', expression: '0 17 * * 5', timezone: 'Asia/Singapore' }),
     { id: 'sp1', kind: 'schedule', title: '想设一个定时', body: '每周五写周报 · 每周五 17:00（Asia/Singapore）' });
   assert.deepEqual(schedule('提议删除定时任务：喝水提醒', 'not json'), { id: 'sp1', kind: 'schedule', title: '想取消一个定时', body: '喝水提醒' });
+  // The engine's own verbs for the three things it proposes about a timer (schedule-mutation-card-block.ts).
+  assert.deepEqual(schedule('提议永久删除定时任务：喝水提醒', { type: 'interval', ms: 3600000 }), { id: 'sp1', kind: 'schedule', title: '想取消一个定时', body: '喝水提醒 · 每 1 小时' });
+  assert.deepEqual(schedule('提议更新定时任务：喝水提醒', { type: 'interval', ms: 3600000 }), { id: 'sp1', kind: 'schedule', title: '想改一个定时', body: '喝水提醒 · 每 1 小时' });
   assert.deepEqual(schedule('一件别的事', {}, 'F999'), { id: 'sp1', kind: 'other', title: '有件事等你确认', body: '一件别的事' });
   assert.equal(requestLine(reply({ rich: { blocks: [card] } })), '想记住你的一个偏好：偏好简短');
   // The engine's preference card as it really writes it: only the judgement is what was asked.

@@ -3,7 +3,7 @@ import { ApiError } from '../errors.js';
 import { ProductStore } from '../product-store.js';
 import type { NativeCat, NativeMessage, NativeThread, NativeTransport } from './types.js';
 import { defaultRuntime, faceOfTool, faceTool, faceTools, memberCliArgs, runtimeUnavailable, supportsRuntime, faceTemplates, type Face, type FaceTemplate } from './agents.js';
-import { approvalReceipt, approvalReceiptText, messageDisplayText, messagePresentation, replyEnding, replyInProgress, rosterRefusals, scheduledReminder } from './message-presentation.js';
+import { approvalReceipt, approvalReceiptText, engineNote, messageDisplayText, messagePresentation, replyEnding, replyInProgress, rosterRefusals, scheduledReminder } from './message-presentation.js';
 import { avatarBreed, type CatConfig, type SourceTemplate } from './cat-templates.js';
 import { clip } from './text.js';
 import { cardReceipts, messageBlocks, type ApprovalDecision } from './blocks.js';
@@ -62,6 +62,14 @@ const hex = (value: unknown): value is string => typeof value === 'string' && /^
 /** Only a well-formed colour pair is passed on; the value ends up in a style. */
 const accent = (cat: NativeCat) => hex(cat.color?.primary) && hex(cat.color?.secondary) ? { primary: cat.color.primary, secondary: cat.color.secondary } : undefined;
 
+/**
+ * The engine refuses a message before admitting it when a cat it names cannot run (switched off, or
+ * the tool it thinks with is gone and no other cat stands in): 409 with one of these codes, and
+ * nothing is stored (routes/messages.ts). Engines before this check admitted the message and let the
+ * turn fail.
+ */
+export const targetRefused = (error: unknown): error is ApiError => error instanceof ApiError && error.status === 409
+  && ['ROUTING_TARGET_UNAVAILABLE', 'ROUTING_CONFIRMATION_REQUIRED'].includes(String((error.details as { code?: unknown } | undefined)?.code));
 export class BotBridge {
   private directCreates = new Map<string, Promise<NativeThread>>();
   private greetingRequests = new Map<string, Promise<GreetingAdmission>>();
@@ -190,7 +198,10 @@ export class BotBridge {
       const seq = this.store.sequence(thread.id, message.id), receipt = approvalReceipt(message);
       // A reminder that came due is a quiet line in the chat's words; the cat's own reply follows it.
       const reminder = scheduledReminder(message);
-      const refusal = refusals.get(message.id) ?? (receipt ? approvalReceiptText(receipt) : reminder ? `提醒：${reminder}` : undefined);
+      // What the engine did by itself is a quiet line too; when the page already says it, nothing is drawn.
+      const note = engineNote(message);
+      if (note === null) continue;
+      const refusal = refusals.get(message.id) ?? (receipt ? approvalReceiptText(receipt) : reminder ? `提醒：${reminder}` : note);
       const text = refusal ?? messageDisplayText(message, thread.id, presentation.speaker?.name), inProgress = replyInProgress(message);
       const rich = message.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(message, decided), ending = replyEnding(message);
       const attachments = this.workspaces.messageFiles(thread.id, message), time = new Date(message.timestamp).toISOString();
@@ -249,8 +260,9 @@ export class BotBridge {
     const drawn = new Map<string, Record<string, unknown>>();
     for (const { message: m, name, ...presentation } of this.presentMessages(page.messages.filter(m => refusals.get(m.id) !== null && !onCards.has(m.id)), cats)) {
       const rich = m.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(m, decided), receipt = approvalReceipt(m);
-      const reminder = scheduledReminder(m);
-      const refusal = refusals.get(m.id) ?? (receipt ? approvalReceiptText(receipt) : reminder ? `提醒：${reminder}` : undefined);
+      const reminder = scheduledReminder(m), note = engineNote(m);
+      if (note === null) continue;
+      const refusal = refusals.get(m.id) ?? (receipt ? approvalReceiptText(receipt) : reminder ? `提醒：${reminder}` : note);
       const text = refusal ?? messageDisplayText(m, thread.id, presentation.speaker?.name), inProgress = replyInProgress(m), ending = replyEnding(m);
       const attachments = this.workspaces.messageFiles(thread.id, m), time = new Date(m.timestamp).toISOString();
       const said = !refusal && presentation.presentation_kind === 'message' && (m.type === 'user' || (m.type === 'assistant' && !!m.catId));
@@ -317,7 +329,7 @@ export class BotBridge {
       } }).catch(error => {
         // These native refusals happen before admission. On an uncertain
         // earlier attempt, only a receipt can resolve the original request.
-        if (known === undefined && error instanceof ApiError && [400, 401, 403, 404, 429].includes(error.status)) {
+        if (known === undefined && error instanceof ApiError && ([400, 401, 403, 404, 429].includes(error.status) || targetRefused(error))) {
           delete sources[threadId];
           this.store.save();
         }
@@ -636,7 +648,7 @@ export class BotBridge {
     if (body.reply_to && !replyTo) throw new ApiError(400, '引用的消息不存在，请刷新对话');
     const addressed = directCat?.id ?? (replyTo ? await this.answeredCat(thread, replyTo, body.text, body.idempotencyKey) : undefined);
     await this.manner.ready();
-    return this.native.request('/api/messages', { method: 'POST', body: {
+    return this.native.request<any>('/api/messages', { method: 'POST', body: {
       threadId: thread.id, content: body.text, idempotencyKey: body.idempotencyKey ?? randomUUID(),
       // Native admission binds the exact active parent and appends without interrupting.
       // If the carrier cannot append (or is idle), native Queue safely starts the next turn.
@@ -644,7 +656,11 @@ export class BotBridge {
       messageDisposition: 'continue_current',
       ...(attachments.length ? { contextAttachments: attachments } : {}),
       ...(addressed ? { mentions: [addressed] } : {}), ...(replyTo ? { replyTo } : {}),
-    } });
+    } }).catch(error => {
+      // Nothing was stored: the words stay with the owner, and the chat says why in its own words.
+      if (targetRefused(error)) throw new ApiError(409, `${directCat ? '这只猫猫' : '点到的猫猫'}现在用不了，消息没有发出`, error.details, 'target_unavailable');
+      throw error;
+    });
   }
   /**
    * In a group, an answer to what one cat said goes to that cat, the way a reply does in a chat app. Native routing

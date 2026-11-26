@@ -157,6 +157,12 @@ export class NativeFixture implements NativeTransport {
       if (this.lostAnswers.has('POST /api/cats')) throw new ApiError(503, 'Clowder AI 请求中断。发送结果可能已持久化，请刷新后确认。');
     }
     else if (parts[2] === 'cats' && parts[3] && method === 'DELETE') {
+      // The engine deletes a member only against the revision it was last saved with
+      // (routes/cats.ts: 428 without one, 409 when the member has changed since).
+      const target = this.cats.find(known => known.id === parts[3]);
+      if (!target) throw new ApiError(404, `Cat "${parts[3]}" not found`);
+      if (body?.expectedRevision === undefined) throw new ApiError(428, '缺少成员保存版本，请重新读取成员配置后再操作。');
+      if (body.expectedRevision !== target.configurationRevision) throw new ApiError(409, '成员已在其他页面修改。草稿已保留，请重新读取后核对再保存。');
       // The engine takes a deleted cat off every block list.
       this.cats = this.cats.filter(known => known.id !== parts[3]);
       for (const entry of this.capabilities) if (entry.blockedCats) { entry.blockedCats = entry.blockedCats.filter(id => id !== parts[3]); if (!entry.blockedCats.length) delete entry.blockedCats; }

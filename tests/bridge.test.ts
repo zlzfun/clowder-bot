@@ -24,6 +24,18 @@ async function setup(t: any) {
   const call = (path: string, method = 'GET', body?: unknown, headers = {}) => fetch(base + path, { method, headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers }, ...(body ? { body: JSON.stringify(body) } : {}) });
   return { ...runtime, native, base, call, dir };
 }
+test('deleting a cat names the revision it read; the engine refuses a delete that names none', async t => {
+  const r = await setup(t);
+  assert.equal((await r.call('/xbot-api/bots', 'POST', { name: 'Ada', runtimeId: 'codex' })).status, 201);
+  assert.equal((await r.call('/xbot-api/bots', 'POST', { name: 'Bea', runtimeId: 'codex' })).status, 201);
+  const [ada, bea] = r.native.cats;
+  assert.equal((await r.call('/xbot-api/bots/Ada', 'DELETE')).status, 200);
+  assert.deepEqual(r.native.calls.findLast(c => c.path === `/api/cats/${ada!.id}` && c.method === 'DELETE')?.body, { expectedRevision: 'r1' });
+  assert.deepEqual(r.native.cats.map(cat => cat.id), [bea!.id]);
+  // The engine refuses a delete that names no revision, so the request cannot have been sent without one.
+  await assert.rejects(r.native.request(`/api/cats/${bea!.id}`, { method: 'DELETE' }), (error: any) => error.status === 428);
+  assert.deepEqual(r.native.cats.map(cat => cat.id), [bea!.id]);
+});
 test('sends admit into native Queue; UI storage contains only references; no local fallback', async t => {
   const r = await setup(t);
   const created = await r.call('/xbot-api/bots', 'POST', { name: 'Ada', runtimeId: 'codex' }); assert.equal(created.status, 201);
@@ -92,6 +104,29 @@ test('an opening is one targeted native turn; only its confirmed invitation is o
   assert.deepEqual(restored.bot(cat.id).greetingSources, {[page.thread_id]:source.id});
   assert.deepEqual(await (await invite()).json(), {status:'accepted'});
   assert.equal(sends().length, 1);
+});
+test('a message the engine refuses because a cat it names cannot run was not sent: the chat says so by code, and an opening is not left unconfirmed', async t => {
+  const r = await setup(t), cat = await r.bridge.createBot({name:'阿橘'}), thread = await r.bridge.direct(cat);
+  const request = r.native.request.bind(r.native);
+  let refusing = true;
+  r.native.request = async (path, opts) => {
+    // routes/messages.ts refuses before admission; nothing is stored.
+    if (refusing && path === '/api/messages' && opts?.method === 'POST')
+      throw new ApiError(409, '指定角色当前不可用，且没有有效接替成员，请选择可用角色后再发送。', { code: 'ROUTING_TARGET_UNAVAILABLE', error: '指定角色当前不可用，且没有有效接替成员，请选择可用角色后再发送。' });
+    return request(path, opts);
+  };
+  const sent = await r.call('/xbot-api/bots/阿橘/messages', 'POST', { text: '在吗', idempotencyKey: 'c1b0f3a2-6f0e-4f43-9d0c-3a1f4d6f2b11' });
+  assert.equal(sent.status, 409);
+  const said = await sent.json() as any;
+  assert.equal(said.code, 'target_unavailable'); assert.equal(said.error, '这只猫猫现在用不了，消息没有发出');
+  await assert.rejects(r.bridge.greet(cat, thread.id), (error: any) => error.status === 409);
+  assert.equal((await r.bridge.transcript(cat)).greeting, undefined, 'a refusal before admission leaves nothing to recover');
+  refusing = false;
+  assert.deepEqual(await r.bridge.greet(cat, thread.id), {status:'accepted'});
+  // Another 409 is not this refusal and is passed on as the engine gave it.
+  r.native.request = async (path, opts) => { if (path === '/api/messages' && opts?.method === 'POST') throw new ApiError(409, '别的冲突', { code: 'SOMETHING_ELSE' }); return request(path, opts); };
+  const other = await r.call('/xbot-api/bots/阿橘/messages', 'POST', { text: '在吗', idempotencyKey: 'c1b0f3a2-6f0e-4f43-9d0c-3a1f4d6f2b12' });
+  assert.equal(other.status, 409); assert.equal((await other.json() as any).code, undefined);
 });
 test('greeting recovery uses the same native key and refuses other threads and pre-existing history', async t => {
   const r = await setup(t), cat = await r.bridge.createBot({name:'兰舟'}), thread = await r.bridge.direct(cat);
