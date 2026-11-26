@@ -283,6 +283,39 @@ test('steps read as everyday words for Claude Code, Codex and other agents; a ta
   assert.equal(L.phrase(r), '');
 });
 
+// Item 52: a step whose event carries area: 'computer' (the server marks the
+// tools of the registry entry `computer`, docs/chat-live-api.md) is 在用电脑.
+test('item 52: a step on this computer reads 在用电脑 — by the event\'s area, never the tool\'s name, no target — and the ones after it change nothing on screen', () => {
+  const L = rules();
+  assert.equal(L.stepWords('mcp__computer__click', 's1:4', 'computer'), '在用电脑');
+  assert.equal(L.stepWords('mcp:computer/type_text', 'hello', 'computer'), '在用电脑');
+  assert.equal(L.stepWords('Read', 'a.md', 'computer'), '在用电脑', 'the area decides, whatever the tool');
+  assert.equal(L.stepWords('mcp__computer__click'), '在用工具', 'without the area the name is not parsed for it');
+  assert.equal(L.stepWords('mcp__computer__click', '', 'elsewhere'), '在用工具', 'an area this page does not know is no computer step');
+  const r = L.reply('m', 'c', true);
+  const step = (tool: string, more: Record<string, unknown> = {}) => ({ kind: 'step', messageId: 'm', catId: 'c', tool, area: 'computer', ...more });
+  assert.equal(L.apply(r, step('mcp__computer__launch_app')), true);
+  assert.equal(L.phrase(r), '在用电脑');
+  // The next computer steps (other tools, other targets, Codex's names too): nothing to redraw, no cross-fade, no stacking.
+  for (const tool of ['mcp__computer__get_window_state', 'mcp__computer__click', 'mcp__computer__click', 'mcp:computer/type_text'])
+    assert.equal(L.apply(r, step(tool, { target: 'window 7' })), false, tool);
+  assert.equal(L.phrase(r), '在用电脑');
+  // Something else in between is a change, and the computer again after it is one too.
+  assert.equal(L.apply(r, { kind: 'step', tool: 'Read', target: 'a.md' }), true);
+  assert.equal(L.phrase(r), '在看 a.md');
+  assert.equal(L.apply(r, step('mcp__computer__click')), true);
+  assert.equal(L.apply(r, { kind: 'thinking' }), true);
+  assert.equal(L.apply(r, step('mcp__computer__click')), true);
+  // Words again: the step is behind it; done: nothing.
+  L.apply(r, piece('好', 1));
+  assert.equal(L.phrase(r), '');
+  // An ordinary step with the same tool and target as before still counts as the same (unchanged rule).
+  const o = L.reply('m', 'c', true);
+  assert.equal(L.apply(o, { kind: 'step', tool: 'Read', target: 'a.md' }), true);
+  assert.equal(L.apply(o, { kind: 'step', tool: 'Read', target: 'a.md' }), false);
+  assert.equal(L.apply(o, { kind: 'step', tool: 'Read', target: 'b.md' }), true);
+});
+
 test('only events that change the record read it again; the pieces the live stream draws do not', () => {
   const L = rules();
   for (const type of ['tool_use', 'tool_result', 'system_info', 'session_init', 'status', 'provider_signal', 'liveness_signal', 'agent_loop']) {
@@ -591,6 +624,35 @@ test('a send shows the cat\'s typing bubble at once; the reply\'s start takes th
   // Late events of a finished reply change nothing.
   p.ev('text', { text: '迟到', end: 30 });
   assert.equal(p.onScreen().children.length, 3);
+});
+
+test('item 52: a reply that uses this computer shows 在用电脑 once on its quiet line: the clicks and looks after it neither flicker nor stack, and the header is told it is the computer', () => {
+  const p = page();
+  p.live.select('bot:Ada');
+  p.live.commit(p.inner('bot:Ada', p.msg('u0', '帮我算一下', 'msg user')), []);
+  p.ev('start');
+  const row = p.onScreen().children.at(-1)!;
+  p.ev('step', { tool: 'mcp__computer__launch_app', area: 'computer' });
+  p.frame();
+  p.advance(250);
+  assert.equal(text(stepOf(row)), '在用电脑');
+  assert.equal(stepOf(row).hidden, false);
+  const shownSpan = stepOf(row).children[0];
+  for (const tool of ['mcp__computer__get_window_state', 'mcp__computer__click', 'mcp__computer__click', 'mcp__computer__get_window_state']) {
+    p.ev('step', { tool, target: 'x', area: 'computer' });
+    p.frame();
+    assert.equal(stepOf(row).find('lv-out').length, 0, tool + ': no cross-fade');
+    assert.equal(stepOf(row).children.length, 1, tool + ': one line, not a stack');
+    assert.equal(stepOf(row).children[0], shownSpan, tool + ': the same words in place');
+  }
+  assert.doesNotMatch(text(row), /mcp|click|window|computer/, 'no tool name, no target');
+  // What the header reads (chat-presence.js): the step's area goes with it.
+  assert.deepEqual(plain(p.live.presence().replies.map((r: Any) => [r.phase, r.area])), [['step', 'computer']]);
+  p.ev('text', { text: '算好了', end: 3 });
+  p.frame();
+  p.advance(250);
+  assert.equal(stepOf(row).hidden, true);
+  assert.deepEqual(plain(p.live.presence().replies.map((r: Any) => [r.phase, r.area])), [['text', '']]);
 });
 
 test('writing() names the cats drawn writing in the open history: the typing bubble and the reply in progress, not a queued send or a finished reply', () => {
