@@ -103,6 +103,20 @@ html[data-theme="dark"] .pf-head.tinted .pf-portrait::before {
 .pf-switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .pf-switch[aria-disabled="true"] { cursor: progress; opacity: .7; }
 
+/* 可以用这台电脑 (item 52): 置顶's twin. Where it cannot be switched on (the
+   driver is not installed) the row is no target and the switch stands back,
+   as a disabled control does elsewhere; the line under it says why. The
+   lines: what needs the owner (the install command as 新建's chip, 不等了
+   as 资料's small link), then a change that failed. */
+.pf-row.pf-locked { cursor: default; }
+.pf-locked .pf-switch[aria-disabled="true"] { cursor: default; opacity: .45; }
+.pf-cnote { margin-top: var(--x-s2); }
+.pf-cnote > p.pf-line { margin: 0; }
+.pf-cnote > .qc-cmd { margin-top: var(--x-s2); background: var(--x-panel-card); }
+.text-btn.pf-cstop { min-height: 0; margin-left: 2px; padding: 1px 6px; vertical-align: baseline; font-weight: 600; color: var(--x-text-2); }
+.pf-cstop:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+.pf-cnote + p.pf-line { margin-top: var(--x-s1); }
+
 /* 对话: 新对话 and the saved conversations under it. */
 .psec.pf-convs { padding-top: var(--x-s6); }
 .secondary.pf-new { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 6px 14px 6px 11px; font-size: 13.5px; }

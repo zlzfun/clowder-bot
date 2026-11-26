@@ -111,10 +111,83 @@
     return { kind: "form", text: plain(message) ? message : what === "delete" ? "没能删掉群聊，请稍后再试。" : "没能改好，请稍后再试。" };
   }
 
+  // ---- 这台电脑 (item 52) ----
+  // GET /xbot-api/bots/:name/computer → {supported, installed, on, permissions,
+  // missing?}; PUT {enabled} answers with the same view as it is afterwards
+  // (docs/xbot-api.md「这台电脑」). `on` is the engine's record, read every time:
+  // the page draws the last answer and asks again, never keeps it as the truth.
+  // It is the owner's own machine: 「这台电脑」, never a computer of the cat's.
+  const COMPUTER = Object.freeze({
+    TITLE: "可以用这台电脑",
+    INSTALL: "npm run computer:install",
+    OPENING: "正在打开…",
+    CLOSING: "正在关掉…",
+    WAITING: "等你在系统设置里打开…",
+    STOP: "不等了",
+    YES: "打开",
+  });
+  const GRANTS = Object.freeze(["accessibility", "screen_recording"]);
+  // The view, taken only in its own shape; anything else is no view, and the
+  // page then says nothing about the computer rather than something false.
+  // A grant said to be missing without a name it knows counts as both.
+  function computerView(answer) {
+    const a = answer && typeof answer === "object" ? answer : null;
+    if (!a || typeof a.supported !== "boolean" || typeof a.installed !== "boolean" || typeof a.on !== "boolean") return null;
+    const permissions = ["granted", "needed", "unknown"].includes(a.permissions) ? a.permissions : "unknown";
+    const named = permissions === "needed" && Array.isArray(a.missing) ? GRANTS.filter((g) => a.missing.includes(g)) : [];
+    return { supported: a.supported, installed: a.installed, on: a.on, permissions, missing: permissions === "needed" ? (named.length ? named : [...GRANTS]) : [] };
+  }
+  // Turning on came back unswitched because macOS has not given the driver
+  // its grants yet (the driver has opened System Settings itself): the page
+  // waits and sends the same request again once they are there.
+  const waitsForGrant = (view) => !!view && view.supported && view.installed && !view.on && view.permissions === "needed";
+  // The grants by the names System Settings lists them under, for CuaDriver
+  // (the name macOS shows for the driver). Accessibility is 辅助功能; newer
+  // systems list it as 设备控制与数据访问, so both names are given.
+  const GRANT_WORDS = Object.freeze({ accessibility: "「辅助功能」（或「设备控制与数据访问」）", screen_recording: "「屏幕录制」" });
+  const grantPlace = (missing) => "到系统设置 › 隐私与安全性，在" + (missing && missing.length ? missing : GRANTS).map((g) => GRANT_WORDS[g]).join("和") + "里打开 CuaDriver";
+  // What turning it on means, asked every time it is turned on: what the cat
+  // can do and where what it sees goes. 模型 is the one technical word here,
+  // and it is the consequence the owner decides on (tests/vocabulary.test.ts).
+  function computerConsent(name) {
+    return {
+      title: "让「" + (trim(name) || "这只猫猫") + "」用这台电脑？",
+      text: "它能看到并操作这台电脑上的应用，看到的画面会发给它用的模型。",
+    };
+  }
+  // A change that did not go through: the server's own sentence when it is
+  // everyday words (computer_half_registered asks the owner to check every
+  // cat, so it is shown whole), else what did not happen.
+  function computerError(err, enabling) {
+    const message = trim(err && err.message);
+    if (err instanceof TypeError || message === "连不上 clowder-bot") return "连不上 clowder-bot";
+    return plain(message) ? message : enabling ? "没能打开，请再试一次" : "没能关掉，请再试一次";
+  }
+  // The row as it is drawn, from the last view and what this page is doing
+  // for the cat: busy "on" | "off" while a change is on its way, wait
+  // {missing} while turning on waits for a grant, said {text, code} the last
+  // change that failed. The switch shows `on` as the server last said it,
+  // never what was asked for. Lines only where something is wrong or pending:
+  //   note   what is true and needs the owner (with the install command, or 不等了)
+  //   error  the failed change (left out where the note already says it)
+  function computerRow(view, flow) {
+    const f = flow || {};
+    if (!view || !view.supported) return { shown: false };
+    const on = view.on, waiting = !!f.wait && !on;
+    const out = { shown: true, on, busy: !!f.busy || waiting, can: !f.busy && !waiting && (on || view.installed),
+      hint: f.busy === "on" ? COMPUTER.OPENING : f.busy === "off" ? COMPUTER.CLOSING : waiting ? COMPUTER.WAITING : "", note: null, error: "" };
+    if (waiting && view.installed) out.note = { text: grantPlace(f.wait.missing) + "。", stop: true };
+    else if (!view.installed) out.note = { text: (on ? "现在还用不了：找不到操作电脑用的驱动，" : "还没装上操作电脑用的驱动，") + "在 clowder-bot 目录里运行：", command: COMPUTER.INSTALL };
+    else if (on && view.permissions === "needed") out.note = { text: "现在还用不了：" + grantPlace(view.missing) + "。" };
+    if (f.said && f.said.text && !(f.said.code === "computer_absent" && !view.installed)) out.error = f.said.text;
+    return out;
+  }
+
   root.ClowderProfileRules = Object.freeze({
     trim, plain, key, TABS, tabs, home, tabFor, opensAdvanced,
     accent, ownBreed,
     MIN, MAX, members, known, countText, addable, room, canRemove, addBody, removeBody, groupFrom,
     defaultName, nameProblem, renameBody, nameSaid, groupError,
+    COMPUTER, GRANTS, computerView, waitsForGrant, grantPlace, computerConsent, computerError, computerRow,
   });
 })(typeof window !== "undefined" ? window : globalThis);

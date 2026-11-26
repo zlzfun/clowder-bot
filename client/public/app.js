@@ -7962,6 +7962,10 @@
     // A group's sidebar row now (polling may have drawn it anew), for focus to return to.
     groupRow: (id) => [...document.querySelectorAll("#roster .item[data-group]")].find((n) => n.dataset.group === id) || null,
     fallbackFocus: () => input,
+    // 这台电脑 (item 52): the install command's 复制, and whether 资料 is on
+    // screen (the wait for a macOS grant reads again only while it is).
+    copy: (text) => copyText(text),
+    open: () => panel.classList.contains("open"),
   });
   // One programmatic edit of the draft (an @ suggestion): rendered like
   // typing, one undo step, the caret after it.
