@@ -111,7 +111,7 @@ html[data-theme="dark"] .pf-head.tinted .pf-portrait::before {
 .pf-row.pf-locked { cursor: default; }
 .pf-locked .pf-switch[aria-disabled="true"] { cursor: default; opacity: .45; }
 .pf-cnote { margin-top: var(--x-s2); }
-.pf-cnote > p.pf-line { margin: 0; }
+.pf-cnote > p.pf-line { margin: 0; text-wrap: pretty; }
 .pf-cnote > .qc-cmd { margin-top: var(--x-s2); background: var(--x-panel-card); }
 .text-btn.pf-cstop { min-height: 0; margin-left: 2px; padding: 1px 6px; vertical-align: baseline; font-weight: 600; color: var(--x-text-2); }
 .pf-cstop:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
