@@ -1467,6 +1467,164 @@ test('review r1 (notes): a late success after the page gave up — after closing
   assert.equal(seen(page.doc.body), words, 'nothing appears because of a request the page let go of');
 });
 
+// ---------------------------------------------------------------- review r2 (Codex's re-check, 2026-11-26)
+// Each test here failed on the page as round 3 left it. The older answer is held, the newer one lands, then
+// the older is released.
+// 微信 on with the ten minutes running out in 5 s; custom:x is found gone on opening (so the list is read again,
+// and that second list read is held: its answer is the list as it was when it was asked for).
+const heldSecondList = (gate: ReturnType<typeof hold>, then: (s: Any, answer: Any) => Any = (_s, answer) => answer) => (s: Any) => {
+  on(5_000)(s);
+  s.add('custom:x', 'X', { type: 'program', program: 'node', args: [], secrets: [] });
+  s.on.set('GET /xbot-api/apps/custom%3Ax', () => { s.custom = s.custom.filter((x: Any) => x.id !== 'custom:x'); throw fail(404, '没有这个应用'); });
+  let lists = 0;
+  s.on.set('GET /xbot-api/apps', () => { const answer = s.listNow(); return lists++ === 0 ? answer : gate.promise.then(() => then(s, answer)); });
+};
+
+test('review r2 (1): an older read of 微信 never paints over a newer one — a list read held across the zero-time read keeps the ten minutes over', async () => {
+  const gate = hold();
+  const { page, srv, row, body } = await opened(heldSecondList(gate));
+  assert.equal(srv.sent('GET', /^\/xbot-api\/apps$/).length, 2, 'the second list read, asked for while 5 s were left, is on its way');
+  row('wechat').click();
+  await settle();
+  srv.wechat = { ...srv.wechat, authorization: { active: false, remaining_ms: 0 } };
+  await page.advance(5_000);
+  assert.equal(seen(one(body(), '.ap-way-part')), R.OPEN_ASK + '授权 10 分钟' + R.WECHAT_HUB, 'the zero-time read: over');
+  // From now on 微信's reads do not come back, so whatever is shown next was painted from the held answer.
+  srv.on.set('GET /xbot-api/apps/wechat', () => new Promise(() => {}));
+  gate.release();
+  await settle();
+  assert.equal(all(body(), '.ap-clock').length, 0, 'the list read asked for before it is older evidence: no countdown again');
+  assert.equal(seen(one(body(), '.ap-way-part')), R.OPEN_ASK + '授权 10 分钟' + R.WECHAT_HUB);
+  page.doc.activeElement.key('Escape');
+  assert.equal(seen(row('wechat')), '微信已打开');
+});
+
+test('review r2 (1): an older read\'s failure never turns a newer good answer into unknown — the held list read fails after the zero-time read answered', async () => {
+  const gate = hold();
+  const { page, srv, body } = await opened(heldSecondList(gate, () => { throw fail(502); }));
+  (page.doc.querySelector('.ap-row[data-app="wechat"]') as El).click();
+  await settle();
+  srv.wechat = { ...srv.wechat, authorization: { active: false, remaining_ms: 0 } };
+  await page.advance(5_000);
+  gate.release();
+  await settle();
+  assert.equal(all(body(), '.ap-unknown').length, 0, 'not 「没能读到…」: the newer read answered');
+  assert.equal(seen(one(body(), '.ap-way-part')), R.OPEN_ASK + '授权 10 分钟' + R.WECHAT_HUB);
+});
+
+test('review r2 (1): a detail read of 微信 older than a list read never paints over it — the zero-time read held while the list says 微信 was closed', async () => {
+  const zero = hold(), xGate = hold();
+  const { page, srv, row, body } = await opened((s) => {
+    on(5_000)(s);
+    s.add('custom:x', 'X', { type: 'program', program: 'node', args: [], secrets: [] });
+    s.on.set('GET /xbot-api/apps/custom%3Ax', () => xGate.promise.then(() => { s.custom = s.custom.filter((x: Any) => x.id !== 'custom:x'); throw fail(404, '没有这个应用'); }));
+  });
+  row('wechat').click();
+  await settle();
+  // The zero-time read is asked for while 微信 is on, and held.
+  srv.on.set('GET /xbot-api/apps/wechat', (c: Call) => { const answer = srv.fallback(c); return zero.promise.then(() => answer); });
+  srv.wechat = { ...srv.wechat, authorization: { active: false, remaining_ms: 0 } };
+  await page.advance(5_000);
+  assert.equal(srv.sent('GET', /\/wechat$/).length, 1);
+  // Then 微信 is closed elsewhere, and a list read asked for after it says so.
+  srv.wechat = { ...srv.wechat, state: 'off', authorization: undefined };
+  xGate.release();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-state')), '未打开', 'the list read, asked for later: closed');
+  zero.release();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-state')), '未打开', 'the zero-time read asked for before it is older evidence');
+});
+
+test('review r2 (1): a read that overlapped a write gives way to it — a list read asked for while 关闭 is on its way, answered first, does not outrank 关闭\'s answer', async () => {
+  const xGate = hold(), off = hold();
+  const { srv, row, body } = await opened((s) => {
+    on()(s);
+    s.add('custom:x', 'X', { type: 'program', program: 'node', args: [], secrets: [] });
+    s.on.set('GET /xbot-api/apps/custom%3Ax', () => xGate.promise.then(() => { s.custom = s.custom.filter((x: Any) => x.id !== 'custom:x'); throw fail(404, '没有这个应用'); }));
+    s.on.set('POST /xbot-api/apps/wechat/disconnect', (c: Call) => off.promise.then(() => s.fallback(c)));
+  });
+  row('wechat').click();
+  await settle();
+  buttonOf(body(), '关闭').click();
+  await settle();
+  // Asked for after 关闭 was sent, answered before 关闭 took effect: 微信 still on.
+  xGate.release();
+  await settle();
+  off.release();
+  await settle();
+  assert.equal(srv.sent('GET', /^\/xbot-api\/apps$/).length, 2);
+  assert.equal(seen(one(body(), '.ap-state')), '未打开', '关闭\'s answer is what is shown');
+});
+
+test('review r2 (3): a list read that finds a custom app changed repaints its open page at once — not 已连接, not the old tools', async () => {
+  const yGate = hold();
+  const { srv, row, body } = await opened((s) => {
+    s.add('custom:a', 'A', { type: 'program', program: 'node', args: ['a.js'], secrets: ['K'] });
+    s.add('custom:y', 'Y', { type: 'program', program: 'node', args: [], secrets: [] });
+    s.on.set('GET /xbot-api/apps/custom%3Ay', () => yGate.promise.then(() => { s.custom = s.custom.filter((x: Any) => x.id !== 'custom:y'); throw fail(404, '没有这个应用'); }));
+  });
+  row('custom:a').click();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-state')), '已连接');
+  assert.equal(all(body(), '.ap-tool').length, 1);
+  srv.custom[0].source = { type: 'program', program: 'missing-new-program', args: [], secrets: ['OTHER'] };
+  yGate.release();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-state')), '未检查', 'the page open on it, at once');
+  assert.equal(all(body(), '.ap-tool').length, 0, 'no tools from the old program');
+  assert.equal(seen(one(body(), '.ap-cmd')), 'missing-new-program');
+  assert.equal(srv.sent('GET', /custom%3Aa$/).length, 1, 'and no new check of its own');
+});
+
+test('review r2 (3): a check on its way for the old configuration loses its claim when the list finds it changed — its late success puts nothing back', async () => {
+  const aGate = hold(), yGate = hold();
+  const { srv, row, body, voice } = await opened((s) => {
+    s.deaf = true; // the check given up on still answers, late, as an engine may
+    s.add('custom:a', 'A', { type: 'program', program: 'node', args: ['a.js'], secrets: ['K'] });
+    s.add('custom:y', 'Y', { type: 'program', program: 'node', args: [], secrets: [] });
+    s.on.set('GET /xbot-api/apps/custom%3Aa', (c: Call) => { const answer = s.fallback(c); return aGate.promise.then(() => answer); });
+    s.on.set('GET /xbot-api/apps/custom%3Ay', () => yGate.promise.then(() => { s.custom = s.custom.filter((x: Any) => x.id !== 'custom:y'); throw fail(404, '没有这个应用'); }));
+  });
+  assert.equal(seen(one(row('custom:a'), '.ap-st-word')), '正在检查…');
+  srv.custom[0].source = { type: 'program', program: 'missing-new-program', args: [], secrets: ['OTHER'] };
+  yGate.release();
+  await settle();
+  assert.equal(seen(one(row('custom:a'), '.ap-st-word')), '未检查', 'the check on its way was about something no longer there');
+  aGate.release();
+  await settle();
+  assert.equal(seen(one(row('custom:a'), '.ap-st-word')), '未检查', 'its late success is not put back');
+  row('custom:a').click();
+  await settle();
+  assert.equal(all(body(), '.ap-tool').length, 0);
+  assert.equal(seen(one(body(), '.ap-cmd')), 'missing-new-program', 'not the old program either');
+  assert.equal(srv.sent('GET', /custom%3Aa$/).length, 1, 'no new check of its own');
+  assert.equal(voice(), '「A」没能检查。', 'the opening round still ends (y went, a was given up on), and is said once');
+  // 再检查 on its way when the change is found: the same.
+  const reGate = hold(), zGate = hold();
+  const second = await opened((s) => {
+    s.deaf = true;
+    s.add('custom:a', 'A', { type: 'program', program: 'node', args: ['a.js'], secrets: ['K'] });
+    s.add('custom:z', 'Z', { type: 'program', program: 'node', args: [], secrets: [] });
+    s.on.set('GET /xbot-api/apps/custom%3Az', () => zGate.promise.then(() => { s.custom = s.custom.filter((x: Any) => x.id !== 'custom:z'); throw fail(404, '没有这个应用'); }));
+  });
+  second.row('custom:a').click();
+  await settle();
+  second.srv.on.set('GET /xbot-api/apps/custom%3Aa', (c: Call) => { const answer = second.srv.fallback(c); return reGate.promise.then(() => answer); });
+  buttonOf(second.body(), '再检查').click();
+  await settle();
+  assert.equal(seen(one(second.body(), '.ap-state')), '正在检查…');
+  second.srv.custom[0].source = { type: 'program', program: 'missing-new-program', args: [], secrets: ['OTHER'] };
+  zGate.release();
+  await settle();
+  assert.equal(seen(one(second.body(), '.ap-state')), '未检查');
+  reGate.release();
+  await settle();
+  assert.equal(seen(one(second.body(), '.ap-state')), '未检查', 'its late success is not put back');
+  assert.equal(all(second.body(), '.ap-tool').length, 0);
+  assert.ok(shown(buttonOf(second.body(), '再检查')) && !buttonOf(second.body(), '再检查').disabled, 'and 再检查 can be pressed again');
+});
+
 // ---------------------------------------------------------------- against the real adapter
 // The dialog over the production router and the adapter (server/xbot/apps.ts, server/native/apps.ts) on the
 // scripted engine of tests/apps-fixture.ts, through real HTTP: what it sends is what the adapter accepts,

@@ -222,7 +222,8 @@
       ctrls: new Set(), timers: new Set(),
       poll: null,                // 微信 starting: {started, timer, reading, gaveUp, error}
       count: null,               // 微信 authorized: {end, timer, zeroRead}
-      wbusy: "", wnote: "", anote: null, wgen: 0, // wgen: 微信's evidence generation (readWechat)
+      wbusy: "", wnote: "", anote: null,
+      wseq: 0, wseen: 0, wwrites: 0, winflight: 0, // 微信's evidence, in the order its requests started (wechatAsk)
       notes: new Map(),          // id → {text, bad} shown on its page
       draft: null, from: null, layer: null,
     };
@@ -383,15 +384,15 @@
       S.reading = true;
       if (why === "again") S.listError = "";
       paintList();
-      const gen = wechatGen();
+      const asked = wechatAsk();
       let data;
       try { data = await call("/xbot-api/apps"); }
       catch (err) {
         if (!S.alive) return false;
         S.reading = false;
         if (!S.order) S.listError = R.listError(err);
-        // The list's read is a read of 微信 too: failed, it is no evidence of the ten minutes.
-        if (stillFresh(gen) && authUnknown()) paintWechatPage();
+        // The list's read is a read of 微信 too: failed, it is no evidence of the ten minutes (unless newer evidence came).
+        if (authShown() && wechatTake(asked)) { authUnknown(); paintWechatPage(); }
         paintList();
         return false;
       }
@@ -401,18 +402,24 @@
       const apps = Array.isArray(data && data.apps) ? data.apps.filter((a) => a && a.id) : [];
       const custom = apps.filter((a) => a.kind === "custom");
       // A check's answer belongs to what it checked: kept only while the app is still what was checked.
+      const changed = new Set();
       for (const a of custom) {
-        const known = S.apps.get(a.id);
-        if (known && a.state === "unchecked" && known.state !== "unchecked" && R.sameSource(known.source, a.source)) S.apps.set(a.id, Object.assign({}, known, { title: a.title }));
+        const known = S.apps.get(a.id), same = !known || R.sameSource(known.source, a.source);
+        if (known && a.state === "unchecked" && known.state !== "unchecked" && same) S.apps.set(a.id, Object.assign({}, known, { title: a.title }));
         else S.apps.set(a.id, a);
+        // Changed: a check begun on what was there before is not about it — it loses its claim (revokeCheck).
+        if (!same) { changed.add(a.id); revokeCheck(a.id); }
       }
+      if (changed.size) pump();
       const keep = new Set(custom.map((a) => a.id));
       const next = view && view.name === "app" && !keep.has(view.id) ? survivor(view.id, keep) : null;
       for (const id of [...S.apps.keys()]) if (id !== R.WECHAT && !keep.has(id)) { dismissLayer(id); forget(id); }
       S.order = custom.map((a) => a.id);
       const w = apps.find((a) => a.id === R.WECHAT);
-      if (w && stillFresh(gen)) setApp(w, "list");
+      if (w && wechatTake(asked)) setApp(w, "list");
       paintList();
+      // The page open on a changed app says so at once (未检查, no tools); nothing new is checked for it.
+      if (view && view.name === "app" && changed.has(view.id) && S.apps.has(view.id)) view.paint();
       if (view && view.name === "app" && !S.apps.has(view.id)) { S.from = next; goList(); }
       if (!S.checkedOnce) {
         S.checkedOnce = true;
@@ -491,15 +498,26 @@
     // A confirmation belongs to its app: when the app goes, so does its confirmation (and a removal on its way is let go).
     function dismissLayer(id) { if (S.layer && S.layer.id === id) S.layer.dismiss(); }
     // A write for an app supersedes its check: the write's own answer is the newer one.
-    function claim(id) {
+    // check: a read of its detail (an opening check, 再检查), not a write.
+    function claim(id, check) {
       const c = S.checks.get(id);
       if (c && c.ctrl) { try { c.ctrl.abort(); } catch { /* done */ } }
       S.queue = S.queue.filter((x) => x !== id);
       const ctrl = typeof AbortController === "function" ? new AbortController() : null, token = {};
-      S.checks.set(id, { status: "running", ctrl, token });
+      S.checks.set(id, { status: "running", ctrl, token, check: !!check });
       paintRow(id);
       if (view && view.id === id) view.paint();
       return { ctrl, token, mine: () => S.alive && S.checks.get(id) && S.checks.get(id).token === token };
+    }
+    // Its configuration changed: a check on its way (begun on the old one) is given up on and its answer, whenever
+    // it comes, is not taken; it leaves the opening round. A write keeps its claim (its answer is the engine's now);
+    // a check still queued runs on what is there now.
+    function revokeCheck(id) {
+      const c = S.checks.get(id);
+      if (!c || !c.check) return;
+      if (c.ctrl) { try { c.ctrl.abort(); } catch { /* done */ } }
+      S.checks.delete(id);
+      settled(id);
     }
     function release(id, token) {
       const c = S.checks.get(id);
@@ -507,7 +525,7 @@
       pump();
     }
     async function runCheck(id) {
-      const T = claim(id);
+      const T = claim(id, true);
       let app = null, error = null;
       try { app = await call(R.path(id), {}, T.ctrl); } catch (err) { error = err; }
       if (!T.mine()) return;
@@ -579,11 +597,24 @@
         if (!P.error && shown && shown.state === "starting") nextPoll();
       }, wait);
     }
-    // 微信's evidence has one owner. Every read of it (the list's included) remembers the generation it began
-    // in; every write's answer moves the generation on, so no read that began before it can paint over it. A read that fails is not evidence either: while 微信
-    // is known to be on, what is not known is the ten minutes, so the open chat becomes unknown (no countdown).
-    const wechatGen = () => S.wgen;
-    const stillFresh = (gen) => gen === S.wgen;
+    // 微信's evidence is ordered by when its request started. Every request about 微信 — the list's read, each read
+    // of 微信 itself (poll, zero, 再看一次, after a failed write) and each write — takes the next number as it starts
+    // (wechatAsk); its answer, or its failure, is taken only if nothing that started later has been taken already
+    // (wechatTake), so an older answer never paints over a newer one. A read that overlapped a write gives way to
+    // it, either way: whether the engine answered it before or after the write took effect is not known.
+    // A read that fails, once taken: while 微信 is known to be on, the ten minutes are unknown (no countdown).
+    function wechatAsk(write) {
+      const asked = { seq: ++S.wseq, writes: S.wwrites, busy: S.winflight > 0 };
+      if (write) { S.wwrites++; S.winflight++; }
+      return asked;
+    }
+    function wechatTake(asked, write) {
+      if (!write && (asked.busy || asked.writes !== S.wwrites)) return false;
+      if (asked.seq < S.wseen) return false;
+      S.wseen = asked.seq;
+      return true;
+    }
+    const authShown = () => { const shown = S.apps.get(R.WECHAT); return !!shown && shown.state === "on" && "authorization" in shown; };
     function authUnknown() {
       const shown = S.apps.get(R.WECHAT);
       if (!shown || shown.state !== "on" || !("authorization" in shown)) return false;
@@ -594,15 +625,15 @@
       return true;
     }
     // 微信 read fresh. why: "poll", "zero" (the authorization ran out), "manual" (再看一次), "after" (a failed write).
-    // null: no answer to go by (failed, or begun before a write that has since answered).
+    // null: no answer to go by (failed, or older than evidence already taken).
     async function readWechat(why) {
       if (why === "manual") { S.wbusy = "reread"; S.wnote = ""; S.anote = null; hold(); paintWechatPage(); }
-      const gen = wechatGen();
+      const asked = wechatAsk();
       let app = null, error = null;
       try { app = await call(R.path(R.WECHAT)); } catch (err) { error = err; }
       if (!S.alive) return null;
       if (why === "manual") S.wbusy = "";
-      if (!stillFresh(gen)) {
+      if (!wechatTake(asked)) {
         if (why === "poll" && S.poll) S.poll.reading = false;
         paintWechatPage();
         return null;
@@ -859,16 +890,17 @@
       S.anote = null;
       hold();
       paintWechatPage();
+      const asked = wechatAsk(true);
       let app = null, error = null;
       try { app = await call(R.path(R.WECHAT) + WECHAT_PATHS[act], { method: "POST", body: {} }); }
       catch (err) { error = err; }
       if (!S.alive) return;
-      // Its answer is newer than every read begun before it (the countdown's, the poll's, the list's).
-      S.wgen++;
+      S.winflight--;
       S.wbusy = "";
       const held = focusWasHeld();
       if (app) {
-        setApp(app, act);
+        // Every read that overlapped it gave way; its answer is what is shown.
+        if (wechatTake(asked, true)) setApp(app, act);
         if (held) wechatFocus(act);
         return;
       }
@@ -1050,7 +1082,7 @@
     async function recheck(id) {
       if (checkOf(id) || S.writes.get(id)) return;
       S.notes.delete(id);
-      const T = claim(id);
+      const T = claim(id, true);
       let app = null, error = null;
       try { app = await call(R.path(id), {}, T.ctrl); } catch (err) { error = err; }
       if (!T.mine()) return;

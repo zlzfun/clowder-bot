@@ -1019,7 +1019,7 @@
       "target": "client/public/apps-dialog.js",
       "description": "应用 dialog (window.ClowderApps): one dialog over the chat on the original .modal/.modal-card with the list (微信, custom apps, 添加自定义应用) and one app's page; GET /xbot-api/apps on opening, one check per custom app (at most 3 at a time), 微信's open/close/authorize/revoke, the add form with idempotency keys, rename and secrets by PATCH, remove after a nested confirm; focus trap, Escape one level at a time, focus back to the opener, eased height, one polite live region; everything in flight is abandoned on close",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-26 (docs/xbot-frontend.md item 52)",
-      "sha256": "dae1a7875d381b09ed83a7e1e7f146cce1d46ba48fa18c5fad09cf2221407465"
+      "sha256": "e0f1e893a33dc957ee12e05c88c91146d40bf72bb52c32e84da36367ae118b9e"
     },
     {
       "target": "client/public/apps-dialog.css",
