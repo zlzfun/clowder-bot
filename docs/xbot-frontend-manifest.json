@@ -843,9 +843,9 @@
     },
     {
       "target": "client/public/chat-cards-rules.js",
-      "description": "Pure rules for round 5: the approvals list checked, a request card's view (open, in flight, 已提交 / 已提交，还在处理 / 没能确认结果 / 已处理, the receipt's outcome), quiet expiry words, server failures with the engine's reason apart, upstream buildSelectionMessage ported as it is, a choice's view, diff lines, the ending of an unfinished reply and the owner message 再发一次 resends; no DOM or network Item 38 review: resend() also returns, in order, the later messages an unfinished reply took in (listed in its inputMessageIds and accepted by it on their own record).",
-      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 确认与提醒 (docs/xbot-frontend.md item 32; docs/chat-experience-api.md 「等你确认的事」「卡片、清单与选项」, docs/chat-live-api.md); the layout explains, not captions, on every other screen (docs/xbot-frontend.md item 46) by local Claude Code (claude-opus-5-5) on 2026-11-13",
-      "sha256": "061a405f8dffbda98cc36af8e297585e1e8750d9d563ea8c560c256ff77471c6"
+      "description": "Pure rules for round 5: the approvals list checked, a request card's view (open, in flight, 已提交 / 已提交，还在处理 / 没能确认结果 / 已处理, the receipt's outcome), quiet expiry words, server failures with the engine's reason apart, upstream buildSelectionMessage ported as it is, a choice's view, diff lines, the ending of an unfinished reply and the owner message 再发一次 resends; no DOM or network Item 38 review: resend() also returns, in order, the later messages an unfinished reply took in (listed in its inputMessageIds and accepted by it on their own record). Item 53: a timer request's outcome is said as setting, changing or removing one, by the verb of its title (想设 / 想改 / 想取消一个定时), never by the cat's name.",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 确认与提醒 (docs/xbot-frontend.md item 32; docs/chat-experience-api.md 「等你确认的事」「卡片、清单与选项」, docs/chat-live-api.md); the layout explains, not captions, on every other screen (docs/xbot-frontend.md item 46) by local Claude Code (claude-opus-5-5) on 2026-11-13; a timer change's own outcome (docs/xbot-frontend.md item 53) by local Claude Code (claude-opus-5-5) on 2026-11-26",
+      "sha256": "1de5fff6d60ce97db044753489fcd0d4c8a565b4705151b80c975327178473f0"
     },
     {
       "target": "client/public/chat-cards.js",
