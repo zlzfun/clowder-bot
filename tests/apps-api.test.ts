@@ -158,6 +158,11 @@ test('the engine\'s probe error can quote the answering server\'s body — and a
   assert.equal(probeDetail('MCP error -32000: Connection closed'), 'MCP error -32000 · Connection closed');
   assert.equal(probeDetail('fetch failed: connect ECONNREFUSED 127.0.0.1:9'), 'fetch failed · ECONNREFUSED');
   assert.equal(probeDetail('something nobody listed, with sk-live-123 in it'), undefined);
+  assert.equal(probeDetail('unable to verify: UNABLE_TO_GET_ISSUER_CERT_LOCALLY'), 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY');
+  // Nothing in the list is open-ended: a made-up code or an endless number is not a fragment, however much it looks like one.
+  for (const forged of ['CERT_PRIVATE_TOKEN_ABC', 'UNABLE_TO_KEEP_SECRET_ABC', 'XSELF_SIGNED_CERT_TOKEN', 'CERT_HAS_EXPIRED_TOKEN_ABC', 'MCP error 123456789012345678901234567890',
+    'HTTP 4011234567', 'status code (4011234567)', 'ENOENT_TOKEN_ABC', 'EVERYTHING', 'Error'])
+    assert.equal(probeDetail(`Error POSTing to endpoint: {"error":"${forged}"}`), undefined, forged);
   assert.equal(probeDetail(undefined), undefined);
   // Through the adapter: added, re-read and patched — the value never comes back, in any field.
   const r = await setup(t);
