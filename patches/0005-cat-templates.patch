@@ -1,5 +1,6 @@
 diff --git a/packages/api/src/config/bot-cat-templates.ts b/packages/api/src/config/bot-cat-templates.ts
 new file mode 100644
+index 00000000..6d7cde8f
 --- /dev/null
 +++ b/packages/api/src/config/bot-cat-templates.ts
 @@ -0,0 +1,197 @@
@@ -200,8 +201,44 @@ new file mode 100644
 +    return saved;
 +  }
 +}
+diff --git a/packages/api/src/config/runtime-cat-catalog.ts b/packages/api/src/config/runtime-cat-catalog.ts
+index 9c0de00e..59d2d667 100644
+--- a/packages/api/src/config/runtime-cat-catalog.ts
++++ b/packages/api/src/config/runtime-cat-catalog.ts
+@@ -18,7 +18,7 @@ import { planAgyAccountBinding } from './agy-account-binding.js';
+ import { clearBudgetCache } from './cat-budgets.js';
+ import { bootstrapCatCatalog, readCatCatalog, resolveCatCatalogPath } from './cat-catalog-store.js';
+ import type { AcpVariantConfig } from './cat-config-loader.js';
+-import { _resetCachedConfig, loadCatConfig, parseRawCatConfig, toAllCatConfigs } from './cat-config-loader.js';
++import { _resetCachedConfig, loadCatConfig, parseRawCatConfig, toAllCatConfigs, readResolvedTemplateSource } from './cat-config-loader.js';
+ import { clearVoiceCache } from './cat-voices.js';
+ import { planClaudeAccountBinding } from './claude-account-binding.js';
+ import { coCreatorMentionInputSchema } from './co-creator-mention.js';
+@@ -490,8 +490,19 @@ export function createRuntimeCat(projectRoot: string, input: RuntimeCatInput): C
+   const nextBreed = createBreedFromInput(input) as unknown as Record<string, any>;
+   const targetBreedId = input.breedId?.trim();
+   if (targetBreedId && targetBreedId !== input.catId) {
+-    const targetBreed = catalog.breeds.find((breed: { id: string }) => breed.id === targetBreedId);
+-    if (!targetBreed) throw new Error(`Unknown breedId "${targetBreedId}"; choose an existing breed`);
++    let targetBreed = catalog.breeds.find((breed: { id: string }) => breed.id === targetBreedId);
++    if (!targetBreed) {
++      // A native-owned first member may establish a shipped template family.
++      // Only this member is added; never activate the other shipped variants.
++      const source = JSON.parse(readResolvedTemplateSource(resolveProjectTemplatePath(projectRoot))) as {
++        roleTemplates?: Array<{ id: string; name?: string }>;
++      };
++      const identity = source.roleTemplates?.find(role => (role.id === 'turkish-van' ? 'moonshot' : role.id) === targetBreedId);
++      if (!input.creationReceipt || input.configurationSource !== 'native_tool' || !identity)
++        throw new Error(`Unknown breedId "${targetBreedId}"; choose an existing breed`);
++      targetBreed = { ...nextBreed, name: identity.name || nextBreed.name, displayName: identity.name || nextBreed.displayName, variants: [] };
++      catalog.breeds.push(targetBreed);
++    }
+     const variant = nextBreed.variants[0];
+     if (targetBreed.variants.some((member: { id: string }) => member.id === variant.id)) {
+       throw new Error(`Variant "${variant.id}" already exists in breed "${targetBreedId}"`);
 diff --git a/packages/api/src/routes/bot-cat-template-routes.ts b/packages/api/src/routes/bot-cat-template-routes.ts
 new file mode 100644
+index 00000000..4db199d8
 --- /dev/null
 +++ b/packages/api/src/routes/bot-cat-template-routes.ts
 @@ -0,0 +1,120 @@
@@ -325,44 +362,11 @@ new file mode 100644
 +    });
 +  }));
 +}
-diff --git a/packages/api/src/config/runtime-cat-catalog.ts b/packages/api/src/config/runtime-cat-catalog.ts
---- a/packages/api/src/config/runtime-cat-catalog.ts
-+++ b/packages/api/src/config/runtime-cat-catalog.ts
-@@ -17,7 +17,7 @@
- import { clearBudgetCache } from './cat-budgets.js';
- import { bootstrapCatCatalog, readCatCatalog, resolveCatCatalogPath } from './cat-catalog-store.js';
- import type { AcpVariantConfig } from './cat-config-loader.js';
--import { _resetCachedConfig, loadCatConfig, parseRawCatConfig, toAllCatConfigs } from './cat-config-loader.js';
-+import { _resetCachedConfig, loadCatConfig, parseRawCatConfig, toAllCatConfigs, readResolvedTemplateSource } from './cat-config-loader.js';
- import { clearVoiceCache } from './cat-voices.js';
- import { planClaudeAccountBinding } from './claude-account-binding.js';
- import { coCreatorMentionInputSchema } from './co-creator-mention.js';
-@@ -474,8 +474,19 @@
-   const nextBreed = createBreedFromInput(input) as unknown as Record<string, any>;
-   const targetBreedId = input.breedId?.trim();
-   if (targetBreedId && targetBreedId !== input.catId) {
--    const targetBreed = catalog.breeds.find((breed: { id: string }) => breed.id === targetBreedId);
--    if (!targetBreed) throw new Error(`Unknown breedId "${targetBreedId}"; choose an existing breed`);
-+    let targetBreed = catalog.breeds.find((breed: { id: string }) => breed.id === targetBreedId);
-+    if (!targetBreed) {
-+      // A native-owned first member may establish a shipped template family.
-+      // Only this member is added; never activate the other shipped variants.
-+      const source = JSON.parse(readResolvedTemplateSource(resolveProjectTemplatePath(projectRoot))) as {
-+        roleTemplates?: Array<{ id: string; name?: string }>;
-+      };
-+      const identity = source.roleTemplates?.find(role => (role.id === 'turkish-van' ? 'moonshot' : role.id) === targetBreedId);
-+      if (!input.creationReceipt || input.configurationSource !== 'native_tool' || !identity)
-+        throw new Error(`Unknown breedId "${targetBreedId}"; choose an existing breed`);
-+      targetBreed = { ...nextBreed, name: identity.name || nextBreed.name, displayName: identity.name || nextBreed.displayName, variants: [] };
-+      catalog.breeds.push(targetBreed);
-+    }
-     const variant = nextBreed.variants[0];
-     if (targetBreed.variants.some((member: { id: string }) => member.id === variant.id)) {
-       throw new Error(`Variant "${variant.id}" already exists in breed "${targetBreedId}"`);
 diff --git a/packages/api/src/routes/cats.ts b/packages/api/src/routes/cats.ts
+index f017d39b..0b9439c4 100644
 --- a/packages/api/src/routes/cats.ts
 +++ b/packages/api/src/routes/cats.ts
-@@ -4,6 +4,7 @@
+@@ -8,6 +8,7 @@ import { registerDshMemberConnectionChecks } from './member-connection-check.js'
  import { dshLauncherProfileState, InvalidDshProfile } from './native-dsh-profile.js';
  import { discoverNativeRuntimesWithReadiness } from './native-runtimes.js';
  import { registerRuntimeCatalogRoute } from './runtime-catalog-route.js';
@@ -370,11 +374,11 @@ diff --git a/packages/api/src/routes/cats.ts b/packages/api/src/routes/cats.ts
  /**
   * Cats API Routes
   * GET /api/cats - 获取所有猫猫信息
-@@ -940,6 +941,7 @@
- export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opts) => {
+@@ -994,6 +995,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
+   });
    if (opts.memberAssets) registerMemberCanonResponse(app, opts.memberAssets);
    registerRuntimeCatalogRoute(app);
 +  registerBotCatTemplateRoutes(app);
    registerDshSetupRoutes(app);
-   app.get('/api/cats/native-runtimes', async (request, reply) => {
-     if (!resolveHeaderUserId(request)) return reply.code(401).send({ error: '需要登录后检查本机工具' });
+   registerDshMemberConnectionChecks(app, {
+     redis: opts.connectionCheckRedis,

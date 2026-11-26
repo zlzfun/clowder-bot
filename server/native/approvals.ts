@@ -2,7 +2,7 @@ import { ApiError } from '../errors.js';
 import { encode, type BotBridge } from './bridge.js';
 import type { NativeCat } from './types.js';
 import { clip } from './text.js';
-import { triggerWords } from './trigger-words.js';
+import { changeWords, triggerWords } from './trigger-words.js';
 export { triggerWords };
 
 /**
@@ -39,8 +39,8 @@ export function approvalLine(item: Record<string, unknown>): string {
     case 'F231': return '更新关于你的资料';
     case 'F276': return '记下一位相关的人';
     case 'F139': {
-      const label = clip(summary.replace(/^(?:Create|Delete) schedule:\s*/, ''), 60);
-      return `${detail.mutationKind === 'delete' ? '取消一个定时' : '设一个定时'}${label ? `「${label}」` : ''}`;
+      const label = clip(summary.replace(/^(?:Create|Delete|Update) schedule:\s*/, ''), 60);
+      return `${detail.mutationKind === 'delete' ? '取消一个定时' : detail.mutationKind === 'update' ? '改一个定时' : '设一个定时'}${label ? `「${label}」` : ''}`;
     }
     default: return clip(summary, 160);
   }
@@ -66,10 +66,12 @@ function present(item: Item, cats: NativeCat[], base: string | undefined): Appro
     case 'F276': return { ...shared, kind: 'person', title: `${who}想记下一位相关的人`, body: summary,
       ...(inline ? { approve: { label: '记下' } } : elsewhere), reject: base ? { label: '不用记' } : null };
     case 'F139': {
-      const label = summary.replace(/^(?:Create|Delete) schedule:\s*/, '') || '定时任务', remove = detail.mutationKind === 'delete';
-      return { ...shared, kind: 'schedule', title: remove ? `${who}想取消一个定时` : `${who}想设一个定时`,
-        body: `${label} · ${triggerWords(detail.trigger)}`,
-        ...(inline ? { approve: { label: remove ? '取消它' : '设上' } } : elsewhere), reject: base ? { label: remove ? '先留着' : '不用' } : null };
+      // The engine proposes three things about a timer: making one, deleting one and (since its parameter updates) changing one.
+      const label = summary.replace(/^(?:Create|Delete|Update) schedule:\s*/, '') || '定时任务', remove = detail.mutationKind === 'delete', change = detail.mutationKind === 'update';
+      return { ...shared, kind: 'schedule', title: remove ? `${who}想取消一个定时` : change ? `${who}想改一个定时` : `${who}想设一个定时`,
+        // A change says what it changes: agreeing to "改吧" without that is not a choice.
+        body: [label, triggerWords(detail.trigger), change ? changeWords(detail.previousParams, detail.params) : ''].filter(Boolean).join(' · '),
+        ...(inline ? { approve: { label: remove ? '取消它' : change ? '改吧' : '设上' } } : elsewhere), reject: base ? { label: remove ? '先留着' : change ? '先不改' : '不用' } : null };
     }
     case 'F306': return { ...shared, kind: 'question', title: `${who}有件事要问你`, body: summary, approve: null, reject: null, note: '这一项要在运行面板里回答' };
     default: return { ...shared, kind: 'other', title: `${who}有件事等你确认`, body: summary,
@@ -107,7 +109,11 @@ export class Approvals {
     if (!item || !card) throw new ApiError(404, '这件事已经处理过，或者不在这个对话里');
     if (!(decision === 'approve' ? card.approve : card.reject)) throw new ApiError(409, card.note ?? '这一项不能在这里处理');
     try {
-      await this.bridge.native.request(`${bases.get(item.sourceFeatureId)}/${encode(proposalId)}/${decision}`, { method: 'POST', body: {} });
+      // A preference that will be published is approved only as the content the hub listed (its digest); the engine
+      // refuses the approval when what it holds has changed since. Other requests take no body.
+      const digest = decision === 'approve' && item.sourceFeatureId === 'F221' ? record(item.detail).decisionDigest : undefined;
+      await this.bridge.native.request(`${bases.get(item.sourceFeatureId)}/${encode(proposalId)}/${decision}`, { method: 'POST',
+        body: typeof digest === 'string' && digest ? { decisionDigest: digest } : {} });
     } catch (error) {
       // The native reason stays attached for diagnosis; the chat says plainly that nothing was applied.
       if (error instanceof ApiError && error.status !== 503)

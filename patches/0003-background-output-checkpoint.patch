@@ -1,17 +1,8 @@
---- a/packages/api/src/domains/cats/services/types.ts
-+++ b/packages/api/src/domains/cats/services/types.ts
-@@ -294,6 +294,8 @@
- export interface AgentMessage {
-   /** The type of this message */
-   type: AgentMessageType;
-+  /** Persist the current output without settling the still-running invocation. */
-+  outputCheckpoint?: 'turn_complete';
-   /** F306: provider-neutral user-meaning event; native wire names stop in the adapter. */
-   semanticEvent?: ProviderSemanticEvent;
-   /** F306: provider-neutral goal observation awaiting exact SessionChain fencing and ThreadStore revision. */
+diff --git a/packages/api/src/domains/cats/services/agents/providers/ClaudeSdkAgentService.ts b/packages/api/src/domains/cats/services/agents/providers/ClaudeSdkAgentService.ts
+index d75c65b0..7ba678d8 100644
 --- a/packages/api/src/domains/cats/services/agents/providers/ClaudeSdkAgentService.ts
 +++ b/packages/api/src/domains/cats/services/agents/providers/ClaudeSdkAgentService.ts
-@@ -276,6 +276,9 @@
+@@ -296,6 +296,9 @@ export class ClaudeSdkAgentService implements AgentService {
          // The archive is ordered best-effort diagnostics, not the receipt
          // authority. Disk I/O must not delay cancellation or member output.
          archive(event);
@@ -21,11 +12,10 @@
          turnInputs.observeSessionState(raw);
          const isResultTerminal = raw.type === 'result';
          if (typeof raw.session_id === 'string' && raw.session_id) {
-@@ -320,6 +323,18 @@
-             }
+@@ -341,6 +344,18 @@ export class ClaudeSdkAgentService implements AgentService {
              yield { ...message, metadata };
            }
-+        }
+         }
 +        // A reply can finish while children keep the same query alive. Publish
 +        // its trailing text now; do not emit done or close the host session.
 +        if (isResultTerminal && process.env.CAT_CAFE_BOT_BACKGROUND_DELEGATION === '1') {
@@ -37,12 +27,15 @@
 +            metadata,
 +            timestamp: Date.now(),
 +          };
-         }
++        }
          // A streaming-input query may carry multiple accepted turns. Close at
          // native idle only after accepted inputs and background report turns
+         // have drained. A result alone can precede queued reports. Breaking
+diff --git a/packages/api/src/domains/cats/services/agents/routing/route-serial.ts b/packages/api/src/domains/cats/services/agents/routing/route-serial.ts
+index be7a6d7a..cb80f0f0 100644
 --- a/packages/api/src/domains/cats/services/agents/routing/route-serial.ts
 +++ b/packages/api/src/domains/cats/services/agents/routing/route-serial.ts
-@@ -2299,6 +2299,8 @@
+@@ -2350,6 +2350,8 @@ export async function* routeSerial(
              const childUpdate = effectiveMsg.semanticEvent?.kind === 'subexecution';
              if (
                childUpdate ||
@@ -51,3 +44,16 @@
                (effectiveMsg.type === 'text' &&
                  charDelta !== 0 &&
                  (neverFlushed ||
+diff --git a/packages/api/src/domains/cats/services/types.ts b/packages/api/src/domains/cats/services/types.ts
+index 62d2ec2a..46ae9cc4 100644
+--- a/packages/api/src/domains/cats/services/types.ts
++++ b/packages/api/src/domains/cats/services/types.ts
+@@ -317,6 +317,8 @@ export interface AgentMessage {
+   providerTeardown?: 'unconfirmed';
+   /** The type of this message */
+   type: AgentMessageType;
++  /** Persist the current output without settling the still-running invocation. */
++  outputCheckpoint?: 'turn_complete';
+   /** F306: provider-neutral user-meaning event; native wire names stop in the adapter. */
+   semanticEvent?: ProviderSemanticEvent;
+   /** F306: provider-neutral goal observation awaiting exact SessionChain fencing and ThreadStore revision. */

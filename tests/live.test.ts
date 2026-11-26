@@ -335,3 +335,36 @@ test('a signature a cat wrote at the start of its own reply is hidden when words
   assert.equal((await r.bridge.activity.read(thread.id)).last!.text, '到了');
   assert.equal((await (await r.call('/xbot-api/bots/' + encodeURIComponent('快手') + '/transcript')).json()).messages[0].content, '到了');
 });
+
+test('what the engine did by itself is a quiet line in the chat’s words; the summary of a remember call adds only what the page does not already say', async t => {
+  const r = await setup(t), cat = await r.bridge.createBot({ name: 'Ada' }), thread = await r.bridge.direct(cat);
+  // As the engine records them (RestartContinuation.ts, owner-ask-correction.ts): connector lines in its own words, some addressed to the cat.
+  const connector = (id: string, timestamp: number, connectorId: string, label: string, content: string): NativeMessage =>
+    ({ id, type: 'connector', catId: null, timestamp, content, source: { connector: connectorId, label, icon: '🔁' } });
+  const restarted = connector('restarted', 2000, 'restart-recovery', '重启接续', '刚才 runtime 重启了（也可能是崩了），你上一轮还没做完就被打断了。看一下这个线程的聊天记录和你的记忆，接着把没做完的事做完；如果已经做完或者不用再做了，简单说一声就好。');
+  const slept = connector('slept', 3000, 'restart-recovery', '睡眠接续', '刚才电脑睡着了（合盖或者自动睡眠），你上一轮还没做完就被打断了。');
+  const asked = connector('asked', 4000, 'owner-ask-check', '掉球检查', '上一条在等你决定或动手，但没有 @ 你，所以没进小信箱。已请它自己定掉，或者补上 @。');
+  // The summary of one cat_cafe_remember call (callback-remember-routes.ts): a card that only refers to each item's own card or receipt.
+  const group = (id: string, timestamp: number, rows: Array<Record<string, unknown>>): NativeMessage => ({ id, type: 'assistant', catId: cat.id, timestamp, origin: 'callback',
+    content: `这次提交的 ${rows.length} 项记忆`, extra: { rich: { v: 1, blocks: [{ kind: 'card', v: 1, id: 'remember_' + id, title: '这次记忆提交结果',
+      meta: { kind: 'memory_group', memoryGroup: { v: 1, groupId: 'remember_' + id, rows } } }] } } });
+  const carded = { itemId: 'a', target: 'profile', statusCode: 200, proposalId: 'proposal_1', messageId: 'card-1', status: 'pending' };
+  const written = { itemId: 'b', target: 'matter', statusCode: 200, resultRef: 'matter_1', status: 'applied' };
+  const failed = { itemId: 'c', target: 'taste', statusCode: 422, error: 'origin_not_eligible' };
+  r.native.messages.set(thread.id, [{ id: 'q', type: 'user', catId: null, timestamp: 1000, content: '在吗' }, restarted, slept, asked,
+    group('all-carded', 5000, [carded]), group('mixed', 6000, [carded, written, failed]), group('failed', 7000, [failed, { ...failed, itemId: 'd' }])]);
+  const rows = (await (await r.call('/xbot-api/bots/Ada/transcript')).json()).messages.filter((m: any) => m.id);
+  const of = (id: string) => rows.find((m: any) => m.id === id);
+  assert.deepEqual(['restarted', 'slept', 'asked'].map(id => [of(id).content, of(id).notice]),
+    [['刚才中断了，接着做。', true], ['电脑睡着时中断了，接着做。', true], ['上一条在等你决定；能自己定的会先定。', true]]);
+  assert.match(of('restarted').native.content, /runtime 重启/, 'the native record keeps the engine’s line');
+  assert.equal(of('all-carded'), undefined, 'every item has its own card on the page: nothing more is drawn');
+  assert.deepEqual([of('mixed').content, of('mixed').notice, of('mixed').blocks, of('mixed').blocks_hidden], ['记下了 1 件事，有 1 项没记成。', true, undefined, undefined]);
+  assert.equal(of('failed').content, '有 2 项没记成。');
+  // The same in a group.
+  await r.bridge.createBot({ name: 'Bob' });
+  const chat = await (await r.call('/xbot-api/groups', 'POST', { members: ['Ada', 'Bob'] })).json();
+  r.native.messages.set(chat.id, [slept, group('all-carded', 5000, [carded]), group('failed', 7000, [failed])]);
+  const lines = (await (await r.call(`/xbot-api/groups/${chat.id}`)).json()).messages;
+  assert.deepEqual(lines.map((line: any) => [line.id, line.text, line.notice]), [['slept', '电脑睡着时中断了，接着做。', true], ['failed', '有 1 项没记成。', true]]);
+});

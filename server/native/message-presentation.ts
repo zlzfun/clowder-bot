@@ -67,6 +67,40 @@ export function scheduledReminder(message: NativeMessage): string | undefined {
   return message.content.replace(/^\s*\[定时任务\]\s*/, '').trim() || undefined;
 }
 
+/**
+ * Lines the engine writes into a conversation when it steps in by itself, in the chat's words. Its own
+ * wording is for its web client or addressed to the cat ("刚才 runtime 重启了…你上一轮还没做完",
+ * "没进小信箱"). Returns the words for a quiet line, null when the page already says everything
+ * (nothing is drawn), undefined for any other message.
+ *
+ * - `restart-recovery`: a reply cut off by a restart of the engine or by the computer going to sleep
+ *   (the source's label tells which); the engine wakes the cat to pick it up
+ *   (restart-continuation/RestartContinuation.ts).
+ * - `owner-ask-check`: a reply ended waiting for the owner while the owner was away; the engine asks
+ *   the cat to settle what it can by itself (routing/owner-ask-correction.ts).
+ * - the summary of one `cat_cafe_remember` call (routes/callback-remember-routes.ts): a message of the
+ *   cat's with a card that only refers to each item's own request card or receipt. Items with a card
+ *   of their own are already on the page; what is said here is what would otherwise go unsaid: an
+ *   item that was written without asking, and an item that did not go through.
+ */
+export function engineNote(message: NativeMessage): string | null | undefined {
+  if (message.type === 'connector') {
+    const source = record(message.source);
+    if (source.connector === 'restart-recovery') return source.label === '睡眠接续' ? '电脑睡着时中断了，接着做。' : '刚才中断了，接着做。';
+    if (source.connector === 'owner-ask-check') return '上一条在等你决定；能自己定的会先定。';
+    return undefined;
+  }
+  if (message.type !== 'assistant') return undefined;
+  const blocks = record(message.extra?.rich).blocks;
+  const group = (Array.isArray(blocks) ? blocks : []).map(record).map(block => record(block.meta)).find(meta => meta.kind === 'memory_group');
+  if (!group) return undefined;
+  const rows = (Array.isArray(record(group.memoryGroup).rows) ? record(group.memoryGroup).rows as unknown[] : []).map(record);
+  const failed = rows.filter(row => typeof row.statusCode !== 'number' || row.statusCode >= 400).length;
+  const written = rows.filter(row => typeof row.statusCode === 'number' && row.statusCode < 400 && typeof row.messageId !== 'string').length;
+  const said = [written ? `记下了 ${written} 件事` : '', failed ? `有 ${failed} 项没记成` : ''].filter(Boolean).join('，');
+  return said ? `${said}。` : null;
+}
+
 /** A reply the engine is still producing: an unpublished draft or a response that has not settled. */
 export function replyInProgress(message: NativeMessage): boolean {
   return message.type === 'assistant'
@@ -94,6 +128,8 @@ export function replyEnding(message: NativeMessage): { how: 'stopped' | 'failed'
  * typing indicator instead of placeholder words.
  */
 export function messageDisplayText(message: NativeMessage, threadId: string, catName?: string): string {
+  const note = engineNote(message);
+  if (note !== undefined) return note ?? '';
   const text = message.type === 'assistant' ? withoutOwnSignatureLines(withoutLeadingSignature(withoutCatSignature(message, threadId), catName), catName) : message.content;
   const content = message.type === 'assistant' && text.trim() === 'SILENT' ? '' : text;
   if (content || replyInProgress(message)) return content;

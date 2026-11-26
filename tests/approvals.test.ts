@@ -7,7 +7,7 @@ import { once } from 'node:events';
 import { createApp } from '../server/app.js';
 import { ApiError } from '../server/errors.js';
 import { NativeFixture } from './native-fixture.js';
-import { triggerWords } from '../server/native/approvals.js';
+import { approvalLine, triggerWords } from '../server/native/approvals.js';
 
 // The hub as the pinned engine answers it: items plus the manifest that names
 // each producer's decision route. The taste item is a trimmed copy of a real
@@ -95,6 +95,31 @@ test('what waits for the owner in a chat is said in chat words; nothing is decid
   assert.deepEqual([taste.quote, taste.messageId, taste.state, taste.catName, taste.expiresAt], ['我喜欢回答简短一点、先说结论', 'card-taste', 'open', '快手', 9000]);
   assert.match(approvals[2].note, /运行面板/); assert.match(approvals[3].note, /运行面板/);
   assert.deepEqual(r.decisions(), [], 'reading decides nothing');
+});
+
+test('a request to change a timer is named as a change; a preference is approved as the content the hub listed, by its digest', async t => {
+  const r = await setup(t), scope = '/bots/' + encodeURIComponent('快手') + '/approvals';
+  // As the engine lists them since it proposes parameter updates (F139ApprovalAdapter) and digests what a preference approval covers (F221).
+  r.native.approvalItems = [
+    r.item('change', 'F139', { createdAt: 1000, summary: 'Update schedule: 喝水提醒', detail: { mutationKind: 'update', trigger: { type: 'interval', ms: 3600000 }, previousParams: { message: '喝水' }, params: { message: '喝温水' } } }),
+    r.item('published', 'F221', { createdAt: 2000, summary: 'Taste: 先说结论', detail: { takeaway: '先说结论', decisionDigest: 'digest-1' } }),
+    r.item('private', 'F221', { createdAt: 3000, summary: 'Taste: 简短', detail: { takeaway: '简短' } }),
+  ];
+  const { approvals } = await (await r.call(scope)).json() as any;
+  assert.deepEqual(approvals.map((a: any) => [a.id, a.kind, a.title, a.body, a.approve?.label ?? null, a.reject?.label ?? null]), [
+    ['change', 'schedule', '快手想改一个定时', '喝水提醒 · 每 1 小时 · 「喝水」改为「喝温水」', '改吧', '先不改'],
+    ['published', 'preference', '快手想记住你的一个偏好', '先说结论', '记住', '不用记'],
+    ['private', 'preference', '快手想记住你的一个偏好', '简短', '记住', '不用记'],
+  ]);
+  assert.equal(approvalLine(r.native.approvalItems[0]!), '改一个定时「喝水提醒」');
+  const answer = (id: string, decision: string) => r.call(`${scope}/${id}`, 'POST', { decision, expectedThreadId: r.thread.id });
+  for (const [id, decision] of [['published', 'approve'], ['private', 'approve'], ['published', 'reject'], ['change', 'approve']]) assert.equal((await answer(id!, decision!)).status, 200);
+  assert.deepEqual(r.native.calls.filter(c => c.method === 'POST' && /\/(approve|reject)$/.test(c.path)).map(c => [c.path, c.body]), [
+    ['/api/taste-proposals/published/approve', { decisionDigest: 'digest-1' }],
+    ['/api/taste-proposals/private/approve', {}],
+    ['/api/taste-proposals/published/reject', {}],
+    ['/api/schedule-proposals/change/approve', {}],
+  ]);
 });
 
 test('the owner’s answer goes to the route the hub names, once, and only for a request open in this chat', async t => {
