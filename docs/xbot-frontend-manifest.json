@@ -27,7 +27,7 @@
       "file": "app.js",
       "target": "client/public/app.js",
       "sourceSha256": "1248f793493826bf044359c71e7d8772ccc3472d6021d6abb979dff9b6cb29bc",
-      "sha256": "5c588f6c8d253c09112d049d213ac9bd24b78cdc1dea24e500ebffe8126f55d0",
+      "sha256": "67348040c717c054545bb7694af2317ddce61d4afdd6b0a7cca86044f8d00176",
       "unchanged": false
     },
     {
@@ -153,7 +153,7 @@
       "file": "index.html",
       "target": "client/index.html",
       "sourceSha256": "a4160c18e23489fbc6a9e21fe494e1ac52840a67b2e138997400a0b42835b556",
-      "sha256": "abbdda26dcbb3b0999ca428fb4e6ed5010d5e360ee78dce9708e46b85ecc6dbb",
+      "sha256": "b68802a0f7cebfc4469cef5d5c8eecfe9b85673cea3dfffde32bdca5165d5ccf",
       "unchanged": false
     },
     {
@@ -965,7 +965,7 @@
       "target": "client/public/theme-lab/lab-rules.js",
       "description": "Colour lab rules without DOM (window.ClowderThemeLabRules): client/index.html's stylesheets in its order, a palette as one style element whose html:root rules out-rank cafe-theme.css's token and four syntax rules, the surfaces a cat's colour is judged on, a frame's srcdoc (the app's stylesheets, the cats' colours, the palette, the frozen body), stepping round the ends, scale to fit; item 48: client/index.html's stylesheets now include cafe-colors.css and colors.css; the override is html:root:root, one step above the app's own 配色, and 拿铁 is written out for the app's window Item 49 (2026-11-13): STYLES follows client/index.html with chat-reactions.css after chat-presence.css.",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 47); review prototype, not loaded by production pages; 配色 by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 48)",
-      "sha256": "cf6617ae00d6ba2cee9c22c12e1677cbf8482ee1b26a29df9e1f206246848340"
+      "sha256": "56704275f5909137cc7fa387ccd81777f169e2d5bec59f757a459a72314029e8"
     },
     {
       "target": "client/public/theme-lab/lab.js",
@@ -1008,6 +1008,24 @@
       "description": "配色 control (window.ClowderColors): mounts one row under 主题 in 设置 → 通用, a radio group with roving tab stop, arrows/Home/End; choosing sets or removes html[data-colors], points the theme-color meta at the new --x-win and remembers the choice in localStorage xbot-colors (a browser that cannot keep it is told so); no request, no server state",
       "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-13 (docs/xbot-frontend.md item 48)",
       "sha256": "32fb626c4e8439c424f5eb072e861136a71da4d4914308a2923fd4fb817cf958"
+    },
+    {
+      "target": "client/public/apps-dialog-rules.js",
+      "description": "应用 rules without DOM (window.ClowderAppsRules): each app state as a mark and a word (微信 and custom apps, from docs/apps-api.md), what 微信 offers in each state, the starting poll (every 2 s, about 2 minutes), the authorization deadline from the server's until and the m:ss clock, the custom-app form's checks mirroring the adapter's, the idempotency fingerprint, splitting a pasted command line only when unambiguous, the consent and consequence words, and what each failed request says",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-26 (docs/xbot-frontend.md item 52)",
+      "sha256": "0a95e35d99b09889d131c528a657c947d97bde9762eac4973d3c803c9ad71f49"
+    },
+    {
+      "target": "client/public/apps-dialog.js",
+      "description": "应用 dialog (window.ClowderApps): one dialog over the chat on the original .modal/.modal-card with the list (微信, custom apps, 添加自定义应用) and one app's page; GET /xbot-api/apps on opening, one check per custom app (at most 3 at a time), 微信's open/close/authorize/revoke, the add form with idempotency keys, rename and secrets by PATCH, remove after a nested confirm; focus trap, Escape one level at a time, focus back to the opener, eased height, one polite live region; everything in flight is abandoned on close",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-26 (docs/xbot-frontend.md item 52)",
+      "sha256": "42628293e06ab3042e528b2ad796abbb7214c256b93f3cb236af1836614148a4"
+    },
+    {
+      "target": "client/public/apps-dialog.css",
+      "description": "应用 dialog styles: the card hanging from a fixed line (a sheet at 560px and below), XBot's settings-row vocabulary for the list, five state marks drawn as different shapes (filled dot, ring, spinner, bar, struck ring), the 微信 page's authorization block and countdown, the custom app's page and the add form; tokens only, 44px targets on a phone, no motion under reduced motion",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-26 (docs/xbot-frontend.md item 52)",
+      "sha256": "9a8ba95a9139cb543b8bec701e86e2d0098352128a5af8f02100f932bb8f7bc3"
     }
   ]
 }

@@ -383,7 +383,7 @@ test('the page loads chat-panel.js before app.js (after sidebar.js) and chat-pan
   assert.equal(scripts.indexOf('chat-panel.js'), scripts.indexOf('sidebar.js') + 1);
   assert.ok(scripts.indexOf('chat-panel.js') < scripts.indexOf('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map((x) => x[1]);
-  assert.deepEqual(styles.slice(-3), ['sidebar.css', 'chat-panel.css', 'chat-live.css']);
+  assert.deepEqual(styles.slice(-4), ['sidebar.css', 'chat-panel.css', 'apps-dialog.css', 'chat-live.css']);
   const manifest = JSON.parse(read('docs/xbot-frontend-manifest.json'));
   for (const f of ['client/public/chat-panel.js', 'client/public/chat-panel.css']) assert.ok(manifest.extensions.some((e: Any) => e.target === f), f + ' is registered');
 });

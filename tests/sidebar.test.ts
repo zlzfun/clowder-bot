@@ -409,15 +409,15 @@ test('the full sidebar: 搜索 and 新建 at the right end of the greeting\'s li
   assert.match(trigger, /^\s*<span id="me-avatar"><\/span>\s*$/);
   assert.match(aside, /<div id="account-menu" class="pop account-menu" hidden>\n\s+<div class="me-head"><span id="me-name" class="me-name">我<\/span><span id="me-device" class="me-device" hidden><\/span><\/div>\n\s+<button id="account-settings"/);
   assert.match(read('client/public/devices.js'), /document\.getElementById\("me-device"\)/, 'devices.js still finds the device line');
-  // 应用: a named, focusable button that answers; a tooltip only in the rail, where its label is gone.
-  assert.match(aside, /<button id="side-apps" class="side-apps" type="button" aria-label="应用" data-tip="应用" data-tip-placement="right" data-tip-only="rail"><span class="side-apps-label">应用<\/span><\/button>/);
+  // 应用: a named, focusable button that opens a dialog (item 52); a tooltip only in the rail, where its label is gone.
+  assert.match(aside, /<button id="side-apps" class="side-apps" type="button" aria-haspopup="dialog" aria-label="应用" data-tip="应用" data-tip-placement="right" data-tip-only="rail"><span class="side-apps-label">应用<\/span><\/button>/);
   const app = read('client/public/app.js');
   assert.match(app, /if \(host\.dataset\.tipOnly === "rail" && !host\.closest\("\.sidebar\.rail"\)\) \{ hideTip\(\); return; \}/);
   // The pinned row holds pinned cats only, and takes no room without one.
   assert.match(read('client/public/sidebar.css'), /\.pin-row:empty \{ display: none; \}/);
   // Styles after every earlier one, chat-live.css still last; the script before app.js.
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
-  assert.deepEqual(styles.slice(-3), ['sidebar.css', 'chat-panel.css', 'chat-live.css']);
+  assert.deepEqual(styles.slice(-4), ['sidebar.css', 'chat-panel.css', 'apps-dialog.css', 'chat-live.css']);
   const scripts = [...html.matchAll(/<script src="\/([^"]+)"/g)].map(m => m[1]);
   assert.ok(scripts.indexOf('sidebar.js') >= 0 && scripts.indexOf('sidebar.js') < scripts.indexOf('app.js'));
 });
@@ -477,15 +477,15 @@ test('我\'s menu opens right above the face (left edges aligned) in the full si
   assert.match(app, /start: \(\) => \{ closeAccount\(\); hideTip\(\); \},/);
 });
 
-test('应用 is a placeholder the owner asked for: it says plainly it is not available yet, and sends nothing, opens nothing, stores nothing', () => {
+test('应用 was a placeholder the owner asked for (item 43); since item 52 it opens the 应用 dialog, from the full sidebar and the rail alike — the same button', () => {
   const app = read('client/public/app.js');
-  assert.match(app, /\$\("side-apps"\)\.prepend\(icon\("grid-plus"\)\);\n\s+\$\("side-apps"\)\.addEventListener\("click", \(\) => showToast\("应用还没有开放。", "info"\)\);/);
-  // The retained XBot apps store is not wired: neither loaded nor called.
+  // The owner, 2026-11-26: 「先做微信 和 自定义应用 两项吧。」 The toast that said it was not open is gone.
+  assert.match(app, /\$\("side-apps"\)\.prepend\(icon\("grid-plus"\)\);\n\s+\$\("side-apps"\)\.addEventListener\("click", \(\) => openApps\(\$\("side-apps"\)\)\);/);
+  assert.doesNotMatch(app, /应用还没有开放/);
+  // The retained XBot apps store is still not wired: neither loaded nor called (the dialog is apps-dialog.js, tests/apps-dialog.test.ts).
   const html = read('client/index.html');
-  assert.doesNotMatch(html, /apps\.(js|css)/);
+  assert.doesNotMatch(html, /\/apps\.(js|css)"/);
   assert.doesNotMatch(app, /XBotApps|\/xbot-api\/apps/);
-  // The toast is the app's status line (role="status"), read aloud.
-  assert.match(html, /<div id="toast" class="toast" role="status" hidden><\/div>/);
   // The rail's tooltip names it; the full sidebar shows its label instead.
   assert.match(read('client/public/sidebar.css'), /\.sidebar\.rail \.side-apps \{ flex: none; width: 40px; height: 40px;/);
 });

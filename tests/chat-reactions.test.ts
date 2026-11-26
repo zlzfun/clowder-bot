@@ -855,7 +855,7 @@ test('the shell wires it with thin hooks: scripts after chat-presence.js and bef
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map((m) => m[1]);
   const at = (n: string) => scripts.indexOf(n);
   assert.ok(at('chat-presence.js') < at('chat-reactions-rules.js') && at('chat-reactions-rules.js') < at('chat-reactions.js') && at('chat-reactions.js') < at('app.js'));
-  assert.deepEqual(styles.slice(-5), ['chat-presence.css', 'chat-reactions.css', 'sidebar.css', 'chat-panel.css', 'chat-live.css']);
+  assert.deepEqual(styles.slice(-6), ['chat-presence.css', 'chat-reactions.css', 'sidebar.css', 'chat-panel.css', 'apps-dialog.css', 'chat-live.css']);
   assert.match(app, /const strip = reactions\.strip\(data\.message, data\.text, closeMessageMenu\);\n {4}if \(strip\) menu\.append\(strip\);/);
   assert.match(app, /menu\.querySelector\("button\.menu-row:not\(:disabled\)"\)/);
   assert.match(app, /reactions\.rendered\(messages, null\);/);

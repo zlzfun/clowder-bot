@@ -1,0 +1,270 @@
+/* 应用 (apps-dialog.js, docs/xbot-frontend.md item 52): one dialog over the
+   chat, on the original .modal / .modal-card, .field, .primary, .secondary,
+   .text-btn, .ghost and the status spinner (.st-spin); the nested confirm is
+   the app's own (.modal-card with .note and .modal-actions, the danger
+   secondary of 删除群聊). Only existing tokens (--x-*, the app.css aliases,
+   the motion durations); no new colours, fonts or keyframes.
+   The list is XBot's settings-row vocabulary (.setrows, .approw: a tile, a
+   bold name, a quiet status line with a dot): 微信 in its own group, then the
+   owner's apps with 添加自定义应用 as their last row. A state is a mark and
+   a word, never colour alone: on — a filled dot; bad — an outlined ring;
+   busy — the spinner; idle (not open, not checked) — a short bar; off
+   (cannot be used here, turned off in the engine) — a struck ring.
+   The card hangs from a fixed line (its top edge stays put while its height
+   is eased); at 560px and below it is a sheet from the bottom edge. */
+
+.ap-modal { --ap-top: max(16px, calc((100vh - 640px) / 2)); place-items: start center; padding-top: var(--ap-top); }
+@supports (height: 100dvh) { .ap-modal { --ap-top: max(16px, calc((100dvh - 640px) / 2)); } }
+.ap-modal > .ap-card {
+  width: min(600px, 100%); max-height: calc(100vh - var(--ap-top) - 16px); padding: 0;
+  display: flex; flex-direction: column; overflow: hidden; overscroll-behavior: contain;
+}
+@supports (height: 100dvh) { .ap-modal > .ap-card { max-height: calc(100dvh - var(--ap-top) - 16px); } }
+.ap-card:focus { outline: none; }
+.ap-card.ap-easing .ap-body { overflow: hidden; }
+
+/* The head: ‹ back (on a page), the title, ×. */
+.ap-head { flex: none; display: flex; align-items: center; gap: var(--x-s2); min-height: 60px; padding: var(--x-s5) var(--x-s5) var(--x-s2) var(--x-s8); }
+.ap-head:has(> .ap-back:not([hidden])) { padding-left: var(--x-s5); }
+.ap-card .ap-title {
+  flex: 1; min-width: 0; margin: 0; font-size: 20px; font-weight: 560; line-height: 1.3; letter-spacing: -0.01em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Focus is put on the title only to start reading a page there (it is not a control, not in the Tab order). */
+.ap-title:focus, .ap-title:focus-visible { outline: none; }
+.ap-back, .ap-x { flex: none; }
+.ap-body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: var(--x-s1) var(--x-s8) var(--x-s8); }
+.ap-view { min-width: 0; animation: fade 160ms ease-out; }
+
+/* ---- the list ---- */
+.ap-wait { margin: var(--x-s3) 0; min-height: 22px; font-size: var(--x-fs-sm); line-height: 22px; color: var(--x-muted); }
+.ap-wait-text { animation: fade 160ms ease-out 300ms both; }
+.ap-fail { display: flex; flex-direction: column; align-items: flex-start; gap: var(--x-s3); }
+.ap-rows { display: flex; flex-direction: column; border-radius: var(--x-r-card); background: var(--x-fill-1); overflow: hidden; }
+.ap-rows + .ap-rows { margin-top: var(--x-s5); }
+.ap-row {
+  display: flex; align-items: center; gap: var(--x-s5); width: 100%; min-height: 60px; padding: var(--x-s4) var(--x-s5) var(--x-s4) 14px;
+  border: 0; border-top: 1px solid var(--x-fill-2); background: transparent; color: var(--x-text);
+  font: inherit; text-align: left; cursor: pointer; transition: background 160ms ease-out;
+}
+.ap-row:first-child { border-top: 0; }
+.ap-row:hover { background: var(--x-fill-2); }
+.ap-row:active { background: var(--x-fill-3); }
+.ap-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--x-r-card); }
+.ap-tile {
+  flex: none; width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center;
+  background: var(--x-card); color: var(--x-text-2);
+}
+.ap-tile > .icon { width: 20px; height: 20px; }
+.ap-row-tx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.ap-row-name { display: block; font-size: 14px; font-weight: 560; line-height: 1.45; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ap-st { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--x-fs-sm); line-height: 1.45; color: var(--x-muted); white-space: nowrap; }
+.ap-st-word { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ap-st-time { flex: none; font-variant-numeric: tabular-nums; }
+.ap-chev { flex: none; width: 16px; height: 16px; color: var(--x-faint); }
+/* 添加自定义应用: the quiet last row. */
+.ap-row-add { min-height: 52px; color: var(--x-text-2); }
+.ap-row-add .ap-tile { background: transparent; box-shadow: inset 0 0 0 1px var(--x-fill-3); color: var(--x-muted); }
+.ap-row-add .ap-tile > .icon { width: 18px; height: 18px; }
+.ap-row-add .ap-row-name { font-weight: 500; }
+
+/* ---- a state: a mark and its word ---- */
+/* Every mark sits in the same 11px slot, so a row's word does not move when its state changes. */
+.ap-mark { position: relative; flex: none; display: inline-grid; place-items: center; width: 11px; height: 11px; }
+.ap-mark::before { content: ""; box-sizing: border-box; width: 9px; height: 9px; border-radius: 50%; }
+.ap-mark.on::before { background: var(--x-online); }
+.ap-mark.bad::before { border: 1.6px solid var(--x-danger); }
+.ap-mark.idle::before { height: 2px; border-radius: 1px; background: var(--x-faint); }
+.ap-mark.off::before { border: 1.4px solid var(--x-muted); }
+.ap-mark.off::after { content: ""; position: absolute; left: 5px; top: 1px; width: 1.4px; height: 9px; background: var(--x-muted); transform: rotate(45deg); }
+.ap-mark.busy { color: var(--x-muted); }
+.ap-mark.busy::before { display: none; }
+.ap-mark.busy > .st-spin { width: 11px; height: 11px; stroke-width: 2.6; }
+.ap-st-word.bad, .ap-state-word.bad { color: var(--x-danger); }
+
+/* ---- an app's page ---- */
+/* The state and the main action, at the top: the tile and the action keep to the first 48px, whatever the words under the state. */
+.ap-hero { display: flex; align-items: flex-start; flex-wrap: wrap; gap: var(--x-s5) 14px; padding: var(--x-s1) 0 var(--x-s6); }
+.ap-tile.lg { width: 48px; height: 48px; border-radius: 14px; background: var(--x-fill-1); }
+.ap-tile.lg > .icon { width: 26px; height: 26px; }
+.ap-hero-tx { flex: 1 1 200px; min-width: 0; min-height: 48px; display: flex; flex-direction: column; justify-content: center; }
+.ap-state { display: flex; align-items: center; gap: var(--x-s3); margin: 0; font-size: 15px; font-weight: 560; line-height: 1.5; color: var(--x-text); }
+.ap-state:focus { outline: none; }
+.ap-state:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--x-r-xs); }
+.ap-state-word { min-width: 0; }
+.ap-about { margin: 2px 0 0; font-size: 13px; line-height: 1.6; color: var(--x-muted); }
+.ap-hero-acts { flex: none; display: flex; align-items: center; gap: var(--x-s3); min-height: 48px; margin-left: auto; }
+.ap-detail { margin-top: 2px; }
+.ap-detail-btn { margin-left: -8px; font-size: var(--x-fs-sm); color: var(--x-muted); }
+.ap-detail-text {
+  margin: 0 0 var(--x-s5); padding: var(--x-s3) var(--x-s4); max-height: 160px; overflow: auto; border-radius: var(--x-r-sm);
+  background: var(--x-fill-1); font: 12px/1.5 var(--x-mono); color: var(--x-muted); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+/* A quiet line for what just happened; a soft danger box for what failed. */
+.ap-note { margin: 0 0 var(--x-s5); font-size: 13px; line-height: 1.6; color: var(--x-text-2); }
+.ap-note.bad { padding: var(--x-s3) var(--x-s5); border-radius: 10px; background: var(--x-danger-bg); color: var(--x-danger); }
+.ap-hint { margin: 0 0 var(--x-s5); font-size: var(--x-fs-sm); line-height: 1.6; color: var(--x-muted); }
+
+/* 微信: when on, the authorization is the centre of the page. */
+.ap-auth { border-radius: 16px; background: var(--x-fill-1); padding: var(--x-s7) var(--x-s7) var(--x-s6); }
+.ap-auth-state { margin: 0; font-size: 15px; font-weight: 600; line-height: 1.5; color: var(--x-text); }
+.ap-auth-state:focus { outline: none; }
+.ap-auth-state:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--x-r-xs); }
+.ap-facts { list-style: none; margin: var(--x-s4) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--x-s2); }
+.ap-facts li, .ap-conseq li { position: relative; padding-left: 14px; font-size: 13.5px; line-height: 1.6; color: var(--x-text-2); }
+.ap-facts li::before, .ap-conseq li::before {
+  content: ""; position: absolute; left: 2px; top: calc(0.8em - 2px); width: 4px; height: 4px; border-radius: 50%; background: var(--x-faint);
+}
+.ap-auth-acts { display: flex; align-items: center; flex-wrap: wrap; gap: var(--x-s3) var(--x-s5); margin-top: var(--x-s6); }
+.ap-source { font-size: var(--x-fs-sm); color: var(--x-muted); }
+.ap-source-text { margin: var(--x-s4) 0 0; padding: var(--x-s4) var(--x-s5); border-radius: 10px; background: var(--x-card); }
+.ap-source-text p { margin: 0; font-size: var(--x-fs-sm); line-height: 1.65; color: var(--x-text-2); }
+.ap-source-text .ap-source-ver { margin-bottom: var(--x-s1); font-size: var(--x-fs-cap); color: var(--x-muted); font-variant-numeric: tabular-nums; }
+.ap-source-text .ap-source-ver:empty { display: none; }
+.ap-clock-row { display: flex; align-items: center; justify-content: space-between; gap: var(--x-s5); margin: var(--x-s1) 0 0; }
+.ap-clock { margin: 0; font-size: 44px; font-weight: 600; line-height: 1.15; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: var(--x-text); }
+.ap-how { margin: var(--x-s5) 0 0; font-size: 13.5px; line-height: 1.65; color: var(--x-text-2); }
+.ap-how.quiet { margin-top: var(--x-s2); font-size: var(--x-fs-sm); color: var(--x-muted); }
+.ap-say { font-weight: 600; color: var(--x-text); }
+.ap-auth .ap-note { margin: var(--x-s5) 0 0; }
+.ap-again { margin-left: var(--x-s2); font-size: var(--x-fs-sm); color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+.ap-foot { margin: var(--x-s5) 0 0; font-size: var(--x-fs-sm); line-height: 1.6; color: var(--x-muted); }
+
+/* A custom app: what it is, its secrets by name, its tools. */
+.ap-cmd {
+  display: flex; align-items: flex-start; gap: var(--x-s3); padding: var(--x-s4) var(--x-s5); border-radius: 10px; background: var(--x-fill-1);
+  font: 12.5px/1.6 var(--x-mono); color: var(--x-text); overflow-wrap: anywhere;
+}
+.ap-cmd code { font: inherit; min-width: 0; user-select: all; }
+.ap-sec { margin-top: var(--x-s7); }
+.ap-sec > h3 { margin: 0 0 var(--x-s3); font-size: 12px; font-weight: 600; letter-spacing: .01em; color: var(--x-faint); }
+.ap-names, .ap-tools { list-style: none; margin: 0; padding: 0; border-radius: var(--x-r-card); background: var(--x-fill-1); overflow: hidden; }
+.ap-name-row { display: flex; align-items: center; gap: var(--x-s3); min-height: 44px; padding: var(--x-s1) var(--x-s3) var(--x-s1) 14px; border-top: 1px solid var(--x-fill-2); }
+.ap-name-row:first-child { border-top: 0; }
+.ap-name-row > code { flex: 1; min-width: 0; font: 12.5px/1.5 var(--x-mono); color: var(--x-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ap-swap { flex: none; min-height: 28px; font-size: var(--x-fs-sm); color: var(--x-text-2); }
+.ap-add-secret { display: inline-flex; align-items: center; gap: var(--x-s1); min-height: 30px; margin-top: var(--x-s2); padding: 0 var(--x-s3) 0 var(--x-s2); font-size: 13px; color: var(--x-text-2); }
+.ap-add-secret > .icon { width: 14px; height: 14px; }
+.ap-names[hidden] + .ap-add-secret { margin-top: 0; margin-left: -6px; }
+.ap-secret-edit { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--x-s2); padding: var(--x-s3) 0; }
+.ap-secret-for { font: 12.5px/1.5 var(--x-mono); color: var(--x-text); }
+.ap-secret-line { display: flex; gap: var(--x-s3); min-width: 0; }
+.ap-secret-line > .ap-secret-name { flex: 2 1 0; }
+.ap-secret-line > .ap-secret-value { flex: 3 1 0; }
+.ap-secret-acts { display: flex; align-items: center; gap: var(--x-s2); }
+/* In the list of names (on --x-fill-1) the editor's fields take the card's surface, so they read as fields. */
+.ap-names .ap-secret-name, .ap-names .ap-secret-in { background: var(--x-card); }
+.ap-names .ap-secret-name:focus, .ap-names .ap-secret-in:focus { background: var(--x-card); box-shadow: inset 0 0 0 1px var(--x-fill-3); }
+.ap-small { min-height: 30px; padding: 4px 12px; font-size: 13px; }
+.ap-tool { border-top: 1px solid var(--x-fill-2); }
+.ap-tool:first-child { border-top: 0; }
+.ap-tool > .ap-tool-name, .ap-tool.none { display: block; padding: var(--x-s3) 14px; }
+.ap-tool.none { font-size: var(--x-fs-sm); color: var(--x-muted); }
+.ap-tool-name { font: 12.5px/1.6 var(--x-mono); color: var(--x-text); overflow-wrap: anywhere; }
+.ap-tool-btn {
+  display: flex; align-items: center; gap: var(--x-s3); width: 100%; padding: var(--x-s3) var(--x-s4) var(--x-s3) 14px;
+  border: 0; background: transparent; text-align: left; cursor: pointer; transition: background 160ms ease-out;
+}
+.ap-tool-btn:hover { background: var(--x-fill-2); }
+.ap-tool-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ap-tool-btn > .ap-tool-name { flex: 1; min-width: 0; }
+.ap-tool-chev { flex: none; width: 14px; height: 14px; color: var(--x-faint); transition: transform 160ms ease-out; }
+.ap-tool-btn[aria-expanded="true"] .ap-tool-chev { transform: rotate(180deg); }
+.ap-tool-desc { margin: 0; padding: 0 14px var(--x-s4); font-size: 13px; line-height: 1.6; color: var(--x-text-2); }
+.ap-end { margin-top: var(--x-s8); }
+.ap-remove { min-height: 30px; margin-left: -8px; font-size: 13px; }
+/* The name in the title is a button: a pencil comes up under the pointer or the keyboard (item 51's language). */
+.ap-name {
+  display: inline-flex; align-items: center; gap: var(--x-s2); max-width: 100%; margin: -2px 0 -2px -6px; padding: 2px 6px;
+  border: 0; border-radius: var(--x-r-sm); background: transparent; color: inherit; font: inherit; cursor: text;
+}
+.ap-name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ap-name-mark { flex: none; width: 15px; height: 15px; color: var(--x-muted); opacity: 0; transition: opacity var(--dur-pop-close) ease-out; }
+.ap-name:hover, .ap-name:focus-visible { background: var(--x-fill-1); }
+.ap-name:hover .ap-name-mark, .ap-name:focus-visible .ap-name-mark { opacity: 1; }
+.ap-name:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+@media (hover: none) { .ap-name-mark { opacity: 1; } }
+.ap-name-input {
+  width: calc(100% + 10px); min-height: 36px; margin: -4px 0 -4px -10px; padding: 4px 10px; border: 0; border-radius: var(--x-r-sm); outline: none;
+  background: var(--x-fill-2); color: var(--x-text); font: inherit;
+}
+
+/* ---- 添加自定义应用 ---- */
+.ap-lead { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--x-muted); }
+.ap-add .field { margin: var(--x-s6) 0 0; }
+.ap-add .field input, .ap-add .field textarea { background: var(--x-fill-1); }
+.ap-add .field input:focus, .ap-add .field textarea:focus { background: var(--x-fill-2); }
+.ap-add .field textarea { min-height: 72px; font-family: var(--x-mono); font-size: 13px; }
+.ap-add .field input[type="url"], .ap-add .ap-kind-panel[data-kind="program"] .field:first-child input { font-family: var(--x-mono); font-size: 13px; }
+.ap-err { margin: 0; font-size: var(--x-fs-sm); line-height: 1.5; color: var(--x-danger); }
+.ap-err:empty { display: none; }
+.ap-card [aria-invalid="true"] { outline: 2px solid var(--x-danger); outline-offset: -2px; }
+.ap-split { margin: 0; }
+.ap-kinds { display: grid; grid-template-columns: 1fr 1fr; gap: var(--x-s3); margin-top: var(--x-s6); }
+.ap-kind {
+  display: flex; align-items: center; gap: var(--x-s4); min-height: 52px; padding: var(--x-s3) var(--x-s5) var(--x-s3) var(--x-s3);
+  border: 0; border-radius: var(--x-r-card); background: var(--x-fill-1); color: var(--x-text-2);
+  font: inherit; font-size: 14px; font-weight: 500; text-align: left; cursor: pointer; transition: background 160ms ease-out, color 160ms ease-out;
+}
+.ap-kind .ap-tile { width: 32px; height: 32px; border-radius: 9px; }
+.ap-kind .ap-tile > .icon { width: 17px; height: 17px; }
+.ap-kind:hover { background: var(--x-fill-2); color: var(--x-text); }
+.ap-kind[aria-checked="true"] { background: var(--selected); color: var(--x-text); font-weight: 600; }
+.ap-kind:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ap-kind[aria-disabled="true"] { cursor: default; }
+.ap-secrets { min-width: 0; margin: var(--x-s6) 0 0; padding: 0; border: 0; }
+.ap-secrets > legend { padding: 0; margin-bottom: var(--x-s3); font-size: 13px; color: var(--muted); }
+.ap-secret-rows { display: flex; flex-direction: column; gap: var(--x-s3); }
+.ap-secret { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) auto; gap: var(--x-s2) var(--x-s3); align-items: center; }
+.ap-secret > .ap-err { grid-column: 1 / -1; }
+.ap-secret-name, .ap-secret-in {
+  width: 100%; min-height: 40px; padding: 8px 12px; border: 0; border-radius: var(--x-r-sm); outline: none;
+  background: var(--x-fill-1); color: var(--x-text); font: 13px/1.5 var(--x-mono); transition: background 160ms ease-out;
+}
+.ap-secret-in { padding-right: 40px; }
+.ap-secret-name:focus, .ap-secret-in:focus { background: var(--x-fill-2); }
+.ap-secret-name::placeholder, .ap-secret-in::placeholder { color: var(--muted); font-family: var(--font); }
+.ap-secret-value { position: relative; min-width: 0; }
+.ap-peek { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 32px; height: 32px; min-width: 32px; min-height: 32px; }
+.ap-peek svg, .ap-drop svg { width: 17px; height: 17px; }
+.ap-conseq {
+  list-style: none; margin: var(--x-s7) 0 0; padding: var(--x-s4) var(--x-s5); border-radius: var(--x-r-card); background: var(--x-fill-1);
+  display: flex; flex-direction: column; gap: var(--x-s1);
+}
+.ap-conseq li { font-size: 13px; }
+.ap-error { margin: var(--x-s4) 0 0; font-size: var(--x-fs-sm); line-height: 1.5; }
+.ap-twin { margin-top: var(--x-s2); font-size: 13px; color: var(--x-text); background: var(--x-fill-1); min-height: 28px; }
+.ap-add .modal-actions { margin-top: var(--x-s6); }
+
+/* The nested confirm sits over the dialog. */
+.ap-confirm-shade { z-index: 51; }
+.ap-confirm:focus { outline: none; }
+
+/* ---- a sheet on a phone ---- */
+@media (max-width: 560px) {
+  .ap-modal { place-items: end stretch; padding: 0; --ap-top: 24px; }
+  .ap-modal > .ap-card {
+    width: 100%; border-radius: 20px 20px 0 0; max-height: calc(100vh - 24px);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  @supports (height: 100dvh) { .ap-modal > .ap-card { max-height: calc(100dvh - 24px); } }
+  .ap-head { min-height: 56px; padding: var(--x-s3) var(--x-s3) var(--x-s1) var(--x-s7); }
+  .ap-head:has(> .ap-back:not([hidden])) { padding-left: var(--x-s3); }
+  .ap-back, .ap-x { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
+  .ap-body { padding: var(--x-s1) var(--x-s6) var(--x-s7); }
+  .ap-auth { padding: var(--x-s6); }
+  .ap-clock { font-size: 40px; }
+  .ap-hero-tx { flex-basis: 160px; }
+  .ap-hero-acts > button { min-height: 44px; }
+  .ap-secret { grid-template-columns: minmax(0, 1fr) auto; }
+  .ap-secret > .ap-secret-name { grid-column: 1 / -1; }
+  .ap-secret-line { flex-direction: column; }
+  .ap-secret-name, .ap-secret-in, .ap-add .field input { min-height: 44px; }
+  .ap-peek, .ap-drop { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
+  .ap-swap, .ap-add-secret, .ap-detail-btn, .ap-source, .ap-remove, .ap-twin { min-height: 44px; }
+  .ap-auth-acts > .primary, .ap-clock-row > .secondary { min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ap-view, .ap-wait-text { animation: none; }
+  .ap-row, .ap-kind, .ap-tool-btn, .ap-tool-chev, .ap-name-mark, .ap-secret-name, .ap-secret-in { transition: none; }
+}

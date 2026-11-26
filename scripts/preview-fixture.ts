@@ -10,7 +10,7 @@
 //   curl -X POST :3230/__preview -H 'Content-Type: application/json' -d '{"agents":"login"}'
 //   …  -d '{"speed":3}'  (slower playback)   -d '{"approvals":"failing"}'  (agreeing fails like a broken store)
 //   …  -d '{"page":12}'  (read conversations 12 messages at a time, to see earlier pages load)
-//   …  -d '{"wechat":"slow"}'  (应用: ok | slow | fail | timeout | absent | present)   -d '{"probe":"fail"}'  (no custom app answers; "ok" restores)
+//   …  -d '{"wechat":"slow"}'  (应用: ok | slow | fail | timeout | absent | present | crashed)   -d '{"probe":"fail"}'  (no custom app answers; "ok" restores)
 //   …  -d '{"append":"off"}'  (a cat that is writing does not take in what is said meanwhile; it answers that afterwards)
 //   curl :3230/__preview   → {preview, scene: "plain" | "showcase", staged, zone, plays[], cats[]} (what this is; changes nothing)
 // Typed words steer the canned reply: 长, 文件/查/资料, 慢, 失败, 清单, 选一个, 确认一下, 记住, 提醒/定时; 谢谢/晚安/再见 gets one
@@ -462,13 +462,15 @@ runtime.app.post('/__preview', async (req, res) => {
   if (typeof input.append === 'string') native.appendable = input.append !== 'off';
   // 应用 (tests/apps-fixture.ts). {"wechat": "ok" | "slow" | "fail" | "timeout"}: what opening 微信 does next time (at once / stays
   // starting for a few reads / fails / the request is cut while the engine goes on); {"wechat": "absent" | "present"}: the engine has
-  // no such plugin / has it, off. {"probe": "ok" | "fail"}: custom apps answer by their script again / none of them answers.
+  // no such plugin / has it, off; {"wechat": "crashed"}: enabled but its runtime is not running (the contract's `failed`, item 52's
+  // screenshots). {"probe": "ok" | "fail"}: custom apps answer by their script again / none of them answers.
   if (typeof input.wechat === 'string') {
     const apps = native.apps, starts: Record<string, typeof apps.start> = { ok: 'ok', slow: 6, fail: 'fail', timeout: 'timeout' };
     if (input.wechat in starts) apps.start = starts[input.wechat]!;
     else if (input.wechat === 'absent') apps.plugin = null;
     else if (input.wechat === 'present') apps.plugin = { artifact: 'installed', intent: 'disabled', live: 'stopped', lifecycleRevision: 4, diagnostic: null, activationFailed: null, setEnabled: true };
-    else return res.status(400).json({ error: 'wechat: ok | slow | fail | timeout | absent | present' });
+    else if (input.wechat === 'crashed' && apps.plugin) Object.assign(apps.plugin, { intent: 'enabled', live: 'crashed', diagnostic: { code: 'UNEXPECTED_RUNTIME_FAILURE', message: 'Plugin runtime reported UNEXPECTED_RUNTIME_FAILURE.' } });
+    else return res.status(400).json({ error: 'wechat: ok | slow | fail | timeout | absent | present | crashed' });
   }
   if (typeof input.probe === 'string') {
     if (!['ok', 'fail'].includes(input.probe)) return res.status(400).json({ error: 'probe: ok | fail' });
