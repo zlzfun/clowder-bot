@@ -139,6 +139,9 @@ test('sending is one ordinary message: the emoji as its words, quoting the row\'
   assert.equal(R.failWords('👍', R.failure(409, '会话已变化。'), ''), '👍 没发出去：会话已变化');
   // A cat that left the group: the server's sentence says it all.
   assert.equal(R.failWords('👍', R.failure(409, '团子已经不在这个群里，这句话没有发出去。', 'reply_cat_left'), ''), '团子已经不在这个群里，这句话没有发出去');
+  // So does a cat that cannot run now (the engine refused before storing anything).
+  assert.equal(R.failWords('👍', R.failure(409, '这只猫猫现在用不了，消息没有发出', 'target_unavailable'), ''), '这只猫猫现在用不了，消息没有发出');
+  assert.equal(R.failWords('👀', R.failure(409, '点到的猫猫现在用不了，消息没有发出。', 'target_unavailable'), ''), '点到的猫猫现在用不了，消息没有发出');
   assert.equal(R.failWords('❤️', R.failure(400, 'x'), '团子'), '给团子的 ❤️ 没发出去');
   assert.equal(R.failWords('🐾', R.failure(0, ''), ''), '没能确认 🐾 发出去没有');
   assert.equal(R.failWords('🐾', R.failure(502, ''), '读书会'), '没能确认给读书会的 🐾 发出去没有');

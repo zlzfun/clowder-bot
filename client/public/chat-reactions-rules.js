@@ -167,12 +167,13 @@
   // A send that did not land: refused (a 4xx, with the server's reason when
   // it gives one in Chinese), or not known (no answer, or a server fault:
   // it may have landed, so tapping again reuses its key). A reply to a cat
-  // that has left the group (409 reply_cat_left) is refused with a sentence
-  // that already says so in full.
+  // that has left the group (409 reply_cat_left), or to one that cannot run
+  // now (409 target_unavailable), is refused with a sentence that already
+  // says so in full.
   function failure(status, error, code) {
     const known = Number(status) >= 400 && Number(status) < 500;
     const reason = known && /\p{Script=Han}/u.test(str(error)) ? str(error).replace(/^没能完成：/, "").replace(/[。.]+$/, "") : "";
-    return { unknown: !known, reason, whole: known && code === "reply_cat_left" && !!reason };
+    return { unknown: !known, reason, whole: known && (code === "reply_cat_left" || code === "target_unavailable") && !!reason };
   }
   // What the owner is told. chat: the chat's name when the owner is no longer in it.
   function failWords(emoji, f, chat) {

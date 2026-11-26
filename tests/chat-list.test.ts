@@ -552,33 +552,36 @@ test('the shell reads the sidebar lines from the status poll only: no transcript
 
 // app.js's own sendText, with what it calls faked: the quote leaves the
 // composer when the send is dispatched, and comes back only if it did not go out.
-function sendHarness() {
+// What the send's row says (shown: each time, its parts' words), what is
+// announced, which files come back and which reads are scheduled are recorded.
+function sendHarness(options: { filesBack?: boolean } = {}) {
   const app = read('client/public/app.js');
   const m = /\n {2}async function sendText\([^)]*\) \{\n[\s\S]*?\n {2}\}\n/.exec(app);
   assert.ok(m, 'sendText is where the shell keeps it');
   const out: Any = {};
   const composer = { text: '' };
   const state: Any = { sel: { type: 'bot', id: '团子' }, replyTo: null, pendingSends: [], replyErrors: [], streaming: 0, threadLoad: 0, sig: '' };
-  const calls: Any[] = [], givenBack: Any[] = [];
+  const calls: Any[] = [], givenBack: Any[] = [], shown: string[][] = [], announced: string[] = [], filesBack: Any[] = [], later: Any[] = [];
   let answer: Any = null;
-  const marker = () => ({ className: '', isConnected: true, replaceChildren() {}, remove() {} });
+  const words = (n: Any) => (typeof n === 'string' ? n : n.text);
+  const marker = () => ({ className: '', isConnected: true, replaceChildren: (...nodes: Any[]) => { shown.push(nodes.map(words)); }, remove() {} });
   const sandbox: Any = {
-    out, state, document: { createTextNode: (t: string) => t }, JSON, Date, Math, setTimeout: () => 0,
+    out, state, document: { createTextNode: (t: string) => t }, JSON, Date, Math, setTimeout: (fn: Any) => { later.push(fn); return 0; },
     sessionStorage: { setItem() {} }, authenticated: true, input: {}, thread: { querySelector: () => null },
-    requestKey: () => 'k1', ownerSends: () => 0, announceSend() {}, botCatId: () => 'c1', setStatus() {}, zhError: (x: string) => x,
-    el: () => ({ append() {}, addEventListener() {} }), errorDetails() {}, composerCaretTo() {}, composerRefreshHeight() {}, syncComposer() {},
+    requestKey: () => 'k1', ownerSends: () => 0, announceSend: (t: string) => { announced.push(t); }, botCatId: () => 'c1', setStatus() {}, zhError: (x: string) => x,
+    el: (_tag: string, _cls: string, text = '') => ({ text, append() {}, addEventListener() {} }), errorDetails() {}, composerCaretTo() {}, composerRefreshHeight() {}, syncComposer() {},
     composerText: () => composer.text, composerSet: (t: string) => { composer.text = t; },
     optimisticMessage: () => { const mk = marker(); return { dataset: {}, classList: { remove() {} }, querySelector: (sel: string) => (sel === '.send-state' ? mk : null) }; },
     live: { expect: () => ({ accept() {}, drop() {} }) },
     liveRules: { receipt: () => ({ userMessageId: 'u1' }) },
-    workspace: { threadId: () => 'T1', giveBack: () => false },
+    workspace: { threadId: () => 'T1', giveBack: (files: Any) => { filesBack.push(files); return !!options.filesBack; } },
     clearQuote: () => { state.replyTo = null; }, paintQuoteBar() {},
     chatList: { giveBack: (...a: Any[]) => givenBack.push(a) },
     loadThread: async () => {},
     apiFetch: (path: string, opt: Any) => { calls.push({ path, body: JSON.parse(opt.body) }); return new Promise((resolve) => { answer = resolve; }); },
   };
   vm.runInNewContext(m![0] + 'out.sendText = sendText;', sandbox);
-  return { send: out.sendText, state, composer, calls, givenBack, respond: (r: Any) => answer(r) };
+  return { send: out.sendText, state, composer, calls, givenBack, shown, announced, filesBack, later, respond: (r: Any) => answer(r) };
 }
 const accepted = () => ({ ok: true, status: 200, headers: { get: () => 'application/json' }, json: async () => ({ userMessageId: 'u1' }), text: async () => '' });
 const refused = () => ({ ok: false, status: 400, headers: { get: () => 'application/json' }, json: async () => ({ error: '不行' }), text: async () => '' });
@@ -628,6 +631,49 @@ test('a quoted send takes its quote along at once: switching chats before the an
   h.state.replyTo = { seq: 5, text: '原话', thread: 'T0' };
   h.send('好的', null, [], null);
   assert.equal('reply_to' in h.calls[0].body, false);
+});
+
+// The engine refuses a message before storing it when a cat it names cannot run; the server answers
+// 409 target_unavailable with its own sentence (docs/xbot-frontend.md item 53). A send that did not go out.
+const unavailable = (error: string) => ({ ok: false, status: 409, headers: { get: () => 'application/json' }, json: async () => ({ error, code: 'target_unavailable' }), text: async () => '' });
+test('a send refused because the cat cannot run did not go out: words, quote and files come back, the server\'s sentence is said once, and the conversation is read again', async () => {
+  const quote = { seq: 5, text: '原话', thread: 'T1' }, files = { threadId: 'T1', ids: ['f1'] };
+  let h = sendHarness({ filesBack: true });
+  h.state.replyTo = quote;
+  let done = h.send('在吗', null, [], files);
+  assert.deepEqual(h.calls[0].body.attachments, ['f1']);
+  h.respond(unavailable('这只猫猫现在用不了，消息没有发出'));
+  await done;
+  assert.equal(h.composer.text, '在吗');
+  assert.deepEqual(plain(h.state.replyTo), quote);
+  assert.deepEqual(plain(h.filesBack), [files]);
+  assert.deepEqual(h.shown.at(-1), ['这只猫猫现在用不了，消息没有发出，原文还在输入框里，附件已放回'], 'the sentence already says it did not go out: said once');
+  assert.equal(h.announced.at(-1), '没发出去，原文还在输入框里，附件已放回');
+  assert.equal(h.later.length, 1, 'a 409: the conversation is read again');
+  // Newer words in the composer stay; these can be put back.
+  h = sendHarness();
+  done = h.send('在吗', null, [], null);
+  h.composer.text = '另一句';
+  h.respond(unavailable('点到的猫猫现在用不了，消息没有发出'));
+  await done;
+  assert.equal(h.composer.text, '另一句');
+  assert.deepEqual(h.shown.at(-1), ['点到的猫猫现在用不了，消息没有发出', '放回输入框']);
+  // Left the chat before the answer: the words and quote go back to its draft.
+  h = sendHarness();
+  h.state.replyTo = quote;
+  const from = h.state.sel;
+  done = h.send('在吗', null, [], null);
+  h.state.sel = { type: 'bot', id: '栗子' };
+  h.respond(unavailable('这只猫猫现在用不了，消息没有发出'));
+  await done;
+  assert.ok(h.givenBack.length === 1 && h.givenBack[0][0] === from);
+  assert.deepEqual(plain(h.givenBack[0].slice(1)), ['在吗', quote]);
+  // Any other refusal still says 没发出去 before the server's reason.
+  h = sendHarness();
+  done = h.send('在吗', null, [], null);
+  h.respond(refused());
+  await done;
+  assert.deepEqual(h.shown.at(-1), ['没发出去：不行，原文还在输入框里']);
 });
 
 test('the greeting counts a cat as busy only while it works or waits in line, never while it waits for the owner', () => {
