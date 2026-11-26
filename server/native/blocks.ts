@@ -1,6 +1,6 @@
 import type { NativeMessage } from './types.js';
 import { clip, plainLine } from './text.js';
-import { triggerWords } from './trigger-words.js';
+import { changeWords, triggerWords } from './trigger-words.js';
 
 /**
  * What a cat attached to a message besides words and files, as the chat can
@@ -48,7 +48,16 @@ function requestWords(producer: unknown, block: Record<string, unknown>): { kind
       let when = '';
       try { when = typeof field?.value === 'string' ? triggerWords(JSON.parse(field.value)) : ''; } catch { /* not a trigger the card spells out */ }
       const verb = colon >= 0 ? heading.slice(0, colon) : heading, remove = /删除|取消|移除|停用/.test(verb), change = /更新|修改/.test(verb);
-      return { kind: 'schedule', title: remove ? '想取消一个定时' : change ? '想改一个定时' : '想设一个定时', ...body([label, when].filter(Boolean).join(' · ')) };
+      // The engine lists each changed parameter as a field of its own, "<name>": "<old JSON> → <new JSON>" (schedule-mutation-card-block.ts).
+      const was: Record<string, unknown> = {}, next: Record<string, unknown> = {};
+      if (change) for (const entry of (Array.isArray(block.fields) ? block.fields : []).map(record)) {
+        if (typeof entry.label !== 'string' || typeof entry.value !== 'string' || ['Task ID', 'Template', 'Trigger', 'Delivery thread'].includes(entry.label)) continue;
+        const cut = entry.value.lastIndexOf(' → ');
+        if (cut < 0) continue;
+        try { next[entry.label] = JSON.parse(entry.value.slice(cut + 3)); } catch { continue; }
+        try { was[entry.label] = JSON.parse(entry.value.slice(0, cut)); } catch { /* not set before */ }
+      }
+      return { kind: 'schedule', title: remove ? '想取消一个定时' : change ? '想改一个定时' : '想设一个定时', ...body([label, when, changeWords(was, next)].filter(Boolean).join(' · ')) };
     }
     case 'F221': return { kind: 'preference', title: '想记住你的一个偏好', ...body(said) };
     case 'F231': return { kind: 'profile', title: '想更新关于你的资料', ...body(said) };

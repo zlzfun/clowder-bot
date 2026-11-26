@@ -2,7 +2,7 @@ import { ApiError } from '../errors.js';
 import { encode, type BotBridge } from './bridge.js';
 import type { NativeCat } from './types.js';
 import { clip } from './text.js';
-import { triggerWords } from './trigger-words.js';
+import { changeWords, triggerWords } from './trigger-words.js';
 export { triggerWords };
 
 /**
@@ -69,7 +69,8 @@ function present(item: Item, cats: NativeCat[], base: string | undefined): Appro
       // The engine proposes three things about a timer: making one, deleting one and (since its parameter updates) changing one.
       const label = summary.replace(/^(?:Create|Delete|Update) schedule:\s*/, '') || '定时任务', remove = detail.mutationKind === 'delete', change = detail.mutationKind === 'update';
       return { ...shared, kind: 'schedule', title: remove ? `${who}想取消一个定时` : change ? `${who}想改一个定时` : `${who}想设一个定时`,
-        body: `${label} · ${triggerWords(detail.trigger)}`,
+        // A change says what it changes: agreeing to "改吧" without that is not a choice.
+        body: [label, triggerWords(detail.trigger), change ? changeWords(detail.previousParams, detail.params) : ''].filter(Boolean).join(' · '),
         ...(inline ? { approve: { label: remove ? '取消它' : change ? '改吧' : '设上' } } : elsewhere), reject: base ? { label: remove ? '先留着' : change ? '先不改' : '不用' } : null };
     }
     case 'F306': return { ...shared, kind: 'question', title: `${who}有件事要问你`, body: summary, approve: null, reject: null, note: '这一项要在运行面板里回答' };

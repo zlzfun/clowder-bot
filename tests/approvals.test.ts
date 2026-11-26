@@ -107,7 +107,7 @@ test('a request to change a timer is named as a change; a preference is approved
   ];
   const { approvals } = await (await r.call(scope)).json() as any;
   assert.deepEqual(approvals.map((a: any) => [a.id, a.kind, a.title, a.body, a.approve?.label ?? null, a.reject?.label ?? null]), [
-    ['change', 'schedule', '快手想改一个定时', '喝水提醒 · 每 1 小时', '改吧', '先不改'],
+    ['change', 'schedule', '快手想改一个定时', '喝水提醒 · 每 1 小时 · 「喝水」改为「喝温水」', '改吧', '先不改'],
     ['published', 'preference', '快手想记住你的一个偏好', '先说结论', '记住', '不用记'],
     ['private', 'preference', '快手想记住你的一个偏好', '简短', '记住', '不用记'],
   ]);

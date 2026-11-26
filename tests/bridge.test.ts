@@ -118,11 +118,21 @@ test('a message the engine refuses because a cat it names cannot run was not sen
   const sent = await r.call('/xbot-api/bots/阿橘/messages', 'POST', { text: '在吗', idempotencyKey: 'c1b0f3a2-6f0e-4f43-9d0c-3a1f4d6f2b11' });
   assert.equal(sent.status, 409);
   const said = await sent.json() as any;
-  assert.equal(said.code, 'target_unavailable'); assert.equal(said.error, '这只猫猫现在用不了，消息没有发出');
-  await assert.rejects(r.bridge.greet(cat, thread.id), (error: any) => error.status === 409);
+  assert.equal(said.code, 'target_unavailable'); assert.equal(said.error, '阿橘现在用不了，消息没有发出');
+  await assert.rejects(r.bridge.greet(cat, thread.id), (error: any) => error.status === 409 && error.code === 'target_unavailable' && error.message === '阿橘现在用不了');
   assert.equal((await r.bridge.transcript(cat)).greeting, undefined, 'a refusal before admission leaves nothing to recover');
   refusing = false;
   assert.deepEqual(await r.bridge.greet(cat, thread.id), {status:'accepted'});
+  // In a group the engine names who cannot run (and who would stand in); the chat names them as the owner knows them.
+  const bea = await r.bridge.createBot({name:'小白'});
+  const group = await (await r.call('/xbot-api/groups', 'POST', { members: ['阿橘', '小白'] })).json() as any;
+  r.native.request = async (path, opts) => {
+    if (path === '/api/messages' && opts?.method === 'POST') throw new ApiError(409, '指定角色当前不可用，请确认实际接收者后再发送。',
+      { code: 'ROUTING_CONFIRMATION_REQUIRED', unavailable: [{ catId: bea.id, displayName: 'x' }], targets: [{ catId: cat.id, displayName: 'y' }] });
+    return request(path, opts);
+  };
+  const grouped = await r.call(`/xbot-api/groups/${group.id}/messages`, 'POST', { text: '@小白 在吗', idempotencyKey: 'c1b0f3a2-6f0e-4f43-9d0c-3a1f4d6f2b13' });
+  assert.deepEqual([grouped.status, (await grouped.json() as any).error], [409, '小白现在用不了，消息没有发出']);
   // Another 409 is not this refusal and is passed on as the engine gave it.
   r.native.request = async (path, opts) => { if (path === '/api/messages' && opts?.method === 'POST') throw new ApiError(409, '别的冲突', { code: 'SOMETHING_ELSE' }); return request(path, opts); };
   const other = await r.call('/xbot-api/bots/阿橘/messages', 'POST', { text: '在吗', idempotencyKey: 'c1b0f3a2-6f0e-4f43-9d0c-3a1f4d6f2b12' });

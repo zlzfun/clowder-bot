@@ -333,6 +333,8 @@ export class BotBridge {
           delete sources[threadId];
           this.store.save();
         }
+        // The page says who could not be asked; the engine's sentence speaks of roles and stand-ins.
+        if (targetRefused(error)) throw new ApiError(409, `${cat.name}现在用不了`, error.details, 'target_unavailable');
         throw error;
       });
       if (typeof receipt?.userMessageId !== 'string' || !receipt.userMessageId)
@@ -656,10 +658,13 @@ export class BotBridge {
       messageDisposition: 'continue_current',
       ...(attachments.length ? { contextAttachments: attachments } : {}),
       ...(addressed ? { mentions: [addressed] } : {}), ...(replyTo ? { replyTo } : {}),
-    } }).catch(error => {
-      // Nothing was stored: the words stay with the owner, and the chat says why in its own words.
-      if (targetRefused(error)) throw new ApiError(409, `${directCat ? '这只猫猫' : '点到的猫猫'}现在用不了，消息没有发出`, error.details, 'target_unavailable');
-      throw error;
+    } }).catch(async error => {
+      // Nothing was stored: the words stay with the owner, and the chat says who cannot run, by name when the engine names it.
+      if (!targetRefused(error)) throw error;
+      const listed = (error.details as { unavailable?: unknown }).unavailable;
+      const ids = (Array.isArray(listed) ? listed : []).map(entry => (entry as { catId?: unknown } | null)?.catId).filter((id): id is string => typeof id === 'string');
+      const names = directCat ? [directCat.name] : ids.length ? (await this.cats().catch(() => [])).filter(cat => ids.includes(cat.id)).map(cat => cat.name) : [];
+      throw new ApiError(409, `${names.length ? names.join('、') : '要回答的猫猫'}现在用不了，消息没有发出`, error.details, 'target_unavailable');
     });
   }
   /**

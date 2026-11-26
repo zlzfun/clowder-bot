@@ -56,6 +56,12 @@ test('a cat’s cards, lists, choices and diffs come through as chat blocks; wha
   // The engine's own verbs for the three things it proposes about a timer (schedule-mutation-card-block.ts).
   assert.deepEqual(schedule('提议永久删除定时任务：喝水提醒', { type: 'interval', ms: 3600000 }), { id: 'sp1', kind: 'schedule', title: '想取消一个定时', body: '喝水提醒 · 每 1 小时' });
   assert.deepEqual(schedule('提议更新定时任务：喝水提醒', { type: 'interval', ms: 3600000 }), { id: 'sp1', kind: 'schedule', title: '想改一个定时', body: '喝水提醒 · 每 1 小时' });
+  // A change lists each changed parameter as a field, old → new as JSON; the card says the values, not the engine's parameter names.
+  const changed = (messageBlocks(reply({ rich: { blocks: [{ id: 's', kind: 'card', v: 1, title: '提议更新定时任务：喝水提醒', bodyMarkdown: '批准后更新以下参数；正在执行的任务继续使用原设置。',
+    fields: [{ label: 'Task ID', value: 'dyn-1' }, { label: 'Template', value: 'reminder' }, { label: 'Trigger', value: JSON.stringify({ type: 'interval', ms: 3600000 }) }, { label: 'Delivery thread', value: 't1' },
+      { label: 'message', value: '"喝水" → "喝温水"' }, { label: 'count', value: '（未设置） → 3' }, { label: 'nested', value: '{"a":1} → {"a":2}' }],
+    meta: { approval: { producerId: 'F139', canonicalProposalId: 'sp1' } } }] } })).blocks[0] as any).approval;
+  assert.deepEqual(changed, { id: 'sp1', kind: 'schedule', title: '想改一个定时', body: '喝水提醒 · 每 1 小时 · 「喝水」改为「喝温水」；改为「3」' });
   assert.deepEqual(schedule('一件别的事', {}, 'F999'), { id: 'sp1', kind: 'other', title: '有件事等你确认', body: '一件别的事' });
   assert.equal(requestLine(reply({ rich: { blocks: [card] } })), '想记住你的一个偏好：偏好简短');
   // The engine's preference card as it really writes it: only the judgement is what was asked.
