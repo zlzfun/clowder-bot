@@ -87,7 +87,7 @@ export class BotBridge {
   private readonly creationNotices = new WeakMap<NativeCat, string>();
   constructor(readonly native: NativeTransport, readonly store: ProductStore, readonly workspace: string, driver: ComputerDriver = noComputer) {
     this.workspaces = new Workspaces(this); this.nativeFiles = new NativeFiles(this); this.activity = new Activity(this);
-    this.approvals = new Approvals(this); this.manner = new ChatPack(native); this.computer = new Computer(native, driver, cat => this.stopRunningTurns(cat), undefined,
+    this.approvals = new Approvals(this); this.manner = new ChatPack(native); this.computer = new Computer(native, driver, (cat, look) => this.stopRunningTurns(cat, look), undefined,
       async ids => { const cats = await this.cats(); return ids.map(id => cats.find(cat => cat.id === id)?.name ?? ''); });
   }
   cats(): Promise<NativeCat[]> { return this.native.request<{ cats: NativeCat[] }>('/api/cats').then(r => r.cats); }
@@ -753,9 +753,10 @@ export class BotBridge {
    * is a request: a turn counts as ended only once the conversation's queue no
    * longer lists it for this cat. A queue that cannot be read, a cancellation
    * the engine did not take, a turn still listed after cancelPatience: not
-   * ended.
+   * ended. `look`: nothing is cancelled — `failed` counts the conversations
+   * where the cat is in the middle of a turn (or that could not be read).
    */
-  async stopRunningTurns(cat: Pick<NativeCat, 'id'>): Promise<{ stopped: number; failed: number }> {
+  async stopRunningTurns(cat: Pick<NativeCat, 'id'>, look = false): Promise<{ stopped: number; failed: number }> {
     // Read without making a record: the id may come from the registry (another cat being switched off) and be no cat this app has drawn.
     const threads = new Set([this.store.state.bots[cat.id]?.activeThreadId, ...this.store.state.groupThreadIds].filter((id): id is string => !!id));
     const running = async (threadId: string) => (await this.queue(threadId)).activeInvocations.some(run => run.catId === cat.id);
@@ -763,6 +764,7 @@ export class BotBridge {
     for (const threadId of threads) {
       try {
         if (!await running(threadId)) continue;
+        if (look) { failed++; continue; }
         const answer = await this.native.request<{ cancelled?: boolean }>(`/api/threads/${encode(threadId)}/cancel/${encode(cat.id)}`, { method: 'POST', body: {} })
           .catch(error => { if (error instanceof ApiError && error.status === 404) return { cancelled: true }; throw error; });
         let gone = answer.cancelled !== false && !await running(threadId);
