@@ -27,7 +27,7 @@
       "file": "app.js",
       "target": "client/public/app.js",
       "sourceSha256": "1248f793493826bf044359c71e7d8772ccc3472d6021d6abb979dff9b6cb29bc",
-      "sha256": "a96006203addfc5005f5b9e907ebf057cfd5b9029e61f942f31c1b6c706dbd15",
+      "sha256": "9989ef9374d9d09ee799d9e5036212ed30170ce08ebb19750b4e66e66c569a6e",
       "unchanged": false
     },
     {
@@ -153,7 +153,7 @@
       "file": "index.html",
       "target": "client/index.html",
       "sourceSha256": "a4160c18e23489fbc6a9e21fe494e1ac52840a67b2e138997400a0b42835b556",
-      "sha256": "40d99d030d71eba8ba936917951e7ca73579e9b58d76ae3f86183cecc90043ad",
+      "sha256": "9de7e9be607580770b8f5b5d13d49e510119e073b680f7b30aa84d9d13f48be0",
       "unchanged": false
     },
     {
@@ -1012,20 +1012,20 @@
     {
       "target": "client/public/apps-dialog-rules.js",
       "description": "应用 rules without DOM (window.ClowderAppsRules): each app state as a mark and a word (微信 and custom apps, from docs/apps-api.md), what 微信 offers in each state, the starting poll (every 2 s, about 2 minutes), the authorization deadline from the server's until and the m:ss clock, the custom-app form's checks mirroring the adapter's, the idempotency fingerprint, splitting a pasted command line only when unambiguous, the consent and consequence words, and what each failed request says",
-      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-26 (docs/xbot-frontend.md item 53)",
-      "sha256": "5e80da6f74c27678dde4cc6394a2ffcd912890fa12a978beda316c5536c8983f"
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-26 (docs/xbot-frontend.md item 54)",
+      "sha256": "3cd42fa88db04b0d80b0a8009cc664f1af1ca6f29c4794e493937b50a57b96dc"
     },
     {
       "target": "client/public/apps-dialog.js",
       "description": "应用 dialog (window.ClowderApps): one dialog over the chat on the original .modal/.modal-card with the list (微信, custom apps, 添加自定义应用) and one app's page; GET /xbot-api/apps on opening, one check per custom app (at most 3 at a time), 微信's open/close/authorize/revoke, the add form with idempotency keys, rename and secrets by PATCH, remove after a nested confirm; focus trap, Escape one level at a time, focus back to the opener, eased height, one polite live region; everything in flight is abandoned on close",
-      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-26 (docs/xbot-frontend.md item 53)",
-      "sha256": "c17463c95abe1d0d31d7d2970eec1214d1b66434e75c358feadf3050d6554b2d"
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-26 (docs/xbot-frontend.md item 54)",
+      "sha256": "5d332463dc6f4302874f3a8e9970489bdde148977291a143fe616c60536bfe21"
     },
     {
       "target": "client/public/apps-dialog.css",
       "description": "应用 dialog styles: the card hanging from a fixed line (a sheet at 560px and below), XBot's settings-row vocabulary for the list, five state marks drawn as different shapes (filled dot, ring, spinner, bar, struck ring), the 微信 page's authorization block and countdown, the custom app's page and the add form; tokens only, 44px targets on a phone, no motion under reduced motion",
-      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-26 (docs/xbot-frontend.md item 53)",
-      "sha256": "65767ff1993de88738c21865208abc91863b0c2f0f242d9dbce3f839f175df8f"
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-26 (docs/xbot-frontend.md item 54)",
+      "sha256": "54dce62d794272aa0136e032fab6a34691d28343d8e0711e137ee3bd5bfc49bf"
     }
   ]
 }

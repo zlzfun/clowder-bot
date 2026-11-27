@@ -409,7 +409,7 @@ test('the full sidebar: 搜索 and 新建 at the right end of the greeting\'s li
   assert.match(trigger, /^\s*<span id="me-avatar"><\/span>\s*$/);
   assert.match(aside, /<div id="account-menu" class="pop account-menu" hidden>\n\s+<div class="me-head"><span id="me-name" class="me-name">我<\/span><span id="me-device" class="me-device" hidden><\/span><\/div>\n\s+<button id="account-settings"/);
   assert.match(read('client/public/devices.js'), /document\.getElementById\("me-device"\)/, 'devices.js still finds the device line');
-  // 应用: a named, focusable button that opens a dialog (item 53); a tooltip only in the rail, where its label is gone.
+  // 应用: a named, focusable button that opens a dialog (item 54); a tooltip only in the rail, where its label is gone.
   assert.match(aside, /<button id="side-apps" class="side-apps" type="button" aria-haspopup="dialog" aria-label="应用" data-tip="应用" data-tip-placement="right" data-tip-only="rail"><span class="side-apps-label">应用<\/span><\/button>/);
   const app = read('client/public/app.js');
   assert.match(app, /if \(host\.dataset\.tipOnly === "rail" && !host\.closest\("\.sidebar\.rail"\)\) \{ hideTip\(\); return; \}/);
@@ -477,7 +477,7 @@ test('我\'s menu opens right above the face (left edges aligned) in the full si
   assert.match(app, /start: \(\) => \{ closeAccount\(\); hideTip\(\); \},/);
 });
 
-test('应用 was a placeholder the owner asked for (item 43); since item 53 it opens the 应用 dialog, from the full sidebar and the rail alike — the same button', () => {
+test('应用 was a placeholder the owner asked for (item 43); since item 54 it opens the 应用 dialog, from the full sidebar and the rail alike — the same button', () => {
   const app = read('client/public/app.js');
   // The owner, 2026-11-26: 「先做微信 和 自定义应用 两项吧。」 The toast that said it was not open is gone.
   assert.match(app, /\$\("side-apps"\)\.prepend\(icon\("grid-plus"\)\);\n\s+\$\("side-apps"\)\.addEventListener\("click", \(\) => openApps\(\$\("side-apps"\)\)\);/);
