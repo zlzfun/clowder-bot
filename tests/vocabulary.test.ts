@@ -55,6 +55,11 @@ const FUNCTIONS: Record<string, string[]> = { 'app.js': ['agentTrigger', 'agentP
 const CONTAINERS: Record<string, string[]> = { 'index.html': ['<div class="setpane" data-spane="about">'] };
 // Strings matched, never shown: someone typing an old word still finds the action.
 const MATCHED = new Set(['palette.js:群组']);
+// One sentence of consent, word for word: what opening 微信 allows says where the text it reads goes — the
+// Agent and its model. Where the owner's 微信 text ends up is a fact the owner consents to, and its truth
+// outranks the everyday-words rule there and only there (docs/xbot-frontend.md item 54; review r1, 6).
+// Technical nouns only: a retired word in it is still reported, and so is the sentence once a word changes.
+const CONSENT = new Set(['apps-dialog-rules.js:认出的文字会和你发给猫猫的话一样，交给它用的 Agent 和模型，并留在那段聊天的执行记录里。']);
 // Scripts index.html loads whose words the owner cannot reach in this product:
 // the runtime panel's Task module (the main app calls only its judgments, whose
 // labels are 恢复任务 / 允许继续), and the upstream cross-device modules whose
@@ -204,7 +209,7 @@ function offenders(file: string, words: Literal[], technical: (line: number) => 
     if (!reads(text)) continue;
     const said = text.replace(/clowder-bot/gi, '');
     for (const [word, re] of NEVER) if (re.test(said) && !MATCHED.has(file + ':' + text)) found.push(`${file}:${line} ${word} in 「${text}」`);
-    if (!technical(line)) for (const [word, re] of TECHNICAL) if (re.test(said)) found.push(`${file}:${line} ${word} outside a technical place in 「${text}」`);
+    if (!technical(line) && !CONSENT.has(file + ':' + text)) for (const [word, re] of TECHNICAL) if (re.test(said)) found.push(`${file}:${line} ${word} outside a technical place in 「${text}」`);
   }
   return found;
 }
@@ -293,6 +298,17 @@ test('Agent may be shown since 2026-11-12; every other retired word is still cau
   assert.equal(caught('const a = "Bot ID";').length, 1, 'a capitalised retired word standing alone');
   // The page says it: 设置 → Agents.
   assert.match(html, /<button type="button" data-set="agents">[^\n]*<span>Agents<\/span><\/button>/);
+});
+
+test('one consent sentence may name the model — that sentence, in that file, word for word, and nothing else', () => {
+  assert.equal(CONSENT.size, 1);
+  const entry = [...CONSENT][0]!, at = entry.indexOf(':'), file = entry.slice(0, at), text = entry.slice(at + 1);
+  assert.ok(literals(script(file)).some((l) => l.text === text), 'still there, word for word (otherwise drop it)');
+  assert.deepEqual(offenders(file, [{ text, line: 1 }], () => false), []);
+  assert.equal(offenders(file, [{ text: text.replace('并留在', '也留在'), line: 1 }], () => false).length, 1, 'a word changed: reported again');
+  assert.equal(offenders('other.js', [{ text, line: 1 }], () => false).length, 1, 'in another file: reported');
+  assert.equal(offenders(file, [{ text: '它用什么模型', line: 1 }], () => false).length, 1, 'another sentence of that file: reported');
+  assert.equal(offenders(file, [{ text: text + '会话', line: 1 }], () => false).length, 2, 'a retired word is never excepted');
 });
 
 test('a technical place cannot grow: a technical noun just outside the named functions or container is reported', () => {
