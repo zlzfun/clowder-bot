@@ -189,9 +189,14 @@ export class Computer {
     return next;
   }
 
-  async view(cat: NativeCat): Promise<ComputerView> {
+  async view(cat: NativeCat): Promise<ComputerView> { return this.shown(cat, await this.entry()); }
+  /**
+   * The view from the registry as it was just read. A change answers with what it read back to confirm itself, not with
+   * another read: one that failed would turn a change known to have gone through into an error.
+   */
+  private async shown(cat: NativeCat, entry: Entry | undefined): Promise<ComputerView> {
     // Whether the cat is on is the registry's to say, also where the driver is gone or this is not a Mac: a stale "on" must still be seen and switched off.
-    const [located, entry] = await Promise.all([this.driver.supported ? this.driver.locate() : undefined, this.entry()]);
+    const located = this.driver.supported ? await this.driver.locate() : undefined;
     const grants: ComputerGrants = located ? await this.driver.permissions() : { state: 'unknown' };
     // Who gives it up when this cat is switched on: the cats that have it on, and a cat that is off with a turn still going
     // (that turn is ended too, see handOver) — looked at now, so that one which has stopped by itself is not named.
@@ -236,9 +241,9 @@ export class Computer {
     const gave = await this.handOver(cat);
     // Written whatever was just read: an earlier request that timed out here may still be waiting in the engine, and the last write is the one that stands.
     // Whether it is on now is the registry's to say, not the answer to the write: one whose answer was lost may have gone through.
-    let failure: unknown, on: boolean | undefined;
+    let failure: unknown, after: Entry | undefined, on: boolean | undefined;
     try { await this.toggle({ scope: 'cat', catId: cat.id, enabled: true }); } catch (error) { failure = error; }
-    try { on = this.isOn(await this.entry(), cat); } catch { /* unread: not known */ }
+    try { after = await this.entry(); on = this.isOn(after, cat); } catch { /* unread: not known */ }
     // The other cats are off by now: said with what became of this one, or the owner would find that cat's switch off without a word.
     if (on === undefined) throw new ApiError(502, `${gave ? `${gave}的已经关掉了，但` : ''}没能确认这只猫的有没有打开。请再试一次。`, undefined, 'computer_on_unknown');
     if (!on) {
@@ -246,7 +251,7 @@ export class Computer {
       throw failure ?? new ApiError(502, '没能打开，请再试一次。');
     }
     this.lingering.delete(cat.id);
-    return this.view(cat);
+    return this.shown(cat, after);
   }
 
   /**
@@ -334,7 +339,7 @@ export class Computer {
       const ended = !this.lingering.has(cat.id) || await this.ended(cat.id, true);
       await this.driver.stop().catch(() => {});
       if (!ended) throw this.stillRunning();
-      return this.view(cat);
+      return this.shown(cat, entry);
     }
     let failure: unknown;
     // Remembered before the block is sent: one whose answer never comes may land after this request is over.
@@ -348,7 +353,7 @@ export class Computer {
     if (failure) throw failure;
     if (entry && !anyOn(entry)) await this.driver.stop().catch(() => {});
     if (!ended) throw this.stillRunning();
-    return this.view(cat);
+    return this.shown(cat, entry);
   }
   private stillRunning() {
     return new ApiError(502, '已经关掉了，但它正在进行的这一轮还没有停下来，停下之前它还能用这台电脑。请在对话里点停止，或者稍后再关一次。', undefined, 'computer_still_running');

@@ -387,6 +387,31 @@ test('one cat at a time: this cat\'s switch written but the registry unread is s
   assert.deepEqual(on(), ['cat-a']);
 });
 
+test('a change that is confirmed answers with what it read: a registry that cannot be read after that does not turn it into a failure', async () => {
+  // After a cat's own write, the registry can be read once (the confirmation) and then not again.
+  const { native, computer, on } = setup(), ask = native.request.bind(native);
+  let reads = Infinity;
+  native.request = (async (path: string, options: any = {}) => {
+    const method = options.method ?? 'GET';
+    if (method === 'GET' && path === '/api/capabilities' && reads-- <= 0) throw new ApiError(500, 'Internal Server Error');
+    const result = await ask(path, options);
+    if (armed && method === 'PATCH' && options.body?.scope === 'cat' && options.body.catId === armed.id && options.body.enabled === armed.enabled) reads = 1;
+    return result;
+  }) as typeof native.request;
+  let armed: { id: string; enabled: boolean } | undefined;
+  await computer.set(a, true);
+  // 猫乙 takes it from 猫甲: on, and said as on.
+  armed = { id: 'cat-b', enabled: true };
+  assert.deepEqual(await computer.set(b, true), { supported: true, installed: true, on: true, permissions: 'granted' });
+  assert.deepEqual(on(), ['cat-b']);
+  // The same turning it off.
+  reads = Infinity; armed = { id: 'cat-b', enabled: false };
+  assert.deepEqual(await computer.set(b, false), { supported: true, installed: true, on: false, permissions: 'granted' });
+  assert.deepEqual(on(), []);
+  reads = Infinity; armed = undefined;
+  assert.equal((await computer.view(b)).on, false);
+});
+
 test('one cat at a time: a block that lands after its request gave up still has that cat\'s turn ended before another cat is let in', async () => {
   const { native, computer, on, ended } = setup();
   await computer.set(a, true);
