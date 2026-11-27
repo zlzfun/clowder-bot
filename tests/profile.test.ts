@@ -1723,6 +1723,11 @@ test('这台电脑, one cat at a time, rules: `others` only as a non-empty list 
     // A name is the owner's own word, whatever it holds.
     ['computer_other_running', '「Bot 一号」的已经关掉，但它正在进行的这一轮还没有停下来，停下之前它还能用这台电脑，所以这只猫的先没有打开。请在「Bot 一号」的对话里点停止，然后再开一次。'],
     ['computer_other_on', '没能先把「会话猫」的关掉，所以这只猫的没有打开。请再试一次。'],
+    // Since the server's 55cf3fd4: cats said as the dialog says them, and computer_other_on names those that did come off.
+    ['computer_other_on', '没能先把「年糕」的关掉，所以这只猫的没有打开。「墨点」的已经关掉了。请再试一次。'],
+    ['computer_other_on', '没能先把「年糕」和另一只猫的关掉，所以这只猫的没有打开。「墨点」「宪宪 2」的已经关掉了。请再试一次。'],
+    ['computer_other_running', '「墨点」「年糕」的已经关掉，但它正在进行的这一轮还没有停下来，停下之前它还能用这台电脑，所以这只猫的先没有打开。请在「墨点」「年糕」的对话里点停止，然后再开一次。'],
+    ['computer_other_running', '另外几只猫的已经关掉，但它正在进行的这一轮还没有停下来，停下之前它还能用这台电脑，所以这只猫的先没有打开。请在另外几只猫的对话里点停止，然后再开一次。'],
   ];
   for (const [code, text] of refusals) assert.equal(R.computerError(Object.assign(fail(502, text), { code }), true), text, text);
   // Outside a name an engine word still hides the sentence.
@@ -1912,6 +1917,53 @@ test('这台电脑, one cat at a time: the two refusals of turning on are said i
   await settle();
   assert.equal(y.gets('墨点'), 2);
   assert.equal(computerRow(mo).on, 'false');
+});
+
+test('这台电脑, one cat at a time: a turn not seen to end refuses the next turn on even though no cat has it (the server\'s 55cf3fd4) — after the plain dialog the refusal is said and the switch is off and usable, as after one naming a cat; the longer computer_other_on is shown whole', async () => {
+  // 墨点 was switched off earlier, its turn not seen to end: the registry has no cat on, so the view names nobody.
+  const c = computerHouse({ 墨点: false });
+  const page = c.cat('快手');
+  await settle();
+  let r = computerRow(page);
+  r.sw.click();
+  assert.deepEqual(leads(c.layer()!), [CONSENT_TEXT], 'the plain dialog: no cat to name');
+  const running = '「墨点」的已经关掉，但它正在进行的这一轮还没有停下来，停下之前它还能用这台电脑，所以这只猫的先没有打开。请在「墨点」的对话里点停止，然后再开一次。';
+  c.srv.putFails = Object.assign(fail(502, running), { code: 'computer_other_running' });
+  button(c.layer()!, '打开').click();
+  await settle();
+  r = computerRow(page);
+  assert.equal(c.gets('快手'), 2, 'read again');
+  assert.deepEqual([r.on, r.busy, r.locked, r.hint, r.failed], ['false', null, null, '', running]);
+  assert.equal(r.error.getAttribute('role'), 'alert');
+  assert.equal(r.sw.getAttribute('aria-describedby'), r.error.id);
+  // Still going: asked again, refused again in the same words; the dialog stays the plain one.
+  r.sw.click();
+  assert.deepEqual(leads(c.layer()!), [CONSENT_TEXT]);
+  c.srv.putFails = Object.assign(fail(502, running), { code: 'computer_other_running' });
+  button(c.layer()!, '打开').click();
+  await settle();
+  r = computerRow(page);
+  assert.deepEqual([r.on, r.busy, r.locked, r.failed], ['false', null, null, running]);
+  // The turn is gone: it goes through, and the sentence goes with the new request.
+  r.sw.click();
+  button(c.layer()!, '打开').click();
+  await settle();
+  r = computerRow(page);
+  assert.deepEqual([r.on, r.busy, r.failed], ['true', null, '']);
+  // computer_other_on naming who did come off: three sentences, two cats, shown whole.
+  const x = computerHouse({ 墨点: true, 年糕: true });
+  const p2 = x.cat('快手');
+  await settle();
+  const other = '没能先把「年糕」的关掉，所以这只猫的没有打开。「墨点」的已经关掉了。请再试一次。';
+  x.srv.putFails = Object.assign(fail(502, other), { code: 'computer_other_on' });
+  x.srv.on.墨点 = false;
+  computerRow(p2).sw.click();
+  button(x.layer()!, '打开').click();
+  await settle();
+  r = computerRow(p2);
+  assert.deepEqual([r.on, r.locked, r.failed], ['false', null, other]);
+  r.sw.click();
+  assert.equal(leads(x.layer()!)[1], '同一时间只有一只猫能用这台电脑：打开后，「年糕」的会关掉；它要是正在回复，那条回复会停下。', 'read again: only the cat still on is named');
 });
 
 test('item 52 wiring: the shell passes the install command\'s 复制 and whether 资料 is on screen; the row\'s styles use existing tokens and 新建\'s own command chip', () => {
