@@ -63,6 +63,7 @@ try {
 <link rel="stylesheet" href="/chat-reactions.css">
 <link rel="stylesheet" href="/sidebar.css">
 <link rel="stylesheet" href="/chat-panel.css">
+<link rel="stylesheet" href="/apps-dialog.css">
 <link rel="stylesheet" href="/chat-live.css">
 </head>
 <body>
@@ -138,8 +139,8 @@ try {
           <button id="account-settings" type="button" aria-haspopup="dialog">设置</button>
         </div>
       </div>
-      <!-- 应用: a place the owner asked to keep for it (docs/xbot-frontend.md item 43); a click says it is not available yet. -->
-      <button id="side-apps" class="side-apps" type="button" aria-label="应用" data-tip="应用" data-tip-placement="right" data-tip-only="rail"><span class="side-apps-label">应用</span></button>
+      <!-- 应用 (docs/xbot-frontend.md items 43, 54): opens the 应用 dialog (apps-dialog.js), here and in the rail. -->
+      <button id="side-apps" class="side-apps" type="button" aria-haspopup="dialog" aria-label="应用" data-tip="应用" data-tip-placement="right" data-tip-only="rail"><span class="side-apps-label">应用</span></button>
     </div>
   </aside>
   <div id="backdrop" class="backdrop" hidden></div>
@@ -317,6 +318,8 @@ try {
 <script src="/colors.js"></script>
 <script src="/sidebar.js"></script>
 <script src="/chat-panel.js"></script>
+<script src="/apps-dialog-rules.js"></script>
+<script src="/apps-dialog.js"></script>
 <script src="/account.js"></script>
 <script src="/app.js"></script>
 <script src="/devices.js"></script>

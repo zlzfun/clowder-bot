@@ -10,6 +10,7 @@
 //   curl -X POST :3230/__preview -H 'Content-Type: application/json' -d '{"agents":"login"}'
 //   …  -d '{"speed":3}'  (slower playback)   -d '{"approvals":"failing"}'  (agreeing fails like a broken store)
 //   …  -d '{"page":12}'  (read conversations 12 messages at a time, to see earlier pages load)
+//   …  -d '{"wechat":"slow"}'  (应用: ok | slow | fail | timeout | absent | present | crashed | status-fails | status-ok | icon-off | icon-on)   -d '{"probe":"fail"}'  (no custom app answers; "ok" restores)
 //   …  -d '{"append":"off"}'  (a cat that is writing does not take in what is said meanwhile; it answers that afterwards)
 //   …  -d '{"computer":"needs"}'  (这台电脑: none = no driver for this system, absent = not installed, needs = waiting for the
 //                                  macOS grants, ready; the plain preview starts ready, the showcase with none)
@@ -39,6 +40,7 @@ import type { NativeCat, NativeEvent, NativeMessage } from '../server/native/typ
 import { NativeFixture, catTemplates } from '../tests/native-fixture.js';
 import { soleEmoji } from '../server/native/reactions.js';
 import { seedShowcase, type Script, type Proposal } from './showcase-scene.js';
+import { macAppIcons, type AppIcons } from '../server/native/app-icons.js';
 
 const root = resolve(import.meta.dirname, '..');
 const port = Number(process.env.PREVIEW_PORT || 3230);
@@ -458,8 +460,11 @@ const computer: ComputerDriver & { mode: typeof computerModes[number] } = {
   async permissions() { return this.mode === 'ready' ? { state: 'granted' } : this.mode === 'needs' ? { state: 'needed', missing: ['accessibility', 'screen_recording'] } : { state: 'unknown' }; },
   async start() {}, async stop() {}, async quiet() {},
 };
+// 应用's pictures: the real ones of this computer (微信's icon where 微信 is installed), which {"wechat": "icon-off"} hides to show the drawn mark.
+const realIcons = macAppIcons(); let showIcons = true;
+const appIcons: AppIcons = { wechatMark: async () => showIcons ? realIcons.wechatMark() : undefined, wechat: async () => showIcons ? realIcons.wechat() : undefined };
 const runtime = createApp({ native, workspace, dataFile: join(dir, 'presentation.json'), staticDir: join(dir, 'no-static'),
-  allowedOrigins: [`http://127.0.0.1:${port}`, `http://localhost:${port}`], computer });
+  allowedOrigins: [`http://127.0.0.1:${port}`, `http://localhost:${port}`], computer, appIcons });
 if (showcase) native.runtimes = agentSets.showcase!;
 // The line under 你 names the device; here it says what this is instead of the machine's own name.
 runtime.store.state.deviceName = showcase ? '示例环境' : '预览环境';
@@ -482,6 +487,25 @@ runtime.app.post('/__preview', async (req, res) => {
   if (typeof input.computer === 'string') { if (!computerModes.includes(input.computer)) return res.status(400).json({ error: 'computer: ' + computerModes.join(' | ') }); computer.mode = input.computer; }
   // {"append": "off"}: a cat that is writing cannot take in what is said meanwhile; that message gets its own reply afterwards. "on" restores it.
   if (typeof input.append === 'string') native.appendable = input.append !== 'off';
+  // 应用 (tests/apps-fixture.ts). {"wechat": "ok" | "slow" | "fail" | "timeout"}: what opening 微信 does next time (at once / stays
+  // starting for a few reads / fails / the request is cut while the engine goes on); {"wechat": "absent" | "present"}: the engine has
+  // no such plugin / has it, off; {"wechat": "crashed"}: enabled but its runtime is not running (the contract's `failed`, item 54's
+  // screenshots); {"wechat": "status-fails" | "status-ok"}: while on, the ten-minute authorization cannot be read / can again.
+  // {"probe": "ok" | "fail"}: custom apps answer by their script again / none of them answers.
+  if (typeof input.wechat === 'string') {
+    const apps = native.apps, starts: Record<string, typeof apps.start> = { ok: 'ok', slow: 6, fail: 'fail', timeout: 'timeout' };
+    if (input.wechat in starts) apps.start = starts[input.wechat]!;
+    else if (input.wechat === 'absent') apps.plugin = null;
+    else if (input.wechat === 'present') apps.plugin = { artifact: 'installed', intent: 'disabled', live: 'stopped', lifecycleRevision: 4, diagnostic: null, activationFailed: null, setEnabled: true };
+    else if (input.wechat === 'status-fails' || input.wechat === 'status-ok') apps.statusFails = input.wechat === 'status-fails';
+    else if (input.wechat === 'icon-off' || input.wechat === 'icon-on') showIcons = input.wechat === 'icon-on';
+    else if (input.wechat === 'crashed' && apps.plugin) Object.assign(apps.plugin, { intent: 'enabled', live: 'crashed', diagnostic: { code: 'UNEXPECTED_RUNTIME_FAILURE', message: 'Plugin runtime reported UNEXPECTED_RUNTIME_FAILURE.' } });
+    else return res.status(400).json({ error: 'wechat: ok | slow | fail | timeout | absent | present | crashed | status-fails | status-ok | icon-off | icon-on' });
+  }
+  if (typeof input.probe === 'string') {
+    if (!['ok', 'fail'].includes(input.probe)) return res.status(400).json({ error: 'probe: ok | fail' });
+    native.apps.probeAll = input.probe === 'fail' ? { connectionStatus: 'disconnected', tools: [], error: 'Probe timeout after 7000ms' } : undefined;
+  }
   // {"page": 12}: conversations are read 12 messages at a time, so "earlier messages" can be seen after a few sends; {"page": 0} restores the usual page.
   if (typeof input.page === 'number') native.pageLimit = input.page >= 2 && input.page <= 200 ? Math.floor(input.page) : undefined;
   // {"play": "布偶猫"}: the owner's demo line for that chat is sent through the real adapter, so its staged reply can be watched being written.

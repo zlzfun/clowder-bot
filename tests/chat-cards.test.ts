@@ -1091,7 +1091,7 @@ test('the page loads the round\'s scripts before app.js and its styles just befo
   assert.ok(at('chat-notify-rules.js') < at('chat-notify.js') && at('chat-notify.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
   // Only 活起来's styles (chat-presence.css) and the sidebar's (sidebar.css, item 43) sit between them.
-  assert.deepEqual(styles.slice(-6), ['chat-cards.css', 'chat-presence.css', 'chat-reactions.css', 'sidebar.css', 'chat-panel.css', 'chat-live.css']);
+  assert.deepEqual(styles.slice(-7), ['chat-cards.css', 'chat-presence.css', 'chat-reactions.css', 'sidebar.css', 'chat-panel.css', 'apps-dialog.css', 'chat-live.css']);
   // Both histories: words, blocks and the ending through chat-cards.js; frames filled right after each keyed commit.
   assert.equal((app.match(/cards\.words\(m, isSilent\(/g) || []).length, 2);
   assert.equal((app.match(/cards\.blocks\(body, m, messages, (true|false)\);/g) || []).length, 2);

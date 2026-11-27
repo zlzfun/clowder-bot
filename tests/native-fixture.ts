@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { ApiError } from '../server/errors.js';
 import type { NativeTransport, NativeCat, NativeThread, NativeMessage, NativeEvent } from '../server/native/types.js';
 import type { NativeRuntime } from '../server/native/bridge.js';
+import { NativeAppsScript } from './apps-fixture.js';
 
 /** Protocol fixture only; never linked from production. Real contracts run in native-integration.test.ts. */
 // The engine's eight cat templates as the pinned upstream serves them (GET /api/cat-templates, read from the isolated runtime 2026-11-12).
@@ -69,6 +70,13 @@ export class NativeFixture implements NativeTransport {
   /** Installed engine packs in the order the engine lists them (F129) — the first is the one it applies: the manifest and, for this fixture, the default behaviours read from the source. */
   packs: Array<{ name: string; version: string; description: string; packType: string; behaviors: string[] }> = [];
   /**
+   * The engine routes behind 应用 (capability registry, plugin manager), scripted: tests/apps-fixture.ts.
+   * One registry in the engine, two scripts here: the 这台电脑 entry (`computer`) is scripted below with what that
+   * feature depends on (block lists, the order of writes, lost answers); every other row is scripted there with what
+   * 应用 depends on (masked secrets, probes, merging installs). `GET /api/capabilities` answers both, as the engine does.
+   */
+  apps = new NativeAppsScript();
+  /**
    * The engine's capability registry as far as an MCP entry goes (read on the isolated runtime and in the pinned
    * source, 2026-11-26): installing an entry leaves it on for every cat; who may not use it is a block list, which
    * takes an id whether or not that cat exists yet; a `project` toggle without a cat blocks or unblocks every cat in
@@ -130,6 +138,10 @@ export class NativeFixture implements NativeTransport {
     const url = new URL(path, 'http://fixture');
     const parts = url.pathname.split('/').map(decodeURIComponent);
     let result: unknown;
+    // The `computer` entry belongs to the script below; the rest of the registry and the plugin manager to tests/apps-fixture.ts.
+    const computer = body?.id === 'computer' || (parts[2] === 'capabilities' && parts[3] === 'mcp' && parts[4] === 'computer');
+    const scripted = computer ? undefined : this.apps.handle(url, method, body);
+    if (scripted !== undefined) return structuredClone(scripted) as T;
     if (path === '/api/health') result = { status: 'ok', callbackAuth: { backend: 'redis', durability: 'durable' } };
     else if (path === '/api/projects/mkdir' && method === 'POST') result = { createdPath: join(body.parentPath, body.name), name: body.name };
     else if (url.pathname === '/api/projects/browse') result = { current: url.searchParams.get('path'), entries: [] };
@@ -172,7 +184,7 @@ export class NativeFixture implements NativeTransport {
       const key = `${method} ${url.pathname}`, kind = method === 'PATCH' ? `PATCH:${body?.scope}` : key;
       if (this.capabilityFailures.has(key) || this.capabilityFailures.has(kind)) throw new ApiError(500, 'capability store failed');
       if (url.pathname === '/api/capabilities' && method === 'GET')
-        result = { items: this.capabilities.map(entry => ({ ...entry, cats: Object.fromEntries(this.cats.map(cat => [cat.id, !entry.blockedCats?.includes(cat.id)])) })) };
+        result = { items: [...this.apps.items(), ...this.capabilities.map(entry => ({ ...entry, cats: Object.fromEntries(this.cats.map(cat => [cat.id, !entry.blockedCats?.includes(cat.id)])) }))], catFamilies: [], projectPath: '/fixture' };
       else {
         const apply = this.capabilityWrite(method, url, parts, body), held = this.capabilityHold;
         if (held && (held.key === key || held.key === kind)) {

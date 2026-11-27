@@ -59,7 +59,7 @@ export function createXbotSettingsRouter(bridge: BotBridge) {
   router.get('/machines', (_req, res) => res.json({ machines: [], supported: false, reason: '由 Clowder AI 管理' }));
   router.get('/push', (_req, res) => res.json({ public_key: '', subscribed: false, supported: false }));
   router.get('/update', (_req, res) => res.json({ state: 'disabled', current: '0.2.0', latest: '', supported: false, reason: '上游版本按 upstream.lock.json 显式升级' }));
-  for (const path of ['/web-search', '/image-gen', '/apps', '/skills']) {
+  for (const path of ['/web-search', '/image-gen', '/skills']) {
     router.get(path, (_req, res) => res.json({ enabled: false, mode: 'native', apps: [], skills: [], connected: 0, supported: false, reason: '由 Clowder AI 和本机 Agent 管理。' }));
     router.all(path, () => unsupported('请在 Clowder AI 的配置里设置'));
     router.all(`${path}/{*tail}`, () => unsupported('请在 Clowder AI 的配置里设置'));

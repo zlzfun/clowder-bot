@@ -11,6 +11,9 @@ import type { ComputerDriver } from './native/computer.js';
 import { createXbotCoreRouter } from './xbot/core.js';
 import { createXbotSettingsRouter } from './xbot/settings.js';
 import { createXbotSchedulesRouter } from './xbot/schedules.js';
+import { createXbotAppsRouter } from './xbot/apps.js';
+import { BotApps } from './native/apps.js';
+import type { AppIcons } from './native/app-icons.js';
 import { createWorkspaceRouter } from './xbot/workspaces.js';
 import { createMemoryRouter } from './xbot/memory.js';
 import { createActivityRouter } from './xbot/activity.js';
@@ -20,7 +23,7 @@ import { nativeDataDir, productDataFile } from '../shared/data-location.mjs';
 const root = resolve(import.meta.dirname, '..');
 
 /** `computer`: the desktop driver behind 「这台电脑」. Left out, the feature is absent (tests and the preview name their own). */
-export function createApp(options: { dataFile?: string; native?: NativeTransport; staticDir?: string; workspace?: string; allowedOrigins?: string[]; computer?: ComputerDriver } = {}) {
+export function createApp(options: { dataFile?: string; native?: NativeTransport; staticDir?: string; workspace?: string; allowedOrigins?: string[]; computer?: ComputerDriver; appIcons?: AppIcons } = {}) {
   const port = Number(process.env.PORT || 3210);
   const origins = new Set(options.allowedOrigins ?? [`http://127.0.0.1:${port}`, `http://localhost:${port}`, 'http://127.0.0.1:5173', 'http://localhost:5173']);
   const native = options.native ?? new NativeClient(`http://127.0.0.1:${process.env.BOT_NATIVE_PORT || 4331}`, `http://127.0.0.1:${port}`);
@@ -41,7 +44,7 @@ export function createApp(options: { dataFile?: string; native?: NativeTransport
   });
   app.use(express.json({ limit: '4mb' }));
   const core = createXbotCoreRouter(bridge);
-  app.use('/xbot-api', createMemoryRouter(native), createActivityRouter(bridge), createWorkspaceRouter(bridge), createComputerRouter(bridge), core.router, createXbotSchedulesRouter(bridge), createXbotSettingsRouter(bridge));
+  app.use('/xbot-api', createMemoryRouter(native), createActivityRouter(bridge), createWorkspaceRouter(bridge), createComputerRouter(bridge), core.router, createXbotSchedulesRouter(bridge), createXbotAppsRouter(bridge, new BotApps(native, store, process.platform, options.appIcons)), createXbotSettingsRouter(bridge));
   app.use('/xbot-api', (_req, res) => res.status(404).json({ error: '这项功能在这里还用不了', code: 'not_adapted' }));
   app.get('/api/health', async (_req, res) => res.json({ ok: true, engine: 'clowder-ai', upstream: await native.request('/api/health') }));
   app.get('/api/state', async (_req, res) => res.json({ engine: 'clowder-ai', cats: await bridge.cats(), presentation: store.state }));

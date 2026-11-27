@@ -812,7 +812,7 @@ test('the shell wires 活起来 with thin hooks: scripts before app.js, styles j
   const at = (name: string) => scripts.indexOf(name);
   assert.ok(at('chat-live.js') < at('chat-presence-rules.js') && at('chat-presence-rules.js') < at('chat-presence.js') && at('chat-presence.js') < at('app.js'));
   const styles = [...html.matchAll(/<link rel="stylesheet" href="\/([^"]+)"/g)].map(m => m[1]);
-  assert.deepEqual(styles.slice(-5), ['chat-presence.css', 'chat-reactions.css', 'sidebar.css', 'chat-panel.css', 'chat-live.css']);
+  assert.deepEqual(styles.slice(-6), ['chat-presence.css', 'chat-reactions.css', 'sidebar.css', 'chat-panel.css', 'apps-dialog.css', 'chat-live.css']);
   const sort = /\n {2}function sortStatusRows\(\) \{\n([\s\S]*?)\n {2}\}\n/.exec(app)![1];
   assert.match(sort, /chatList\.paint\(\$\("roster"\)\);\n\s+presence\.rows\(\$\("roster"\)\);/);
   assert.equal((app.match(/cards\.rendered\(\);[^\n]*\n\s+presence\.rendered\(messages\);/g) || []).length, 2, 'both histories, right after the cards are filled');

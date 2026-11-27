@@ -17,7 +17,7 @@
     "/skills.css", "/persona-cards.css", "/account.css", "/cafe-theme.css", "/cafe-colors.css", "/colors.css", "/agents.css", "/cat-templates.css",
     "/chat-presentation.css", "/schedules.css", "/workspace.css", "/chat-experience.css", "/quick-create.css",
     "/palette.css", "/chat-list.css", "/chat-history.css", "/profile.css", "/mention.css", "/polish.css",
-    "/chat-cards.css", "/chat-presence.css", "/chat-reactions.css", "/sidebar.css", "/chat-panel.css", "/chat-live.css",
+    "/chat-cards.css", "/chat-presence.css", "/chat-reactions.css", "/sidebar.css", "/chat-panel.css", "/apps-dialog.css", "/chat-live.css",
   ]);
   const MODES = Object.freeze(["light", "dark"]);
   // The id of the style element the lab adds to the app's window.
