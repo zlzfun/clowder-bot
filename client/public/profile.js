@@ -517,14 +517,16 @@
   // GET /xbot-api/bots/:name/computer and PUT {enabled} (docs/xbot-api.md
   // 「这台电脑」); the rules and the words are profile-rules.js's. What it is
   // doing, by cat and apart from the page, as 置顶's saves:
-  //   { view, reading, again, busy: "" | "on" | "off", ending, wait: {missing} | null,
+  //   { view, reading, again, busy: "" | "on" | "off", stale, ending, wait: {missing} | null,
   //     said: {text, code} | null, n, applied, timer }
   // ending: the cat was replying when off was asked (the shell's replying
   // hook: the status poll's running turns, or the open chat's live reply);
   // off ends that reply, and the busy line says so while it does.
   // view is the server's last answer, drawn while it is asked again, never
   // kept as the truth: a new page for the cat starts without it, and another
-  // cat turned on drops it (forgetOthers; again: read once more). Answers are
+  // cat turned on, or a deletion of this one that did not go through, drops
+  // it (forget; again: read once more; stale: the change on its way may
+  // answer what was before, so it is read again first). Answers are
   // numbered: one asked for before a later answer arrived is not drawn, and
   // nothing is read while a change is on its way (its answer is the view).
   // The only repeated request is the wait for a macOS grant, every 2 s while
@@ -533,7 +535,7 @@
   const WAIT_MS = 2000;
   function computerOf(key) {
     let cs = computers.get(key);
-    if (!cs) computers.set(key, (cs = { view: null, reading: false, again: false, busy: "", ending: false, wait: null, said: null, n: 0, applied: 0, timer: 0 }));
+    if (!cs) computers.set(key, (cs = { view: null, reading: false, again: false, busy: "", stale: false, ending: false, wait: null, said: null, n: 0, applied: 0, timer: 0 }));
     return cs;
   }
   const computerPath = (name) => "/xbot-api/bots/" + enc(name) + "/computer";
@@ -639,15 +641,19 @@
     cs.busy = "";
     cs.ending = false;
     cs.applied = Math.max(cs.applied, n);
+    // Another cat was switched on while this was on its way (forget): this answer may be from before that.
+    const stale = cs.stale;
+    cs.stale = false;
     // One cat at a time: turning on may have switched the others off, also when it was refused afterwards.
     if (enabled) forgetOthers(key);
-    if (failed || !view) {
+    if (failed || !view || stale) {
       endWait(cs);
       if (failed) cs.said = { text: R.computerError(failed, enabled), code: String(failed.code || "") };
-      // computer_other_running: the others are off now (their turn has not stopped yet): the next turn on names nobody, also if the read below fails.
-      if (failed && failed.code === "computer_other_running" && cs.view) cs.view = Object.assign({}, cs.view, { others: [] });
+      // Not drawn as true: nothing is said about the computer until it is read again.
+      if (stale) cs.view = null;
       repaintComputer(key);
-      // What is true now, read again (a read that fails keeps the last answer).
+      // What is true now, read again (a read that fails keeps the last answer: after
+      // computer_other_running its `others` still name the cat whose turn goes on).
       await readComputer(key, name);
       return;
     }
@@ -673,6 +679,8 @@
     cs.applied = n;
     // A read that fails keeps the last answer; with none, nothing is said about the computer.
     if (view) cs.view = view;
+    // computer_on_unknown said it was not known whether this cat went on: a read that says on settles it.
+    if (view && view.on && cs.said && cs.said.code === "computer_on_unknown") cs.said = null;
     if (cs.wait && view) {
       if (view.on || !view.installed || !view.supported) endWait(cs);
       else if (view.permissions === "needed") cs.wait.missing = view.missing;
@@ -684,20 +692,43 @@
 
   // Turning a cat on switches every other cat off first, and a refusal may
   // come after some were (docs/xbot-api.md「同一时间只有一只猫」): what this
-  // page last heard about the others may be an "on" that is no longer true.
-  // The cat whose 资料 is drawn now (the owner went to it while the switch
-  // was on its way) is read again — a read already on its way is asked once
-  // more when it is back. For the rest the last answer is dropped and nothing
-  // they asked for before now is drawn: their 资料 asks again when it opens.
-  // A cat with its own change on its way keeps it: that answer is its view.
+  // page heard about the others before then may be an "on" that is no longer
+  // true, and the cats they name may have changed.
   function forgetOthers(key) {
-    for (const [k, cs] of computers) {
-      if (k === key || cs.busy) continue;
-      const P = pageOf(k);
-      if (P) { if (cs.reading) cs.again = true; else readComputer(k, P.data.name || P.sel.id); continue; }
-      cs.view = null;
-      cs.applied = cs.n;
-    }
+    for (const k of [...computers.keys()]) if (k !== key) forget(k);
+  }
+  // What the page heard about a cat's switch is no longer drawn as true. Its
+  // last answer is dropped, and nothing it asked for before now is drawn: the
+  // row is not there until a read answers, as before the first one (a switch
+  // can say neither on nor off truthfully, and a sentence would say no more
+  // than its absence) — a read that fails leaves it so, and its 资料 asks
+  // again whenever its profile is read again. The cat whose 资料 is drawn is
+  // read now; a read already on its way is asked once more when it is back.
+  // A cat with its own change on its way stays busy as it is: that answer may
+  // be from before now, so it is read again before it is believed (stale).
+  function forget(k) {
+    const cs = computers.get(k);
+    if (!cs) return;
+    if (cs.busy) { cs.stale = true; return; }
+    cs.view = null;
+    cs.applied = cs.n;
+    if (cs.reading) cs.again = true;
+    const P = pageOf(k);
+    if (!P) return;
+    paintComputer(P);
+    if (!cs.reading) readComputer(k, P.data.name || P.sel.id);
+  }
+  // 删除猫猫 has ended (app.js's confirmDelete). Deleted: nothing of its
+  // computer is kept, since a new cat may be given its name. Not deleted: the
+  // server may have switched it off first (docs/xbot-api.md「删除一只开着的猫」).
+  // Other cats are not touched by a deletion.
+  function afterDelete(name, deleted) {
+    const k = R.key({ type: "bot", id: name }), cs = computers.get(k);
+    if (!cs) return;
+    if (!deleted) { forget(k); return; }
+    endWait(cs);
+    computers.delete(k);
+    repaintComputer(k);
   }
 
   // Waiting for a grant: read again in 2 s, only while this cat's 资料 is
@@ -1084,6 +1115,8 @@
   window.ClowderProfile = Object.freeze({
     init: (hooks) => { H = hooks; },
     catHead, groupHead, catPage, groupPage, groupMenu, renameGroup, removeGroup,
+    // 删除猫猫 ended, deleted or not (这台电脑: what the page heard about the cat's switch).
+    afterDelete,
     // Whether a drawer node is the page this module keeps for the chat shown.
     current: (n, sel) => !!n && !!sel && ((S.cat && S.cat.root === n && S.cat.key === R.key(sel)) || (S.group && S.group.root === n && S.group.key === R.key(sel))),
     // Open 高级 for this chat (the old 任务 tab, the work row above the composer).

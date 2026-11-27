@@ -117,8 +117,9 @@
   // (docs/xbot-api.md「这台电脑」). `on` is the engine's record, read every time:
   // the page draws the last answer and asks again, never keeps it as the truth.
   // It is the owner's own machine: 「这台电脑」, never a computer of the cat's.
-  // One cat at a time (item 55): `others` names the other cats that have it on;
-  // turning this one on switches them off first, ending a reply they are writing.
+  // One cat at a time (item 55): `others` names the other cats that have it on,
+  // and one already off whose turn that had it is still going (item 56); turning
+  // this one on switches them off first, ending a reply they are writing.
   const COMPUTER = Object.freeze({
     TITLE: "可以用这台电脑",
     INSTALL: "npm run computer:install",
@@ -181,9 +182,10 @@
   }
   // A change that did not go through: the server's own sentence when it is
   // everyday words (computer_half_registered asks the owner to check every
-  // cat, so it is shown whole; computer_other_on / computer_other_running
-  // name the other cat), else what did not happen. A cat's name in 「」 is the
-  // owner's own word: it does not make the sentence technical.
+  // cat, so it is shown whole; computer_other_on / computer_other_running /
+  // computer_not_on / computer_on_unknown name the other cat), else what did
+  // not happen. A cat's name in 「」 is the owner's own word: it does not make
+  // the sentence technical.
   function computerError(err, enabling) {
     const message = trim(err && err.message);
     if (err instanceof TypeError || message === "连不上 clowder-bot") return "连不上 clowder-bot";
