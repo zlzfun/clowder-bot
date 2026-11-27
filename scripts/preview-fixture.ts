@@ -10,7 +10,7 @@
 //   curl -X POST :3230/__preview -H 'Content-Type: application/json' -d '{"agents":"login"}'
 //   …  -d '{"speed":3}'  (slower playback)   -d '{"approvals":"failing"}'  (agreeing fails like a broken store)
 //   …  -d '{"page":12}'  (read conversations 12 messages at a time, to see earlier pages load)
-//   …  -d '{"wechat":"slow"}'  (应用: ok | slow | fail | timeout | absent | present | crashed | status-fails | status-ok)   -d '{"probe":"fail"}'  (no custom app answers; "ok" restores)
+//   …  -d '{"wechat":"slow"}'  (应用: ok | slow | fail | timeout | absent | present | crashed | status-fails | status-ok | icon-off | icon-on)   -d '{"probe":"fail"}'  (no custom app answers; "ok" restores)
 //   …  -d '{"append":"off"}'  (a cat that is writing does not take in what is said meanwhile; it answers that afterwards)
 //   …  -d '{"computer":"needs"}'  (这台电脑: none = no driver for this system, absent = not installed, needs = waiting for the
 //                                  macOS grants, ready; the plain preview starts ready, the showcase with none)
@@ -40,6 +40,7 @@ import type { NativeCat, NativeEvent, NativeMessage } from '../server/native/typ
 import { NativeFixture, catTemplates } from '../tests/native-fixture.js';
 import { soleEmoji } from '../server/native/reactions.js';
 import { seedShowcase, type Script, type Proposal } from './showcase-scene.js';
+import { macAppIcons, type AppIcons } from '../server/native/app-icons.js';
 
 const root = resolve(import.meta.dirname, '..');
 const port = Number(process.env.PREVIEW_PORT || 3230);
@@ -459,8 +460,11 @@ const computer: ComputerDriver & { mode: typeof computerModes[number] } = {
   async permissions() { return this.mode === 'ready' ? { state: 'granted' } : this.mode === 'needs' ? { state: 'needed', missing: ['accessibility', 'screen_recording'] } : { state: 'unknown' }; },
   async start() {}, async stop() {}, async quiet() {},
 };
+// 应用's pictures: the real ones of this computer (微信's icon where 微信 is installed), which {"wechat": "icon-off"} hides to show the drawn mark.
+const realIcons = macAppIcons(); let showIcons = true;
+const appIcons: AppIcons = { wechatMark: async () => showIcons ? realIcons.wechatMark() : undefined, wechat: async () => showIcons ? realIcons.wechat() : undefined };
 const runtime = createApp({ native, workspace, dataFile: join(dir, 'presentation.json'), staticDir: join(dir, 'no-static'),
-  allowedOrigins: [`http://127.0.0.1:${port}`, `http://localhost:${port}`], computer });
+  allowedOrigins: [`http://127.0.0.1:${port}`, `http://localhost:${port}`], computer, appIcons });
 if (showcase) native.runtimes = agentSets.showcase!;
 // The line under 你 names the device; here it says what this is instead of the machine's own name.
 runtime.store.state.deviceName = showcase ? '示例环境' : '预览环境';
@@ -494,8 +498,9 @@ runtime.app.post('/__preview', async (req, res) => {
     else if (input.wechat === 'absent') apps.plugin = null;
     else if (input.wechat === 'present') apps.plugin = { artifact: 'installed', intent: 'disabled', live: 'stopped', lifecycleRevision: 4, diagnostic: null, activationFailed: null, setEnabled: true };
     else if (input.wechat === 'status-fails' || input.wechat === 'status-ok') apps.statusFails = input.wechat === 'status-fails';
+    else if (input.wechat === 'icon-off' || input.wechat === 'icon-on') showIcons = input.wechat === 'icon-on';
     else if (input.wechat === 'crashed' && apps.plugin) Object.assign(apps.plugin, { intent: 'enabled', live: 'crashed', diagnostic: { code: 'UNEXPECTED_RUNTIME_FAILURE', message: 'Plugin runtime reported UNEXPECTED_RUNTIME_FAILURE.' } });
-    else return res.status(400).json({ error: 'wechat: ok | slow | fail | timeout | absent | present | crashed | status-fails | status-ok' });
+    else return res.status(400).json({ error: 'wechat: ok | slow | fail | timeout | absent | present | crashed | status-fails | status-ok | icon-off | icon-on' });
   }
   if (typeof input.probe === 'string') {
     if (!['ok', 'fail'].includes(input.probe)) return res.status(400).json({ error: 'probe: ok | fail' });

@@ -12,6 +12,12 @@ export function createXbotAppsRouter(bridge: BotBridge, apps = new BotApps(bridg
   router.post('/apps/wechat/disconnect', async (_req, res) => res.json(await apps.disconnectWechat()));
   router.post('/apps/wechat/authorize', async (_req, res) => res.json(await apps.authorizeWechat(true)));
   router.post('/apps/wechat/revoke', async (_req, res) => res.json(await apps.authorizeWechat(false)));
+  // 微信's picture: the icon of the program installed on this computer. Its address carries a mark that changes with the file, so it may be kept.
+  router.get('/apps/wechat/icon', async (_req, res) => {
+    const png = await apps.wechatIcon();
+    if (!png) throw new ApiError(404, '没有这张图');
+    res.set({ 'Content-Type': 'image/png', 'Cache-Control': 'private, max-age=86400' }).send(png);
+  });
   router.get('/apps/:id', async (req, res) => res.json(await apps.detail(req.params.id)));
   router.patch('/apps/:id', async (req, res) => res.json(await apps.patchCustom(req.params.id, customPatchSchema.parse(req.body))));
   router.delete('/apps/:id', async (req, res) => {

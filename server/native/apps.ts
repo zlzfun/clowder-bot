@@ -4,6 +4,7 @@ import { ApiError } from '../errors.js';
 import type { ProductStore } from '../product-store.js';
 import type { NativeTransport } from './types.js';
 import { computerEntry } from './computer.js';
+import { noIcons, type AppIcons } from './app-icons.js';
 
 // 应用 (docs/apps-api.md): a listing over two native mechanisms, with nothing of its own behind it.
 //   · 微信  = the engine's official plugin `official.wechat-visible-reader`, through the plugin manager:
@@ -37,6 +38,8 @@ export type AppState = 'off' | 'starting' | 'on' | 'failed' | 'unavailable' | 'u
 export interface AppTool { name: string; description?: string }
 export interface AppRow {
   id: string; kind: 'wechat' | 'custom'; title: string; state: AppState;
+  /** 微信: where its picture is served — the icon of the 微信 installed on this computer. Absent when there is none to show. */
+  icon?: string;
   /** Why it is not usable, in plain words. Present for `failed`, `unavailable`, and an `off` that followed a failed start. */
   reason?: string;
   /** The engine's own words for a failure, for whoever wants to diagnose. Never needed to act. */
@@ -162,11 +165,20 @@ export class BotApps {
     this[lane] = run.catch(() => undefined);
     return run;
   }
-  constructor(private native: NativeTransport, private store: ProductStore, private platform: NodeJS.Platform = process.platform) {}
+  constructor(private native: NativeTransport, private store: ProductStore, private platform: NodeJS.Platform = process.platform,
+    private icons: AppIcons = noIcons) {}
+
+  /** 微信 as it is named and pictured, whatever state it is in. A picture that cannot be found is simply not offered. */
+  private async wechatBase(): Promise<{ id: 'wechat'; kind: 'wechat'; title: string; icon?: string }> {
+    const mark = await this.icons.wechatMark().catch(() => undefined);
+    return { id: 'wechat', kind: 'wechat', title: '微信', ...(mark ? { icon: `/xbot-api/apps/wechat/icon?v=${encode(mark)}` } : {}) };
+  }
+  /** The picture itself (PNG), or undefined. */
+  wechatIcon(): Promise<Buffer | undefined> { return this.icons.wechat().catch(() => undefined); }
 
   async list(): Promise<{ apps: AppRow[] }> {
     // 微信 that cannot be read must not take the owner's other apps off the screen: it is listed as it is — not readable.
-    const unread = (): AppRow => ({ id: 'wechat', kind: 'wechat', title: '微信', state: 'unavailable', reason: '没能读到它的状态' });
+    const unread = async (): Promise<AppRow> => ({ ...await this.wechatBase(), state: 'unavailable', reason: '没能读到它的状态' });
     const [wechat, custom] = await Promise.all([this.wechat().catch(unread), this.registry()]);
     return { apps: [wechat, ...custom.map(entry => this.customRow(entry))] };
   }
@@ -303,7 +315,7 @@ export class BotApps {
   }
   /** `known`: a plugin record just read (`null` when the engine has none), to avoid reading it twice. */
   async wechat(known?: NativePlugin | null): Promise<AppRow> {
-    const base = { id: 'wechat', kind: 'wechat' as const, title: '微信' };
+    const base = await this.wechatBase();
     if (this.platform !== 'darwin') return { ...base, state: 'unavailable', reason: '只在 Mac 上能用' };
     const plugin = known === undefined ? await this.plugin() : known;
     if (!plugin || plugin.artifact === 'absent' || plugin.artifact === 'staged') return { ...base, state: 'unavailable', reason: '这台电脑上还没有它的程序包' };

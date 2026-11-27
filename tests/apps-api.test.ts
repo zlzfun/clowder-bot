@@ -9,17 +9,18 @@ import { createApp } from '../server/app.js';
 import { createXbotAppsRouter } from '../server/xbot/apps.js';
 import { BotApps, nativeIdFor, parseCustomApp, probeDetail, probeReason, WECHAT_PLUGIN } from '../server/native/apps.js';
 import { ApiError } from '../server/errors.js';
+import type { AppIcons } from '../server/native/app-icons.js';
 import { NativeFixture } from './native-fixture.js';
 import { WECHAT_DISCLOSURE } from './apps-fixture.js';
 
 // The adapter over a scripted engine that answers as the pinned upstream did on the isolated runtime
 // (tests/apps-fixture.ts). The Mac-only app is tested with the platform given, so it runs anywhere.
-async function setup(t: any, platform: NodeJS.Platform = 'darwin') {
+async function setup(t: any, platform: NodeJS.Platform = 'darwin', icons?: AppIcons) {
   const dir = mkdtempSync(join(tmpdir(), 'bot-apps-test-')), native = new NativeFixture();
   const runtime = createApp({ native, dataFile: join(dir, 'presentation.json') });
   // The same router as production, with the platform under the test's control.
   const app = express(); app.use(express.json());
-  app.use('/xbot-api', createXbotAppsRouter(runtime.bridge, new BotApps(native, runtime.store, platform)));
+  app.use('/xbot-api', createXbotAppsRouter(runtime.bridge, new BotApps(native, runtime.store, platform, icons)));
   app.use((error: any, _req: any, res: any, _next: any) => res.status(error.status ?? (error.issues ? 400 : 500)).json({ error: error.issues ? error.issues.map((i: any) => `${i.path.join('.')}: ${i.message}`).join('；') : error.message, ...(error.code ? { code: error.code } : {}) }));
   const server = app.listen(0, '127.0.0.1'); await once(server, 'listening');
   const address = server.address(); assert.ok(address && typeof address !== 'string');
@@ -27,9 +28,13 @@ async function setup(t: any, platform: NodeJS.Platform = 'darwin') {
     const response = await fetch(`http://127.0.0.1:${address.port}/xbot-api/apps${path}`, { method, headers: body === undefined ? {} : { 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     return { status: response.status, body: await response.json() as any };
   };
+  const raw = async (path: string) => {
+    const response = await fetch(`http://127.0.0.1:${address.port}/xbot-api/apps${path}`);
+    return { status: response.status, type: response.headers.get('content-type'), cache: response.headers.get('cache-control'), bytes: await response.arrayBuffer() };
+  };
   t.after(async () => { await runtime.close(); await new Promise<void>(r => server.close(() => r())); rmSync(dir, { recursive: true, force: true }); });
   const sent = (pattern: RegExp, method?: string) => native.calls.filter(c => pattern.test(c.path) && (!method || c.method === method));
-  return { ...runtime, native, apps: native.apps, call, sent, dataFile: join(dir, 'presentation.json'), platform };
+  return { ...runtime, native, apps: native.apps, call, raw, sent, dataFile: join(dir, 'presentation.json'), platform };
 }
 const wechatOf = (list: any) => list.body.apps.find((a: any) => a.id === 'wechat');
 const nativeOf = (app: any): string => app.id.slice('custom:'.length);
@@ -483,4 +488,37 @@ test('这台电脑\'s entry lives in the same registry and is not one of the own
   await r.call(`/${encodeURIComponent(mine.body.id)}`, 'DELETE');
   assert.deepEqual(r.native.capabilities, [{ id: 'computer', type: 'mcp', source: 'external', enabled: true, mcpServer: { transport: 'stdio', command: '/Applications/CuaDriver.app/Contents/MacOS/cua-driver', args: ['mcp'] }, blockedCats: ['someone'] }]);
   assert.equal(r.sent(/mcp\/computer(\?|\/|$)/).length, 0, 'nothing 应用 sends names that entry');
+});
+
+test('微信\'s picture is the icon of the 微信 installed on this computer: offered when there is one, in every state; without one the row simply has no picture', async t => {
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+  let installed = true, asked = 0;
+  const icons: AppIcons = { wechatMark: async () => installed ? 'a1b2 c3' : undefined, wechat: async () => { asked++; return installed ? png : undefined; } };
+  const r = await setup(t, 'darwin', icons);
+  // Its address carries the mark that changes with the file (escaped), so the page may keep it.
+  assert.equal(wechatOf(await r.call()).icon, '/xbot-api/apps/wechat/icon?v=a1b2%20c3');
+  assert.equal(asked, 0, 'listing never makes the picture');
+  for (const state of ['off', 'on'] as const) {
+    if (state === 'on') await r.call('/wechat/connect', 'POST', {});
+    assert.equal((await r.call('/wechat')).body.icon, '/xbot-api/apps/wechat/icon?v=a1b2%20c3', state);
+  }
+  // …also when its state cannot be read, and when the engine has no such plugin.
+  const request = r.native.request.bind(r.native);
+  r.native.request = (async (path: string, options: any = {}) => { if (/plugin-manager/.test(path)) throw Object.assign(new Error('no'), { status: 500 }); return request(path, options); }) as any;
+  assert.deepEqual([wechatOf(await r.call()).state, wechatOf(await r.call()).icon], ['unavailable', '/xbot-api/apps/wechat/icon?v=a1b2%20c3']);
+  r.native.request = request as any; r.apps.plugin = null;
+  assert.equal(wechatOf(await r.call()).icon, '/xbot-api/apps/wechat/icon?v=a1b2%20c3');
+  // The picture itself.
+  const got = await r.raw('/wechat/icon?v=a1b2%20c3');
+  assert.deepEqual([got.status, got.type, got.cache, Buffer.from(got.bytes).equals(png)], [200, 'image/png', 'private, max-age=86400', true]);
+  // Not installed (or removed since): no picture offered, and its address answers 404 — the page draws its own mark.
+  installed = false;
+  assert.equal('icon' in wechatOf(await r.call()), false);
+  assert.equal((await r.raw('/wechat/icon')).status, 404);
+  // A source that throws is no picture, not an error for the list.
+  const broken = await setup(t, 'darwin', { wechatMark: async () => { throw new Error('plutil'); }, wechat: async () => { throw new Error('sips'); } });
+  assert.deepEqual([(await broken.call()).status, 'icon' in wechatOf(await broken.call())], [200, false]);
+  assert.equal((await broken.raw('/wechat/icon')).status, 404);
+  // By default (tests, anything that does not say where pictures come from) there is none: nothing here depends on what this machine has installed.
+  assert.equal('icon' in wechatOf(await (await setup(t)).call()), false);
 });
