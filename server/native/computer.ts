@@ -217,34 +217,45 @@ export class Computer {
     if (!this.real(entry)) await this.register(located);
     // The driver was moved or reinstalled: the engine keeps who is blocked when an entry is installed over.
     else if (entry.mcpServer?.command !== located.command || JSON.stringify(entry.mcpServer?.args ?? []) !== JSON.stringify(located.args)) await this.install(located);
-    await this.handOver(cat);
+    const gave = await this.handOver(cat);
     // Written whatever was just read: an earlier request that timed out here may still be waiting in the engine, and the last write is the one that stands.
-    await this.toggle({ scope: 'cat', catId: cat.id, enabled: true });
-    if (!this.isOn(await this.entry(), cat)) throw new ApiError(502, '没能打开，请再试一次。');
+    // Whether it is on now is the registry's to say, not the answer to the write: one whose answer was lost may have gone through.
+    let failure: unknown, on = false;
+    try { await this.toggle({ scope: 'cat', catId: cat.id, enabled: true }); } catch (error) { failure = error; }
+    try { on = this.isOn(await this.entry(), cat); } catch (error) { failure ??= error; }
+    if (!on) {
+      // The other cats are off by now and no cat has it: said with the failure, or the owner would find that cat's switch off without a word.
+      if (gave) throw new ApiError(502, `${gave}的已经关掉了，但这只猫的没能打开。请再试一次。`, undefined, 'computer_not_on');
+      throw failure ?? new ApiError(502, '没能打开，请再试一次。');
+    }
     this.lingering.delete(cat.id);
     return this.view(cat);
   }
 
   /**
-   * The other cats give the computer up to `cat`: see enable. Throws, with nothing switched for `cat`, when one of them
-   * cannot be seen to be off and stopped. A cat that did come off has its running turns ended whatever became of the
-   * others, and so has a cat that was switched off earlier with a turn still going: asking again must not let `cat` in
-   * beside it.
+   * The other cats give the computer up to `cat`: see enable. Returns the cats that were switched off, as words ('' for
+   * none). Throws, with nothing switched for `cat`, when one of them cannot be seen to be off and stopped. A cat that
+   * did come off has its running turns ended whatever became of the others, and so has a cat that was switched off
+   * earlier with a turn still going: asking again must not let `cat` in beside it.
    */
-  private async handOver(cat: NativeCat): Promise<void> {
+  private async handOver(cat: NativeCat): Promise<string> {
     const rivals = this.rivals(await this.entry(), cat), earlier = [...this.lingering].filter(id => id !== cat.id && !rivals.includes(id));
-    if (!rivals.length && !earlier.length) return;
+    if (!rivals.length && !earlier.length) return '';
     for (const id of rivals) { try { await this.toggle({ scope: 'cat', catId: id, enabled: false }); } catch { /* read back below */ } }
     // What the registry says now decides, not the answers to the writes: a write whose answer was lost may have gone through.
-    let left = rivals;
-    if (rivals.length) { try { const after = await this.entry(); left = rivals.filter(id => this.isOn(after, { id })); } catch { /* unread: none of them is known to be off */ } }
+    let left: string[] = [], unread = false;
+    if (rivals.length) { try { const after = await this.entry(); left = rivals.filter(id => this.isOn(after, { id })); } catch { unread = true; } }
+    // A cat seen to be still on keeps its reply: nothing changed for it. Every other one is off — or, the registry unread, may
+    // be: its turns are ended all the same, or the next try would find it off and let `cat` in beside a turn nobody ended.
     const off = rivals.filter(id => !left.includes(id)), running: string[] = [];
     for (const id of [...off, ...earlier]) if (!await this.ended(id)) running.push(id);
+    if (unread) throw new ApiError(502, `没能确认${await this.who(rivals)}的已经关掉，所以这只猫的没有打开。请再试一次。`, undefined, 'computer_other_on');
     if (left.length) throw new ApiError(502, `没能先把${await this.who(left)}的关掉，所以这只猫的没有打开。${off.length ? `${await this.who(off)}的已经关掉了。` : ''}请再试一次。`, undefined, 'computer_other_on');
     if (running.length) {
       const names = await this.who(running);
       throw new ApiError(502, `${names}的已经关掉，但它正在进行的这一轮还没有停下来，停下之前它还能用这台电脑，所以这只猫的先没有打开。请在${names}的对话里点停止，然后再开一次。`, undefined, 'computer_other_running');
     }
+    return off.length ? this.who(off) : '';
   }
 
   /**

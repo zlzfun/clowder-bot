@@ -756,7 +756,8 @@ export class BotBridge {
    * ended.
    */
   async stopRunningTurns(cat: Pick<NativeCat, 'id'>): Promise<{ stopped: number; failed: number }> {
-    const threads = new Set([this.store.bot(cat.id).activeThreadId, ...this.store.state.groupThreadIds].filter((id): id is string => !!id));
+    // Read without making a record: the id may come from the registry (another cat being switched off) and be no cat this app has drawn.
+    const threads = new Set([this.store.state.bots[cat.id]?.activeThreadId, ...this.store.state.groupThreadIds].filter((id): id is string => !!id));
     const running = async (threadId: string) => (await this.queue(threadId)).activeInvocations.some(run => run.catId === cat.id);
     let stopped = 0, failed = 0;
     for (const threadId of threads) {
