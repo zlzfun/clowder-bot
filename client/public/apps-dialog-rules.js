@@ -4,8 +4,9 @@
 // state is called and drawn as, what can be done in it, the starting poll and
 // the authorization countdown, the custom-app form's checks (mirroring the
 // adapter's own: server/native/apps.ts), the idempotency fingerprint, what a
-// failed request says, and the words that must be read before 授权 10 分钟
-// and 添加 (consent; docs/apps-api.md lists what is true).
+// failed request says, and the words (docs/apps-api.md 「界面怎么说」: in
+// front of a button only what a person would be misled without; the rest of
+// what is true one click away).
 // The word MCP appears only in the custom-app form's one line: everyone else
 // meets an app by its name.
 (function (root) {
@@ -55,16 +56,14 @@
   }
 
   // ---- 微信 ----
-  // What can be done in each state; nothing that cannot work (unavailable: nothing).
+  // What can be done in each state, at the top by the state; nothing that cannot work (unavailable: nothing).
   // gaveUp: the starting poll stopped after about two minutes (or a read failed): a manual re-read.
   // said: the button's name for a screen reader, which holds the word shown (the dialog's × is 关闭 too).
-  // where: "hero" — at the top, by the state (关闭, 再看一次); "consent" — after what opening allows,
-  // because opening is the point of consent (打开, and 再试一次 after a start that failed).
   function wechatActions(app, gaveUp) {
     if (!app) return [];
-    const open = (label) => ({ act: "connect", label, said: label === "打开" ? "打开微信" : "再试一次打开微信", main: true, where: "consent" });
-    const shut = { act: "disconnect", label: "关闭", said: "关闭微信", main: false, where: "hero" };
-    const reread = { act: "reread", label: "再看一次", said: "再看一次微信现在的状态", main: false, where: "hero" };
+    const open = (label) => ({ act: "connect", label, said: label === "打开" ? "打开微信" : "再试一次打开微信", main: true });
+    const shut = { act: "disconnect", label: "关闭", said: "关闭微信", main: false };
+    const reread = { act: "reread", label: "再看一次", said: "再看一次微信现在的状态", main: false };
     if (app.state === "off") return [open(trim(app.reason) ? "再试一次" : "打开")];
     if (app.state === "starting") return gaveUp ? [reread] : [];
     if (app.state === "on") return [shut];
@@ -101,55 +100,52 @@
   // When the shown clock next changes.
   const tickIn = (ms) => { const r = ms % 1000; return ms <= 0 ? 0 : r === 0 ? 1000 : r; };
 
-  // The words around 微信 (docs/apps-api.md 「微信」 → 「两种读法」). A cat reads 微信 in two ways:
-  //   by name — a contact whose name matches exactly: needs only 微信 to be open; no other switch, no time
-  //     limit; any cat may do it in its reply to a message of the owner's (nothing makes it ask first);
-  //     it brings 微信 to the front, opens that chat (may clear its unread mark), then tries to put things back;
-  //   the open chat — the chat open in 微信 now: needs 微信 open AND the plugin's ten-minute authorization;
-  //     it does not operate 微信.
-  // So opening is the point of consent: what opening allows is on the page before 打开 (and before 再试一次
-  // after a start that failed). 关闭 ends both; 撤销 and the ten minutes end only the open chat. What is not
-  // true is never said: that a cat asks first; that cats cannot read for want of the ten minutes; that the
-  // ten minutes or 撤销 stop all reading; that macOS will ask for the permissions (the plugin only checks).
-  const WECHAT_ABOUT = "让猫猫读这台 Mac 上微信里看得到的消息。";
-  // The two ways, each with its own heading.
-  const BY_NAME = "按名字读某位联系人";
+  // The words around 微信 (docs/apps-api.md 「微信」: 「两种读法」, 「界面怎么说」). A cat reads 微信 in two ways:
+  //   by name — a contact whose name matches exactly: needs only 微信 to be open, until 关闭 (no other switch,
+  //     no time limit; nothing makes the cat ask first); it brings 微信 to the front, may mark that chat read;
+  //   the open chat — the chat open in 微信 now: needs 微信 open AND the plugin's ten-minute authorization.
+  // In front of 打开 (and 再试一次) only the one thing a person would be misled without: opening is what lets
+  // cats read by name (otherwise the ten minutes look like the gate of all reading). Once open, the layout says
+  // the rest: the two ways as two rows, each its own state and control. Everything else is behind 说明.
+  // Never said: that a cat asks first; that cats cannot read for want of the ten minutes; that macOS will ask.
+  const WECHAT_LEAD = "打开后，猫猫可以按联系人的名字读这台 Mac 上的微信，直到你关闭。";
+  // The two rows, and their states (a mark and a word, as everywhere in the dialog).
+  const BY_NAME = "按名字读联系人";
+  const BY_NAME_ON = "可用";
   const OPEN_CHAT = "读微信里正打开的那段聊天";
-  // By name: what it takes (opening, nothing more, until 关闭), who may (any cat, replying to you), what it does to 微信.
-  const byName = (open) => (open ? "现在就能读" : "打开后就能读") + "：在聊天里对猫猫说出联系人的名字就行，不用再授权，也没有时限，直到你关闭。";
-  const BY_NAME_REACH = "任何一只猫在回复你的消息时都能这样读；读时微信会短暂切到前面，那段聊天可能被标为已读，读完尽量回到原来的样子。";
-  // The open chat: before opening, after opening (the authorization's own facts, before its button), while authorized.
-  const OPEN_LATER = "打开后还要另外授权 10 分钟；读这一段不会动微信。";
-  const OPEN_ASK = "授权 10 分钟，猫猫就能读这一段：只读它，不会动微信；10 分钟后自己结束，也可以随时撤销。";
-  const WECHAT_SAY = "看一下微信";
-  const OPEN_SAY = ["在聊天里说「", WECHAT_SAY, "」，猫猫读的就是这一段。"];
-  const OPEN_LEFT = "这一段的授权";
-  // 微信 on without an `authorization` field: the plugin's status could not be read — unknown, never "not authorized".
-  const OPEN_UNKNOWN = "没能读到这 10 分钟授权现在的状态。";
+  const OPEN_OFF = "未授权";
+  const OPEN_LEFT = "授权还剩";
+  // 微信 on without an `authorization` field (or its last read failed): unknown, never "not authorized".
+  const OPEN_UNKNOWN = "没能读到授权状态";
   const authKnown = (app) => !!app && app.state === "on" && !!app.authorization && typeof app.authorization === "object";
-  // How it reads, either way. The second line names both places the text goes (the Agent and its model):
-  // where the owner's 微信 text ends up outranks the everyday-words rule (tests/vocabulary.test.ts, CONSENT).
-  const WECHAT_READS = Object.freeze([
-    "只读：不发消息、不点链接，也不读微信的聊天记录库。读的时候截图认字，截图不保存。",
+  // 说明: the one place for the rest, collapsed until asked for. The second line names both places the text goes
+  // (the Agent and its model): where the owner's 微信 text ends up outranks the everyday-words rule
+  // (tests/vocabulary.test.ts, CONSENT) — it is word for word the sentence that rule excepts.
+  const MORE = "说明";
+  const WECHAT_NOTES = Object.freeze([
+    "只读：不发消息、不点链接，也不读聊天记录库；截图认字，截图不保存。",
     "认出的文字会和你发给猫猫的话一样，交给它用的 Agent 和模型，并留在那段聊天的执行记录里。",
+    "按名字读时，微信会短暂切到前面，那段聊天可能被标为已读，读完尽量复原。",
+    // The plugin checks screen recording and never asks; the entry is the program that started clowder-bot
+    // (not named: which one depends on how it was started).
+    "需要在 系统设置 › 隐私与安全性 里给启动 clowder-bot 的程序打开「屏幕录制」，按名字读还要「辅助功能」；没有的话，猫猫会说没能读到。",
+    // A cat refused for want of the ten minutes repeats the plugin's words, which name its upstream screen.
+    "猫猫提到「Plugin Hub」时，指的就是这里。",
   ]);
-  // 「插件原文」 is quoted verbatim; where this version says reading by contact is authorized each time, one line
-  // of ours says what is true (两种读法: nothing asks each time; reading by name, the cat confirms by itself).
-  const SOURCE_NOTE = "上面说按联系人读取要你逐次授权，实际不是这样：不会每次问你，按名字读时是猫猫自己确认的。";
+  // The plugin's own words, quoted with their version; where they say reading by contact is authorized each
+  // time, one line of ours says what is true (两种读法: nothing asks each time; the cat confirms by itself).
+  const sourceLabel = (version) => "插件原文" + (trim(version) ? " · " + trim(version) : "");
+  const SOURCE_NOTE = "其中说按联系人读取要逐次授权，其实不会每次问你：按名字读时是猫猫自己确认的。";
   const sourceNote = (disclosure) => (/逐次授权/.test(String(disclosure || "")) ? SOURCE_NOTE : "");
-  // What reading needs from macOS (the plugin checks screen recording and never asks; the entry is the
-  // program that started clowder-bot, not named here because which one it is depends on how it was started).
-  const WECHAT_PERMISSIONS = "要读得到，需要在 系统设置 › 隐私与安全性 里给启动 clowder-bot 的程序打开「屏幕录制」，按名字读还要「辅助功能」；没有的话，猫猫会说它没能读到。";
-  // A cat refused for want of the ten minutes repeats the plugin's words, which name its upstream screen.
-  const WECHAT_HUB = "猫猫提到「Plugin Hub」时，说的就是这里。";
-  const WECHAT_SLOW = "第一次启动可能要半分钟以上。";
+  // Starting: a first start can take long enough to look stuck; after about two minutes the reads stop.
+  const WECHAT_SLOW = "第一次可能要半分钟以上。";
   const WECHAT_STILL = "已经两分钟了，还在启动。";
   // Said once to a screen reader, for what happened while the owner was not acting.
   const SAID = Object.freeze({
     started: "微信已经打开了。",
     startFailed: (reason) => "微信没能启动" + (trim(reason) ? "：" + trim(reason) : "") + "。",
     still: "微信还在启动。",
-    ended: "读微信里正打开那段聊天的 10 分钟授权结束了；按名字读不受影响。",
+    ended: "微信的 10 分钟授权结束了，按名字读不受影响。",
   });
 
   // ---- 自定义应用: the form ----
@@ -310,24 +306,20 @@
     return FETCHERS.has(String(src.program || "").split("/").pop());
   }
 
-  // The consequences of 添加, read before it is pressed (docs/apps-api.md「范围与确认」).
-  const CUSTOM_LEAD = "接入你自己的 MCP 服务。";
-  function consequences(kind) {
-    const k = kind === "url" ? "url" : "program";
-    return [
-      "所有猫猫都能用它，以后新建的猫猫也能。",
-      "猫猫每次用它都不会先问你。",
-      ...(k === "program" ? ["这个程序会在这台电脑上、以你的身份运行。"] : []),
-      "填的" + SECRETS_WORD[k] + "会原样存在这台电脑上，不加密。",
-    ];
+  // The form's one line: without MCP, 网址 reads as "add a website". The only place the word appears.
+  const CUSTOM_LEAD = "接入一个 MCP 服务。";
+  // In front of 添加 (docs/apps-api.md「范围与确认」): what a person would be misled without — every cat, unasked.
+  const ADD_SCOPE = "所有猫猫都能用它，用的时候不会先问你。";
+  // Next to the secrets, once there is one: how they are kept.
+  const SECRETS_KEPT = "值会原样存在这台电脑上，不加密。";
+  // What an add answered: 201 is added, whatever its state. On the page the state line says how it is (so the
+  // note only says it is in); said to a screen reader after the owner left the form, the state comes with it.
+  function added(app, said) {
+    if (app && app.state === "on") return "加好了。";
+    if (!said) return "已经加上了。";
+    return app && app.state === "failed" ? "已经加上了，但它没有回应。" : "已经加上了，但没能检查它。";
   }
-  // What an add answered: 201 is added, whatever its state.
-  function added(app) {
-    if (app && app.state === "on") return "加好了。猫猫从下一条消息起就能用它。";
-    if (app && app.state === "failed") return "已经加上了，但它没有回应。";
-    return "已经加上了，但没能检查它。";
-  }
-  const SLOW_HINT = "第一次运行要先下载，可能慢一些，稍后再试一次。";
+  const SLOW_HINT = "第一次运行要先下载，稍后再试一次。";
   const REMOVE_NOTE = "移除后不能恢复，猫猫从下一条消息起就用不了它。";
   const removeTitle = (name) => "移除「" + trim(name) + "」？";
 
@@ -384,10 +376,10 @@
 
   root.ClowderAppsRules = Object.freeze({
     trim, WECHAT, path, UNREAD, unread, look, wechatActions, BUSY, POLL_EVERY, POLL_FOR, pollNext, deadline, clock, clockSaid, tickIn,
-    WECHAT_ABOUT, BY_NAME, OPEN_CHAT, byName, BY_NAME_REACH, OPEN_LATER, OPEN_ASK, WECHAT_SAY, OPEN_SAY, OPEN_LEFT, OPEN_UNKNOWN, authKnown, WECHAT_READS, SOURCE_NOTE, sourceNote, WECHAT_PERMISSIONS, WECHAT_HUB, WECHAT_SLOW, WECHAT_STILL, SAID,
+    WECHAT_LEAD, BY_NAME, BY_NAME_ON, OPEN_CHAT, OPEN_OFF, OPEN_LEFT, OPEN_UNKNOWN, authKnown, MORE, WECHAT_NOTES, sourceLabel, SOURCE_NOTE, sourceNote, WECHAT_SLOW, WECHAT_STILL, SAID,
     NAME_MAX, PROGRAM_MAX, ARGS_MAX, ARG_MAX, URL_MAX, SECRETS_MAX, VALUE_MAX, SECRETS_WORD, URL_SAID, EMPTY_SECRET,
     nameProblem, programProblem, argsOf, argsProblem, urlProblem, secretNameProblem, secretValueProblem, secretsOf, check, fingerprint, sameSource,
-    splitCommand, commandLine, slowFirstRun, CUSTOM_LEAD, consequences, added, SLOW_HINT, REMOVE_NOTE, removeTitle,
+    splitCommand, commandLine, slowFirstRun, CUSTOM_LEAD, ADD_SCOPE, SECRETS_KEPT, added, SLOW_HINT, REMOVE_NOTE, removeTitle,
     sentence, ADD_UNSURE, addError, wechatError, checkError, patchError, removeError, listError, checked,
   });
 })(typeof window !== "undefined" ? window : globalThis);

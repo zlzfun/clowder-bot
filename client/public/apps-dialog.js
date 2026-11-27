@@ -672,7 +672,7 @@
       const left = S.count ? Math.max(0, S.count.end - now()) : 0;
       const r = L.rows.get(R.WECHAT);
       if (r) setText(r.time, S.count ? " · 授权还剩 " + R.clock(left) : "");
-      if (view && view.name === "wechat") { setText(view.clock, R.clock(left)); setText(view.clockSaid, R.clockSaid(left)); }
+      if (view && view.name === "wechat") { setText(view.clock, R.clock(left)); setText(view.clockSaid, "授权" + R.clockSaid(left)); }
     }
 
     // ---------------------------------------------------------------- 微信's page
@@ -682,11 +682,11 @@
       const next = id === R.WECHAT ? wechatPage() : appPage(id);
       show(next, () => title.focus());
     }
-    // 微信's page: at the top the state, and 关闭 (which ends every way of reading). Under it the two ways a
-    // cat reads 微信, each with what it takes and what it does — by name (opening is all it takes, until
-    // 关闭) and the chat open in 微信 (the ten-minute authorization, its own facts, its countdown and 撤销) —
-    // then how it reads either way. Opening is the point of consent: 打开 (and 再试一次 after a start that
-    // failed) comes after all of that; the plugin's own words are one click away beside it.
+    // 微信's page, a settings row or two. At the top its state and what can be done (打开 / 关闭 / 再试一次);
+    // before 打开 one sentence, the one fact a person would be misled without (opening lets cats read by name).
+    // Once open, the two ways a cat reads it are two rows, each its own state and control: by name (可用) and
+    // the chat open in 微信 (授权 10 分钟; the time left and 撤销; or unknown, 再看一次 and 撤销). Everything
+    // else true about reading is behind 说明, one control, collapsed until asked for.
     function wechatPage() {
       const el = node("div", "ap-view ap-wechat");
       const hero = node("div", "ap-hero"), tile = node("span", "ap-tile lg"), tx = node("div", "ap-hero-tx");
@@ -695,87 +695,72 @@
       state.setAttribute("tabindex", "-1");
       mark.setAttribute("aria-hidden", "true");
       state.append(mark, word);
-      const about = node("p", "ap-about", R.WECHAT_ABOUT), detail = details();
-      tx.append(state, about, detail.wrap);
+      const lead = node("p", "ap-about", R.WECHAT_LEAD), detail = details();
+      lead.id = uid("lead");
+      tx.append(state, lead, detail.wrap);
       const acts = node("div", "ap-hero-acts");
       hero.append(tile, tx, acts);
       const note = node("p", "ap-note");
-      const text = (cls, words) => { const p = node("p", cls, words); p.id = uid("w"); return p; };
-      // The two ways.
+      // A row: its title, its state (a mark and a word), its controls.
+      const row = (title, cls) => {
+        const r = node("div", "ap-way " + cls), copy = node("div", "ap-way-copy"), head = node("h3", "", title);
+        const st = node("p", "ap-way-st"), stMark = node("span", "ap-mark"), stWord = node("span", "ap-way-word");
+        head.id = uid("way");
+        st.id = uid("way-st");
+        stMark.setAttribute("aria-hidden", "true");
+        st.append(stMark, stWord);
+        copy.append(head, st);
+        const rowActs = node("div", "ap-way-acts");
+        r.append(copy, rowActs);
+        return { r, head, st, stMark, stWord, acts: rowActs };
+      };
       const ways = node("div", "ap-ways");
-      const nameWay = node("section", "ap-way"), nameHead = node("h3", "", R.BY_NAME);
-      nameHead.id = uid("way");
-      nameWay.setAttribute("aria-labelledby", nameHead.id);
-      const nameText = text("ap-way-text", ""), nameReach = text("ap-way-text quiet", R.BY_NAME_REACH);
-      nameWay.append(nameHead, nameText, nameReach);
-      const openWay = node("section", "ap-way"), openHead = node("h3", "", R.OPEN_CHAT);
-      openHead.id = uid("way");
-      openWay.setAttribute("aria-labelledby", openHead.id);
-      const openLater = text("ap-way-text", R.OPEN_LATER);
-      // Not authorized: the authorization's own facts, then its button; the plugin's refusal points here.
-      const ask = node("div", "ap-way-part"), askText = text("ap-way-text", R.OPEN_ASK);
-      askText.setAttribute("tabindex", "-1");
-      const authorize = button("primary ap-authorize", "授权 10 分钟", () => wechatAct("authorize"));
-      const askRow = node("div", "ap-way-acts"), hub = node("p", "ap-way-text quiet ap-hub", R.WECHAT_HUB);
-      askRow.append(authorize);
-      ask.append(askText, askRow, hub);
-      // Authorized: the time left on this authorization, 撤销 for this alone, and what to say for it.
-      const can = node("div", "ap-way-part ap-can");
-      const clockRow = node("div", "ap-clock-row"), clockBox = node("p", "ap-clock-box");
-      clockBox.setAttribute("tabindex", "-1");
-      const clockEl = node("span", "ap-clock"), clockSaid = node("span", "visually-hidden");
-      clockEl.setAttribute("aria-hidden", "true");
-      const clockLead = node("span", "ap-clock-lead", "授权还剩");
+      const byName = row(R.BY_NAME, "ap-by-name");
+      byName.r.setAttribute("aria-labelledby", byName.head.id);
+      byName.r.setAttribute("role", "group");
+      paintMark({ mark: byName.stMark, markKind: "" }, "on");
+      setText(byName.stWord, R.BY_NAME_ON);
+      const open = row(R.OPEN_CHAT, "ap-open");
+      open.r.setAttribute("role", "group");
+      open.r.setAttribute("aria-labelledby", open.head.id);
+      // Its state is where focus lands to say how it now stands (after 授权, 撤销, 再看一次).
+      open.st.setAttribute("tabindex", "-1");
+      // The time left: seen as 授权还剩 9:41, heard as 授权还剩 9 分 41 秒.
+      const clockLead = node("span", "ap-clock-lead", R.OPEN_LEFT + " "), clockEl = node("span", "ap-clock"), clockSaid = node("span", "visually-hidden");
       clockLead.setAttribute("aria-hidden", "true");
-      clockBox.append(node("span", "visually-hidden", R.OPEN_LEFT + "，"), clockSaid, clockLead, clockEl);
+      clockEl.setAttribute("aria-hidden", "true");
+      open.st.append(clockLead, clockEl, clockSaid);
+      const described = [open.head.id, open.st.id].join(" ");
+      const authorize = button("primary ap-authorize", "授权 10 分钟", () => wechatAct("authorize"));
       const revoke = button("secondary ap-revoke", "撤销", () => wechatAct("revoke"));
-      revoke.setAttribute("aria-label", "撤销读这一段的授权");
-      clockRow.append(clockBox, revoke);
-      const say = node("p", "ap-way-text");
-      say.append(R.OPEN_SAY[0], node("b", "ap-say", R.OPEN_SAY[1]), R.OPEN_SAY[2]);
-      can.append(clockRow, say);
-      // Its status could not be read (on, no `authorization`): said so, one fresh read, and 撤销 (which works either way).
-      const unknown = node("div", "ap-way-part ap-unknown"), unknownText = text("ap-way-text", R.OPEN_UNKNOWN);
-      unknownText.setAttribute("tabindex", "-1");
       const reread = button("secondary ap-reread", "再看一次", () => wechatAct("reread"));
-      reread.setAttribute("aria-label", "再看一次这 10 分钟授权的状态");
-      const revokeAnyway = button("secondary ap-revoke", "撤销", () => wechatAct("revoke"));
-      revokeAnyway.setAttribute("aria-label", "撤销读这一段的授权");
-      const unknownRow = node("div", "ap-way-acts");
-      unknownRow.append(reread, revokeAnyway);
-      unknown.append(unknownText, unknownRow);
-      const authNote = node("div", "ap-note");
-      openWay.append(openHead, openLater, ask, unknown, can, authNote);
-      ways.append(nameWay, openWay);
-      // How it reads, either way.
-      const reads = node("div", "ap-reads");
-      const readTexts = R.WECHAT_READS.map((t) => text("ap-way-text", t));
-      reads.append(...readTexts);
-      // 授权 10 分钟 is heard as it is seen: which reading it is (the heading names 「这一段」), what it does, how it reads.
-      authorize.setAttribute("aria-describedby", [openHead.id, askText.id, ...readTexts.map((p) => p.id)].join(" "));
-      // 打开 / 再试一次 after all of that, the plugin's own words beside it.
-      const tail = node("div", "ap-tail"), consent = node("div", "ap-consent");
-      const sourceBox = node("div", "ap-source-text"), source = button("text-btn ap-source", "插件原文");
-      sourceBox.id = uid("source");
-      sourceBox.hidden = true;
-      source.setAttribute("aria-expanded", "false");
-      source.setAttribute("aria-controls", sourceBox.id);
-      source.addEventListener("click", () => {
-        sourceBox.hidden = !sourceBox.hidden;
-        source.setAttribute("aria-expanded", String(!sourceBox.hidden));
+      for (const b of [authorize, revoke, reread]) b.setAttribute("aria-describedby", described);
+      open.acts.append(reread, authorize, revoke);
+      const authNote = node("p", "ap-note ap-auth-note");
+      ways.append(byName.r, open.r);
+      // 说明: the rest, one click away.
+      const more = button("text-btn ap-more", null), moreBox = node("div", "ap-more-box");
+      more.append(node("span", "", R.MORE), icon("chevronDown", "ap-more-chev"));
+      moreBox.id = uid("more");
+      moreBox.hidden = true;
+      more.setAttribute("aria-expanded", "false");
+      more.setAttribute("aria-controls", moreBox.id);
+      more.addEventListener("click", () => {
+        moreBox.hidden = !moreBox.hidden;
+        more.setAttribute("aria-expanded", String(!moreBox.hidden));
       });
-      tail.append(consent, source);
-      const consentNote = node("p", "ap-note");
-      const perms = node("p", "ap-foot", R.WECHAT_PERMISSIONS);
-      el.append(hero, detail.box, note, ways, reads, tail, consentNote, sourceBox, perms);
+      const notes = R.WECHAT_NOTES.map((t) => node("p", "ap-more-line", t));
+      const source = node("div", "ap-source");
+      moreBox.append(...notes, source);
+      el.append(hero, detail.box, note, ways, authNote, more, moreBox);
       const V = {
-        name: "wechat", id: R.WECHAT, el, title: "微信", state, mark, word, about, detail, acts, note, ways, nameText, nameReach, openLater,
-        ask, askText, authorize, hub, unknown, unknownText, reread, revokeAnyway, can, clockBox, clock: clockEl, clockSaid, revoke, authNote, reads, tail, consent, consentNote, source,
-        sourceBox, perms, markKind: "",
-        // What opening allows, each way under its heading, then how it reads: the button that opens is described by it.
-        consentIds: [nameHead.id, nameText.id, nameReach.id, openHead.id, openLater.id, ...readTexts.map((p) => p.id)].join(" "),
+        name: "wechat", id: R.WECHAT, el, title: "微信", state, mark, word, lead, detail, acts, note, ways, byName: byName.r,
+        open: open.r, openHead: open.head, openState: open.st, openMark: open.stMark, openWord: open.stWord, clockLead, clock: clockEl, clockSaid,
+        authorize, revoke, reread, authNote, more, moreBox, source, markKind: "", mode: "",
         paint: () => paintWechat(V),
       };
+      // The open row's mark, painted by paintWechat (paintMark keeps its kind on the object it is given).
+      V.openMarkView = { mark: open.stMark, markKind: "" };
       return V;
     }
     function paintWechatPage() { if (view && view.name === "wechat") view.paint(); paintRow(R.WECHAT); }
@@ -790,72 +775,65 @@
       V.word.classList.toggle("bad", lk.mark === "bad");
       // known: the plugin answered about the ten minutes (on without `authorization` is unknown, never "not authorized").
       const on = app.state === "on", known = R.authKnown(app), active = known && !!app.authorization.active;
-      // What it would be is the one line for a 微信 that cannot be opened (or read) here; otherwise the two ways say it.
       const none = app.state === "unavailable";
-      V.about.hidden = !none;
       V.detail.set(on ? "" : app.detail);
       const gave = !!(S.poll && (S.poll.gaveUp || S.poll.error));
       const all = R.wechatActions(app, gave);
-      const consenting = all.some((a) => a.where === "consent");
-      const lostTop = paintActs(V.acts, all.filter((a) => a.where === "hero"));
-      const lostTail = paintActs(V.consent, all.filter((a) => a.where === "consent"));
-      const lost = lostTop || lostTail;
-      // What failed is said next to what was tried: by 打开 / 再试一次 when it is there, else under the state.
-      const at = S.wnote && consenting ? "consent" : "hero";
+      const lost = paintActs(V.acts, all);
+      // The one sentence before 打开 / 再试一次 (the button is described by it).
+      const opening = all.some((a) => a.act === "connect");
+      V.lead.hidden = !opening;
+      for (const b of V.acts.children) { if (b.dataset.act === "connect") b.setAttribute("aria-describedby", V.lead.id); else b.removeAttribute("aria-describedby"); }
+      // Under the state: what failed (beside what was tried), or how a start is going.
       const starting = app.state === "starting" ? (S.poll && S.poll.error) || (gave ? R.WECHAT_STILL : R.WECHAT_SLOW) : "";
-      const said = (at === "hero" && S.wnote) || starting;
+      const said = S.wnote || starting;
       setText(V.note, said);
       V.note.hidden = !said;
-      V.note.classList.toggle("bad", (at === "hero" && !!S.wnote) || !!(S.poll && S.poll.error && app.state === "starting"));
-      if (at === "hero" && S.wnote) V.note.setAttribute("role", "alert"); else V.note.removeAttribute("role");
-      const byConsent = at === "consent";
-      setText(V.consentNote, byConsent ? S.wnote : "");
-      V.consentNote.hidden = !byConsent;
-      V.consentNote.classList.toggle("bad", byConsent);
-      if (byConsent) V.consentNote.setAttribute("role", "alert"); else V.consentNote.removeAttribute("role");
-      for (const b of V.consent.children) b.setAttribute("aria-describedby", V.consentIds);
-      // The two ways, as they stand now.
-      V.ways.hidden = V.reads.hidden = none;
-      setText(V.nameText, R.byName(on));
-      V.openLater.hidden = on;
-      V.ask.hidden = !known || active;
-      V.unknown.hidden = !on || known;
-      V.can.hidden = !active;
-      // The plugin's refusal ("Plugin Hub") can only happen while 微信 is on without the ten minutes.
-      V.hub.hidden = !known || active;
+      const bad = !!S.wnote || !!(S.poll && S.poll.error && app.state === "starting");
+      V.note.classList.toggle("bad", bad);
+      if (S.wnote) V.note.setAttribute("role", "alert"); else V.note.removeAttribute("role");
+      // The two rows, once it is open. The open chat's state changing under focus (the time ran out, its state
+      // became unknown) moves focus to the line that says the new state, even where the focused button stays.
+      V.ways.hidden = !on;
+      const was = V.mode;
+      V.mode = !on ? "" : !known ? "unknown" : active ? "can" : "ask";
+      const changed = inside && !!was && was !== V.mode && V.open.contains(had);
+      const markView = V.openMarkView;
+      paintMark(markView, V.mode === "can" ? "on" : "idle");
+      const timed = V.mode === "can";
+      setText(V.openWord, V.mode === "unknown" ? R.OPEN_UNKNOWN : V.mode === "ask" ? R.OPEN_OFF : "");
+      V.openWord.hidden = timed;
+      V.clockLead.hidden = V.clock.hidden = V.clockSaid.hidden = !timed;
+      V.authorize.hidden = V.mode !== "ask";
+      V.revoke.hidden = V.mode !== "can" && V.mode !== "unknown";
+      V.reread.hidden = V.mode !== "unknown";
       const busy = S.wbusy;
-      V.authorize.disabled = V.revoke.disabled = V.reread.disabled = V.revokeAnyway.disabled = !!busy;
+      V.authorize.disabled = V.revoke.disabled = V.reread.disabled = !!busy;
       setText(V.authorize, busy === "authorize" ? R.BUSY.authorize : "授权 10 分钟");
-      for (const b of [V.revoke, V.revokeAnyway]) setText(b, busy === "revoke" ? R.BUSY.revoke : "撤销");
-      setText(V.reread, busy === "reread" && on && !known ? R.BUSY.reread : "再看一次");
-      // What failed about the ten minutes, under them (a failed read leaves them unknown, with its own 再看一次).
+      setText(V.revoke, busy === "revoke" ? R.BUSY.revoke : "撤销");
+      setText(V.reread, busy === "reread" && V.mode === "unknown" ? R.BUSY.reread : "再看一次");
+      // What failed about the ten minutes, under their row.
       const A = S.anote;
       setText(V.authNote, A && on ? A.text : "");
       V.authNote.hidden = !(A && on);
       V.authNote.classList.toggle("bad", !!A);
       if (A && on) V.authNote.setAttribute("role", "alert"); else V.authNote.removeAttribute("role");
-      // The plugin's own words, one click away (an off 微信 carries them too), verbatim; where they say reading by
-      // contact is authorized each time, one line of ours under them says what is true.
-      setText(V.sourceBox, "");
+      // 说明, wherever 微信 can be used; the plugin's own words in it, verbatim, with our one correction.
+      V.more.hidden = none;
+      if (none) { V.moreBox.hidden = true; V.more.setAttribute("aria-expanded", "false"); }
+      V.source.replaceChildren();
       if (app.disclosure) {
-        V.sourceBox.append(node("p", "ap-source-ver", app.version ? "版本 " + app.version : ""), node("p", "ap-source-body", app.disclosure));
+        V.source.append(node("p", "ap-source-ver", R.sourceLabel(app.version)), node("p", "ap-source-body", app.disclosure));
         const fix = R.sourceNote(app.disclosure);
-        if (fix) V.sourceBox.append(node("p", "ap-source-note", fix));
+        if (fix) V.source.append(node("p", "ap-source-note", fix));
       }
       V.source.hidden = !app.disclosure;
-      if (!app.disclosure) { V.sourceBox.hidden = true; V.source.setAttribute("aria-expanded", "false"); }
-      V.tail.hidden = none || (!consenting && !app.disclosure);
-      // What reading needs from macOS, once there is something to read with.
-      V.perms.hidden = !on;
       paintClock();
-      if (lost || (inside && (!had.isConnected || !V.el.contains(had) || !visible(had)))) stateLine(V).focus();
+      if (lost || changed || (inside && (!had.isConnected || !V.el.contains(had) || !visible(had)))) stateLine(V).focus();
     }
-    // The line that says how things stand now: for the ten minutes, the open chat's own line; otherwise the state.
+    // The line that says how 微信 now stands: the open chat's state once it is open, else the state at the top.
     function stateLine(V) {
-      if (!V.can.hidden) return V.clockBox;
-      if (!V.ask.hidden) return V.askText;
-      if (!V.unknown.hidden) return V.unknownText;
-      return V.state;
+      return V.mode ? V.openState : V.state;
     }
     // The page's own actions for the state it is in; a button that stays keeps its focus.
     function paintActs(box, list) {
@@ -873,8 +851,8 @@
       box.hidden = !next.length;
       return !!focused && !next.includes(focused);
     }
-    // A button for an act wherever it now sits on the page (its box changes with the state).
-    const actButton = (V, act) => [...V.acts.children, ...V.consent.children].find((b) => b.dataset.act === act) || null;
+    // A button for an act at the top of the page.
+    const actButton = (V, act) => [...V.acts.children].find((b) => b.dataset.act === act) || null;
     const WECHAT_PATHS = { connect: "/connect", disconnect: "/disconnect", authorize: "/authorize", revoke: "/revoke" };
     async function wechatAct(act) {
       if (S.wbusy) return;
@@ -918,15 +896,15 @@
       paintWechatPage();
       if (held) wechatFocus(act);
     }
-    // After an action: where the answer is — the state line; for the ten minutes, the open chat's own line
-    // (its time left, or what authorizing would do); after a failure, the button that was tried.
+    // After an action: where the answer is — the state line; for the ten minutes, the open chat's own state
+    // (its time left, 未授权, or unknown); after a failure, the button that was tried.
     function wechatFocus(act) {
       if (!view || view.name !== "wechat") return;
       const app = S.apps.get(R.WECHAT), on = !!app && app.state === "on";
       let target = view.state;
-      // The open chat's part as it now stands: its time left, what authorizing would do, or that its status is unknown.
+      // The open chat's row as it now stands: its time left, 未授权, or that its state is unknown.
       const openPart = () => stateLine(view);
-      if (on && S.anote) target = !view.unknown.hidden ? view.reread : view.can.hidden ? view.authorize : view.revoke;
+      if (on && S.anote) target = view.mode === "unknown" ? view.reread : view.mode === "ask" ? view.authorize : view.revoke;
       else if (on && (act === "authorize" || act === "revoke" || act === "reread")) target = openPart();
       else if (S.wnote && act === "connect") target = actButton(view, "connect") || view.state;
       if (target && visible(target)) target.focus(); else view.state.focus();
@@ -1192,7 +1170,9 @@
         nameIn.addEventListener("input", () => setText(err, ""));
       }
       const value = secretInput(name ? name + " 的新值" : word + "的值");
-      value.input.setAttribute("aria-describedby", err.id);
+      const kept = node("p", "ap-kept", R.SECRETS_KEPT);
+      kept.id = uid("kept");
+      value.input.setAttribute("aria-describedby", err.id + " " + kept.id);
       value.input.addEventListener("input", () => setText(err, ""));
       const save = button("primary ap-small", "保存", () => saveSecret(V)), drop = button("text-btn", "取消", () => closeSecret(V, true));
       const line = node("div", "ap-secret-line");
@@ -1200,7 +1180,7 @@
       line.append(value.wrap);
       const acts = node("div", "ap-secret-acts");
       acts.append(save, drop);
-      box.append(...(name ? [node("code", "ap-secret-for", name)] : []), line, acts, err);
+      box.append(...(name ? [node("code", "ap-secret-for", name)] : []), line, kept, acts, err);
       const enter = (ev) => {
         if (ev.key === "Enter") { ev.preventDefault(); saveSecret(V); }
         else if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); closeSecret(V, true); }
@@ -1407,7 +1387,7 @@
       const programIn = textInput("", R.PROGRAM_MAX * 2);
       programIn.placeholder = "名称或路径";
       const programF = field("程序", programIn);
-      const split = node("p", "ap-hint ap-split", "参数已经分到下面，每行一个。");
+      const split = node("p", "ap-hint ap-split", "参数已经分到下面。");
       split.hidden = true;
       programF.wrap.insertBefore(split, programF.err);
       const argsIn = node("textarea", "");
@@ -1443,7 +1423,8 @@
         split.hidden = false;
       });
       programIn.addEventListener("input", () => { split.hidden = true; });
-      const conseq = node("ul", "ap-conseq");
+      // In front of 添加, the one thing a person would be misled without: every cat may use it, unasked.
+      const conseq = node("p", "ap-conseq", R.ADD_SCOPE);
       conseq.id = uid("conseq");
       const error = node("p", "error ap-error");
       error.setAttribute("role", "alert");
@@ -1473,7 +1454,6 @@
           }
           program.hidden = kind !== "program";
           url.hidden = kind !== "url";
-          conseq.replaceChildren(...R.consequences(kind).map((t) => node("li", "", t)));
         };
         if (eased) ease(card, change); else change();
       }
@@ -1484,12 +1464,15 @@
     function secretSet(kind) {
       const word = R.SECRETS_WORD[kind];
       const el = node("fieldset", "ap-secrets"), legend = node("legend", "", word), rows = node("div", "ap-secret-rows");
+      // How they are kept, next to them once there is one (the value fields are described by it).
+      const kept = node("p", "ap-kept", R.SECRETS_KEPT);
+      kept.id = uid("kept");
       const add = button("text-btn ap-add-secret", null, () => { addRow(); });
       add.append(icon("plus"), node("span", "", "添加" + word));
-      el.append(legend, rows, add);
-      const T = { el, kind, list: [], legend, add };
+      el.append(legend, rows, kept, add);
+      const T = { el, kind, list: [], legend, kept, add };
       function paint() {
-        legend.hidden = !T.list.length;
+        legend.hidden = kept.hidden = !T.list.length;
         add.hidden = T.list.length >= R.SECRETS_MAX;
       }
       function addRow() {
@@ -1501,7 +1484,7 @@
         err.id = uid("err");
         nameIn.setAttribute("aria-describedby", err.id);
         const value = secretInput(word + "的值");
-        value.input.setAttribute("aria-describedby", err.id);
+        value.input.setAttribute("aria-describedby", err.id + " " + kept.id);
         const drop = button("ghost ap-drop", null, () => {
           const at = T.list.indexOf(entry);
           ease(card, () => { T.list.splice(at, 1); row.remove(); paint(); });
@@ -1612,7 +1595,7 @@
       setApp(app, "added");
       paintList();
       if (view === F) openPage(app.id);
-      else announce("「" + R.trim(app.title) + "」" + R.added(app));
+      else announce("「" + R.trim(app.title) + "」" + R.added(app, true));
     }
 
     // ---- open ----
