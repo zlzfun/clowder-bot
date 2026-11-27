@@ -607,8 +607,8 @@
     const words = R.computerConsent(name, others);
     // Focus comes back to the switch of the page showing this cat then.
     const L = dialog(words.title, () => { const p = pageOf(key); return p ? p.compSwitch : null; });
-    L.body.append(node("p", "pf-lead", words.text));
-    if (words.handover) L.body.append(node("p", "pf-lead", words.handover));
+    L.body.append(node("p", "pf-lead pf-cwhy", words.text));
+    if (words.handover) L.body.append(node("p", "pf-lead pf-cwhy", words.handover));
     const cancel = button("secondary", "取消", () => L.close());
     const go = node("button", "primary", R.COMPUTER.YES);
     go.type = "submit";

@@ -120,6 +120,10 @@ html[data-theme="dark"] .pf-head.tinted .pf-portrait::before {
 .text-btn.pf-cstop { min-height: 0; margin-left: 2px; padding: 1px 6px; vertical-align: baseline; font-weight: 600; color: var(--x-text-2); }
 .pf-cstop:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
 .pf-cnote + p.pf-line { margin-top: var(--x-s1); }
+/* The failure line and the turning-on dialog's words (item 55: a sentence
+   naming the other cat, and the server's longer refusals) wrap as the note
+   does, with no single character left on a phone's last line. */
+.pf-cnote + p.pf-line, .pf-lead.pf-cwhy { text-wrap: pretty; }
 
 /* 对话: 新对话 and the saved conversations under it. */
 .psec.pf-convs { padding-top: var(--x-s6); }

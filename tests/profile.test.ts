@@ -1742,6 +1742,8 @@ test('这台电脑, one cat at a time: with another cat on, turning on says whos
   assert.deepEqual(leads(layer), [CONSENT_TEXT, '同一时间只有一只猫能用这台电脑：打开后，「墨点」的会关掉；它要是正在回复，那条回复会停下。']);
   assert.equal(visibleText(one(layer, 'pf-card')), '让「快手」用这台电脑？' + leads(layer).join('') + '取消打开');
   assert.equal(c.doc.activeElement, button(layer, '取消'));
+  assert.ok(named(layer, 'pf-lead').every(n => has(n, 'pf-cwhy')), 'both paragraphs wrap as the row\'s note does');
+  assert.match(read('client/public/profile.css'), /\n\.pf-cnote \+ p\.pf-line, \.pf-lead\.pf-cwhy \{ text-wrap: pretty; \}/, 'and so does the failure line');
   assert.deepEqual(c.puts('快手'), [], 'nothing sent while it asks');
   // 打开: on its way, the owner goes to 墨点's 资料, which reads it on (the server has not got that far).
   const put = gate();
