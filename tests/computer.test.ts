@@ -231,10 +231,22 @@ test('one cat at a time: a cat is only switched on once the other is seen to be 
   assert.equal(await said(computer.set(b, true)),
     '502 computer_other_running 「猫甲」的已经关掉，但它正在进行的这一轮还没有停下来，停下之前它还能用这台电脑，所以这只猫的先没有打开。请在「猫甲」的对话里点停止，然后再开一次。');
   assert.deepEqual(on(), []); assert.deepEqual(ended, ['cat-a']);
-  // Asked again once it has stopped: on.
+  // Asked again while that turn is still going: the registry has no cat on, and this cat is still not let in beside it.
+  assert.match(await said(computer.set(b, true)), /^502 computer_other_running 「猫甲」的已经关掉/);
+  assert.match(await said(computer.set(c, true)), /^502 computer_other_running 「猫甲」的已经关掉/);
+  assert.deepEqual(on(), []); assert.deepEqual(ended, ['cat-a', 'cat-a', 'cat-a']);
+  // Asked again once it has stopped: on, and that cat is not asked about any more.
   stopping.failed = 0;
   assert.equal((await computer.set(b, true)).on, true);
-  assert.deepEqual(on(), ['cat-b']);
+  assert.deepEqual(on(), ['cat-b']); assert.deepEqual(ended, ['cat-a', 'cat-a', 'cat-a', 'cat-a']);
+  ended.length = 0; await computer.set(b, true); assert.deepEqual(ended, []);
+  // The same after a cat's own switch was turned off with its turn still going.
+  stopping.failed = 1;
+  await refused(computer.set(b, false), 502, 'computer_still_running');
+  assert.match(await said(computer.set(c, true)), /^502 computer_other_running 「猫乙」的已经关掉/);
+  // That cat switched on again: the turn is its own once more, and nobody waits for it.
+  stopping.failed = 0; ended.length = 0;
+  assert.equal((await computer.set(b, true)).on, true); assert.deepEqual(ended, []);
   // The block was written and its answer lost: what the registry says decides, and the other cat's turn is ended.
   ended.length = 0; native.lostAnswers.add('PATCH:cat');
   await refused(computer.set(a, true), 503);
@@ -249,6 +261,18 @@ test('one cat at a time: a cat is only switched on once the other is seen to be 
   const nameless = new Computer(native, driver, async () => ({ stopped: 0, failed: 1 }), 0);
   assert.deepEqual((await nameless.view(b)).others, ['']);
   assert.match(await said(nameless.set(b, true)), /^502 computer_other_running 另一只猫的已经关掉/);
+  // Several others, one of which will not come off: the words say which did. Cats are said the way the page's dialog says them.
+  const several = setup();
+  await several.computer.set(a, true); several.native.capabilities[0]!.blockedCats = [];
+  const write = several.native.request.bind(several.native);
+  several.native.request = (async (path: string, options: any = {}) => {
+    if (options.method === 'PATCH' && options.body?.scope === 'cat' && options.body.catId === 'cat-c' && options.body.enabled === false) throw new ApiError(500, 'capability store failed');
+    return write(path, options);
+  }) as typeof several.native.request;
+  assert.equal(await said(several.computer.set(b, true)), '502 computer_other_on 没能先把「猫丙」的关掉，所以这只猫的没有打开。「猫甲」的已经关掉了。请再试一次。');
+  assert.deepEqual(several.on(), ['cat-b', 'cat-c'], 'only 猫甲 came off (猫乙 was on too in this made-up state)'); assert.deepEqual(several.ended, ['cat-a']);
+  several.native.request = write; several.stopping.failed = 1; several.native.capabilities[0]!.blockedCats = ['cat-b'];
+  assert.match(await said(several.computer.set(b, true)), /^502 computer_other_running 「猫甲」「猫丙」的已经关掉，/);
 });
 
 test('one cat at a time, through the routes: the other cat\'s reply is ended by native cancellation', async () => {

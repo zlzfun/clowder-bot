@@ -127,6 +127,11 @@ export class Computer {
    */
   private readonly unconfirmed = new Set<string>();
   /**
+   * Cats that were switched off while a turn of theirs was not seen to end: that turn may still hold the tools. They are
+   * asked to stop again before another cat is switched on (see handOver). Request bookkeeping, in memory.
+   */
+  private readonly lingering = new Set<string>();
+  /**
    * `stopRunning`: how a cat's running turns are ended (the bridge's native cancel).
    * `patience`: how long a driver that was just started is given to answer, in ms.
    * `nameCats`: what the cats are called, for the words about another cat.
@@ -152,6 +157,18 @@ export class Computer {
     return this.real(entry) && entry.enabled !== false ? Object.entries(entry.cats ?? {}).filter(([id, on]) => on === true && id !== cat.id).map(([id]) => id) : [];
   }
   private async called(ids: string[]): Promise<string[]> { return this.nameCats(ids).then(names => ids.map((_, index) => names[index] ?? ''), () => ids.map(() => '')); }
+  /** The cats as the owner would say them, the way the page's dialog does (profile-rules.js computerHandover): each name in 「」, those without one as 另一只猫, 另外几只猫 for more. */
+  private async who(ids: string[]): Promise<string> {
+    const called = await this.called(ids), names = [...new Set(called.filter(Boolean))].map(name => `「${name}」`), unnamed = called.filter(name => !name).length;
+    const rest = unnamed > 1 ? '另外几只猫' : unnamed ? '另一只猫' : '';
+    return names.join('') + (names.length && rest ? '和' : '') + rest;
+  }
+  /** Ends the turns a cat is in the middle of and says whether they are seen to have ended; one that is not is remembered. */
+  private async ended(id: string): Promise<boolean> {
+    const seen = !(await this.stopRunning({ id }).catch(() => ({ stopped: 0, failed: 1 }))).failed;
+    if (seen) this.lingering.delete(id); else this.lingering.add(id);
+    return seen;
+  }
   /** One change at a time: a switch, and a cat being made, are several native steps that must not interleave. */
   private serial<T>(work: () => Promise<T>): Promise<T> {
     const next = this.tail.then(work);
@@ -204,26 +221,28 @@ export class Computer {
     // Written whatever was just read: an earlier request that timed out here may still be waiting in the engine, and the last write is the one that stands.
     await this.toggle({ scope: 'cat', catId: cat.id, enabled: true });
     if (!this.isOn(await this.entry(), cat)) throw new ApiError(502, '没能打开，请再试一次。');
+    this.lingering.delete(cat.id);
     return this.view(cat);
   }
 
   /**
    * The other cats give the computer up to `cat`: see enable. Throws, with nothing switched for `cat`, when one of them
-   * cannot be seen to be off and stopped. A cat that did come off has its running turns ended whatever became of the others.
+   * cannot be seen to be off and stopped. A cat that did come off has its running turns ended whatever became of the
+   * others, and so has a cat that was switched off earlier with a turn still going: asking again must not let `cat` in
+   * beside it.
    */
   private async handOver(cat: NativeCat): Promise<void> {
-    const rivals = this.rivals(await this.entry(), cat);
-    if (!rivals.length) return;
-    const who = async (ids: string[]) => (await this.called(ids)).map(name => name ? `「${name}」` : '另一只猫').join('、');
+    const rivals = this.rivals(await this.entry(), cat), earlier = [...this.lingering].filter(id => id !== cat.id && !rivals.includes(id));
+    if (!rivals.length && !earlier.length) return;
     for (const id of rivals) { try { await this.toggle({ scope: 'cat', catId: id, enabled: false }); } catch { /* read back below */ } }
     // What the registry says now decides, not the answers to the writes: a write whose answer was lost may have gone through.
     let left = rivals;
-    try { const after = await this.entry(); left = rivals.filter(id => this.isOn(after, { id })); } catch { /* unread: none of them is known to be off */ }
-    const running: string[] = [];
-    for (const id of rivals) if (!left.includes(id) && (await this.stopRunning({ id }).catch(() => ({ stopped: 0, failed: 1 }))).failed) running.push(id);
-    if (left.length) throw new ApiError(502, `没能先把${await who(left)}的关掉，所以这只猫的没有打开。请再试一次。`, undefined, 'computer_other_on');
+    if (rivals.length) { try { const after = await this.entry(); left = rivals.filter(id => this.isOn(after, { id })); } catch { /* unread: none of them is known to be off */ } }
+    const off = rivals.filter(id => !left.includes(id)), running: string[] = [];
+    for (const id of [...off, ...earlier]) if (!await this.ended(id)) running.push(id);
+    if (left.length) throw new ApiError(502, `没能先把${await this.who(left)}的关掉，所以这只猫的没有打开。${off.length ? `${await this.who(off)}的已经关掉了。` : ''}请再试一次。`, undefined, 'computer_other_on');
     if (running.length) {
-      const names = await who(running);
+      const names = await this.who(running);
       throw new ApiError(502, `${names}的已经关掉，但它正在进行的这一轮还没有停下来，停下之前它还能用这台电脑，所以这只猫的先没有打开。请在${names}的对话里点停止，然后再开一次。`, undefined, 'computer_other_running');
     }
   }
@@ -281,10 +300,10 @@ export class Computer {
       entry = await this.entry();
       if (this.isOn(entry, cat)) throw new ApiError(502, '没能关掉，请再试一次。');
     } catch (error) { failure = error; }
-    const ended = await this.stopRunning(cat).catch(() => ({ stopped: 0, failed: 1 }));
+    const ended = await this.ended(cat.id);
     if (failure) throw failure;
     if (entry && !anyOn(entry)) await this.driver.stop().catch(() => {});
-    if (ended.failed) throw new ApiError(502, '已经关掉了，但它正在进行的这一轮还没有停下来，停下之前它还能用这台电脑。请在对话里点停止，或者稍后再关一次。', undefined, 'computer_still_running');
+    if (!ended) throw new ApiError(502, '已经关掉了，但它正在进行的这一轮还没有停下来，停下之前它还能用这台电脑。请在对话里点停止，或者稍后再关一次。', undefined, 'computer_still_running');
     return this.view(cat);
   }
 
