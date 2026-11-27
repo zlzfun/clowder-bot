@@ -355,25 +355,24 @@ export class Computer {
   }
 
   /**
-   * A cat is deleted. `remove` is its native deletion. A cat that has the computer — or had it taken with a turn not
-   * seen to end — would leave that turn behind with the tools, and nothing to find it by: its conversation is forgotten
-   * with it, and the engine does not end a deleted cat's turns. So such a cat is switched off first, as by its own
-   * switch, and deleted only once it is seen to be off and stopped; otherwise it is not deleted, and the words say why.
-   * Any other cat is deleted as before. Switches wait meanwhile, so a cat cannot be deleted from under a hand-over.
+   * A cat is deleted. `remove` is its native deletion. A turn keeps the tools it started with, the engine does not end
+   * a deleted cat's turns, and its conversation is forgotten with it. So a cat that may have the computer — it is on,
+   * or the computer was taken from it and it is not done with yet, or the registry cannot be read — is not deleted
+   * while it is in the middle of a turn: that turn would be left behind with the tools and nothing to find it by, and
+   * the next cat switched on would be using the computer beside it. Nothing is changed for it (were it switched off
+   * here and the engine then refused the deletion, it would have lost the computer without a word): the owner lets it
+   * finish or stops that reply, and deletes again. Any other cat is deleted as before. Switches wait meanwhile, so a
+   * cat cannot be deleted from under a hand-over.
    */
   retire<T>(cat: NativeCat, remove: () => Promise<T>): Promise<T> {
     return this.serial(async () => {
       let has: boolean | undefined;
       try { has = this.isOn(await this.entry(), cat); } catch { /* unread: it may have it */ }
-      if (has !== false || this.lingering.has(cat.id)) {
-        try { await this.disable(cat); }
-        catch (error) {
-          const running = error instanceof ApiError && error.code === 'computer_still_running';
-          throw new ApiError(409, running ? '它用着这台电脑的那一轮还没有停下来，所以没有删除。请在它的对话里点停止，然后再删一次。'
-            : '没能先确认它已经用不了这台电脑，所以没有删除。请再试一次。', undefined, running ? 'computer_still_running' : 'computer_still_on');
-        }
-      }
+      const may = has !== false || this.lingering.has(cat.id);
+      if (may && await this.busy(cat.id)) throw new ApiError(409, '它这一轮可能还在用这台电脑，所以没有删除。等它做完，或在它的对话里点停止，然后再删一次。', undefined, 'computer_still_running');
       const removed = await remove();
+      // A turn that began between that look and the deletion: asked to end while its conversation is still known here.
+      if (may) await this.stopRunning({ id: cat.id }).catch(() => {});
       this.lingering.delete(cat.id);
       return removed;
     });

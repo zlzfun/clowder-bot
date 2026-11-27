@@ -690,42 +690,75 @@ test('turning the computer off ends the turn the cat is in the middle of, by nat
   } finally { await end(); }
 });
 
-test('a cat that has the computer is switched off and seen to have stopped before it is deleted', async () => {
+test('a cat that may be using the computer is not deleted in the middle of a turn, and nothing is changed for it', async () => {
   const { native, bridge, runtime, end } = app([a, b, c]);
   const server = runtime.app.listen(0, '127.0.0.1'); await once(server, 'listening');
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}/xbot-api`;
   const call = (name: string, method = 'GET', body?: unknown) => fetch(`${base}/bots/${encodeURIComponent(name)}/computer`, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
   const remove = (name: string) => fetch(`${base}/bots/${encodeURIComponent(name)}`, { method: 'DELETE' });
-  const order = () => native.calls.filter(item => item.path.includes('/cancel/') || (item.method === 'DELETE' && item.path.startsWith('/api/cats/'))).map(item => `${item.method} ${item.path}`);
+  const did = () => native.calls.filter(item => item.path.includes('/cancel/') || (item.method !== 'GET' && (item.path.startsWith('/api/cats/') || item.path.startsWith('/api/capabilities')))).map(item => `${item.method} ${item.path}`);
+  const refusal = { error: '它这一轮可能还在用这台电脑，所以没有删除。等它做完，或在它的对话里点停止，然后再删一次。', code: 'computer_still_running' };
   try {
-    const [first, second, third] = [native.cats[0]!, native.cats[1]!, native.cats[2]!], thread = await bridge.direct(first);
-    // A cat that never had it is deleted as before: nothing about the computer is written.
+    const [first, second, third] = [native.cats[0]!, native.cats[1]!, native.cats[2]!];
+    const thread = await bridge.direct(first), other = await bridge.direct(third);
+    assert.equal((await (await call(first.name, 'PUT', { enabled: true })).json()).on, true);
+    // A cat that does not have it is deleted as before, also in the middle of a turn: nothing about the computer is asked of the engine.
+    native.queues.set(other.id, { queue: [], activeInvocations: [{ catId: third.id, invocationId: 'inv-3' }] });
     native.calls.length = 0;
     assert.equal((await remove(third.name)).status, 200);
-    assert.equal(native.calls.some(item => item.method === 'PATCH' && item.path === '/api/capabilities'), false);
-    // 猫甲 has the computer and is in the middle of a turn that will not go away: it is switched off, and not deleted.
-    assert.equal((await (await call(first.name, 'PUT', { enabled: true })).json()).on, true);
+    assert.deepEqual(did(), [`DELETE /api/cats/${third.id}`]);
+    // 猫甲 has the computer and is in the middle of a turn: not deleted, and nothing is changed for it — not switched off, not stopped.
     native.queues.set(thread.id, { queue: [], activeInvocations: [{ catId: first.id, invocationId: 'inv-1' }] });
-    native.cancelEndsAfterReads = Infinity; bridge.cancelPatience = 400; native.calls.length = 0;
+    native.calls.length = 0;
     const kept = await remove(first.name);
-    assert.equal(kept.status, 409);
-    assert.deepEqual(await kept.json(), { error: '它用着这台电脑的那一轮还没有停下来，所以没有删除。请在它的对话里点停止，然后再删一次。', code: 'computer_still_running' });
-    assert.deepEqual(order(), [`POST /api/threads/${thread.id}/cancel/${first.id}`], 'asked to stop, and not deleted');
-    assert.equal(native.cats.some(known => known.id === first.id), true);
-    assert.equal(bridge.store.state.bots[first.id]?.activeThreadId, thread.id, 'its conversation is still known: the turn can be found again');
+    assert.equal(kept.status, 409); assert.deepEqual(await kept.json(), refusal);
+    assert.deepEqual(did(), []);
+    assert.equal(native.cats.some(known => known.id === first.id), true); assert.equal(bridge.store.state.bots[first.id]?.activeThreadId, thread.id);
+    assert.equal((await (await call(first.name)).json()).on, true);
+    assert.equal(native.queues.get(thread.id)!.activeInvocations.length, 1);
+    // Its switch turned off with that turn not going away: off, and still not deleted — the turn started with the tools.
+    native.cancelEndsAfterReads = Infinity; bridge.cancelPatience = 400;
+    const off = await call(first.name, 'PUT', { enabled: false });
+    assert.equal(off.status, 502); assert.equal((await off.json()).code, 'computer_still_running');
     assert.equal((await (await call(first.name)).json()).on, false);
-    // Meanwhile another cat is told of it, and is not let in beside that turn.
-    assert.deepEqual((await (await call(second.name)).json()).others, [first.name]);
-    const beside = await call(second.name, 'PUT', { enabled: true });
-    assert.equal(beside.status, 502); assert.equal((await beside.json()).code, 'computer_other_running');
-    // The turn can be ended now: it is ended first, then the cat is deleted.
-    native.cancelEndsAfterReads = 0; bridge.cancelPatience = 1500; native.calls.length = 0;
+    const still = await remove(first.name);
+    assert.equal(still.status, 409); assert.deepEqual(await still.json(), refusal);
+    assert.deepEqual((await (await call(second.name)).json()).others, [first.name], 'another cat is told of it meanwhile');
+    // The turn is over: deleted, and the next cat has the computer to itself.
+    native.queues.get(thread.id)!.activeInvocations = [];
+    native.calls.length = 0;
     assert.equal((await remove(first.name)).status, 200);
-    assert.deepEqual(order(), [`POST /api/threads/${thread.id}/cancel/${first.id}`, `DELETE /api/cats/${first.id}`]);
-    assert.deepEqual(native.queues.get(thread.id)!.activeInvocations, []);
+    assert.deepEqual(did(), [`DELETE /api/cats/${first.id}`]);
     assert.equal(native.cats.some(known => known.id === first.id), false); assert.equal(bridge.store.state.bots[first.id], undefined);
     assert.deepEqual(await (await call(second.name, 'PUT', { enabled: true })).json(), { supported: true, installed: true, on: true, permissions: 'granted' });
   } finally { server.close(); await end(); }
+});
+
+test('deleting a cat: one that never had the computer is not looked at; a turn that began during the deletion is asked to end', async () => {
+  const { native, computer, ended, stopping } = setup();
+  const looks: string[] = [], request = native.request.bind(native);
+  // No entry: nobody has it, and nothing is looked at.
+  assert.equal(await computer.retire(a, async () => 'gone'), 'gone'); assert.deepEqual(ended, []);
+  await computer.set(a, true);
+  // 猫乙 does not have it: deleted without a look at its turns (the stub would say it is in the middle of one).
+  stopping.failed = 1;
+  assert.equal(await computer.retire(b, async () => 'gone'), 'gone'); assert.deepEqual(ended, []);
+  // 猫甲 has it and is in the middle of a turn: the deletion is not even sent.
+  let sent = 0;
+  await refused(computer.retire(a, async () => { sent++; }), 409, 'computer_still_running');
+  assert.equal(sent, 0); assert.deepEqual(ended, [], 'nothing was ended either');
+  // Idle when looked at: deleted; whatever began meanwhile is asked to end, after the deletion.
+  stopping.failed = 0;
+  native.request = (async (path: string, options: any = {}) => { looks.push(`${options.method ?? 'GET'} ${path}`); return request(path, options); }) as typeof native.request;
+  const steps: string[] = [];
+  assert.equal(await computer.retire(a, async () => { steps.push(`deleted after ${ended.length} stops`); return 'gone'; }), 'gone');
+  assert.deepEqual(steps, ['deleted after 0 stops']); assert.deepEqual(ended, ['cat-a']);
+  assert.equal(looks.some(step => !step.startsWith('GET ')), false, 'the registry is only read');
+  // The registry unread: the cat may have it, so the same care is taken.
+  native.capabilityFailures.add('GET /api/capabilities'); stopping.failed = 1;
+  await refused(computer.retire(c, async () => { sent++; }), 409, 'computer_still_running'); assert.equal(sent, 0);
+  stopping.failed = 0; ended.length = 0;
+  assert.equal(await computer.retire(c, async () => 'gone'), 'gone'); assert.deepEqual(ended, ['cat-c']);
 });
 
 test('a cat deleted while the computer is being taken from it: the hand-over finds its turn first, the deletion waits', async () => {
