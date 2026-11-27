@@ -134,6 +134,8 @@ cafile=/Users/<你>/.config/node-ca/system-ca.pem
 
 固定提交在隔离运行时上的实测，与 [应用：第一版接口](apps-api.md) 相关的部分。升级固定提交时逐条重新核对。
 
+2026-11-27：引擎换到 `next` 的 `fe632f8f` 之后重新核对过（读了改动的路由，又在升级后的隔离运行时上从界面走了一遍），下面各条都还成立，适配层没有因此改动。隔离运行时是这一天升级的：旧引擎正常停下后做了冷备份 `~/.clowder-bot-dev.before-fe632f8f-20261127`，旧锁文件留在 `.runtime/dev/upstream.lock.42017e0c.json`，旧构建 `.runtime/clowder-ai-dev` 没有删。
+
 - **插件带的 MCP 与技能到不了猫**。Bot 启动引擎时的部署标识是 `clowder-bot`，上游的 `allowsImplicitCapabilityWrites` 因此为假，插件运行时不把自己的 MCP 写进能力登记表、也不挂载技能；剩下的调用时投影要求线程的项目目录等于能力根目录，而每只猫的对话在 `workspace/cats/<id>`。实测：自写的插件包（一个 stdio MCP、一条技能、一个密钥字段）能安装、配置、运行，但猫的会话里没有它的工具和技能。读取侧的 `GET /api/capabilities/snapshot?catId=` 仍把它显示为已启用，不能当作「已连接」的依据。把标识改成上游自己的 `runtime` 能打开这个开关，但那是上游自身安装的身份（共享 MCP 的部署标签、运行时部署登记、启动时的 CLI 配置再生成），与使用者自己的 Clowder AI 会串线，不采用。
 - **插件带的直接工具与外接节点到得了猫**：`tool` 贡献经 `plugin_list_tools`／`plugin_call`，`limb` 贡献经 `limb_list_available`。实测 `official.enterprise-workflow` 的两个工具和 `official.wechat-visible-reader` 的节点都被测试猫列出。
 - **外部 MCP 的安装接口不做校验**（任意 id、空命令都接受，id 已存在时合并覆盖：后来的程序会配上先来的密钥）。适配层因此给每个添加请求一个独有的 id（名字的字母加请求自己的 8 位码），并用同一段码在登记表里认出重发的请求；请求头名称引擎按原样存，两种大小写会并存。
