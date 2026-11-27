@@ -5217,10 +5217,8 @@
       try {
         await api("/xbot-api/bots/" + encodeURIComponent(name), { method: "DELETE" });
         chatList.forget({ type: "bot", id: name }); // its draft goes too (a new cat may reuse the name)
-        profile.afterDelete(name, true); // and what the page heard about its computer
+        profile.afterDelete(name); // and what the page heard about its computer
       } catch (e) {
-        // Not deleted, but one that had the computer may have been switched off first: what was heard is not drawn as true.
-        profile.afterDelete(name, false);
         const msg = e.message || "";
         if (/primary/i.test(msg)) throw new Error("它是默认接待的猫猫，暂时不能删。");
         if (/last bot/i.test(msg)) throw new Error("最后一只猫猫不能删。");

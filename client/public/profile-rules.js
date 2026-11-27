@@ -180,6 +180,19 @@
     const one = names.length + unnamed === 1;
     return "同一时间只有一只猫能用这台电脑：打开后，" + who + "的会关掉；" + (one ? "它要是正在回复，那条回复会停下。" : "它们要是正在回复，那些回复会停下。");
   }
+  // The cats a turn on would take the computer from now (a view's `others`)
+  // that the dialog the owner confirmed did not name (`told`, the list it was
+  // drawn from): a name it said covers that cat; one the server could not
+  // name ('') only as many times as the dialog counted one (item 57).
+  function computerUntold(told, others) {
+    const said = Array.isArray(told) ? told.map(trim) : [], out = [];
+    for (const n of Array.isArray(others) ? others.map(trim) : []) {
+      const at = said.indexOf(n);
+      if (at < 0) out.push(n);
+      else if (!n) said.splice(at, 1);
+    }
+    return out;
+  }
   // A change that did not go through: the server's own sentence when it is
   // everyday words (computer_half_registered asks the owner to check every
   // cat, so it is shown whole; computer_other_on / computer_other_running /
@@ -221,6 +234,6 @@
     accent, ownBreed,
     MIN, MAX, members, known, countText, addable, room, canRemove, addBody, removeBody, groupFrom,
     defaultName, nameProblem, renameBody, nameSaid, groupError,
-    COMPUTER, GRANTS, computerView, waitsForGrant, grantPlace, computerConsent, computerHandover, computerError, computerRow,
+    COMPUTER, GRANTS, computerView, waitsForGrant, grantPlace, computerConsent, computerHandover, computerUntold, computerError, computerRow,
   });
 })(typeof window !== "undefined" ? window : globalThis);

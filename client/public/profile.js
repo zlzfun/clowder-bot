@@ -517,16 +517,19 @@
   // GET /xbot-api/bots/:name/computer and PUT {enabled} (docs/xbot-api.md
   // 「这台电脑」); the rules and the words are profile-rules.js's. What it is
   // doing, by cat and apart from the page, as 置顶's saves:
-  //   { view, reading, again, busy: "" | "on" | "off", stale, ending, wait: {missing} | null,
+  //   { view, reading, again, busy: "" | "on" | "off", stale, ending, wait: {missing, told} | null,
   //     said: {text, code} | null, n, applied, timer }
   // ending: the cat was replying when off was asked (the shell's replying
   // hook: the status poll's running turns, or the open chat's live reply);
   // off ends that reply, and the busy line says so while it does.
+  // told: the cats the dialog the owner confirmed named (its `others`); the
+  // wait sends the request again by itself only while it takes the computer
+  // from no one else.
   // view is the server's last answer, drawn while it is asked again, never
   // kept as the truth: a new page for the cat starts without it, and another
-  // cat turned on, or a deletion of this one that did not go through, drops
-  // it (forget; again: read once more; stale: the change on its way may
-  // answer what was before, so it is read again first). Answers are
+  // cat turned on, or a cat deleted, drops it (forget; again: read once
+  // more; stale: the change on its way may answer what was before, so it is
+  // read again first). Answers are
   // numbered: one asked for before a later answer arrived is not drawn, and
   // nothing is read while a change is on its way (its answer is the view).
   // The only repeated request is the wait for a macOS grant, every 2 s while
@@ -619,12 +622,13 @@
       ev.preventDefault();
       if (!L.alive) return;
       L.close();
-      changeComputer(key, name, true);
+      changeComputer(key, name, true, others);
     });
     cancel.focus();
   }
 
-  async function changeComputer(key, name, enabled) {
+  // told: for a turn on, the cats the dialog the owner confirmed named.
+  async function changeComputer(key, name, enabled, told) {
     const cs = computerOf(key);
     if (cs.busy) return;
     // A turn on asked for again by the wait, rather than by the owner just now.
@@ -660,7 +664,7 @@
     cs.view = view;
     // Nothing was switched: macOS has not given the driver its grants. Wait
     // for them — unless 不等了 was pressed while this was on its way.
-    if (enabled && R.waitsForGrant(view) && (!again || cs.wait)) cs.wait = { missing: view.missing };
+    if (enabled && R.waitsForGrant(view) && (!again || cs.wait)) cs.wait = { missing: view.missing, told: told || [] };
     else endWait(cs);
     repaintComputer(key);
   }
@@ -686,9 +690,22 @@
       else if (view.permissions === "needed") cs.wait.missing = view.missing;
     }
     repaintComputer(key);
-    // The grants are there: the same request once more.
-    if (cs.wait && view && view.permissions === "granted") await changeComputer(key, name, true);
+    if (!cs.wait || !view || view.permissions !== "granted") return;
+    // The grants are there: the same request once more — unless it would now
+    // take the computer from a cat the confirmed dialog did not name (another
+    // was switched on meanwhile). Then nothing is sent: the wait ends, the row
+    // shows it off as it is, and with this 资料 on screen and no other dialog
+    // open the dialog asks again, naming them; else the switch does when it
+    // is next pressed.
+    const told = cs.wait.told;
+    if (!R.computerUntold(told, view.others).length) { await changeComputer(key, name, true, told); return; }
+    endWait(cs);
+    repaintComputer(key);
+    const P = pageOf(key);
+    if (P && showing(P) && !S.layer && !asking()) askComputer(key, name, view.others);
   }
+  // A dialog of the app's is open (a form, a confirmation): nothing asks over it.
+  const asking = () => [...document.querySelectorAll('[aria-modal="true"]')].some((n) => n.getClientRects().length > 0);
 
   // Turning a cat on switches every other cat off first, and a refusal may
   // come after some were (docs/xbot-api.md「同一时间只有一只猫」): what this
@@ -718,16 +735,14 @@
     paintComputer(P);
     if (!cs.reading) readComputer(k, P.data.name || P.sel.id);
   }
-  // 删除猫猫 has ended (app.js's confirmDelete). Deleted: nothing of its
-  // computer is kept, since a new cat may be given its name. Not deleted: the
-  // server may have switched it off first (docs/xbot-api.md「删除一只开着的猫」).
-  // Other cats are not touched by a deletion.
-  function afterDelete(name, deleted) {
+  // A cat was deleted (app.js's confirmDelete; a refused deletion changes
+  // nothing, docs/xbot-api.md「删除一只可能正用着电脑的猫」). Nothing of its
+  // computer is kept, since a new cat may be given its name; the other cats'
+  // views may name it among those a turn on would switch off: no longer known.
+  function afterDelete(name) {
     const k = R.key({ type: "bot", id: name }), cs = computers.get(k);
-    if (!cs) return;
-    if (!deleted) { forget(k); return; }
-    endWait(cs);
-    computers.delete(k);
+    if (cs) { endWait(cs); computers.delete(k); }
+    forgetOthers(k);
     repaintComputer(k);
   }
 
@@ -1115,7 +1130,7 @@
   window.ClowderProfile = Object.freeze({
     init: (hooks) => { H = hooks; },
     catHead, groupHead, catPage, groupPage, groupMenu, renameGroup, removeGroup,
-    // 删除猫猫 ended, deleted or not (这台电脑: what the page heard about the cat's switch).
+    // A cat was deleted (这台电脑: what the page heard about its switch, and about it in the others' views).
     afterDelete,
     // Whether a drawer node is the page this module keeps for the chat shown.
     current: (n, sel) => !!n && !!sel && ((S.cat && S.cat.root === n && S.cat.key === R.key(sel)) || (S.group && S.group.root === n && S.group.key === R.key(sel))),
