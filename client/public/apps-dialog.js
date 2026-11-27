@@ -51,8 +51,9 @@
   }
 
   // ---- our own small drawings, in the icon() style (24px grid, stroke) ----
-  // 微信's mark: one speech bubble with two lines of text in it — a chat that is read. Not WeChat's logo
-  // (no pair of bubbles, no eyes, no green).
+  // 微信's drawn mark: one speech bubble with two lines of text in it — a chat that is read. Where the row carries
+  // `icon` (the 微信 installed on this Mac) its own icon is shown instead (paintTile); this is what is left when
+  // there is none, or it does not load.
   const DRAWN = {
     wechat: '<path d="M5 4.5h14a2 2 0 0 1 2 2V15a2 2 0 0 1-2 2h-7.5L7 20.5V17H5a2 2 0 0 1-2-2V6.5a2 2 0 0 1 2-2Z"/><path d="M7.5 9h9"/><path d="M7.5 12.5h5.5"/>',
     eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/>',
@@ -223,6 +224,7 @@
       poll: null,                // 微信 starting: {started, timer, reading, gaveUp, error}
       count: null,               // 微信 authorized: {end, timer, zeroRead}
       wbusy: "", wnote: "", anote: null,
+      badIcons: new Set(),       // icon addresses that did not load: their tiles keep the drawn mark
       wseq: 0, wseen: 0, wwrites: 0, winflight: 0, // 微信's evidence, in the order its requests started (wechatAsk)
       notes: new Map(),          // id → {text, bad} shown on its page
       draft: null, from: null, layer: null,
@@ -334,7 +336,36 @@
       st.append(mark, word, time);
       tx.append(name, node("span", "visually-hidden", "，"), st);
       b.append(tile, tx, icon("chevron", "ap-chev"));
-      return { id, b, tile, name, mark, word, time, markKind: "", tileKind: "" };
+      return { id, b, tile, name, mark, word, time, markKind: "", tileKey: "" };
+    }
+    // A tile: the app's kind drawn, or 微信's own icon where the row carries one. An app icon has its own shape
+    // (and a transparent margin), so it takes the tile's place rather than sitting on its square. Until it has
+    // loaded the tile is empty (the bubble does not flash first); if it does not load, the square and the drawn
+    // bubble come back and stay. Decorative: the name is beside it. Rebuilt only when the kind or the address
+    // changes, so a repaint never asks for the picture again.
+    function paintTile(holder, app) {
+      const kind = kindOf(app), src = kind === "wechat" && app && app.icon && !S.badIcons.has(String(app.icon)) ? String(app.icon) : "";
+      const key = kind + "|" + src;
+      if (holder.tileKey === key) return;
+      holder.tileKey = key;
+      const tile = holder.tile;
+      if (!src) { tile.classList.remove("has-icon"); tile.replaceChildren(tileIcon(kind)); return; }
+      const img = document.createElement("img");
+      img.className = "ap-icon";
+      img.setAttribute("alt", "");
+      img.setAttribute("aria-hidden", "true");
+      img.decoding = "async";
+      img.draggable = false;
+      img.addEventListener("error", () => {
+        S.badIcons.add(src);
+        if (holder.tileKey !== key) return;
+        holder.tileKey = kind + "|";
+        tile.classList.remove("has-icon");
+        tile.replaceChildren(tileIcon(kind));
+      });
+      img.src = src;
+      tile.classList.add("has-icon");
+      tile.replaceChildren(img);
     }
     function paintRow(id) {
       const r = L.rows.get(id), app = S.apps.get(id);
@@ -344,8 +375,7 @@
       paintMark(r, lk.mark);
       setText(r.word, lk.word);
       r.word.classList.toggle("bad", lk.mark === "bad");
-      const kind = kindOf(app);
-      if (r.tileKind !== kind) { r.tileKind = kind; r.tile.replaceChildren(tileIcon(kind)); }
+      paintTile(r, app);
       if (id === R.WECHAT) paintClock();
     }
     function paintList() {
@@ -690,7 +720,6 @@
     function wechatPage() {
       const el = node("div", "ap-view ap-wechat");
       const hero = node("div", "ap-hero"), tile = node("span", "ap-tile lg"), tx = node("div", "ap-hero-tx");
-      tile.append(drawn("wechat"));
       const state = node("p", "ap-state"), mark = node("span", "ap-mark"), word = node("span", "ap-state-word");
       state.setAttribute("tabindex", "-1");
       mark.setAttribute("aria-hidden", "true");
@@ -754,7 +783,7 @@
       moreBox.append(...notes, source);
       el.append(hero, detail.box, note, ways, authNote, more, moreBox);
       const V = {
-        name: "wechat", id: R.WECHAT, el, title: "微信", state, mark, word, lead, detail, acts, note, ways, byName: byName.r,
+        name: "wechat", id: R.WECHAT, el, title: "微信", tile, tileKey: "", state, mark, word, lead, detail, acts, note, ways, byName: byName.r,
         open: open.r, openHead: open.head, openState: open.st, openMark: open.stMark, openWord: open.stWord, clockLead, clock: clockEl, clockSaid,
         authorize, revoke, reread, authNote, more, moreBox, source, markKind: "", mode: "",
         paint: () => paintWechat(V),
@@ -770,6 +799,7 @@
       // What has focus now; if this paint hides or replaces it, focus moves to the line that says the new state.
       const had = document.activeElement, inside = !!had && V.el.contains(had);
       const lk = R.look(app);
+      paintTile(V, app);
       paintMark(V, lk.mark);
       setText(V.word, lk.word);
       V.word.classList.toggle("bad", lk.mark === "bad");
@@ -949,7 +979,7 @@
       nameBtn.append(nameText, node("span", "visually-hidden", "，改名"), icon("pencil", "ap-name-mark"));
       nameBtn.dataset.tip = "改名";
       const V = {
-        name: "app", id, el, state, mark, word, detail, again, note, hint, tile, tileKind: "", whatText, secrets, secretsHead, names,
+        name: "app", id, el, state, mark, word, detail, again, note, hint, tile, tileKey: "", whatText, secrets, secretsHead, names,
         addSecret, tools, toolsHead, toolList, remove, nameBtn, nameText, markKind: "", editing: null, secretEdit: null, open: new Set(),
         head: () => [V.editing ? V.editing.input : V.nameBtn],
         paint: () => paintApp(V),
@@ -967,7 +997,7 @@
       setText(V.word, lk.word);
       V.word.classList.toggle("bad", lk.mark === "bad");
       V.detail.set(app.state === "failed" ? app.detail : "");
-      if (V.tileKind !== kind) { V.tileKind = kind; V.tile.replaceChildren(tileIcon(kind)); }
+      paintTile(V, app);
       const hadFocus = document.activeElement === V.again;
       V.again.hidden = app.state === "off";
       // A write's answer is its own check: no second one while a write waits or is on its way.

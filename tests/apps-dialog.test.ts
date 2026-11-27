@@ -1658,6 +1658,68 @@ test('review r2 (3): a check on its way for the old configuration loses its clai
   assert.ok(shown(buttonOf(second.body(), '再检查')) && !buttonOf(second.body(), '再检查').disabled, 'and 再检查 can be pressed again');
 });
 
+// ---------------------------------------------------------------- 微信's own icon (round 6)
+test('微信\'s own icon (the owner: 「这个应用的logo、我希望是微信图标。」): where the row carries `icon` it takes the tile\'s place, in the list and on the page — decorative, never announced, made once however often its row repaints; absent, the drawn bubble; one that does not load ends on the bubble and is not asked for again', async () => {
+  const ICON = '/xbot-api/apps/wechat/icon?v=7u77mttx1en6';
+  const kids = (tile: El) => tile.kids.map((k) => (k as El).tagName);
+  const { page, srv, row, body, voice } = await opened((s) => {
+    on()(s);
+    s.wechat.icon = ICON;
+    s.add('custom:a', 'A', { type: 'program', program: 'node', args: [], secrets: [] });
+  });
+  const tile = one(row('wechat'), '.ap-tile'), img = one(tile, 'img');
+  assert.deepEqual(kids(tile), ['IMG'], 'the icon alone: no bubble drawn first, before it has loaded');
+  assert.equal((img as Any).src, ICON);
+  assert.ok(tile.classList.contains('has-icon'), 'in place of the tile\'s square');
+  assert.equal(img.getAttribute('alt'), '', 'decorative: the name 微信 is beside it');
+  assert.equal(img.getAttribute('aria-hidden'), 'true');
+  assert.deepEqual(kids(one(row('custom:a'), '.ap-tile')), ['SVG'], 'a custom app keeps its drawn kind');
+  const said = voice();
+  img.dispatch('load');
+  assert.equal(voice(), said, 'nothing about it is said');
+  // 微信's page: the larger tile, the same picture; a repaint (授权) keeps the same element.
+  row('wechat').click();
+  await settle();
+  const big = one(body(), '.ap-hero .ap-tile'), bigImg = one(big, 'img');
+  assert.ok(big.classList.contains('lg') && big.classList.contains('has-icon'));
+  assert.equal((bigImg as Any).src, ICON);
+  buttonOf(body(), '授权 10 分钟').click();
+  await settle();
+  assert.equal(one(body(), '.ap-hero .ap-tile img'), bigImg, 'not made again when the page repaints');
+  // Back on the list, and the list read again: the row's picture is the same element, never asked for again.
+  page.doc.activeElement.key('Escape');
+  await page.advance(5_000);
+  assert.equal(one(row('wechat'), '.ap-tile img'), img);
+  srv.add('custom:b', 'B', { type: 'program', program: 'node', args: [], secrets: [] });
+  srv.on.set('GET /xbot-api/apps/custom%3Aa', () => { srv.custom = srv.custom.filter((x: Any) => x.id !== 'custom:a'); throw fail(404, '没有这个应用'); });
+  row('custom:a').click();
+  await settle();
+  buttonOf(body(), '再检查').click();
+  await settle();
+  assert.equal(srv.sent('GET', /^\/xbot-api\/apps$/).length, 2, 'the list was read again');
+  assert.equal(one(row('wechat'), '.ap-tile img'), img, 'the same picture after the list was read again');
+  // Absent (not installed, not a Mac): the drawn bubble, on its square.
+  const none = await opened(on());
+  const plainTile = one(none.row('wechat'), '.ap-tile');
+  assert.deepEqual(kids(plainTile), ['SVG']);
+  assert.ok(!plainTile.classList.contains('has-icon'));
+  // One that does not load: the bubble comes back and stays, in the row and on the page, and it is not tried again.
+  const broken = await opened((s) => { s.wechat = { ...s.wechat, icon: ICON }; });
+  const bTile = one(broken.row('wechat'), '.ap-tile');
+  one(bTile, 'img').dispatch('error');
+  assert.deepEqual(kids(bTile), ['SVG'], 'it ends on the bubble');
+  assert.ok(!bTile.classList.contains('has-icon'), 'on its square again');
+  broken.row('wechat').click();
+  await settle();
+  assert.deepEqual(kids(one(broken.body(), '.ap-hero .ap-tile')), ['SVG'], 'the page does not ask for it again');
+  broken.page.doc.activeElement.key('Escape');
+  assert.deepEqual(kids(one(broken.row('wechat'), '.ap-tile')), ['SVG']);
+  // Its stylesheet: in place of the square, larger than the tile by its transparent margin; nothing moves.
+  const css = read('client/public/apps-dialog.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.match(css, /\.ap-tile\.has-icon, \.ap-tile\.lg\.has-icon \{ position: relative; background: transparent; box-shadow: none; \}/);
+  assert.match(css, /\.ap-tile > \.ap-icon \{[^}]*position: absolute;[^}]*width: 122%; height: 122%;/);
+});
+
 // ---------------------------------------------------------------- against the real adapter
 // The dialog over the production router and the adapter (server/xbot/apps.ts, server/native/apps.ts) on the
 // scripted engine of tests/apps-fixture.ts, through real HTTP: what it sends is what the adapter accepts,

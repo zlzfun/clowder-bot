@@ -88,6 +88,14 @@
 .ap-hero { display: flex; align-items: flex-start; flex-wrap: wrap; gap: var(--x-s5) 14px; padding: var(--x-s1) 0 var(--x-s6); }
 .ap-tile.lg { width: 48px; height: 48px; border-radius: 14px; background: var(--x-fill-1); }
 .ap-tile.lg > .icon { width: 26px; height: 26px; }
+/* 微信's own icon (the 微信 installed on this Mac) takes the tile's place: an app icon has its own shape and a
+   transparent margin of about a tenth on each side, so the square goes and the picture is drawn larger than the
+   tile, its body the tile's size, at both sizes; nothing moves when it arrives or fails. */
+.ap-tile.has-icon, .ap-tile.lg.has-icon { position: relative; background: transparent; box-shadow: none; }
+.ap-tile > .ap-icon {
+  position: absolute; left: -11%; top: -11%; width: 122%; height: 122%; max-width: none;
+  pointer-events: none; user-select: none; -webkit-user-drag: none;
+}
 .ap-hero-tx { flex: 1 1 200px; min-width: 0; min-height: 48px; display: flex; flex-direction: column; justify-content: center; }
 .ap-state { display: flex; align-items: center; gap: var(--x-s3); margin: 0; font-size: 15px; font-weight: 560; line-height: 1.5; color: var(--x-text); }
 .ap-state:focus, .ap-note:focus, .ap-secret-edit:focus { outline: none; }
