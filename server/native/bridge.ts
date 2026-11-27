@@ -87,7 +87,8 @@ export class BotBridge {
   private readonly creationNotices = new WeakMap<NativeCat, string>();
   constructor(readonly native: NativeTransport, readonly store: ProductStore, readonly workspace: string, driver: ComputerDriver = noComputer) {
     this.workspaces = new Workspaces(this); this.nativeFiles = new NativeFiles(this); this.activity = new Activity(this);
-    this.approvals = new Approvals(this); this.manner = new ChatPack(native); this.computer = new Computer(native, driver, cat => this.stopRunningTurns(cat));
+    this.approvals = new Approvals(this); this.manner = new ChatPack(native); this.computer = new Computer(native, driver, cat => this.stopRunningTurns(cat), undefined,
+      async ids => { const cats = await this.cats(); return ids.map(id => cats.find(cat => cat.id === id)?.name ?? ''); });
   }
   cats(): Promise<NativeCat[]> { return this.native.request<{ cats: NativeCat[] }>('/api/cats').then(r => r.cats); }
   templates(): Promise<{ templates: RoleTemplate[]; clientDefaults: Record<string, { defaultModel: string; models: string[] }> }> { return this.native.request('/api/cat-templates'); }
@@ -754,7 +755,7 @@ export class BotBridge {
    * the engine did not take, a turn still listed after cancelPatience: not
    * ended.
    */
-  async stopRunningTurns(cat: NativeCat): Promise<{ stopped: number; failed: number }> {
+  async stopRunningTurns(cat: Pick<NativeCat, 'id'>): Promise<{ stopped: number; failed: number }> {
     const threads = new Set([this.store.bot(cat.id).activeThreadId, ...this.store.state.groupThreadIds].filter((id): id is string => !!id));
     const running = async (threadId: string) => (await this.queue(threadId)).activeInvocations.some(run => run.catId === cat.id);
     let stopped = 0, failed = 0;

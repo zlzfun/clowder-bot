@@ -30,7 +30,8 @@ class Driver implements ComputerDriver {
 function setup(cats = [a, b, c]) {
   const native = new NativeFixture(); native.cats = structuredClone(cats);
   const driver = new Driver(), ended: string[] = [], stopping = { failed: 0 };
-  const computer = new Computer(native, driver, async known => { ended.push(known.id); return { stopped: stopping.failed ? 0 : 1, failed: stopping.failed }; }, 0);
+  const computer = new Computer(native, driver, async known => { ended.push(known.id); return { stopped: stopping.failed ? 0 : 1, failed: stopping.failed }; }, 0,
+    async ids => ids.map(id => native.cats.find(known => known.id === id)?.name ?? ''));
   const writes = () => native.calls.filter(call => call.method !== 'GET' && call.path.startsWith('/api/capabilities')).map(call => `${call.method} ${call.path.split('?')[0]}${call.body?.scope ? ':' + call.body.scope : ''}${call.body?.command ? ' ' + call.body.command : ''}${call.body?.scope === 'cat' ? `=${call.body.catId}:${call.body.enabled}` : ''}`);
   const on = () => native.capabilities.length && native.capabilities[0]!.mcpServer.command !== '/usr/bin/true' ? native.cats.filter(known => !native.capabilities[0]!.blockedCats?.includes(known.id)).map(known => known.id) : [];
   return { native, driver, computer, writes, on, ended, stopping };
@@ -83,11 +84,11 @@ test('turning it on registers the entry with no cat on for a moment, then switch
   assert.equal(driver.freshLooks, 1, 'the driver\'s identity was checked anew before the registry was pointed at it');
   assert.deepEqual(driver.did, ['quiet'], 'the driver was running and granted: not started, analytics switched off once');
   assert.equal((await computer.view(b)).on, false);
-  // A second cat: one toggle, nothing registered again.
+  // The same cat again: one toggle, nothing registered again.
   native.calls.length = 0;
-  assert.equal((await computer.set(b, true)).on, true);
-  assert.deepEqual(writes(), ['PATCH /api/capabilities:cat=cat-b:true']);
-  assert.deepEqual(on(), ['cat-a', 'cat-b']);
+  assert.equal((await computer.set(a, true)).on, true);
+  assert.deepEqual(writes(), ['PATCH /api/capabilities:cat=cat-a:true']);
+  assert.deepEqual(on(), ['cat-a']);
 });
 
 test('while a macOS grant is missing nothing is switched and the registry is not touched', async () => {
@@ -136,25 +137,28 @@ test('a registration that cannot be confirmed is taken out again; one that canno
 
 test('an "on" that timed out here and is still waiting in the engine does not outlive a later "off"', async () => {
   const { native, computer, on } = setup();
-  await computer.set(b, true);
-  // The engine is slow: A's switch-on is taken in, but this app's request gives up first.
+  await computer.set(b, true); await computer.set(b, false);
+  // The entry is there and no cat has it. The engine is slow: A's switch-on is taken in, but this app's request gives up first.
   let release!: () => void;
   native.capabilityHold = { key: 'PATCH:cat', release: new Promise<void>(done => { release = done; }) };
   await refused(computer.set(a, true), 503);
-  assert.deepEqual(on(), ['cat-b'], 'not applied yet');
+  assert.deepEqual(on(), [], 'not applied yet');
   // The owner turns A off. It reads as off already, and the block is written all the same, behind the waiting write.
   const off = computer.set(a, false);
   await settle();
   release();
   assert.equal((await off).on, false);
   await settle();
-  assert.deepEqual(on(), ['cat-b'], 'the waiting "on" was applied first and the "off" after it stands');
+  assert.deepEqual(on(), [], 'the waiting "on" was applied first and the "off" after it stands');
   assert.deepEqual(native.capabilities[0]?.blockedCats?.includes('cat-a'), true);
 });
 
 test('turning it off takes only this cat off, ends the turns it is in the middle of, and with the last one ends the driver\'s process', async () => {
   const { native, driver, computer, on, ended, stopping } = setup();
-  await computer.set(a, true); await computer.set(b, true); driver.did.length = 0;
+  await computer.set(a, true); await computer.set(b, true);
+  // Two cats on: a state from before the one-at-a-time rule, or written by another client of the registry.
+  native.capabilities[0]!.blockedCats = native.capabilities[0]!.blockedCats!.filter(id => id !== 'cat-a');
+  assert.deepEqual(on(), ['cat-a', 'cat-b']); driver.did.length = 0; ended.length = 0;
   assert.equal((await computer.set(a, false)).on, false);
   assert.deepEqual(on(), ['cat-b']); assert.deepEqual(driver.did, []); assert.deepEqual(ended, ['cat-a'], 'a running turn keeps the tools it started with, so it is ended');
   assert.equal((await computer.set(b, false)).on, false);
@@ -189,21 +193,107 @@ test('turning it off takes only this cat off, ends the turns it is in the middle
   assert.equal((await computer.set(a, false)).on, false);
 });
 
+test('one cat at a time: switching a cat on switches the others off first and ends their turns', async () => {
+  const { native, driver, computer, writes, on, ended } = setup();
+  await computer.set(a, true);
+  // The page of another cat is told who has it: that cat is switched off when this one is switched on.
+  assert.deepEqual(await computer.view(b), { supported: true, installed: true, on: false, permissions: 'granted', others: ['猫甲'] });
+  assert.deepEqual(await computer.view(a), { supported: true, installed: true, on: true, permissions: 'granted' });
+  // After every registry write, who could use the tools right then: never two.
+  const usable: string[][] = [], request = native.request.bind(native);
+  native.request = (async (path: string, options: any = {}) => { const result = await request(path, options); if ((options.method ?? 'GET') !== 'GET') usable.push(on()); return result; }) as typeof native.request;
+  native.calls.length = 0; driver.did.length = 0;
+  assert.deepEqual(await computer.set(b, true), { supported: true, installed: true, on: true, permissions: 'granted' });
+  assert.deepEqual(writes(), ['PATCH /api/capabilities:cat=cat-a:false', 'PATCH /api/capabilities:cat=cat-b:true']);
+  assert.deepEqual(usable, [[], ['cat-b']]);
+  assert.deepEqual(ended, ['cat-a'], 'the turn the other cat is in the middle of keeps its tools until it ends, so it is ended');
+  assert.deepEqual(driver.did, [], 'the driver keeps running: a cat still has it');
+  assert.deepEqual(await computer.view(a), { supported: true, installed: true, on: false, permissions: 'granted', others: ['猫乙'] });
+  // More than one other cat (a state from before the rule): all of them.
+  native.capabilities[0]!.blockedCats = ['cat-b'];
+  ended.length = 0;
+  assert.deepEqual((await computer.view(b)).others, ['猫甲', '猫丙']);
+  assert.equal((await computer.set(b, true)).on, true);
+  assert.deepEqual(on(), ['cat-b']); assert.deepEqual(ended.sort(), ['cat-a', 'cat-c']);
+});
+
+test('one cat at a time: a cat is only switched on once the other is seen to be off and stopped', async () => {
+  const { native, driver, computer, on, ended, stopping } = setup();
+  const said = async (work: Promise<unknown>) => { try { await work; } catch (error) { return error instanceof ApiError ? `${error.status} ${error.code} ${error.message}` : String(error); } return 'no error'; };
+  await computer.set(a, true);
+  // The other cat's block cannot be written: nothing changes, and the words name it.
+  native.capabilityFailures.add('PATCH:cat');
+  assert.equal(await said(computer.set(b, true)), '502 computer_other_on 没能先把「猫甲」的关掉，所以这只猫的没有打开。请再试一次。');
+  assert.deepEqual(on(), ['cat-a']); assert.deepEqual(ended, []);
+  native.capabilityFailures.clear();
+  // Its turn is not seen to end: it is off, this cat is not switched on, and the words say where to stop it.
+  stopping.failed = 1;
+  assert.equal(await said(computer.set(b, true)),
+    '502 computer_other_running 「猫甲」的已经关掉，但它正在进行的这一轮还没有停下来，停下之前它还能用这台电脑，所以这只猫的先没有打开。请在「猫甲」的对话里点停止，然后再开一次。');
+  assert.deepEqual(on(), []); assert.deepEqual(ended, ['cat-a']);
+  // Asked again once it has stopped: on.
+  stopping.failed = 0;
+  assert.equal((await computer.set(b, true)).on, true);
+  assert.deepEqual(on(), ['cat-b']);
+  // The block was written and its answer lost: what the registry says decides, and the other cat's turn is ended.
+  ended.length = 0; native.lostAnswers.add('PATCH:cat');
+  await refused(computer.set(a, true), 503);
+  native.lostAnswers.clear();
+  assert.deepEqual(on(), ['cat-a'], 'both writes went through; only their answers were lost'); assert.deepEqual(ended, ['cat-b']);
+  // While a macOS grant is missing nothing is switched: the cat that has it keeps it.
+  driver.grants = { state: 'needed', missing: ['accessibility'] }; native.calls.length = 0; ended.length = 0;
+  assert.deepEqual(await computer.set(b, true), { supported: true, installed: true, on: false, permissions: 'needed', missing: ['accessibility'], others: ['猫甲'] });
+  assert.equal(native.calls.some(call => call.method !== 'GET'), false); assert.deepEqual(on(), ['cat-a']); assert.deepEqual(ended, []);
+  // A cat whose name is not known is still spoken of.
+  driver.grants = { state: 'granted' };
+  const nameless = new Computer(native, driver, async () => ({ stopped: 0, failed: 1 }), 0);
+  assert.deepEqual((await nameless.view(b)).others, ['']);
+  assert.match(await said(nameless.set(b, true)), /^502 computer_other_running 另一只猫的已经关掉/);
+});
+
+test('one cat at a time, through the routes: the other cat\'s reply is ended by native cancellation', async () => {
+  const { native, bridge, runtime, end } = app();
+  const server = runtime.app.listen(0, '127.0.0.1'); await once(server, 'listening');
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}/xbot-api`;
+  const call = (name: string, method = 'GET', body?: unknown) => fetch(`${base}/bots/${encodeURIComponent(name)}/computer`, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+  try {
+    const [first, second] = [native.cats[0]!, native.cats[1]!], thread = await bridge.direct(first);
+    bridge.cancelPatience = 1500; native.cancelEndsAfterReads = 0;
+    assert.equal((await (await call(first.name, 'PUT', { enabled: true })).json()).on, true);
+    assert.deepEqual(await (await call(second.name)).json(), { supported: true, installed: true, on: false, permissions: 'granted', others: [first.name] });
+    native.queues.set(thread.id, { queue: [], activeInvocations: [{ catId: first.id, invocationId: 'inv-1' }] });
+    native.calls.length = 0;
+    assert.deepEqual(await (await call(second.name, 'PUT', { enabled: true })).json(), { supported: true, installed: true, on: true, permissions: 'granted' });
+    assert.deepEqual(native.calls.filter(item => item.path.includes('/cancel/')).map(item => `${item.method} ${item.path}`), [`POST /api/threads/${thread.id}/cancel/${first.id}`]);
+    assert.deepEqual(native.queues.get(thread.id)!.activeInvocations, []);
+    assert.deepEqual(await (await call(first.name)).json(), { supported: true, installed: true, on: false, permissions: 'granted', others: [second.name] });
+    // The other cat's turn never goes away: said with its name, and nobody has the computer.
+    native.queues.set((await bridge.direct(second)).id, { queue: [], activeInvocations: [{ catId: second.id, invocationId: 'inv-2' }] });
+    native.cancelEndsAfterReads = Infinity; bridge.cancelPatience = 400;
+    const refusal = await call(first.name, 'PUT', { enabled: true });
+    assert.equal(refusal.status, 502);
+    const told = await refusal.json();
+    assert.equal(told.code, 'computer_other_running'); assert.match(told.error, new RegExp(`^「${second.name}」的已经关掉`));
+    assert.equal((await (await call(first.name)).json()).on, false); assert.equal((await (await call(second.name)).json()).on, false);
+  } finally { server.close(); await end(); }
+});
+
 test('a driver that moved is pointed at again without changing who is on', async () => {
   const { native, driver, computer, on } = setup();
   await computer.set(a, true);
   driver.server = { ...real, command: '/Applications/CuaDriver.app/Contents/MacOS/cua-driver' };
-  assert.equal((await computer.set(b, true)).on, true);
+  assert.equal((await computer.set(a, true)).on, true);
   assert.equal(native.capabilities[0]?.mcpServer.command, '/Applications/CuaDriver.app/Contents/MacOS/cua-driver');
-  assert.deepEqual(on(), ['cat-a', 'cat-b']);
+  assert.deepEqual(on(), ['cat-a']);
+  assert.deepEqual(native.capabilities[0]?.blockedCats, ['cat-b', 'cat-c']);
 });
 
-test('two switches at once register once', async () => {
+test('two switches at once register once, and the later one has the computer', async () => {
   const { native, computer, on } = setup();
   const [first, second] = await Promise.all([computer.set(a, true), computer.set(b, true)]);
   assert.equal(first.on && second.on, true);
   assert.equal(native.calls.filter(call => call.body?.command === '/usr/bin/true').length, 1);
-  assert.deepEqual(on(), ['cat-a', 'cat-b']);
+  assert.deepEqual(on(), ['cat-b']);
 });
 
 test('a new cat is blocked before it exists whenever the entry is there, also while every cat is off', async () => {
