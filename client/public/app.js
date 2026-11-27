@@ -667,7 +667,7 @@
     ellipsis: '<circle class="solid" cx="5" cy="12" r="1.5"/><circle class="solid" cx="12" cy="12" r="1.5"/><circle class="solid" cx="19" cy="12" r="1.5"/>',
     wrench: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
     plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
-    // 应用 (the sidebar's, items 43 and 53): three tiles and a plus.
+    // 应用 (the sidebar's, items 43 and 54): three tiles and a plus.
     "grid-plus": '<rect x="3.5" y="3.5" width="7" height="7" rx="1"/><rect x="13.5" y="3.5" width="7" height="7" rx="1"/><rect x="3.5" y="13.5" width="7" height="7" rx="1"/><path d="M17 13.5v7M13.5 17h7"/>',
     pin: '<path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/>',
     pencil: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>',
@@ -966,7 +966,7 @@
   // The details panel beside the chat where the card has room for both, else
   // the drawer over it (chat-panel.js, item 50); init() next to panelOpen.
   const panelPlace = window.ClowderPanel;
-  // 应用 (apps-dialog.js, item 53): 微信 and the owner's custom apps, one
+  // 应用 (apps-dialog.js, item 54): 微信 and the owner's custom apps, one
   // dialog over the chat; init() next to quick.init.
   const apps = window.ClowderApps;
   // An empty single chat's greeting invitation (chat-presentation.js): one
@@ -6780,7 +6780,7 @@
     quick.openCat({ opener: opener && opener.isConnected ? opener : document.activeElement });
   }
 
-  // 应用 (apps-dialog.js, item 53): one dialog over the chat. Menus, the
+  // 应用 (apps-dialog.js, item 54): one dialog over the chat. Menus, the
   // tooltip and any other dialog close first; focus comes back to the button
   // it was opened from when it closes. The module sends its own requests.
   function openApps(opener) {
@@ -6985,7 +6985,7 @@
     btn.append(icon("plus"));
     btn.addEventListener("click", () => openNewBot(btn));
   }
-  // 应用 (item 53): the full sidebar's pill and the rail's icon are the same button; it opens the dialog.
+  // 应用 (item 54): the full sidebar's pill and the rail's icon are the same button; it opens the dialog.
   $("side-apps").prepend(icon("grid-plus"));
   $("side-apps").addEventListener("click", () => openApps($("side-apps")));
   $("account").addEventListener("click", () => {

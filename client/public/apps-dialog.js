@@ -1,4 +1,4 @@
-// 应用 (docs/xbot-frontend.md item 53). The rules live in apps-dialog-rules.js;
+// 应用 (docs/xbot-frontend.md item 54). The rules live in apps-dialog-rules.js;
 // app.js passes its helpers through init() and opens the dialog from the
 // sidebar's 应用 (full sidebar and rail: the same #side-apps).
 // One dialog over the chat, on the original .modal / .modal-card, with two

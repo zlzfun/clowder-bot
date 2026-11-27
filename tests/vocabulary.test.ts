@@ -57,7 +57,7 @@ const CONTAINERS: Record<string, string[]> = { 'index.html': ['<div class="setpa
 const MATCHED = new Set(['palette.js:群组']);
 // One sentence of consent, word for word: what opening 微信 allows says where the text it reads goes — the
 // Agent and its model. Where the owner's 微信 text ends up is a fact the owner consents to, and its truth
-// outranks the everyday-words rule there and only there (docs/xbot-frontend.md item 53; review r1, 6).
+// outranks the everyday-words rule there and only there (docs/xbot-frontend.md item 54; review r1, 6).
 // Technical nouns only: a retired word in it is still reported, and so is the sentence once a word changes.
 const CONSENT = new Set(['apps-dialog-rules.js:认出的文字会和你发给猫猫的话一样，交给它用的 Agent 和模型，并留在那段聊天的执行记录里。']);
 // Scripts index.html loads whose words the owner cannot reach in this product:
