@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test, { after } from 'node:test';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readdirSync, lstatSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -12,7 +12,22 @@ const sandbox = mkdtempSync(join(tmpdir(), 'bot-output-test-'));
 mkdirSync(join(sandbox, '.cat-cafe'));
 writeFileSync(join(sandbox, '.cat-cafe/capabilities.json'), JSON.stringify({ version: 2, capabilities: [] }));
 for (const key of ['CAT_CAFE_CONFIG_ROOT', 'CAT_CAFE_GLOBAL_CONFIG_ROOT', 'CAT_CAFE_WORKSPACE_ROOT', 'CAT_CAFE_DATA_DIR']) process.env[key] = sandbox;
-after(() => rmSync(sandbox, { recursive: true, force: true }));
+// Session credential files default to <build>/.cat-cafe/mcp-creds; keep them in the sandbox too.
+process.env.CAT_CAFE_MCP_CREDS_DIR = join(sandbox, 'mcp-creds');
+// The engine also writes its shell guard to <build>/.cat-cafe/tmp/guarded-zsh, a path it takes from
+// its own location with no setting to move it. On a build that has never been started that creates a
+// real .cat-cafe directory where the launcher must later place its link, and the launcher then
+// refuses to start. Remove it afterwards only when this run created it and it holds nothing else.
+const buildConfig = resolve(root, lock.build, '.cat-cafe');
+const buildConfigExisted = existsSync(buildConfig);
+after(() => {
+  rmSync(sandbox, { recursive: true, force: true });
+  if (buildConfigExisted || !existsSync(buildConfig) || lstatSync(buildConfig).isSymbolicLink()) return;
+  const only = (dir, names) => readdirSync(dir).every(name => names.includes(name));
+  if (!only(buildConfig, ['tmp']) || !only(join(buildConfig, 'tmp'), ['guarded-zsh'])) return;
+  if (!only(join(buildConfig, 'tmp/guarded-zsh'), ['.zshenv', '.zprofile', '.zshrc', '.zlogin'])) return;
+  rmSync(buildConfig, { recursive: true });
+});
 const { ClaudeSdkAgentService } = await import(pathToFileURL(resolve(root, lock.build, 'packages/api/dist/domains/cats/services/agents/providers/ClaudeSdkAgentService.js')).href);
 const { routeSerial } = await import(pathToFileURL(resolve(root, lock.build, 'packages/api/dist/domains/cats/services/agents/routing/route-serial.js')).href);
 const { routeParallel } = await import(pathToFileURL(resolve(root, lock.build, 'packages/api/dist/domains/cats/services/agents/routing/route-parallel.js')).href);

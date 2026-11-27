@@ -27,7 +27,7 @@
       "file": "app.js",
       "target": "client/public/app.js",
       "sourceSha256": "1248f793493826bf044359c71e7d8772ccc3472d6021d6abb979dff9b6cb29bc",
-      "sha256": "6ffe1136cc2af490b22e1b19b95b571574e5b5c15333cbe09ef5b8afba5908fb",
+      "sha256": "a96006203addfc5005f5b9e907ebf057cfd5b9029e61f942f31c1b6c706dbd15",
       "unchanged": false
     },
     {
@@ -843,9 +843,9 @@
     },
     {
       "target": "client/public/chat-cards-rules.js",
-      "description": "Pure rules for round 5: the approvals list checked, a request card's view (open, in flight, 已提交 / 已提交，还在处理 / 没能确认结果 / 已处理, the receipt's outcome), quiet expiry words, server failures with the engine's reason apart, upstream buildSelectionMessage ported as it is, a choice's view, diff lines, the ending of an unfinished reply and the owner message 再发一次 resends; no DOM or network Item 38 review: resend() also returns, in order, the later messages an unfinished reply took in (listed in its inputMessageIds and accepted by it on their own record).",
-      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 确认与提醒 (docs/xbot-frontend.md item 32; docs/chat-experience-api.md 「等你确认的事」「卡片、清单与选项」, docs/chat-live-api.md); the layout explains, not captions, on every other screen (docs/xbot-frontend.md item 46) by local Claude Code (claude-opus-5-5) on 2026-11-13",
-      "sha256": "061a405f8dffbda98cc36af8e297585e1e8750d9d563ea8c560c256ff77471c6"
+      "description": "Pure rules for round 5: the approvals list checked, a request card's view (open, in flight, 已提交 / 已提交，还在处理 / 没能确认结果 / 已处理, the receipt's outcome), quiet expiry words, server failures with the engine's reason apart, upstream buildSelectionMessage ported as it is, a choice's view, diff lines, the ending of an unfinished reply and the owner message 再发一次 resends; no DOM or network Item 38 review: resend() also returns, in order, the later messages an unfinished reply took in (listed in its inputMessageIds and accepted by it on their own record). Item 53: a timer request's outcome is said as setting, changing or removing one, by the verb of its title (想设 / 想改 / 想取消一个定时), never by the cat's name.",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-11 for 确认与提醒 (docs/xbot-frontend.md item 32; docs/chat-experience-api.md 「等你确认的事」「卡片、清单与选项」, docs/chat-live-api.md); the layout explains, not captions, on every other screen (docs/xbot-frontend.md item 46) by local Claude Code (claude-opus-5-5) on 2026-11-13; a timer change's own outcome (docs/xbot-frontend.md item 53) by local Claude Code (claude-opus-5-5) on 2026-11-26",
+      "sha256": "1de5fff6d60ce97db044753489fcd0d4c8a565b4705151b80c975327178473f0"
     },
     {
       "target": "client/public/chat-cards.js",
@@ -891,9 +891,9 @@
     },
     {
       "target": "client/public/chat-reactions-rules.js",
-      "description": "Pure rules for replies and emoji reactions (window.ClowderReactionRules): which rows offer 回复 and 表情 (a cat's own finished words on the newest page, from a cat still in the group), a row's reactions[] grouped into chips by emoji with counts, the owner's marked and who for the tip (a chip the owner's part is still on its way in is pending as a whole), what the owner already gave a row (sent or sending), when an own reaction has landed (its userMessageId in the record), the read rule (when the newest reply is a cat's reaction, the newest row of a cat reply the server counts — failed and interrupted ones too, not stopped or empty — by the history's order must be seen too), the send body (one ordinary message quoting the row) and the failure words",
-      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-13 for 回复与表情回应 (docs/xbot-frontend.md item 49; docs/chat-experience-api.md 「回复与表情回应」)",
-      "sha256": "c94e310d164df00cce575b065add70de6f8a4cd44ae98c3d365ba9b10f75dc08"
+      "description": "Pure rules for replies and emoji reactions (window.ClowderReactionRules): which rows offer 回复 and 表情 (a cat's own finished words on the newest page, from a cat still in the group), a row's reactions[] grouped into chips by emoji with counts, the owner's marked and who for the tip (a chip the owner's part is still on its way in is pending as a whole), what the owner already gave a row (sent or sending), when an own reaction has landed (its userMessageId in the record), the read rule (when the newest reply is a cat's reaction, the newest row of a cat reply the server counts — failed and interrupted ones too, not stopped or empty — by the history's order must be seen too), the send body (one ordinary message quoting the row) and the failure words (item 53: a refusal whose sentence already says it was not sent, reply_cat_left or target_unavailable, is said whole)",
+      "attribution": "Original clowder-bot extension authored by local Claude Code (claude-opus-5-5) on 2026-11-13 for 回复与表情回应 (docs/xbot-frontend.md item 49; docs/chat-experience-api.md 「回复与表情回应」); target_unavailable said whole (docs/xbot-frontend.md item 53) by local Claude Code (claude-opus-5-5) on 2026-11-26",
+      "sha256": "ff4f57e2ef2edde99ea790b65e18871d1d3820c9440e3f7d82538076795a8c75"
     },
     {
       "target": "client/public/chat-reactions.js",

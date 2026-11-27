@@ -40,19 +40,22 @@
   }
 
   // How an answered request turned out, from the engine's receipt (state),
-  // said for what it was. A schedule request either sets a timer or removes
-  // one; its title says which.
+  // said for what it was. A schedule request sets a timer, changes one or
+  // removes one; its title says which, by its verb (never by the cat's name
+  // in front of it).
   const OUTCOME = {
     preference: ["已记住这个偏好", "没有记这个偏好"],
     profile: ["已更新关于你的资料", "没有更新关于你的资料"],
     person: ["已记下这个人", "没有记这个人"],
     schedule: ["已设好这个定时", "没有设这个定时"],
+    reschedule: ["已改好这个定时", "没有改这个定时"],
     unschedule: ["已取消这个定时", "这个定时还留着"],
     other: ["已同意", "已拒绝"],
   };
+  const timer = (title) => (/想取消一个定时/.test(title) ? "unschedule" : /想改一个定时/.test(title) ? "reschedule" : "schedule");
   function outcome(kind, state, title = "") {
     if (state === "closed") return "已结束";
-    const words = OUTCOME[kind === "schedule" && /取消/.test(title) ? "unschedule" : kind] || OUTCOME.other;
+    const words = OUTCOME[kind === "schedule" ? timer(title) : kind] || OUTCOME.other;
     return state === "approved" ? words[0] : state === "rejected" ? words[1] : "已处理";
   }
 

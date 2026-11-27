@@ -1,6 +1,6 @@
 import type { NativeMessage } from './types.js';
 import { clip, plainLine } from './text.js';
-import { triggerWords } from './trigger-words.js';
+import { changeWords, triggerWords } from './trigger-words.js';
 
 /**
  * What a cat attached to a message besides words and files, as the chat can
@@ -47,8 +47,17 @@ function requestWords(producer: unknown, block: Record<string, unknown>): { kind
       const field = (Array.isArray(block.fields) ? block.fields : []).map(record).find(entry => entry.label === 'Trigger');
       let when = '';
       try { when = typeof field?.value === 'string' ? triggerWords(JSON.parse(field.value)) : ''; } catch { /* not a trigger the card spells out */ }
-      const remove = /删除|取消|移除|停用/.test(colon >= 0 ? heading.slice(0, colon) : heading);
-      return { kind: 'schedule', title: remove ? '想取消一个定时' : '想设一个定时', ...body([label, when].filter(Boolean).join(' · ')) };
+      const verb = colon >= 0 ? heading.slice(0, colon) : heading, remove = /删除|取消|移除|停用/.test(verb), change = /更新|修改/.test(verb);
+      // The engine lists each changed parameter as a field of its own, "<name>": "<old JSON> → <new JSON>" (schedule-mutation-card-block.ts).
+      const was: Record<string, unknown> = {}, next: Record<string, unknown> = {};
+      if (change) for (const entry of (Array.isArray(block.fields) ? block.fields : []).map(record)) {
+        if (typeof entry.label !== 'string' || typeof entry.value !== 'string' || ['Task ID', 'Template', 'Trigger', 'Delivery thread'].includes(entry.label)) continue;
+        const cut = entry.value.lastIndexOf(' → ');
+        if (cut < 0) continue;
+        try { next[entry.label] = JSON.parse(entry.value.slice(cut + 3)); } catch { continue; }
+        try { was[entry.label] = JSON.parse(entry.value.slice(0, cut)); } catch { /* not set before */ }
+      }
+      return { kind: 'schedule', title: remove ? '想取消一个定时' : change ? '想改一个定时' : '想设一个定时', ...body([label, when, changeWords(was, next)].filter(Boolean).join(' · ')) };
     }
     case 'F221': return { kind: 'preference', title: '想记住你的一个偏好', ...body(said) };
     case 'F231': return { kind: 'profile', title: '想更新关于你的资料', ...body(said) };
@@ -90,6 +99,8 @@ export function messageBlocks(message: NativeMessage, decided: ApprovalDecision[
     const block = record(entry), id = text(block.id, 200);
     if (!id) { hidden++; continue; }
     if (block.kind === 'file') continue;
+    // The summary card of one remember call only refers to other cards and receipts; the line it becomes is said by engineNote.
+    if (block.kind === 'card' && record(block.meta).kind === 'memory_group') continue;
     if (block.kind === 'card' && text(block.title, 300)) {
       const approval = record(record(block.meta).approval), proposal = text(approval.canonicalProposalId, 200);
       const state = proposal ? decided.find(receipt => answers(receipt, proposal, approval.producerId, message.id))?.state : undefined;

@@ -27,3 +27,22 @@ export function triggerWords(trigger: unknown): string {
   }
   return '按设定的时间';
 }
+
+/**
+ * What a request to change a timer would change, for the line under its title: the values only
+ * ("「喝水」改为「喝温水」"), since the parameter names are the engine's. Values that are not plain
+ * words or numbers are left out; an empty string when nothing can be said.
+ */
+export function changeWords(before: unknown, after: unknown): string {
+  const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const plain = (value: unknown): string | undefined => typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, 60) || undefined
+    : typeof value === 'number' || typeof value === 'boolean' ? String(value) : undefined;
+  const was = record(before), next = record(after), said: string[] = [];
+  for (const key of Object.keys(next)) {
+    if (JSON.stringify(next[key]) === JSON.stringify(was[key])) continue;
+    const to = plain(next[key]), from = plain(was[key]);
+    if (to !== undefined) said.push(from !== undefined ? `「${from}」改为「${to}」` : `改为「${to}」`);
+  }
+  return said.slice(0, 3).join('；');
+}
+

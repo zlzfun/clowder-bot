@@ -6467,8 +6467,9 @@
       // The server's own reason for a refusal (a changed conversation, a
       // file that no longer belongs to it), when it gives one in Chinese.
       const reason = !accepted && e.status >= 400 && e.status < 500 && /\p{Script=Han}/u.test(e.message || "") ? "：" + e.message.replace(/[。.]+$/, "") : "";
-      // A reply to a cat that has left the group: the server's own sentence already says it did not go out.
-      const failed = accepted ? "没送到" : e.code === "reply_cat_left" && reason ? reason.slice(1) : "没发出去" + reason;
+      // A reply to a cat that has left the group, or a cat that cannot run now (nothing was stored):
+      // the server's own sentence already says it did not go out.
+      const failed = accepted ? "没送到" : (e.code === "reply_cat_left" || e.code === "target_unavailable") && reason ? reason.slice(1) : "没发出去" + reason;
       // A picture cannot go back into the textarea, but its words can: the
       // send cleared the input, so the text is restored whether or not a
       // picture came with it, and the row says what the picture needs.

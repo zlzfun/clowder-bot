@@ -148,6 +148,13 @@ test('after a fresh load an answered request says its real outcome in the chat\'
   assert.equal(done('rejected').text, '没有设这个定时');
   assert.equal(done('approved', { ...schedule, title: '想取消一个定时' }).text, '已取消这个定时');
   assert.equal(done('rejected', { ...schedule, title: '想取消一个定时' }).text, '这个定时还留着');
+  // A change of a timer's parameters (改吧 / 先不改) is neither a new timer nor a removed one.
+  assert.equal(done('approved', { ...schedule, title: '想改一个定时' }).text, '已改好这个定时');
+  assert.equal(done('rejected', { ...schedule, title: '想改一个定时' }).text, '没有改这个定时');
+  assert.equal(R.card({ fact: fact('approved'), item: null, list: 'ready', seen: { ...schedule, title: '团子想改一个定时' } }).text, '已改好这个定时', 'the open list\'s title, as this page last saw it');
+  // The verb decides, never the cat's name in front of it.
+  assert.equal(R.card({ fact: row('approved'), list: 'idle', catName: '取消' }).text, '已设好这个定时');
+  assert.equal(R.card({ fact: row('rejected'), list: 'idle', catName: '改改' }).text, '没有设这个定时');
   assert.equal(done('approved', { kind: 'profile', title: '想更新关于你的资料', body: '住在新加坡' }).text, '已更新关于你的资料');
   assert.equal(done('rejected', { kind: 'person', title: '想记下一位相关的人', body: '同事小林' }).text, '没有记这个人');
   // Still open, the list slow or unreadable: the card from the row, its subject the cat; never an action.

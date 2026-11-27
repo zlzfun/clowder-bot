@@ -1,5 +1,5 @@
 diff --git a/packages/api/src/domains/ball-custody/OrdinaryTaskHandoffAuthority.ts b/packages/api/src/domains/ball-custody/OrdinaryTaskHandoffAuthority.ts
-index 545f7ae4..128a27aa 100644
+index 9002392e..3ef9aef6 100644
 --- a/packages/api/src/domains/ball-custody/OrdinaryTaskHandoffAuthority.ts
 +++ b/packages/api/src/domains/ball-custody/OrdinaryTaskHandoffAuthority.ts
 @@ -1,3 +1,4 @@
@@ -7,7 +7,7 @@ index 545f7ae4..128a27aa 100644
  import type { TaskItem } from '@cat-cafe/shared';
  import type { IMessageStore, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
  import type { IThreadStore } from '../cats/services/stores/ports/ThreadStore.js';
-@@ -42,6 +43,12 @@ export async function authorizeTaskHandoff(
+@@ -40,6 +41,12 @@ export async function authorizeTaskHandoff(
    )
      throw new OrdinaryTaskHandoffError('task_thread_authority_mismatch');
  
@@ -17,11 +17,11 @@ index 545f7ae4..128a27aa 100644
 +    throw new OrdinaryTaskHandoffError('task_target_not_member');
 +  }
 +
-   const previousId = task.lastAppliedHandoffMessageRef?.slice('message:'.length);
+   // Keep the predecessor stable after application, including replay/provider admission.
+   const previousId = request.expected.lastAppliedHandoffMessageRef?.slice('message:'.length);
    const previous = previousId ? await deps.messages.getById(previousId) : null;
-   const previousRequest = previous?.extra?.taskHandoff;
 diff --git a/packages/api/src/domains/ball-custody/OrdinaryTaskHandoffContract.ts b/packages/api/src/domains/ball-custody/OrdinaryTaskHandoffContract.ts
-index 3279442d..632e9be1 100644
+index fa0f5764..f3d4a490 100644
 --- a/packages/api/src/domains/ball-custody/OrdinaryTaskHandoffContract.ts
 +++ b/packages/api/src/domains/ball-custody/OrdinaryTaskHandoffContract.ts
 @@ -39,7 +39,14 @@ export class OrdinaryTaskHandoffError extends Error {
@@ -41,7 +41,7 @@ index 3279442d..632e9be1 100644
  export const ordinaryTaskHandoffRequestSchema = z
    .object({
 diff --git a/packages/api/src/domains/ball-custody/OrdinaryTaskHandoffService.ts b/packages/api/src/domains/ball-custody/OrdinaryTaskHandoffService.ts
-index b842470b..55a68e55 100644
+index 0a8cc9e6..92ad62c2 100644
 --- a/packages/api/src/domains/ball-custody/OrdinaryTaskHandoffService.ts
 +++ b/packages/api/src/domains/ball-custody/OrdinaryTaskHandoffService.ts
 @@ -1,7 +1,11 @@
@@ -96,7 +96,7 @@ index b842470b..55a68e55 100644
 @@ -120,6 +138,7 @@ export class OrdinaryTaskHandoffService {
        )
          return { kind: 'refused', reason: 'task_assignment_changed' };
-       await this.assertCurrentSource(sourceMessageId, task, request);
+       await this.assertCurrentSource(sourceMessageId, request);
 +      await this.deps.onHandoffApplied?.(task);
        return { kind: 'replayed', task };
      }
@@ -111,7 +111,7 @@ index b842470b..55a68e55 100644
 +      !sameTaskExecution(task.executionRef, request.expected.executionRef)
 +    )
 +      return { kind: 'refused', reason: 'task_execution_changed' };
-     await this.assertCurrentSource(sourceMessageId, task, request);
+     await this.assertCurrentSource(sourceMessageId, request);
      task = await this.adoptLegacyExecution(task);
      if (task.executionRef) {
        if (!(await this.releaseStoppedExecution(task))) {
@@ -149,25 +149,15 @@ index b842470b..55a68e55 100644
      const current = task;
      const result = await this.deps.tasks.mutateOrdinaryTask(
        {
-@@ -164,6 +202,7 @@ export class OrdinaryTaskHandoffService {
-         assertCurrent: () => this.assertCurrentSource(sourceMessageId, current, request),
+@@ -161,6 +199,7 @@ export class OrdinaryTaskHandoffService {
        },
+       await this.authorityFence(sourceMessageId, current, request),
      );
 +    if (result.kind === 'updated' || result.kind === 'replayed') await this.deps.onHandoffApplied?.(result.task);
      return result.kind === 'updated' || result.kind === 'replayed'
        ? { kind: result.kind === 'updated' ? 'applied' : 'replayed', task: result.task }
        : { kind: 'refused', reason: result.kind === 'refused' ? result.reason : 'ordinary_task_unavailable' };
-@@ -179,6 +218,9 @@ export class OrdinaryTaskHandoffService {
-       ThreadKeys.detail(request.targetThreadId),
-       ...(task.sourceMessageId ? [MessageKeys.detail(task.sourceMessageId)] : []),
-       ...(task.lastAppliedHandoffMessageRef ? [MessageKeys.detail(task.lastAppliedHandoffMessageRef.slice(8))] : []),
-+      ...(request.expected.lastAppliedHandoffMessageRef
-+        ? [MessageKeys.detail(request.expected.lastAppliedHandoffMessageRef.slice(8))]
-+        : []),
-       ...(proposal ? [ProposalKeys.detail(proposal)] : []),
-     ];
-   }
-@@ -191,7 +233,28 @@ export class OrdinaryTaskHandoffService {
+@@ -204,7 +243,28 @@ export class OrdinaryTaskHandoffService {
      const currentTask = await this.deps.tasks.get(request.taskId);
      if (!currentTask || !isOrdinaryImplementTask(currentTask) || currentTask.status === 'done')
        throw new OrdinaryTaskHandoffError('ordinary_task_unavailable');
@@ -197,7 +187,7 @@ index b842470b..55a68e55 100644
      await this.deps.dispatchAuthority?.assertCurrent(source, request);
    }
  
-@@ -214,6 +277,16 @@ export class OrdinaryTaskHandoffService {
+@@ -227,6 +287,16 @@ export class OrdinaryTaskHandoffService {
    async releaseStoppedExecution(task: TaskItem): Promise<boolean> {
      const ref = task.executionRef;
      if (!ref) return true;
@@ -214,57 +204,11 @@ index b842470b..55a68e55 100644
      let turn = await this.deps.turns.get(ref.invocationId);
      if (
        !turn ||
-diff --git a/packages/api/src/domains/cats/services/agents/invocation/QueueProcessor.ts b/packages/api/src/domains/cats/services/agents/invocation/QueueProcessor.ts
-index 2eb46a73..695e5209 100644
---- a/packages/api/src/domains/cats/services/agents/invocation/QueueProcessor.ts
-+++ b/packages/api/src/domains/cats/services/agents/invocation/QueueProcessor.ts
-@@ -3846,6 +3846,7 @@ export class QueueProcessor {
-       return { started: false };
-     }
-     const heldTargets = new Set<string>();
-+    const heldContinuationTargets = new Set<string>();
-     // The entries this scan passed over, each with the targets it asked for when it was passed over.
-     const passedOver = new Map<string, string>();
-     let waitingEntries = 0;
-@@ -3881,9 +3882,18 @@ export class QueueProcessor {
-       let appended = false;
-       if (!this.retryDeferrals.isDeferred(candidate.id)) {
-         for (const targetCatId of eligibleTargets) {
-+          // Bot follow-ups explicitly bound to the current parent may pass work
-+          // reserved for a future turn. They still cannot pass older pending
-+          // guidance/recovery; exact parent, capability and Queue CAS checks
-+          // remain owned by tryAutoAppendExactEntry/appendExactEntry.
-+          const currentContinuation =
-+            process.env.CAT_CAFE_BOT_TASK_CONTROL === '1' &&
-+            candidate.delivery.authorIntentByTarget?.[targetCatId]?.requested === 'continue_current' &&
-+            candidate.delivery.authorIntentByTarget?.[targetCatId]?.fallbackAt === undefined &&
-+            !heldContinuationTargets.has(targetCatId);
-           if (
-             candidate.delivery.appendRecoveryByTarget?.[targetCatId] ||
--            heldTargets.has(targetCatId) ||
-+            (heldTargets.has(targetCatId) && !currentContinuation) ||
-             this.automaticAppendSlots.has(QueueProcessor.slotKey(threadId, targetCatId)) ||
-             this.isAutoResumeSuppressed(threadId, targetCatId)
-           )
-@@ -3938,7 +3948,12 @@ export class QueueProcessor {
-         if (attempt) return attempt;
-       }
-       passedOver.set(candidate.id, requestedTargetsKey(candidate));
--      for (const catId of [...queueEntryTargetCats(candidate), ...targets]) heldTargets.add(catId);
-+      for (const catId of [...queueEntryTargetCats(candidate), ...targets]) {
-+        heldTargets.add(catId);
-+        const intent = candidate.delivery.authorIntentByTarget?.[catId];
-+        if (candidate.delivery.appendRecoveryByTarget?.[catId] || intent?.requested === 'continue_current')
-+          heldContinuationTargets.add(catId);
-+      }
-       waitingEntries += 1;
-       firstWaitingTarget ??= targets[0];
-     }
 diff --git a/packages/api/src/domains/cats/services/agents/invocation/invoke-single-cat.ts b/packages/api/src/domains/cats/services/agents/invocation/invoke-single-cat.ts
-index 55f9bc87..daa404b8 100644
+index c8cb59c1..9563a3fd 100644
 --- a/packages/api/src/domains/cats/services/agents/invocation/invoke-single-cat.ts
 +++ b/packages/api/src/domains/cats/services/agents/invocation/invoke-single-cat.ts
-@@ -1442,8 +1442,11 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
+@@ -1698,8 +1698,11 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
      await assertThreadParticipant(deps.threadStore, params.threadId, params.catId);
    } catch (error) {
      yield {
@@ -279,7 +223,7 @@ index 55f9bc87..daa404b8 100644
      yield { type: 'done', catId: params.catId, timestamp: Date.now() };
      return;
 diff --git a/packages/api/src/domains/cats/services/agents/providers/ClaudeSdkAgentService.ts b/packages/api/src/domains/cats/services/agents/providers/ClaudeSdkAgentService.ts
-index 2b8f0eba..9d4b0cc7 100644
+index 7ba678d8..e9b43260 100644
 --- a/packages/api/src/domains/cats/services/agents/providers/ClaudeSdkAgentService.ts
 +++ b/packages/api/src/domains/cats/services/agents/providers/ClaudeSdkAgentService.ts
 @@ -1,3 +1,5 @@
@@ -288,7 +232,7 @@ index 2b8f0eba..9d4b0cc7 100644
  import { randomUUID } from 'node:crypto';
  import { isAbsolute, resolve } from 'node:path';
  import type { Options as ClaudeSdkOptions, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-@@ -33,7 +35,11 @@ const log = createModuleLogger('claude-sdk-agent');
+@@ -36,7 +38,11 @@ const log = createModuleLogger('claude-sdk-agent');
  export type ClaudeSdkQueryFn = (params: {
    prompt: AsyncIterable<SDKUserMessage>;
    options: ClaudeSdkOptions;
@@ -301,7 +245,7 @@ index 2b8f0eba..9d4b0cc7 100644
  interface ClaudeSdkAgentServiceOptions {
    catId?: CatId;
    model?: string;
-@@ -176,6 +182,8 @@ export class ClaudeSdkAgentService implements AgentService {
+@@ -194,6 +200,8 @@ export class ClaudeSdkAgentService implements AgentService {
          .then(() => this.rawArchive.append(invocationId, sanitizeRawEvent(event)))
          .catch((err) => log.warn({ err }, 'SDK raw archive failed'));
      };
@@ -310,7 +254,7 @@ index 2b8f0eba..9d4b0cc7 100644
      let releaseDispatch: (() => void) | undefined;
      let dispatcherRegistered = false;
  
-@@ -245,7 +253,37 @@ export class ClaudeSdkAgentService implements AgentService {
+@@ -264,7 +272,37 @@ export class ClaudeSdkAgentService implements AgentService {
        }
        metadata.model = prepared.model;
        const sdkOptions = prepared.sdkOptions;
@@ -348,7 +292,7 @@ index 2b8f0eba..9d4b0cc7 100644
        sdkOptions.stderr = (data) => {
          stderrBuffer = sanitizeCliStderr(`${stderrBuffer}${data}`).slice(-MAX_SDK_STDERR_CHARS);
        };
-@@ -276,6 +314,8 @@ export class ClaudeSdkAgentService implements AgentService {
+@@ -296,6 +334,8 @@ export class ClaudeSdkAgentService implements AgentService {
          // The archive is ordered best-effort diagnostics, not the receipt
          // authority. Disk I/O must not delay cancellation or member output.
          archive(event);
@@ -357,7 +301,7 @@ index 2b8f0eba..9d4b0cc7 100644
          // Child SDK wire records belong to their own output/state. Retain the
          // raw evidence, but never merge a child's text or idle into the parent.
          if (process.env.CAT_CAFE_BOT_BACKGROUND_DELEGATION === '1' && raw.parent_tool_use_id) continue;
-@@ -372,6 +412,8 @@ export class ClaudeSdkAgentService implements AgentService {
+@@ -392,6 +432,8 @@ export class ClaudeSdkAgentService implements AgentService {
        } catch (err) {
          log.warn({ err }, 'SDK query cleanup failed');
        }
@@ -398,7 +342,7 @@ index 293a4b3a..89a13ae6 100644
 +</bot_background_delegation>${taskPolicy}`;
  }
 diff --git a/packages/api/src/domains/cats/services/agents/providers/claude-sdk-launch.ts b/packages/api/src/domains/cats/services/agents/providers/claude-sdk-launch.ts
-index 15aedb7e..5b89c128 100644
+index 8c67e8d0..8449e677 100644
 --- a/packages/api/src/domains/cats/services/agents/providers/claude-sdk-launch.ts
 +++ b/packages/api/src/domains/cats/services/agents/providers/claude-sdk-launch.ts
 @@ -1,3 +1,4 @@
@@ -406,24 +350,25 @@ index 15aedb7e..5b89c128 100644
  import { isAbsolute, resolve } from 'node:path';
  import type { EffortLevel, Options } from '@anthropic-ai/claude-agent-sdk';
  import type { CatId } from '@cat-cafe/shared';
-@@ -84,7 +85,7 @@ export async function prepareClaudeSdkLaunch(input: {
-   l0CompilerFn: typeof compileL0ViaSubprocess;
+@@ -93,7 +94,7 @@ export async function prepareClaudeSdkLaunch(input: {
    abortController: AbortController;
+   runtime?: ClaudeSdkRuntime;
    options?: AgentServiceOptions;
 -}): Promise<{ prompt: string; model: string; sdkOptions: Options }> {
 +}): Promise<{ prompt: string; model: string; sdkOptions: Options; closeNativeMcp?: () => Promise<void> }> {
-   const { options, catId } = input;
-   if (options?.signal?.aborted) throw options.signal.reason ?? new Error('Invocation cancelled');
-   // Alternate spawn transports cannot silently be ignored by this carrier.
-@@ -115,6 +116,7 @@ export async function prepareClaudeSdkLaunch(input: {
-         })
-       : undefined;
-   const mcpServers = mcpResolution?.servers ?? {};
-+  const managedTasks = process.env.CAT_CAFE_BOT_TASK_CONTROL === '1';
-   const operator = sdkOperatorArgs(readOnly ? [] : (options?.cliConfigArgs ?? []));
+   const { catId } = input;
+   const member = captureClaudeMemberOptions(input.options);
+   const options = member ?? input.options;
+@@ -148,6 +149,8 @@ export async function prepareClaudeSdkLaunch(input: {
+         },
+       }
+     : (mcpResolution?.servers ?? {});
++  // A plugin member launch keeps its single scoped server exactly as upstream starts it.
++  const managedTasks = process.env.CAT_CAFE_BOT_TASK_CONTROL === '1' && !member;
+   const operator = sdkOperatorArgs(readOnly || member ? [] : (options?.cliConfigArgs ?? []));
    const additionalDirectories = [
      ...new Set([...(operator.additionalDirectories ?? []), ...collectImageAccessDirectories(imagePaths)]),
-@@ -152,6 +154,15 @@ export async function prepareClaudeSdkLaunch(input: {
+@@ -196,6 +199,15 @@ export async function prepareClaudeSdkLaunch(input: {
    // idle is the drain receipt for background agents AND their report turns.
    env.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS = '1';
    if (readOnly) env.CAT_CAFE_READONLY = 'true';
@@ -439,10 +384,10 @@ index 15aedb7e..5b89c128 100644
    const request: PreparedProviderRequestV1 = Object.freeze({
      v: 1,
      message: Object.freeze({ body: prompt }),
-@@ -172,7 +183,10 @@ export async function prepareClaudeSdkLaunch(input: {
-     providerNativeVisibility: 'unknown',
+@@ -217,7 +229,10 @@ export async function prepareClaudeSdkLaunch(input: {
    });
    await options?.beforeProviderLaunch?.(request);
+   await launch?.assertCurrent();
 +  const hosted = managedTasks ? hostNativeMcp(mcpServers) : undefined;
 +  const cliServers = hosted?.external ?? mcpServers;
    return {
@@ -450,19 +395,19 @@ index 15aedb7e..5b89c128 100644
      prompt,
      model: effectiveModel,
      sdkOptions: {
-@@ -186,7 +200,7 @@ export async function prepareClaudeSdkLaunch(input: {
-       permissionMode: readOnly ? 'plan' : 'bypassPermissions',
-       ...(readOnly ? { tools: [] } : { allowDangerouslySkipPermissions: true }),
+@@ -239,7 +254,7 @@ export async function prepareClaudeSdkLaunch(input: {
+       ...(readOnly || member ? { tools: [] } : { allowDangerouslySkipPermissions: true }),
+       ...(launch ? { allowedTools: [claudeMemberToolPattern(launch.server.name)], persistSession: false } : {}),
        strictMcpConfig: true,
 -      mcpServers: {},
 +      mcpServers: hosted?.sdk ?? {},
        settingSources,
        ...(options?.sessionId ? { resume: options.sessionId } : {}),
        ...(additionalDirectories.length ? { additionalDirectories } : {}),
-@@ -205,7 +219,12 @@ export async function prepareClaudeSdkLaunch(input: {
+@@ -258,7 +273,12 @@ export async function prepareClaudeSdkLaunch(input: {
                ...operator.extraArgs,
-               ...(readOnly ? {} : { chrome: null }),
-               ...(mcpResolution
+               ...(member ? { 'no-chrome': null, 'disable-slash-commands': null } : readOnly ? {} : { chrome: null }),
+               ...(mcpResolution || launch
 -                ? { 'mcp-config': writeInvocationMcpConfigFile({ mcpServers }, options?.callbackEnv) }
 +                ? {
 +                    'mcp-config': writeInvocationMcpConfigFile(
@@ -676,10 +621,10 @@ index 00000000..4e0749fe
 +  };
 +}
 diff --git a/packages/api/src/domains/cats/services/agents/routing/route-parallel.ts b/packages/api/src/domains/cats/services/agents/routing/route-parallel.ts
-index f58cd265..3811adaf 100644
+index 007493ba..b27d4504 100644
 --- a/packages/api/src/domains/cats/services/agents/routing/route-parallel.ts
 +++ b/packages/api/src/domains/cats/services/agents/routing/route-parallel.ts
-@@ -1625,6 +1625,7 @@ async function* routeParallelPrepared(
+@@ -1658,6 +1658,7 @@ async function* routeParallelPrepared(
          const neverFlushedCat = lastLen === 0 && lastToolLen === 0;
          if (
            effectiveMsg.semanticEvent?.kind === 'subexecution' ||
@@ -1789,10 +1734,10 @@ index 08577e79..a9a1522c 100644
    // Invalid execution coordinates fail closed rather than making an occupied Task appear idle.
    if (data.executionRef) {
 diff --git a/packages/api/src/index.ts b/packages/api/src/index.ts
-index 8d8e7b59..0a49a778 100644
+index 5e38cd29..4f3f4198 100644
 --- a/packages/api/src/index.ts
 +++ b/packages/api/src/index.ts
-@@ -2728,6 +2728,52 @@ async function main(): Promise<void> {
+@@ -2928,6 +2928,52 @@ async function initializeApi(
      turns: turnExecutionStore,
      delegates: taskApprovedDelegateProvider,
    });
@@ -1845,7 +1790,7 @@ index 8d8e7b59..0a49a778 100644
    const ordinaryTaskHandoffs = new OrdinaryTaskHandoffService({
      tasks: taskStore,
      messages: messageStore,
-@@ -2737,8 +2783,20 @@ async function main(): Promise<void> {
+@@ -2937,8 +2983,20 @@ async function initializeApi(
      tracker: invocationTracker,
      dispatchAuthority: taskHandoffDispatchAuthority(dispatchProposalStore, app.log),
      legacy: legacyTaskExecutions,
@@ -1867,7 +1812,7 @@ index 8d8e7b59..0a49a778 100644
        const live = await cliExecutionOwnerService.listLive();
        if (
          !live.complete ||
-@@ -6529,6 +6587,10 @@ async function main(): Promise<void> {
+@@ -7057,6 +7115,10 @@ async function initializeApi(
          (await router.resolveConversationTargetsAtAdmission([], threadId))[0],
      });
    }
@@ -1878,23 +1823,6 @@ index 8d8e7b59..0a49a778 100644
    await app.register(tasksRoutes, {
      ordinaryTaskHandoffs,
      messageStore,
-@@ -7510,7 +7572,6 @@ async function main(): Promise<void> {
-           logger: app.log,
-         });
-         releaseHostListening();
--        await initialPlugins?.activate();
-         return listening;
-       },
-       recover: async () => {
-@@ -7579,6 +7640,8 @@ async function main(): Promise<void> {
-     await apiInstanceLease?.release().catch(() => {});
-     throw err;
-   }
-+  // Callback recovery owns core admission; optional plugin startup must not delay it.
-+  await initialPlugins?.activate();
-   if (runtimeDeploymentContext) {
-     try {
-       const readiness = await checkReadiness();
 diff --git a/packages/api/src/routes/callback-ordinary-task-update.ts b/packages/api/src/routes/callback-ordinary-task-update.ts
 index 170c70e1..50b6f3e3 100644
 --- a/packages/api/src/routes/callback-ordinary-task-update.ts
@@ -1990,7 +1918,7 @@ index 170c70e1..50b6f3e3 100644
              throw new Error('task_source_withdrawn');
          }
 diff --git a/packages/api/src/routes/callback-task-routes.ts b/packages/api/src/routes/callback-task-routes.ts
-index 0e4b223f..1a1c2fc1 100644
+index 24b933fd..8e098eb2 100644
 --- a/packages/api/src/routes/callback-task-routes.ts
 +++ b/packages/api/src/routes/callback-task-routes.ts
 @@ -1,3 +1,8 @@
@@ -2021,7 +1949,7 @@ index 0e4b223f..1a1c2fc1 100644
    title: z.string().min(1).max(200),
    why: z.string().max(1000).optional().default(''),
    ownerCatId: z.string().min(1).optional(),
-@@ -273,6 +283,40 @@ export function registerCallbackTaskRoutes(
+@@ -282,6 +292,40 @@ export function registerCallbackTaskRoutes(
          return { error: 'Live may mutate only its own owner-scoped work Task' };
        }
  
@@ -2062,7 +1990,7 @@ index 0e4b223f..1a1c2fc1 100644
        const updateData: UpdateTaskInput = {};
        if (status) updateData.status = status;
        if (why) updateData.why = why;
-@@ -307,6 +351,7 @@ export function registerCallbackTaskRoutes(
+@@ -316,6 +360,7 @@ export function registerCallbackTaskRoutes(
            updated = result.task;
          } else updated = await taskStore.update(taskId, updateData);
        } catch (error) {
@@ -2070,7 +1998,7 @@ index 0e4b223f..1a1c2fc1 100644
          if (isEntrustedWorkTerminalActionRequiredError(error)) {
            reply.status(409);
            return {
-@@ -514,8 +559,25 @@ export function registerCallbackTaskRoutes(
+@@ -526,8 +571,25 @@ export function registerCallbackTaskRoutes(
          resolvedOwnerCatId = createCatId(resolved.ok);
        }
  
@@ -2096,14 +2024,15 @@ index 0e4b223f..1a1c2fc1 100644
          threadId: actor.threadId,
          title,
          why: why ?? '',
-@@ -602,7 +664,9 @@ export function registerCallbackTaskRoutes(
+@@ -614,7 +676,10 @@ export function registerCallbackTaskRoutes(
        ...(taskId ? { taskId } : {}),
        ...(featureId ? { featureId } : {}),
      });
--    const tasks = [...result.tasks];
+-    const tasks = deps.taskRecovery ? await deps.taskRecovery.projectMany(result.tasks) : [...result.tasks];
 +    for (const threadId of new Set(result.tasks.map((task) => task.threadId)))
 +      await taskBackgroundRuntime()?.reconcileThread(threadId);
-+    const tasks = await Promise.all(result.tasks.map(async (task) => (await taskStore.get(task.id)) ?? task));
++    const current = await Promise.all(result.tasks.map(async (task) => (await taskStore.get(task.id)) ?? task));
++    const tasks = deps.taskRecovery ? await deps.taskRecovery.projectMany(current) : current;
  
      // F236 AC-A4: anchor the why field (head preview + whyLength + whyTruncated + drillDown).
      // A taskId drill returns that task's why in full.
@@ -2174,7 +2103,7 @@ index 00000000..a34e481f
 +  });
 +}
 diff --git a/packages/api/src/routes/tasks.ts b/packages/api/src/routes/tasks.ts
-index 55936f73..90512303 100644
+index 6ee12fbe..ee7033cf 100644
 --- a/packages/api/src/routes/tasks.ts
 +++ b/packages/api/src/routes/tasks.ts
 @@ -1,3 +1,4 @@
@@ -2182,15 +2111,15 @@ index 55936f73..90512303 100644
  import { adoptOrdinaryTaskTenant } from '../domains/ball-custody/adopt-ordinary-task-tenant.js';
  import { OrdinaryTaskHandoffError } from '../domains/ball-custody/OrdinaryTaskHandoffContract.js';
  import type { OrdinaryTaskHandoffService } from '../domains/ball-custody/OrdinaryTaskHandoffService.js';
-@@ -208,6 +209,7 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
+@@ -212,6 +213,7 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
        return { error: 'Missing threadId query parameter' };
      }
  
 +    await taskBackgroundRuntime()?.reconcileThread(threadId);
      let tasks = await taskStore.listByThread(threadId);
      if (kind) tasks = tasks.filter((t) => t.kind === kind);
-     return { tasks };
-@@ -216,7 +218,11 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
+     return { tasks: opts.taskRecovery ? await opts.taskRecovery.projectMany(tasks) : tasks };
+@@ -220,7 +222,11 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
    // GET /api/tasks/:id
    app.get('/api/tasks/:id', async (request, reply) => {
      const { id } = request.params as { id: string };
@@ -2203,137 +2132,11 @@ index 55936f73..90512303 100644
      if (!task) {
        reply.status(404);
        return { error: 'Task not found' };
-diff --git a/packages/api/test/1398-append-delivery-boundary.test.js b/packages/api/test/1398-append-delivery-boundary.test.js
-index b593d99d..c2decaac 100644
---- a/packages/api/test/1398-append-delivery-boundary.test.js
-+++ b/packages/api/test/1398-append-delivery-boundary.test.js
-@@ -1220,3 +1220,121 @@ describe('Append hands the carrier the same body a fresh turn would see', () =>
-     assert.equal(queued.delivery.routingHeldTargetIds?.includes('opus') ?? false, false);
-   });
- });
-+
-+describe('Bot current-parent guidance behind future A2A work', () => {
-+  for (const enabled of [false, true]) {
-+    it(`keeps future work queued and ${enabled ? 'delivers' : 'holds'} explicit current guidance with Bot policy ${enabled}`, async (t) => {
-+      const before = process.env.CAT_CAFE_BOT_TASK_CONTROL;
-+      process.env.CAT_CAFE_BOT_TASK_CONTROL = enabled ? '1' : '0';
-+      t.after(() => {
-+        if (before === undefined) delete process.env.CAT_CAFE_BOT_TASK_CONTROL;
-+        else process.env.CAT_CAFE_BOT_TASK_CONTROL = before;
-+      });
-+      const harness = createHarness(),
-+        dispatch = mock.fn(async () => ({ accepted: true, handle: {} }));
-+      const run = bindRun(harness, dispatch);
-+      t.after(run.releaseCarrier);
-+      const future = await admit(harness, {
-+        from: { kind: 'agent', catId: 'codex' },
-+        content: 'A2A next turn',
-+        authorIntentByCatId: { opus: { requested: 'next_work' } },
-+      });
-+      const followups = [];
-+      for (const content of ['current first', 'current second'])
-+        followups.push(
-+          await admit(harness, {
-+            content,
-+            authorIntentByCatId: { opus: { requested: 'continue_current', boundParentInvocationId: 'parent-phase-m' } },
-+          }),
-+        );
-+      await harness.processor.requestDrain('thread-1');
-+      if (enabled) await waitFor(() => dispatch.mock.calls.length === 2);
-+      assert.equal(dispatch.mock.calls.length, enabled ? 2 : 0);
-+      assert.equal(harness.queue.getEntrySnapshot('thread-1', 'user-1', future.entry.id).status, 'queued');
-+      for (const followup of followups)
-+        assert.equal(harness.queue.getEntrySnapshot('thread-1', 'user-1', followup.entry.id) === null, enabled);
-+      if (enabled)
-+        assert.deepEqual(
-+          dispatch.mock.calls.map((c) => c.arguments[0].text),
-+          ['current first', 'current second'],
-+        );
-+      assert.equal(harness.router.routeExecution.mock.calls.length, 0, 'must not create a second main invocation');
-+    });
-+  }
-+  it('does not send a continuation to a replacement parent or start it ahead of older future work', async (t) => {
-+    const before = process.env.CAT_CAFE_BOT_TASK_CONTROL;
-+    process.env.CAT_CAFE_BOT_TASK_CONTROL = '1';
-+    t.after(() => {
-+      if (before === undefined) delete process.env.CAT_CAFE_BOT_TASK_CONTROL;
-+      else process.env.CAT_CAFE_BOT_TASK_CONTROL = before;
-+    });
-+    const harness = createHarness(),
-+      dispatch = mock.fn(async () => ({ accepted: true, handle: {} }));
-+    const run = bindRun(harness, dispatch);
-+    t.after(run.releaseCarrier);
-+    const future = await admit(harness, { authorIntentByCatId: { opus: { requested: 'next_work' } } });
-+    const stale = await admit(harness, {
-+      authorIntentByCatId: { opus: { requested: 'continue_current', boundParentInvocationId: 'old-parent' } },
-+    });
-+    await harness.processor.requestDrain('thread-1');
-+    assert.equal(dispatch.mock.calls.length, 0);
-+    assert.equal(harness.queue.getEntrySnapshot('thread-1', 'user-1', future.entry.id).status, 'queued');
-+    assert.equal(harness.queue.getEntrySnapshot('thread-1', 'user-1', stale.entry.id).status, 'queued');
-+    assert.equal(harness.router.routeExecution.mock.calls.length, 0);
-+  });
-+  it('preserves older current guidance while the provider dispatcher is preparing', async (t) => {
-+    const before = process.env.CAT_CAFE_BOT_TASK_CONTROL;
-+    process.env.CAT_CAFE_BOT_TASK_CONTROL = '1';
-+    t.after(() => {
-+      if (before === undefined) delete process.env.CAT_CAFE_BOT_TASK_CONTROL;
-+      else process.env.CAT_CAFE_BOT_TASK_CONTROL = before;
-+    });
-+    const harness = createHarness(),
-+      dispatch = mock.fn(async () => ({ accepted: true, handle: {} }));
-+    const run = bindRun(harness, dispatch);
-+    run.releaseCarrier();
-+    const first = await admit(harness, {
-+      authorIntentByCatId: { opus: { requested: 'continue_current', boundParentInvocationId: 'parent-phase-m' } },
-+    });
-+    const second = await admit(harness, {
-+      authorIntentByCatId: { opus: { requested: 'continue_current', boundParentInvocationId: 'parent-phase-m' } },
-+    });
-+    const attempted = [],
-+      original = harness.processor.tryAutoAppendExactEntry.bind(harness.processor);
-+    harness.processor.tryAutoAppendExactEntry = async (...args) => {
-+      attempted.push(args[0].entryId);
-+      return original(...args);
-+    };
-+    await harness.processor.requestDrain('thread-1');
-+    assert.ok(attempted.includes(first.entry.id));
-+    assert.ok(!attempted.includes(second.entry.id));
-+    assert.equal(dispatch.mock.calls.length, 0);
-+  });
-+});
-+
-+it('Bot guidance cannot overtake an older continuation after its parent-ended fallback', async (t) => {
-+  const before = process.env.CAT_CAFE_BOT_TASK_CONTROL;
-+  process.env.CAT_CAFE_BOT_TASK_CONTROL = '1';
-+  t.after(() => {
-+    if (before === undefined) delete process.env.CAT_CAFE_BOT_TASK_CONTROL;
-+    else process.env.CAT_CAFE_BOT_TASK_CONTROL = before;
-+  });
-+  const harness = createHarness(),
-+    dispatch = mock.fn(async () => ({ accepted: true, handle: {} }));
-+  const run = bindRun(harness, dispatch);
-+  t.after(run.releaseCarrier);
-+  const older = await admit(harness, {
-+    authorIntentByCatId: { opus: { requested: 'continue_current', boundParentInvocationId: 'ended-parent' } },
-+  });
-+  await harness.processor.requestDrain('thread-1');
-+  assert.ok(
-+    harness.queue.getEntrySnapshot('thread-1', 'user-1', older.entry.id).delivery.authorIntentByTarget.opus.fallbackAt,
-+  );
-+  const newer = await admit(harness, {
-+    authorIntentByCatId: { opus: { requested: 'continue_current', boundParentInvocationId: 'parent-phase-m' } },
-+  });
-+  await harness.processor.requestDrain('thread-1');
-+  assert.equal(dispatch.mock.calls.length, 0);
-+  assert.equal(harness.queue.getEntrySnapshot('thread-1', 'user-1', newer.entry.id).status, 'queued');
-+  assert.equal(harness.router.routeExecution.mock.calls.length, 0);
-+});
 diff --git a/packages/mcp-server/src/tools/callback-tools.ts b/packages/mcp-server/src/tools/callback-tools.ts
-index e9e1b0bc..9063ae2f 100644
+index 9a69e698..69076c8f 100644
 --- a/packages/mcp-server/src/tools/callback-tools.ts
 +++ b/packages/mcp-server/src/tools/callback-tools.ts
-@@ -652,6 +652,14 @@ export const featIndexInputSchema = {
+@@ -677,6 +677,14 @@ export const featIndexInputSchema = {
  };
  
  export const createTaskInputSchema = {
@@ -2345,10 +2148,10 @@ index e9e1b0bc..9063ae2f 100644
 +    .describe(
 +      'Native parent Task for delegated work in this thread. You must own the parent; its cancellation fences descendant execution. Omit for independent work.',
 +    ),
-   title: z.string().min(1).max(200).describe('Task title — what needs to be done'),
-   why: z.string().max(1000).optional().describe('Why this task matters (context for whoever picks it up)'),
-   ownerCatId: z
-@@ -716,6 +724,13 @@ export const createTaskInputSchema = {
+   title: z.string().min(1).max(200).describe('Task title — what needs to be done; 1–200 UTF-16 code units'),
+   why: z
+     .string()
+@@ -745,6 +753,13 @@ export const createTaskInputSchema = {
  };
  
  export const updateTaskInputSchema = {
@@ -2362,7 +2165,7 @@ index e9e1b0bc..9063ae2f 100644
    taskId: z.string().min(1).describe('The ID of the task to update'),
    expectedOwnerRevision: z.number().int().nonnegative().optional(),
    status: z
-@@ -1412,6 +1427,7 @@ function formatFeatIndexResponse(raw: string): string {
+@@ -1501,6 +1516,7 @@ function formatFeatIndexResponse(raw: string): string {
  }
  
  export async function handleUpdateTask(input: {
@@ -2370,7 +2173,7 @@ index e9e1b0bc..9063ae2f 100644
    taskId: string;
    expectedOwnerRevision?: number;
    status?: string | undefined;
-@@ -1432,6 +1448,7 @@ export async function handleUpdateTask(input: {
+@@ -1521,6 +1537,7 @@ export async function handleUpdateTask(input: {
        callbackPost(
          '/api/callbacks/update-task',
          {
@@ -2378,7 +2181,7 @@ index e9e1b0bc..9063ae2f 100644
            taskId: input.taskId,
            ...(input.expectedOwnerRevision !== undefined ? { expectedOwnerRevision: input.expectedOwnerRevision } : {}),
            ...(input.status ? { status: input.status } : {}),
-@@ -1569,6 +1586,7 @@ export async function handleRetryCustodyAdmission(input: {
+@@ -1658,6 +1675,7 @@ export async function handleRetryCustodyAdmission(input: {
  }
  
  export async function handleCreateTask(input: {
@@ -2386,7 +2189,7 @@ index e9e1b0bc..9063ae2f 100644
    title: string;
    why?: string | undefined;
    ownerCatId?: string | undefined;
-@@ -1618,6 +1636,7 @@ export async function handleCreateTask(input: {
+@@ -1707,6 +1725,7 @@ export async function handleCreateTask(input: {
    const result = await callbackPost(
      '/api/callbacks/create-task',
      {
@@ -2394,7 +2197,7 @@ index e9e1b0bc..9063ae2f 100644
        title: input.title,
        ...(input.why ? { why: input.why } : {}),
        ...(input.ownerCatId ? { ownerCatId: input.ownerCatId } : {}),
-@@ -3741,7 +3760,7 @@ export const callbackTools = [
+@@ -3718,7 +3737,7 @@ export const callbackTools = [
      name: 'cat_cafe_get_thread_cats',
      description:
        'Find recipients before choosing; forRole adds cached quota facts for every routable member. ' +
@@ -2404,7 +2207,7 @@ index e9e1b0bc..9063ae2f 100644
      inputSchema: getThreadCatsInputSchema,
      handler: handleGetThreadCats,
 diff --git a/packages/shared/src/types/task.ts b/packages/shared/src/types/task.ts
-index 6b678f03..24ccd587 100644
+index 6db39b75..fdb59555 100644
 --- a/packages/shared/src/types/task.ts
 +++ b/packages/shared/src/types/task.ts
 @@ -189,7 +189,27 @@ export type TaskProbeSpec =
@@ -2435,10 +2238,10 @@ index 6b678f03..24ccd587 100644
    readonly invocationId: string;
    readonly parentInvocationId: string;
    readonly catId: string;
-@@ -218,6 +238,14 @@ export interface TaskItem {
-   readonly ownerChangedAt?: number;
-   readonly lastAppliedHandoffMessageRef?: string;
+@@ -235,6 +255,14 @@ export interface TaskItem {
    readonly executionRef?: TaskExecutionRef | null;
+   /** Derived at read time from the existing action/ball owner facts; stores must not persist this field. */
+   readonly recovery?: TaskRecoveryProjection;
 +  readonly backgroundExecution?: TaskBackgroundExecution;
 +  readonly backgroundCancelledAt?: number;
 +  readonly backgroundStopRequestedAt?: number;
@@ -2450,7 +2253,7 @@ index 6b678f03..24ccd587 100644
    readonly status: TaskStatus;
    readonly why: string;
    readonly createdBy: CatId | 'user' | 'system';
-@@ -257,6 +285,8 @@ export interface TaskItem {
+@@ -274,6 +302,8 @@ export interface TaskItem {
  export type CreateTaskInput = Pick<TaskItem, 'threadId' | 'title' | 'why' | 'createdBy'> & {
    /** Host-only reservation for a Task created by its already-running owner. Never an API/tool field. */
    initialExecutionRef?: TaskExecutionRef;

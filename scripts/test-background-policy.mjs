@@ -47,3 +47,31 @@ test('background policy preserves native identity and works on stdout, file and 
     clearL0Cache(); rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('a plugin member session gets its projection as compiled: the main-conversation policy is not appended', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'bot-policy-'));
+  const previous = process.env.CAT_CAFE_BOT_BACKGROUND_DELEGATION;
+  mkdirSync(join(dir, 'scripts'));
+  writeFileSync(join(dir, 'scripts/compile-system-prompt-l0.mjs'), '// isolated compiler fixture');
+  const base = 'Scoped member identity.';
+  const spawnFn = (_cmd, args) => {
+    const child = new EventEmitter(); child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
+    setImmediate(() => {
+      const out = args.indexOf('--out');
+      if (out >= 0) writeFileSync(args[out + 1], base);
+      child.stdout.emit('data', Buffer.from(base)); child.emit('close', 0);
+    });
+    return child;
+  };
+  try {
+    clearL0Cache(); process.env.CAT_CAFE_BOT_BACKGROUND_DELEGATION = '1';
+    const outPath = join(dir, 'member-system.txt');
+    assert.equal(await compileL0ViaSubprocess({ catId: 'policy-member', projection: 'scoped-member', cwd: dir, spawnFn, outPath }), base);
+    assert.equal(readFileSync(outPath, 'utf8'), base);
+    assert.match(await compileL0ViaSubprocess({ catId: 'policy-member', projection: 'public', cwd: dir, spawnFn }), /<bot_background_delegation>/, 'other projections keep the policy');
+  } finally {
+    if (previous === undefined) delete process.env.CAT_CAFE_BOT_BACKGROUND_DELEGATION;
+    else process.env.CAT_CAFE_BOT_BACKGROUND_DELEGATION = previous;
+    clearL0Cache(); rmSync(dir, { recursive: true, force: true });
+  }
+});

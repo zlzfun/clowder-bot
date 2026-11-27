@@ -115,7 +115,7 @@ export function createXbotCoreRouter(bridge: BotBridge) {
   });
   router.delete('/bots/:name', async (req, res) => {
     const cat = await bot(req.params.name);
-    await native.request(`/api/cats/${encode(cat.id)}`, { method: 'DELETE' });
+    await native.request(`/api/cats/${encode(cat.id)}`, { method: 'DELETE', body: { expectedRevision: cat.configurationRevision } });
     delete store.state.bots[cat.id]; store.save(); res.json({ status: 'ok', history: 'preserved_by_clowder_ai' });
   });
   router.post('/groups', async (req, res) => {
