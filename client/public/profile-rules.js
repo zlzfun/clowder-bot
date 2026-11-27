@@ -113,10 +113,13 @@
 
   // ---- 这台电脑 (item 52) ----
   // GET /xbot-api/bots/:name/computer → {supported, installed, on, permissions,
-  // missing?}; PUT {enabled} answers with the same view as it is afterwards
+  // missing?, others?}; PUT {enabled} answers with the same view as it is afterwards
   // (docs/xbot-api.md「这台电脑」). `on` is the engine's record, read every time:
   // the page draws the last answer and asks again, never keeps it as the truth.
   // It is the owner's own machine: 「这台电脑」, never a computer of the cat's.
+  // One cat at a time (item 55): `others` names the other cats that have it on,
+  // and one already off whose turn that had it is still going (item 56); turning
+  // this one on switches them off first, ending a reply they are writing.
   const COMPUTER = Object.freeze({
     TITLE: "可以用这台电脑",
     INSTALL: "npm run computer:install",
@@ -133,13 +136,16 @@
   const GRANTS = Object.freeze(["accessibility", "screen_recording"]);
   // The view, taken only in its own shape; anything else is no view, and the
   // page then says nothing about the computer rather than something false.
-  // A grant said to be missing without a name it knows counts as both.
+  // A grant said to be missing without a name it knows counts as both. The
+  // other cats only as a non-empty list of names ('' for one the server could
+  // not name); anything else is none.
   function computerView(answer) {
     const a = answer && typeof answer === "object" ? answer : null;
     if (!a || typeof a.supported !== "boolean" || typeof a.installed !== "boolean" || typeof a.on !== "boolean") return null;
     const permissions = ["granted", "needed", "unknown"].includes(a.permissions) ? a.permissions : "unknown";
     const named = permissions === "needed" && Array.isArray(a.missing) ? GRANTS.filter((g) => a.missing.includes(g)) : [];
-    return { supported: a.supported, installed: a.installed, on: a.on, permissions, missing: permissions === "needed" ? (named.length ? named : [...GRANTS]) : [] };
+    const others = Array.isArray(a.others) && a.others.length && a.others.every((n) => typeof n === "string") ? a.others.map(trim) : [];
+    return { supported: a.supported, installed: a.installed, on: a.on, permissions, missing: permissions === "needed" ? (named.length ? named : [...GRANTS]) : [], others };
   }
   // Turning on came back unswitched because macOS has not given the driver
   // its grants yet (the driver has opened System Settings itself): the page
@@ -153,19 +159,50 @@
   // What turning it on means, asked every time it is turned on: what the cat
   // can do and where what it sees goes. 模型 is the one technical word here,
   // and it is the consequence the owner decides on (tests/vocabulary.test.ts).
-  function computerConsent(name) {
+  // With other cats on (the view's `others`), who gives it up: `handover`,
+  // else "" and the dialog is as it always was.
+  function computerConsent(name, others) {
     return {
       title: "让「" + (trim(name) || "这只猫猫") + "」用这台电脑？",
       text: "它能看到并操作这台电脑上的应用，看到的画面会发给它用的模型。",
+      handover: computerHandover(others),
     };
+  }
+  // The cats the server named, each in 「」 (one name once); those it could
+  // not name as 另一只猫, or 另外几只猫 for more than one.
+  function computerHandover(others) {
+    const list = Array.isArray(others) ? others.map(trim) : [];
+    if (!list.length) return "";
+    const names = [...new Set(list.filter(Boolean))].map((n) => "「" + n + "」");
+    const unnamed = list.filter((n) => !n).length;
+    const rest = unnamed > 1 ? "另外几只猫" : unnamed ? "另一只猫" : "";
+    const who = names.join("") + (names.length && rest ? "和" : "") + rest;
+    const one = names.length + unnamed === 1;
+    return "同一时间只有一只猫能用这台电脑：打开后，" + who + "的会关掉；" + (one ? "它要是正在回复，那条回复会停下。" : "它们要是正在回复，那些回复会停下。");
+  }
+  // The cats a turn on would take the computer from now (a view's `others`)
+  // that the dialog the owner confirmed did not name (`told`, the list it was
+  // drawn from): a name it said covers that cat; one the server could not
+  // name ('') only as many times as the dialog counted one (item 57).
+  function computerUntold(told, others) {
+    const said = Array.isArray(told) ? told.map(trim) : [], out = [];
+    for (const n of Array.isArray(others) ? others.map(trim) : []) {
+      const at = said.indexOf(n);
+      if (at < 0) out.push(n);
+      else if (!n) said.splice(at, 1);
+    }
+    return out;
   }
   // A change that did not go through: the server's own sentence when it is
   // everyday words (computer_half_registered asks the owner to check every
-  // cat, so it is shown whole), else what did not happen.
+  // cat, so it is shown whole; computer_other_on / computer_other_running /
+  // computer_not_on / computer_on_unknown name the other cat), else what did
+  // not happen. A cat's name in 「」 is the owner's own word: it does not make
+  // the sentence technical.
   function computerError(err, enabling) {
     const message = trim(err && err.message);
     if (err instanceof TypeError || message === "连不上 clowder-bot") return "连不上 clowder-bot";
-    return plain(message) ? message : enabling ? "没能打开，请再试一次。" : "没能关掉，请再试一次。";
+    return plain(message.replace(/「[^「」]*」/g, "")) ? message : enabling ? "没能打开，请再试一次。" : "没能关掉，请再试一次。";
   }
   // The row as it is drawn, from the last view and what this page is doing
   // for the cat: busy "on" | "off" while a change is on its way (ending: the
@@ -197,6 +234,6 @@
     accent, ownBreed,
     MIN, MAX, members, known, countText, addable, room, canRemove, addBody, removeBody, groupFrom,
     defaultName, nameProblem, renameBody, nameSaid, groupError,
-    COMPUTER, GRANTS, computerView, waitsForGrant, grantPlace, computerConsent, computerError, computerRow,
+    COMPUTER, GRANTS, computerView, waitsForGrant, grantPlace, computerConsent, computerHandover, computerUntold, computerError, computerRow,
   });
 })(typeof window !== "undefined" ? window : globalThis);

@@ -115,7 +115,8 @@ export function createXbotCoreRouter(bridge: BotBridge) {
   });
   router.delete('/bots/:name', async (req, res) => {
     const cat = await bot(req.params.name);
-    await native.request(`/api/cats/${encode(cat.id)}`, { method: 'DELETE', body: { expectedRevision: cat.configurationRevision } });
+    // A cat that may be using the computer in a turn it is in the middle of is not deleted (Computer.retire): its conversation is forgotten below.
+    await bridge.computer.retire(cat, () => native.request(`/api/cats/${encode(cat.id)}`, { method: 'DELETE', body: { expectedRevision: cat.configurationRevision } }));
     delete store.state.bots[cat.id]; store.save(); res.json({ status: 'ok', history: 'preserved_by_clowder_ai' });
   });
   router.post('/groups', async (req, res) => {

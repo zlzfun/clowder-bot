@@ -103,11 +103,19 @@ export function cuaDriver(toolsDir: string, env: NodeJS.ProcessEnv = process.env
   };
 }
 
-/** What a cat's 资料 shows about the computer. `on` is the registry's word; the rest says whether that can work right now. */
-export interface ComputerView { supported: boolean; installed: boolean; on: boolean; permissions: ComputerGrants['state']; missing?: ComputerGrant[] }
+/**
+ * What a cat's 资料 shows about the computer. `on` is the registry's word; the rest says whether that can work right now.
+ * `others`: the names of the other cats that have it on (one at a time is the rule, see enable) — who is switched off when this cat is switched on.
+ */
+export interface ComputerView { supported: boolean; installed: boolean; on: boolean; permissions: ComputerGrants['state']; missing?: ComputerGrant[]; others?: string[] }
 interface Entry { id?: string; type?: string; source?: string; enabled?: boolean; cats?: Record<string, boolean>; blockedCats?: string[]; mcpServer?: { command?: string; args?: string[] } }
-/** Ends the turns a cat is in the middle of, wherever it is working; `failed` counts those not seen to have ended. */
-export type StopRunning = (cat: NativeCat) => Promise<{ stopped: number; failed: number }>;
+/**
+ * Ends the turns a cat is in the middle of, wherever it is working; `failed` counts those not seen to have ended.
+ * `look`: nothing is ended — `failed` is how many it is in the middle of.
+ */
+export type StopRunning = (cat: Pick<NativeCat, 'id'>, look?: boolean) => Promise<{ stopped: number; failed: number }>;
+/** The names the owner knows the cats with these ids by, in the same order; '' for one that cannot be named. Only for words. */
+export type NameCats = (ids: string[]) => Promise<string[]>;
 
 // What the entry points at while it is being registered: a program that offers no tools.
 const placeholder = '/usr/bin/true';
@@ -122,11 +130,22 @@ export class Computer {
    */
   private readonly unconfirmed = new Set<string>();
   /**
+   * Cats the computer was, or is being, taken from, each until it is seen to be both off in the registry and without a
+   * running turn. A turn keeps the tools it started with, so a cat that reads as off may still be using the computer;
+   * and a block whose answer never came may land after the request that sent it is over. So a cat is put here before
+   * its block is sent and taken out only on that evidence (or when it is switched on again: the turn is its own once
+   * more). While one of them is still going no other cat is switched on (handOver), and it is not deleted (retire).
+   * Request bookkeeping, in memory: who is on stays the registry's to say.
+   */
+  private readonly lingering = new Set<string>();
+  /**
    * `stopRunning`: how a cat's running turns are ended (the bridge's native cancel).
    * `patience`: how long a driver that was just started is given to answer, in ms.
+   * `nameCats`: what the cats are called, for the words about another cat.
    */
   constructor(private readonly native: NativeTransport, readonly driver: ComputerDriver,
-    private readonly stopRunning: StopRunning = async () => ({ stopped: 0, failed: 0 }), private readonly patience = 6000) {}
+    private readonly stopRunning: StopRunning = async () => ({ stopped: 0, failed: 0 }), private readonly patience = 6000,
+    private readonly nameCats: NameCats = async ids => ids.map(() => '')) {}
 
   private async entry(): Promise<Entry | undefined> {
     const { items } = await this.native.request<{ items?: Entry[] }>('/api/capabilities');
@@ -139,7 +158,30 @@ export class Computer {
     return this.native.request('/api/capabilities/mcp/install', { method: 'POST', body: { id: computerEntry, transport: 'stdio', ...server } });
   }
   private real(entry: Entry | undefined): entry is Entry { return !!entry && entry.mcpServer?.command !== placeholder; }
-  private isOn(entry: Entry | undefined, cat: NativeCat) { return this.real(entry) && entry.enabled !== false && entry.cats?.[cat.id] === true; }
+  private isOn(entry: Entry | undefined, cat: Pick<NativeCat, 'id'>) { return this.real(entry) && entry.enabled !== false && entry.cats?.[cat.id] === true; }
+  /** The other cats that have it on, by id. */
+  private rivals(entry: Entry | undefined, cat: NativeCat): string[] {
+    return this.real(entry) && entry.enabled !== false ? Object.entries(entry.cats ?? {}).filter(([id, on]) => on === true && id !== cat.id).map(([id]) => id) : [];
+  }
+  private async called(ids: string[]): Promise<string[]> { return this.nameCats(ids).then(names => ids.map((_, index) => names[index] ?? ''), () => ids.map(() => '')); }
+  /** The cats as the owner would say them, the way the page's dialog does (profile-rules.js computerHandover): each name in 「」, those without one as 另一只猫, 另外几只猫 for more. */
+  private async who(ids: string[]): Promise<string> {
+    const called = await this.called(ids), names = [...new Set(called.filter(Boolean))].map(name => `「${name}」`), unnamed = called.filter(name => !name).length;
+    const rest = unnamed > 1 ? '另外几只猫' : unnamed ? '另一只猫' : '';
+    return names.join('') + (names.length && rest ? '和' : '') + rest;
+  }
+  /**
+   * Ends the turns a cat is in the middle of and says whether they are seen to have ended. `off`: the registry was just
+   * read with this cat off. Only with both is the cat done with (see lingering): one that may still be on can start
+   * another turn with the tools before a block that is still on its way lands.
+   */
+  private async ended(id: string, off: boolean): Promise<boolean> {
+    const seen = !(await this.stopRunning({ id }).catch(() => ({ stopped: 0, failed: 1 }))).failed;
+    if (seen && off) this.lingering.delete(id); else this.lingering.add(id);
+    return seen;
+  }
+  /** Whether a cat is in the middle of a turn, as far as can be seen; one that cannot be looked at counts as in one. */
+  private async busy(id: string): Promise<boolean> { return (await this.stopRunning({ id }, true).catch(() => ({ stopped: 0, failed: 1 }))).failed > 0; }
   /** One change at a time: a switch, and a cat being made, are several native steps that must not interleave. */
   private serial<T>(work: () => Promise<T>): Promise<T> {
     const next = this.tail.then(work);
@@ -147,12 +189,21 @@ export class Computer {
     return next;
   }
 
-  async view(cat: NativeCat): Promise<ComputerView> {
+  async view(cat: NativeCat): Promise<ComputerView> { return this.shown(cat, await this.entry()); }
+  /**
+   * The view from the registry as it was just read. A change answers with what it read back to confirm itself, not with
+   * another read: one that failed would turn a change known to have gone through into an error.
+   */
+  private async shown(cat: NativeCat, entry: Entry | undefined): Promise<ComputerView> {
     // Whether the cat is on is the registry's to say, also where the driver is gone or this is not a Mac: a stale "on" must still be seen and switched off.
-    const [located, entry] = await Promise.all([this.driver.supported ? this.driver.locate() : undefined, this.entry()]);
+    const located = this.driver.supported ? await this.driver.locate() : undefined;
     const grants: ComputerGrants = located ? await this.driver.permissions() : { state: 'unknown' };
+    // Who gives it up when this cat is switched on: the cats that have it on, and a cat that is off with a turn still going
+    // (that turn is ended too, see handOver) — looked at now, so that one which has stopped by itself is not named.
+    const others = this.rivals(entry, cat);
+    for (const id of [...this.lingering]) if (id !== cat.id && !others.includes(id) && await this.busy(id)) others.push(id);
     return { supported: this.driver.supported, installed: !!located, on: this.isOn(entry, cat), permissions: grants.state,
-      ...(grants.state === 'needed' ? { missing: grants.missing } : {}) };
+      ...(grants.state === 'needed' ? { missing: grants.missing } : {}), ...(others.length ? { others: await this.called(others) } : {}) };
   }
 
   set(cat: NativeCat, enabled: boolean): Promise<ComputerView> { return this.serial(() => enabled ? this.enable(cat) : this.disable(cat)); }
@@ -162,6 +213,14 @@ export class Computer {
    * `permissions: 'needed'` means the driver is waiting for the owner in System
    * Settings and nothing was switched; the same request is sent again once the
    * grants are there. The registry is only written after the grants are read.
+   *
+   * One cat at a time. The cats share one desktop and nothing between them
+   * says which application another is in the middle of using (the engine has
+   * no such coordination to reuse yet), so the rule is kept where the Bot can
+   * keep it, at the switch: every other cat that has it is switched off first
+   * — blocked, the block read back, the turns it is in the middle of ended, as
+   * when its own switch is turned off — and only then is this cat switched on.
+   * If another cat cannot be seen to be off and stopped, this one stays off.
    */
   private async enable(cat: NativeCat): Promise<ComputerView> {
     if (!this.driver.supported) throw new ApiError(422, '这台电脑上还用不了这项功能。', undefined, 'computer_unsupported');
@@ -179,10 +238,54 @@ export class Computer {
     if (!this.real(entry)) await this.register(located);
     // The driver was moved or reinstalled: the engine keeps who is blocked when an entry is installed over.
     else if (entry.mcpServer?.command !== located.command || JSON.stringify(entry.mcpServer?.args ?? []) !== JSON.stringify(located.args)) await this.install(located);
+    const gave = await this.handOver(cat);
     // Written whatever was just read: an earlier request that timed out here may still be waiting in the engine, and the last write is the one that stands.
-    await this.toggle({ scope: 'cat', catId: cat.id, enabled: true });
-    if (!this.isOn(await this.entry(), cat)) throw new ApiError(502, '没能打开，请再试一次。');
-    return this.view(cat);
+    // Whether it is on now is the registry's to say, not the answer to the write: one whose answer was lost may have gone through.
+    let failure: unknown, after: Entry | undefined, on: boolean | undefined;
+    try { await this.toggle({ scope: 'cat', catId: cat.id, enabled: true }); } catch (error) { failure = error; }
+    try { after = await this.entry(); on = this.isOn(after, cat); } catch { /* unread: not known */ }
+    // The other cats are off by now: said with what became of this one, or the owner would find that cat's switch off without a word.
+    if (on === undefined) throw new ApiError(502, `${gave ? `${gave}的已经关掉了，但` : ''}没能确认这只猫的有没有打开。请再试一次。`, undefined, 'computer_on_unknown');
+    if (!on) {
+      if (gave) throw new ApiError(502, `${gave}的已经关掉了，但这只猫的没能打开。请再试一次。`, undefined, 'computer_not_on');
+      throw failure ?? new ApiError(502, '没能打开，请再试一次。');
+    }
+    this.lingering.delete(cat.id);
+    return this.shown(cat, after);
+  }
+
+  /**
+   * The other cats give the computer up to `cat`: see enable. Returns the cats that were switched off, as words ('' for
+   * none). Throws, with nothing written for `cat`, when one of them cannot be seen to be off and stopped — what `cat`
+   * was before is what it still is, and the words say which. A cat that did come off has its running turns ended
+   * whatever became of the others, and so has a cat the computer was taken from earlier that is not done with yet
+   * (lingering): asking again must not let `cat` in beside a turn that still has the tools.
+   */
+  private async handOver(cat: NativeCat): Promise<string> {
+    const entry = await this.entry(), had = this.isOn(entry, cat);
+    const rivals = this.rivals(entry, cat), earlier = [...this.lingering].filter(id => id !== cat.id && !rivals.includes(id));
+    if (!rivals.length && !earlier.length) return '';
+    // Remembered before its block is sent: a write whose answer never comes may land after this request is over.
+    for (const id of rivals) { this.lingering.add(id); try { await this.toggle({ scope: 'cat', catId: id, enabled: false }); } catch { /* read back below */ } }
+    // What the registry says now decides, not the answers to the writes: a write whose answer was lost may have gone through.
+    let left: string[] = [], unread = false;
+    if (rivals.length) { try { const after = await this.entry(); left = rivals.filter(id => this.isOn(after, { id })); } catch { unread = true; } }
+    // A cat seen to be still on keeps its reply: nothing changed for it (it stays remembered: its block may yet land). Every
+    // other one is off — or, the registry unread, may be: its turns are ended all the same, or the next try would find it
+    // off and let `cat` in beside a turn nobody ended.
+    const off = rivals.filter(id => !left.includes(id)), running: string[] = [];
+    for (const id of off) if (!await this.ended(id, !unread)) running.push(id);
+    for (const id of earlier) if (!await this.ended(id, true)) running.push(id);
+    // Nothing was written for this cat: one that already had it (a state from before the rule, or a request sent twice) has it still.
+    const mine = had ? '这只猫的本来就开着' : '所以这只猫的没有打开';
+    if (unread) throw new ApiError(502, `没能确认${await this.who(rivals)}的已经关掉，${mine}。请再试一次。`, undefined, 'computer_other_on');
+    if (left.length) throw new ApiError(502, `没能先把${await this.who(left)}的关掉，${mine}。${off.length ? `${await this.who(off)}的已经关掉了。` : ''}请再试一次。`, undefined, 'computer_other_on');
+    if (running.length) {
+      const names = await this.who(running);
+      throw new ApiError(502, `${names}的已经关掉，但它正在进行的这一轮还没有停下来，停下之前它还能用这台电脑，${had
+        ? `这只猫的本来就开着。请在${names}的对话里点停止。` : `所以这只猫的先没有打开。请在${names}的对话里点停止，然后再开一次。`}`, undefined, 'computer_other_running');
+    }
+    return off.length ? this.who(off) : '';
   }
 
   /**
@@ -229,20 +332,55 @@ export class Computer {
   private async disable(cat: NativeCat): Promise<ComputerView> {
     let entry: Entry | undefined, read = true;
     try { entry = await this.entry(); } catch { read = false; }
-    // No entry, or only the placeholder: no cat was ever handed the tools. A driver started for a switch-on that was given up
-    // (the owner stopped waiting for the macOS grants) has nothing to do: it is asked to end.
-    if (read && !this.real(entry)) { await this.driver.stop().catch(() => {}); return this.view(cat); }
+    // No entry, or only the placeholder: no cat can be handed the tools. A driver started for a switch-on that was given up
+    // (the owner stopped waiting for the macOS grants) has nothing to do: it is asked to end. A cat the computer was taken
+    // from earlier, with a turn not seen to end, is asked to stop all the same.
+    if (read && !this.real(entry)) {
+      const ended = !this.lingering.has(cat.id) || await this.ended(cat.id, true);
+      await this.driver.stop().catch(() => {});
+      if (!ended) throw this.stillRunning();
+      return this.shown(cat, entry);
+    }
     let failure: unknown;
+    // Remembered before the block is sent: one whose answer never comes may land after this request is over.
+    this.lingering.add(cat.id);
     try {
       await this.toggle({ scope: 'cat', catId: cat.id, enabled: false });
       entry = await this.entry();
       if (this.isOn(entry, cat)) throw new ApiError(502, '没能关掉，请再试一次。');
     } catch (error) { failure = error; }
-    const ended = await this.stopRunning(cat).catch(() => ({ stopped: 0, failed: 1 }));
+    const ended = await this.ended(cat.id, !failure);
     if (failure) throw failure;
     if (entry && !anyOn(entry)) await this.driver.stop().catch(() => {});
-    if (ended.failed) throw new ApiError(502, '已经关掉了，但它正在进行的这一轮还没有停下来，停下之前它还能用这台电脑。请在对话里点停止，或者稍后再关一次。', undefined, 'computer_still_running');
-    return this.view(cat);
+    if (!ended) throw this.stillRunning();
+    return this.shown(cat, entry);
+  }
+  private stillRunning() {
+    return new ApiError(502, '已经关掉了，但它正在进行的这一轮还没有停下来，停下之前它还能用这台电脑。请在对话里点停止，或者稍后再关一次。', undefined, 'computer_still_running');
+  }
+
+  /**
+   * A cat is deleted. `remove` is its native deletion. A turn keeps the tools it started with, the engine does not end
+   * a deleted cat's turns, and its conversation is forgotten with it. So a cat that may have the computer — it is on,
+   * or the computer was taken from it and it is not done with yet, or the registry cannot be read — is not deleted
+   * while it is in the middle of a turn: that turn would be left behind with the tools and nothing to find it by, and
+   * the next cat switched on would be using the computer beside it. Nothing is changed for it (were it switched off
+   * here and the engine then refused the deletion, it would have lost the computer without a word): the owner lets it
+   * finish or stops that reply, and deletes again. Any other cat is deleted as before. Switches wait meanwhile, so a
+   * cat cannot be deleted from under a hand-over.
+   */
+  retire<T>(cat: NativeCat, remove: () => Promise<T>): Promise<T> {
+    return this.serial(async () => {
+      let has: boolean | undefined;
+      try { has = this.isOn(await this.entry(), cat); } catch { /* unread: it may have it */ }
+      const may = has !== false || this.lingering.has(cat.id);
+      if (may && await this.busy(cat.id)) throw new ApiError(409, '它这一轮可能还在用这台电脑，所以没有删除。等它做完，或在它的对话里点停止，然后再删一次。', undefined, 'computer_still_running');
+      const removed = await remove();
+      // A turn that began between that look and the deletion: asked to end while its conversation is still known here.
+      if (may) await this.stopRunning({ id: cat.id }).catch(() => {});
+      this.lingering.delete(cat.id);
+      return removed;
+    });
   }
 
   /**
