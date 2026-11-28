@@ -180,7 +180,45 @@ type ChatBlock =
 
 `GET /xbot-api/memory/:kind/:id/source?revision=…` 转接原生来源读取，将 Profile 的来源数组和 Taste 的单一来源坐标统一投影为 `{status:'ready'|'not_recorded'|'unavailable',sources:[{label,occurredAt,canOpen,threadId?,messageId?}]}`。原生没有提供时间时 `occurredAt:null`。版本冲突保持 409，须重读列表后再查看；权限错误保持 401／403；不可读不能显示成“还没有记忆”。
 
-- owner 身份、Origin、CSRF 由现有 NativeClient 沿用原生会话；只增加 GET，禁用其他方法，不开放 actions。
-- Profile 按原生条目／整份文档展示；Taste 显示已保存的内容。`pendingCount` 只表示另有待确认修改／候选，不把候选当已保存内容。
-- 在单聊原有记忆页按需展开「关于你」「你的偏好」；不注入对话、不在群聊显示。会话便笺仍只读展示并明确范围，既有后端便笺路由不改，本轮不增加写入入口。
+`GET /xbot-api/memory/matters`（可选 `query`、`cursor`、`limit`）转接原生 F332 `GET /api/memory/matters`（`management: true` 目录），返回：
+
+```ts
+{
+  kind: 'matters'; readStatus: 'ready'|'partial'|'unavailable';
+  entries: Array<{
+    id:string; title:string; content:string; revision:number;
+    status:'active'|'retired'|'unknown'; entryCount:number;
+    summaryStatus?:'sources_changed'; updatedAt?:number|string; createdAt?:number|string;
+  }>;
+  nextCursor?:string;
+}
+```
+
+- 目录里标为 `unavailable: true` 的事项不进入 `entries`，只把目录 `readStatus` 降为 `partial`（仍有可读事项）或 `unavailable`（全部不可读）。
+- 原生返回 `503 matter_memory_unavailable` 时，目录接口收敛为 `{kind:'matters', readStatus:'unavailable', entries:[]}`，不拖垮整页；其余 `401`／`403`／`400` 及运行时断连仍如实报错。
+
+`GET /xbot-api/memory/matters/:id`（可选 `cursor`、`limit`、`expectedRevision`、`history`）转接原生 `GET /api/memory/matters/:matterId`，投影每条记录的正文、状态、引用原文（仅 `sourceStatus === 'current'` 时保留 `quote`）与来源坐标：
+
+```ts
+{
+  matter: {
+    id:string; title:string; content:string; revision:number;
+    status:'active'|'retired'|'unknown'; summaryStatus?:'sources_changed';
+    updatedAt?:number|string; createdAt?:number|string;
+  };
+  entries: Array<{
+    id:string; status:'active'|'superseded'|'retired'|'unknown';
+    sourceStatus:'current'|'changed'|'thread_only'|'unknown';
+    summary?:string; quote?:string; recordedAt?:number|string;
+    source:{ canOpen:boolean; threadId?:string; messageId?:string; occurredAt:number|string|null };
+  }>;
+  nextCursor?:string;
+}
+```
+
+- 仅当 `source` 同时包含有效 `threadId` 与 `messageId`（`MatterSourceCoordinate` 或 `kind:'message'`）时 `canOpen: true`；纯对话指针（`kind:'thread'`）仅投影 `threadId` 且 `canOpen: false`。`409 stale_revision`、`404 not_available`、`400 invalid_cursor` 与 `401`／`403`／`503` 保持原状态码。
+
+- owner 身份、Origin、CSRF 由现有 NativeClient 沿用原生会话；只增加 GET，禁用其他方法，不开放 actions 或 write-receipt。
+- Profile 按原生条目／整份文档展示；Taste 显示已保存的内容；事项按原生事项与条目投影展示。`pendingCount` 只表示另有待确认修改／候选，不把候选当已保存内容。
+- 在单聊原有记忆页按需展开「关于你」「你的偏好」「事项」；不注入对话、不在群聊显示。会话便笺仍只读展示并明确范围，既有后端便笺路由不改，本轮不增加写入入口。
 - 本轮无长期记忆编辑、确认、停用、遗忘按钮，也没有另建存储或检索。

@@ -22,11 +22,12 @@
 //   time, never twice for the same reply. A refusal (404, 409) is about that
 //   one reply: a newer reply is still confirmed. A late answer for another
 //   conversation or thread changes nothing here.
-// - Memory (a cat's 记忆), read only throughout: 关于你 and 你的偏好 folded and
-//   read only when opened (GET /xbot-api/memory/profile|taste), each entry's
-//   source on demand with its revision; then the conversation's own notes,
-//   named for what they are: 这个对话的便笺. Nothing here edits, adds,
-//   deletes, confirms or forgets.
+// - Memory (a cat's 记忆), read only throughout: 关于你, 你的偏好 and 事项
+//   folded and read only when opened (GET /xbot-api/memory/profile|taste|
+//   matters), each entry's source on demand with its revision, and each
+//   matter's records on demand for its revision, a page at a time (加载更多);
+//   then the conversation's own notes, named for what they are: 这个对话的便笺.
+//   Nothing here edits, adds, deletes, confirms or forgets.
 //
 // Nothing here schedules, approves or completes anything. A request is
 // answered on its own card in the history (chat-cards.js); the line's 去确认
@@ -493,9 +494,15 @@
 
   // ------------------------------------------------------------------ 记忆
   // Owner-level memory read on demand, kept across conversations; each
-  // fold reads again when it opens. Sources by entry and revision.
-  const MEM = { profile: { state: "idle", data: null, error: null, req: 0 }, taste: { state: "idle", data: null, error: null, req: 0 } };
+  // fold reads again when it opens. Sources by entry and revision; a
+  // matter's records by matter and revision, a page at a time.
+  const FOLDS = ["profile", "taste", "matters"];
+  const EMPTY = { profile: "还没有保存关于你的资料。", taste: "还没有保存的偏好。", matters: "还没有保存的事项。" };
+  const fresh = () => ({ state: "idle", data: null, error: null, req: 0, more: null });
+  const MEM = { profile: fresh(), taste: fresh(), matters: fresh() };
   const SRC = new Map();
+  // A matter's records by "matters:<id>@<revision>": { state, data, error, req, more }.
+  const DET = new Map();
   let mem = null;
 
   function memoryView(sel, data) {
@@ -514,14 +521,14 @@
       loadNotes(mem);
     }
     paintNotes();
-    for (const kind of ["profile", "taste"]) paintMem(kind);
+    for (const kind of FOLDS) paintMem(kind);
     return mem.root;
   }
 
   function buildMemory(sel) {
     const root = node("div", "cx-mem");
     const page = { key: keyOf(sel), sel: { ...sel }, root, folds: {}, notes: { list: null, from: null, state: "idle", error: "", req: 0, sig: "" } };
-    for (const kind of ["profile", "taste"]) {
+    for (const kind of FOLDS) {
       const box = node("details", "task-details cx-fold");
       box.dataset.kind = kind;
       const sum = node("summary");
@@ -546,16 +553,24 @@
     return page;
   }
 
+  const unreadable = () => Object.assign(new Error("返回格式无法识别"), { status: 0 });
   async function loadMemory(kind) {
     const m = MEM[kind], req = ++m.req;
     if (!m.data) m.state = "loading";
+    // A page still on its way belongs to the list read before this one.
+    m.more = null;
     paintMem(kind);
     try {
       const data = await H.api("/xbot-api/memory/" + kind);
       if (req !== m.req) return;
-      const got = X.memory(data, kind);
-      if (!got) throw Object.assign(new Error("返回格式无法识别"), { status: 0 });
-      Object.assign(m, { state: "ready", data: got, error: null });
+      const got = kind === "matters" ? X.matters(data) : X.memory(data, kind);
+      if (!got) throw unreadable();
+      Object.assign(m, { state: "ready", data: got, error: null, more: null });
+      // Every matter's records go once the list is read again: a message
+      // edited since keeps the matter's revision (only its sources say they
+      // changed), so records kept by revision could keep words no longer said.
+      // Their folds close and read afresh when opened.
+      if (kind === "matters") DET.clear();
     } catch (e) {
       if (req !== m.req) return;
       Object.assign(m, { state: "error", error: X.memoryError(e) });
@@ -563,17 +578,43 @@
     paintMem(kind);
   }
 
+  // The next page of 事项: one request at a time, and none kept once the
+  // list has been read again since it was asked for.
+  async function moreMatters() {
+    const m = MEM.matters, d = m.data;
+    if (!d || !d.nextCursor || (m.more && m.more.state === "loading")) return;
+    const req = m.req, from = d.entries.length, more = { state: "loading", from };
+    m.more = more;
+    paintMem("matters");
+    try {
+      const data = await H.api("/xbot-api/memory/matters?" + new URLSearchParams({ cursor: d.nextCursor }));
+      if (req !== m.req || m.more !== more) return;
+      const page = X.matters(data);
+      if (!page) throw unreadable();
+      m.data = X.moreMatters(m.data, page);
+      m.more = { state: "done", from };
+    } catch (e) {
+      if (req !== m.req || m.more !== more) return;
+      m.more = { state: "error", error: X.memoryError(e), from, restart: !!e && e.status === 400 };
+    }
+    paintMem("matters");
+  }
+
   function paintMem(kind) {
     if (!mem) return;
     const f = mem.folds[kind], m = MEM[kind];
     if (!f.box.open && !f.body.childNodes.length && m.state === "idle") return;
-    const sig = JSON.stringify([m.state, m.data, m.error, [...SRC].filter(([k]) => k.startsWith(kind + ":")), S.threadId]);
+    const own = kind === "matters" ? [...DET] : [...SRC].filter(([k]) => k.startsWith(kind + ":"));
+    const sig = JSON.stringify([m.state, m.data, m.error, m.more, own, S.threadId]);
     if (f.sig === sig) return;
     f.sig = sig;
     const opened = new Set([...f.body.querySelectorAll("details.cx-src")].filter((d) => d.open).map((d) => d.dataset.key));
-    // A source fold's summary that had focus gets it back after the redraw.
+    // A source or records fold's summary that had focus gets it back after
+    // the redraw; focus on 加载更多 goes where landing() says.
     const here = document.activeElement;
-    const back = here && f.body.contains(here) && here.parentElement && here.parentElement.dataset ? here.parentElement.dataset.key || "" : "";
+    const inside = here && f.body.contains(here);
+    const back = inside && here.parentElement && here.parentElement.dataset ? here.parentElement.dataset.key || "" : "";
+    const again = inside && here.dataset ? here.dataset.more || "" : "";
     const retry = () => loadMemory(kind);
     const parts = [];
     if (m.state === "error" && !m.data) {
@@ -589,12 +630,51 @@
       else if (d.readStatus === "partial") parts.push(failure("部分内容暂时读不到，下面只显示读到的部分。", retry));
       if (d.entries.length) {
         const list = node("div", "cx-entries");
-        for (const e of d.entries) list.append(entryCard(kind, e, opened));
+        const first = landed(m.more);
+        d.entries.forEach((e, i) => {
+          const card = kind === "matters" ? matterCard(e, opened) : entryCard(kind, e, opened);
+          if (i === first) mark(card, kind);
+          list.append(card);
+        });
         parts.push(list);
-      } else if (d.readStatus === "ready") parts.push(note(kind === "profile" ? "还没有保存关于你的资料。" : "还没有保存的偏好。"));
+      } else if (d.readStatus === "ready" && !d.nextCursor) parts.push(note(EMPTY[kind]));
+      if (kind === "matters" && d.nextCursor) parts.push(moreRow(kind, m.more, moreMatters, retry));
     }
     f.body.replaceChildren(...parts);
     if (back) [...f.body.querySelectorAll("details.cx-src")].find((d) => d.dataset.key === back)?.firstChild?.focus?.({ preventScroll: true });
+    else if (again) landing(f, again)?.focus?.({ preventScroll: true });
+  }
+
+  // Where focus goes from the 加载更多 a redraw replaced: the button again, or
+  // the first item it brought. A last page that brought nothing new leaves
+  // neither: for the list, the 重试 of what could not be read, else the last
+  // matter's 记录, else 事项 itself; for a matter's records, its own 记录,
+  // never another matter's.
+  function landing(f, again) {
+    const to = [...f.body.querySelectorAll("button")].find((b) => b.dataset.more === again) || [...f.body.querySelectorAll("[data-from]")].find((x) => x.dataset.from === again);
+    if (to) return to;
+    if (again !== "matters") return [...f.body.querySelectorAll("details.cx-src")].find((d) => d.dataset.key === again)?.firstChild;
+    const bar = [...f.body.children].filter((c) => !c.classList.contains("cx-entries")).map((c) => c.querySelector("button")).find(Boolean);
+    const last = [...f.body.querySelectorAll(".cx-entry")].pop();
+    return bar || (last && last.querySelector("details.cx-src")?.firstChild) || f.box.firstChild;
+  }
+
+  // 加载更多 under a list, or what kept it from reading on. restart reads
+  // from the first page (the server no longer knows where the last one ended).
+  const landed = (more) => (more && more.state === "done" ? more.from : -1);
+  function mark(el, from) { el.dataset.from = from; el.tabIndex = -1; }
+  function moreRow(from, more, load, restart) {
+    let row;
+    if (more && more.state === "error") {
+      row = more.restart ? failure("没能读取更多：" + more.error.text + "。", restart, "重新读取") : failure("没能读取更多：" + more.error.text + "。", load);
+    } else {
+      const busy = !!more && more.state === "loading";
+      row = node("p", "cx-more");
+      row.append(button("text-btn ws-link", busy ? "正在读取…" : "加载更多", load));
+      if (busy) row.lastChild.setAttribute("aria-busy", "true");
+    }
+    row.lastChild.dataset.more = from;
+    return row;
   }
 
   function entryCard(kind, e, opened) {
@@ -610,21 +690,26 @@
     // Proposed changes are not saved content: counted apart, never shown as it.
     if (e.pendingCount > 0) card.append(node("p", "cx-meta cx-pending", "另有 " + e.pendingCount + " 条待确认的修改，确认前不算已保存，也不在上面的内容里。"));
     const key = kind + ":" + e.id + "@" + e.revision;
-    const src = node("details", "task-details cx-src");
-    src.dataset.key = key;
-    const sum = node("summary");
-    sum.append(node("span", "", "来源"), H.icon("chevron"));
-    const body = node("div", "cx-src-body");
-    src.append(sum, body);
-    // Reopened by a redraw, not by the owner: that does not read again.
-    if (opened.has(key)) { src.quiet = true; src.open = true; }
-    src.addEventListener("toggle", () => {
-      if (src.quiet) { src.quiet = false; return; }
-      if (src.open) loadSource(kind, e, key);
-    });
-    if (src.open) paintSource(body, kind, e, key);
-    card.append(src);
+    card.append(fold(key, "来源", opened, () => loadSource(kind, e, key), (body) => paintSource(body, kind, e, key)));
     return card;
+  }
+
+  // A fold under an entry, read when the owner opens it.
+  function fold(key, label, opened, load, paint) {
+    const box = node("details", "task-details cx-src");
+    box.dataset.key = key;
+    const sum = node("summary");
+    sum.append(node("span", "", label), H.icon("chevron"));
+    const body = node("div", "cx-src-body");
+    box.append(sum, body);
+    // Reopened by a redraw, not by the owner: that does not read again.
+    if (opened.has(key)) { box.quiet = true; box.open = true; }
+    box.addEventListener("toggle", () => {
+      if (box.quiet) { box.quiet = false; return; }
+      if (box.open) load();
+    });
+    if (box.open) paint(body);
+    return box;
   }
 
   async function loadSource(kind, e, key) {
@@ -637,7 +722,7 @@
       const data = await H.api("/xbot-api/memory/" + kind + "/" + enc(e.id) + "/source?" + new URLSearchParams({ revision: e.revision }));
       if (SRC.get(key)?.req !== req) return;
       const got = X.sources(data);
-      if (!got) throw Object.assign(new Error("返回格式无法识别"), { status: 0 });
+      if (!got) throw unreadable();
       SRC.set(key, { state: "ready", data: got, error: null, req });
     } catch (err) {
       if (SRC.get(key)?.req !== req) return;
@@ -668,13 +753,144 @@
       const li = node("li");
       li.append(node("span", "cx-src-label", src.label || "来源"));
       if (src.occurredAt) li.append(node("time", "cx-src-time", stamp(src.occurredAt)));
-      // Only a message in the conversation open now can be shown in place.
-      if (src.canOpen && src.messageId && src.threadId && src.threadId === S.threadId && mem && mem.key === S.key) {
-        li.append(button("text-btn ws-link", "在对话里查看", () => locate({ kind: "source", messageId: src.messageId })));
-      }
+      const here = showHere(src);
+      if (here) li.append(here);
       list.append(li);
     }
     body.replaceChildren(list);
+  }
+
+  // Only a message in the conversation open now can be shown in place.
+  function showHere(src) {
+    if (!(src.canOpen && src.messageId && src.threadId && src.threadId === S.threadId && mem && mem.key === S.key)) return null;
+    return button("text-btn ws-link", "在对话里查看", () => locate({ kind: "source", messageId: src.messageId }));
+  }
+
+  // ---- 事项: a card per matter; its records folded, read for its revision.
+  const recordsKey = (e) => "matters:" + e.id + "@" + e.revision;
+  const NONE = new Set();
+  function recordsPath(e, cursor) {
+    const q = new URLSearchParams();
+    if (e.revision) q.set("expectedRevision", String(e.revision));
+    if (cursor) q.set("cursor", cursor);
+    const qs = q.toString();
+    return "/xbot-api/memory/matters/" + enc(e.id) + (qs ? "?" + qs : "");
+  }
+
+  function matterCard(e, opened) {
+    const key = recordsKey(e), det = DET.get(key);
+    const card = node("div", "lib-card cx-entry");
+    const k = node("div", "k", e.title || X.MEMORY.matters);
+    if (e.status === "retired") k.append(node("span", "cx-flag", "已停用"));
+    else if (e.status === "unknown") k.append(node("span", "cx-flag", "状态未知"));
+    card.append(k);
+    if (e.content) card.append(node("div", "v cx-content", e.content));
+    const meta = [];
+    if (e.updatedAt) meta.push("更新于 " + stamp(e.updatedAt));
+    // The list may not say it while the matter's records do.
+    if (e.sourcesChanged || !!(det && det.state === "ready" && det.data && det.data.sourcesChanged)) meta.push("部分来源有变化");
+    if (meta.length) card.append(node("p", "cx-meta", meta.join(" · ")));
+    // Kept open through a redraw only while its records are still held.
+    card.append(fold(key, e.entryCount ? "记录 · " + e.entryCount : "记录", det ? opened : NONE, () => loadRecords(e, key), (body) => paintRecords(body, e, key)));
+    return card;
+  }
+
+  // A matter's answer for another matter or revision is not this one's.
+  function checked(data, e) {
+    const got = X.matter(data);
+    if (!got || got.id !== e.id) throw unreadable();
+    if (e.revision && got.revision && got.revision !== e.revision) throw Object.assign(new Error(""), { status: 409 });
+    return got;
+  }
+
+  // A read is this fold's only while its own entry is still there: records let
+  // go of (the list read again) and read anew start another one, and an
+  // earlier read that answers late lands nowhere.
+  let detReq = 0;
+  async function loadRecords(e, key) {
+    const was = DET.get(key);
+    if (was && was.state === "loading") return;
+    const req = ++detReq;
+    const loading = { state: "loading", data: null, error: null, req, more: null };
+    DET.set(key, loading);
+    paintMem("matters");
+    try {
+      const data = await H.api(recordsPath(e));
+      if (DET.get(key) !== loading) return;
+      DET.set(key, { state: "ready", data: checked(data, e), error: null, req, more: null });
+    } catch (err) {
+      if (DET.get(key) !== loading) return;
+      DET.set(key, { state: "error", data: null, error: X.memoryError(err), req, more: null });
+    }
+    paintMem("matters");
+  }
+
+  // The next page of a matter's records: one at a time; an answer for a fold
+  // read again (closed and opened, or another revision) since is dropped. A
+  // matter that changed or went in between shows only that.
+  async function moreRecords(e, key) {
+    const d = DET.get(key);
+    if (!d || d.state !== "ready" || !d.data.nextCursor || (d.more && d.more.state === "loading")) return;
+    const from = d.data.entries.length, more = { state: "loading", from };
+    d.more = more;
+    paintMem("matters");
+    try {
+      const data = await H.api(recordsPath(e, d.data.nextCursor));
+      if (DET.get(key) !== d || d.more !== more) return;
+      d.data = X.moreRecords(d.data, checked(data, e));
+      d.more = { state: "done", from };
+    } catch (err) {
+      if (DET.get(key) !== d || d.more !== more) return;
+      const error = X.memoryError(err);
+      if (error.kind === "changed" || error.kind === "missing") Object.assign(d, { state: "error", data: null, error, more: null });
+      else d.more = { state: "error", error, from, restart: !!err && err.status === 400 };
+    }
+    paintMem("matters");
+  }
+
+  const RECORD_FLAG = { superseded: "旧版", retired: "已停用", unknown: "状态未知" };
+  function paintRecords(body, e, key) {
+    const s = DET.get(key);
+    const reread = () => { loadMemory("matters"); };
+    if (!s || s.state === "loading") { body.replaceChildren(waiting("正在读取…")); return; }
+    if (s.state === "error") {
+      const err = s.error;
+      if (err.kind === "changed") body.replaceChildren(failure("这条已经更新，重新读取后再看。", reread, "重新读取"));
+      else if (err.kind === "missing") body.replaceChildren(failure("没有找到这条事项：它可能已经变化。", reread, "重新读取"));
+      else if (err.kind === "denied") body.replaceChildren(failure("没有权限查看详情：" + err.text + "。"));
+      else body.replaceChildren(failure("没能读取详情：" + err.text + "。", () => loadRecords(e, key)));
+      return;
+    }
+    const d = s.data, parts = [];
+    if (d.entries.length) {
+      const list = node("ul", "cx-records");
+      const first = landed(s.more);
+      d.entries.forEach((r, i) => {
+        const li = record(r);
+        if (i === first) mark(li, key);
+        list.append(li);
+      });
+      parts.push(list);
+    } else if (!d.nextCursor) parts.push(note("还没有记录。"));
+    if (d.nextCursor) parts.push(moreRow(key, s.more, () => moreRecords(e, key), () => loadRecords(e, key)));
+    body.replaceChildren(...parts);
+  }
+
+  // One record: what was noted, the words it quotes while they are still
+  // what was said, when, and where it was said when that is here.
+  function record(r) {
+    const li = node("li", "cx-record");
+    const text = r.summary || (r.quote ? "" : "（没有内容）");
+    if (text) li.append(node("p", "cx-record-text", text));
+    if (r.quote) li.append(node("blockquote", "cx-quote", r.quote));
+    const meta = node("p", "cx-record-meta");
+    if (r.at) meta.append(node("time", "cx-src-time", stamp(r.at)));
+    if (r.sourceStatus === "changed") meta.append(node("span", "", "原话已改动"));
+    if (RECORD_FLAG[r.status]) meta.append(node("span", "", RECORD_FLAG[r.status]));
+    const here = showHere(r);
+    if (here) meta.append(here);
+    if (meta.childNodes.length) li.append(meta);
+    return li;
   }
 
   // ------------------------------------------------- 这个对话的便笺

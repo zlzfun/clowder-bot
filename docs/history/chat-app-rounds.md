@@ -245,6 +245,15 @@
 
 **前端**：已完成并合入（第 59 项，`378c9db3`）：由本机 Claude Code（`claude-opus-5-5`，xhigh）实现。`chat-cards*` 支持单题/多题、单选/多选、「其他」自定义输入、密码输入、可跳过题目、链接/表单征询与对话决定的原位作答及内存草稿保持；`GET .../approvals?ids=...` 按 50 条分批查询早先页卡片结果；「去确认」复用 `ClowderLocate` 往前翻页定位卡片并处理并发查找取消。经过 Codex（`gpt-6-astra`，xhigh）两轮只读检视，13 条问题全部修正。全量测试通过。
 
+<a id="round-23"></a>
+### 第 23 轮 · 记忆里查看事项记忆（2026-11-28）
+
+**内容**：完成待办 `T-18`。单聊「记忆」页在「关于你」「你的偏好」之后新增只读「事项」目录与按需展开的记录、游标分页和当前对话原话定位（写操作仍按 `D-11` 留待使用者决定）。
+
+**后端（适配层）**：已完成并合入（`5e4d54df`）：`server/xbot/memory.ts` 新增 `GET /xbot-api/memory/matters` 与 `GET /xbot-api/memory/matters/:id`，只读转接原生 `/api/memory/matters` 目录与记录，支持游标分页与 `expectedRevision` 核对；原生未开启事项记忆（`503 matter_memory_unavailable`）时如实映射为 `readStatus: "unavailable"`，原话所在消息已改动时不再返回旧 `quote`，409 `stale_revision`、404、400、401/403 如实区分。详见 [聊天体验适配契约](../chat-experience-api.md)「只读长期记忆」。
+
+**前端**：已完成并合入（第 62 项，`6f71f4d7`）：由本机 Claude Code（`claude-opus-5-5`，xhigh）实现。`chat-experience*` 新增默认折叠的「事项」及按版本展开的「记录 · N」，支持目录与记录各自的「加载更多」、原话改动提示（「原话已改动」）及当前对话内消息定位（「在对话里查看」）。经过 Codex（`gpt-6-astra`，xhigh）两轮只读检视，4 条问题全部修正（重读目录清掉缓存记录以反映原话改动、单调递增请求号防止迟到记录覆盖、透传详情页 `sources_changed`、末页无新增条目时无障碍焦点回退）。全量测试通过。
+
 ## 部署记录
 
 部署的做法在 [验证环境与部署](../operations.md)。第 17、18 轮的部署、2026-11-26 日常实例换引擎和 2026-11-27 部署「同一时间只有一只猫」只写在上面各轮自己的记录里，换引擎的经过另见 [上游维护记录](upstream-records.md)。

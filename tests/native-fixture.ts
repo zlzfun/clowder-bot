@@ -62,7 +62,8 @@ export class NativeFixture implements NativeTransport {
   settledApprovalItems: any[] = [];
   runtimeInteractions = new Map<string, any>();
   artifactRows = new Map<string, any[]>();
-  memoryViews: Record<string, any> = { profile: {readStatus:'ready',entries:[]}, taste: {readStatus:'ready',entries:[]} };
+  memoryViews: Record<string, any> = { profile: {readStatus:'ready',entries:[]}, taste: {readStatus:'ready',entries:[]}, matters: {items:[]} };
+  matterPages: Record<string, any> = {};
   uploads = new Map<string, Buffer>();
   fail?: ApiError;
   /** Why the engine's routing preview picks a cat when the words name none. */
@@ -314,6 +315,18 @@ export class NativeFixture implements NativeTransport {
       if(method!=='GET')throw new Error('Fixture forbids long-term memory writes');
       if(parts[5]==='source')result={status:'ready',sources:[]};
       else result=this.memoryViews[parts[3]];
+    }
+    else if (parts[2] === 'memory' && parts[3] === 'matters') {
+      if (method !== 'GET') throw new Error('Fixture forbids long-term memory writes');
+      if (parts[4]) {
+        const page = this.matterPages[decodeURIComponent(parts[4])];
+        if (!page) throw new ApiError(404, 'not_available', { error: 'not_available' });
+        const expected = url.searchParams.get('expectedRevision');
+        if (expected !== null && Number(expected) !== page.matter?.revision) throw new ApiError(409, 'stale_revision', { error: 'stale_revision' });
+        const history = url.searchParams.get('history') === 'true';
+        const entries = Array.isArray(page.entries) ? (history ? page.entries : page.entries.filter((e: any) => e.status === 'active')) : [];
+        result = { ...page, entries };
+      } else result = this.memoryViews.matters;
     }
     else if (parts[2] === 'memory') result = method === 'GET' ? { entries: [] } : { key: body?.key };
     else throw new Error(`Unconfigured fixture route: ${method} ${path}`);

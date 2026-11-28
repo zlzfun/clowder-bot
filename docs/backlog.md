@@ -55,10 +55,6 @@
 - **T-16** 改已有的定时。现在不能编辑，也没有手动立即触发、任意 cron、高级调度治理和群聊里的定时。上游已有改参数的接口（F139，`POST /api/schedule/tasks/:id/parameters`），「Bot 以后可以用它做『改提醒内容』」。——出处：xbot-api.md 未迁移段；schedules-api.md「交互边界」；history/upstream-next-20261126.md「四」「十」
 - **T-17** 猫提出改一个定时时，确认卡的正文是服务端给的「名称 · 规则」（如「喝水提醒 · 每 1 小时」），不说改的是什么。——出处：xbot-frontend.md 第 53 项
 
-### 记忆
-
-- **T-18** 事项记忆（Matter）上游已有，记忆页现在只有「关于你」和「你的偏好」，「以后可用」。写操作见 D-11。——出处：history/upstream-next-20261126.md「三」「十」
-
 ### 文件与任务
 
 - **T-19** 猫发出的文件只有原生发布到 `/uploads/` 的读得到字节，其他来源保留卡片、显示原因，不能下载。（摘录 01 记为可做；摘录 02 记为可做或等上游，是推断）——出处：chat-experience-api.md「文件」；history/chat-files-collaboration-memory.md「首批实施」「1．发资料，收成果」
