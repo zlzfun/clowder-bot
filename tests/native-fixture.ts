@@ -50,6 +50,7 @@ export class NativeFixture implements NativeTransport {
   calls: Array<{ path: string; method: string; body?: any }> = [];
   cats: NativeCat[] = [];
   runtimes: NativeRuntime[] = [{ id: 'codex', label: 'Codex', clientId: 'openai', installed: true, configuredModel: 'native-default', models: [], readiness: { status: 'configured', checkedAt: 1000 } }];
+  availableClients: Array<{ client: string; provider?: string; label?: string; cli?: string; installed: boolean; hasApiKey?: boolean; authenticated?: boolean; authType?: string; accountRef?: string }> = [];
   threads = new Map<string, NativeThread>();
   messages = new Map<string, NativeMessage[]>();
   /** A smaller page than the callers ask for, to show paging without hundreds of messages. */
@@ -160,10 +161,11 @@ export class NativeFixture implements NativeTransport {
     }
     else if (path === '/api/cat-templates') result = { templates: catTemplates.map(([id, name, roleDescription, personality, teamStrengths, nickname]) => ({ id, name, nickname, roleDescription, personality, teamStrengths, color: { primary: '#888888', secondary: '#eeeeee' } })), clientDefaults: {} };
     else if (url.pathname === '/api/cats/native-runtimes') result = { runtimes: this.runtimes };
+    else if (url.pathname === '/api/first-run/available-clients' && method === 'GET') result = { clients: this.availableClients };
     else if (path === '/api/accounts') result = { providers: [] };
     else if (path === '/api/cats' && method === 'GET') result = { cats: this.cats };
     else if (path === '/api/cats' && method === 'POST') {
-      const cat = { ...body, id: body.catId, breedId: body.catId, configurationRevision: 'r1' } as NativeCat;
+      const cat = { ...body, id: body.catId, breedId: body.breedId ?? body.catId, configurationRevision: 'r1' } as NativeCat;
       const make = () => {
         for (const entry of this.capabilities) if (this.cats.length && this.cats.every(known => entry.blockedCats?.includes(known.id)) && !entry.blockedCats!.includes(cat.id)) entry.blockedCats!.push(cat.id);
         this.cats.push(cat);

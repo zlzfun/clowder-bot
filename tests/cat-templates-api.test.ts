@@ -16,8 +16,23 @@ const config = {
 };
 const seed = { ...config, id: 'seed:maine-coon', name: '缅因猫', nameHint: '砚砚', revision: 7, source: { kind: 'native-seed', breedId: 'maine-coon', variantId: 'codex-default' } };
 class TemplateFixture extends NativeFixture {
-  template = seed;
-  override async request<T>(path: string, options: { method?: string; body?: any } = {}): Promise<T> {
+  template: any = seed;
+  receipts = new Map<string, { payload: string; id: string }>();
+  override async request<T>(path: string, options: { method?: string; body?: any; headers?: Record<string, string> } = {}): Promise<T> {
+    if (path === '/api/cats' && options.method === 'POST' && options.headers?.['idempotency-key']) {
+      this.calls.push({ path, method: 'POST', body: options.body });
+      if (this.fail) throw this.fail;
+      const key = options.headers['idempotency-key'], payload = JSON.stringify(options.body);
+      const receipt = this.receipts.get(key);
+      if (receipt) {
+        if (receipt.payload !== payload) throw new ApiError(409, 'This creation request already belongs to a different configuration');
+        return { cat: structuredClone(this.cats.find(c => c.id === receipt.id)) } as T;
+      }
+      const cat = { ...options.body, id: options.body.catId, breedId: options.body.breedId ?? options.body.catId, configurationRevision: 'r1' } as NativeCat;
+      this.cats.push(cat);
+      this.receipts.set(key, { payload, id: cat.id });
+      return { cat: structuredClone(cat) } as T;
+    }
     if (path.startsWith('/api/bot-cat-templates') || path === '/api/cats/runtime-models') {
       this.calls.push({ path, method: options.method || 'GET', body: options.body });
       if (this.fail) throw this.fail;
@@ -36,7 +51,9 @@ class TemplateFixture extends NativeFixture {
       }
       if (path === '/api/cats/runtime-models') return { status: 'live', models: [{ value: 'gpt-6-astra', label: 'GPT', efforts: [{ value: 'xhigh', label: 'xhigh' }] }] } as T;
       if (options.method === 'DELETE') return { status: 'ok' } as T;
-      if (path === '/api/bot-cat-templates' && (!options.method || options.method === 'GET')) return { templates: [this.template], breeds: [{ id: 'maine-coon', name: '缅因猫' }] } as T;
+      if (path === '/api/bot-cat-templates' && (!options.method || options.method === 'GET')) {
+        return { templates: [this.template], breeds: [{ id: 'maine-coon', name: '缅因猫' }, { id: 'dragon-li', name: '狸花猫', color: { primary: '#556677', secondary: '#ddeeff' } }] } as T;
+      }
       return { template: this.template } as T;
     }
     return super.request(path, options);
@@ -125,4 +142,75 @@ test('creation preserves request identity, native configuration and separate ava
   assert.equal((await r.call('/xbot-api/bots', 'POST', { ...body, runtimeId: 'codex' })).status, 400);
   assert.equal((await r.call('/xbot-api/bots', 'POST', { ...body, catConfig: { ...config, command: 'bad' } })).status, 400);
   assert.equal((await r.call('/xbot-api/bots/配置猫', 'PATCH', { catConfig: config })).status, 400);
+});
+
+test('OpenCode model lookup and template creation compose unpatched native endpoints cleanly', async t => {
+  const r = await setup(t);
+  assert.equal((await r.call('/xbot-api/agents/opencode/models', 'POST', {})).status, 404);
+  r.native.availableClients = [{ client: 'opencode', label: 'OpenCode', cli: 'opencode', installed: false, authenticated: false }];
+  const unavailable = await r.call('/xbot-api/agents/opencode/models', 'POST', {});
+  assert.equal(unavailable.status, 200);
+  assert.deepEqual(await unavailable.json(), { status: 'unavailable', models: [], message: 'not_installed' });
+
+  r.native.availableClients = [{ client: 'opencode', label: 'OpenCode', cli: '/opt/homebrew/bin/opencode', installed: true, authenticated: true }];
+  const configured = await r.call('/xbot-api/agents/opencode/models', 'POST', { refresh: true });
+  assert.equal(configured.status, 200);
+  assert.deepEqual(await configured.json(), { status: 'configured', models: [], effortOptions: [], defaultModelSource: 'tool_config', message: 'configured_only' });
+
+  const ocTemplate = { ...seed, id: 'seed:dragon-li', name: '狸花猫', revision: 12, runtimeId: 'opencode', breed: { mode: 'explicit', breedId: 'dragon-li' }, model: { mode: 'inherit' }, effort: { mode: 'inherit' } };
+  r.native.template = ocTemplate;
+  const ocConfig = { runtimeId: 'opencode', breed: { mode: 'explicit', breedId: 'dragon-li' }, model: { mode: 'inherit' }, effort: { mode: 'inherit' }, portrait: { roleDescription: '写代码' } };
+  assert.equal((await r.call('/xbot-api/bots', 'POST', { name: '错', catConfig: { ...ocConfig, effort: { mode: 'explicit', value: 'high' } }, idempotencyKey: randomUUID() })).status, 422);
+  assert.equal((await r.call('/xbot-api/bots', 'POST', { name: '旧模板', catConfig: ocConfig, sourceTemplate: { id: ocTemplate.id, revision: 11 }, idempotencyKey: randomUUID() })).status, 409);
+
+  const key = randomUUID();
+  const body = { name: '小狸花', catConfig: ocConfig, sourceTemplate: { id: ocTemplate.id, revision: 12 }, idempotencyKey: key };
+  const created = await r.call('/xbot-api/bots', 'POST', body);
+  assert.equal(created.status, 201);
+  assert.equal(r.native.calls.some(c => c.path.endsWith('/instantiate')), false);
+  const postCat = r.native.calls.findLast(c => c.path === '/api/cats' && c.method === 'POST')!;
+  assert.equal(postCat.body.clientId, 'opencode');
+  assert.equal(postCat.body.breedId, 'dragon-li');
+  assert.equal(postCat.body.defaultModel, '');
+  assert.equal(postCat.body.cli.command, '/opt/homebrew/bin/opencode');
+  assert.equal(postCat.body.cli.effort, null);
+
+  // Source template edited later: identical idempotent retry still succeeds without rejecting.
+  r.native.template = { ...ocTemplate, revision: 13 };
+  assert.equal((await r.call('/xbot-api/bots', 'POST', body)).status, 201);
+  assert.equal(r.native.cats.length, 1);
+
+  // Lost response before store persistence + breed color change + template revision bump:
+  // retry replays original payload (no 409) and records original template provenance (rev 12, not 13).
+  const lostKey = randomUUID(), lostBody = { name: '小金渐层', catConfig: ocConfig, sourceTemplate: { id: ocTemplate.id, revision: 12 }, idempotencyKey: lostKey };
+  r.native.template = ocTemplate;
+  const origReq = r.native.request.bind(r.native);
+  let dropNextPost = true;
+  r.native.request = (async (path: string, opts?: any) => {
+    if (path === '/api/bot-cat-templates' && (!opts?.method || opts.method === 'GET')) {
+      return { templates: [r.native.template], breeds: [{ id: 'dragon-li', name: '狸花猫', color: { primary: dropNextPost ? '#556677' : '#112233', secondary: '#ddeeff' } }] };
+    }
+    const out = await origReq(path, opts);
+    if (path === '/api/cats' && opts?.method === 'POST' && dropNextPost) {
+      dropNextPost = false;
+      throw new ApiError(503, 'lost answer');
+    }
+    return out;
+  }) as typeof r.native.request;
+  assert.equal((await r.call('/xbot-api/bots', 'POST', lostBody)).status, 503);
+  r.native.template = { ...ocTemplate, revision: 13, name: '改名后的狸花猫' };
+  const recovered = await r.call('/xbot-api/bots', 'POST', lostBody);
+  assert.equal(recovered.status, 201);
+  const lostCat = r.native.cats.find(c => c.name === '小金渐层')!;
+  assert.deepEqual(r.store.bot(lostCat.id).sourceTemplate, { id: ocTemplate.id, revision: 12, name: '狸花猫' });
+
+  // Concurrent creations with the same name must not create two cats with duplicate names.
+  r.native.request = origReq;
+  r.native.template = ocTemplate;
+  const [c1, c2] = await Promise.all([
+    r.call('/xbot-api/bots', 'POST', { name: '重名测试', catConfig: ocConfig, idempotencyKey: randomUUID() }),
+    r.call('/xbot-api/bots', 'POST', { name: '重名测试', catConfig: ocConfig, idempotencyKey: randomUUID() }),
+  ]);
+  assert.deepEqual([c1.status, c2.status].sort(), [201, 409]);
+  assert.equal(r.native.cats.filter(c => c.name === '重名测试').length, 1);
 });

@@ -54,9 +54,13 @@ interface Breed {id:string;name:string}
 - 左上「＋」创建成功后关闭弹层并进入单聊。创建接口返回的是成员回执；打开空单聊会另外请求这只猫发送问候，回复或执行错误以原生消息记录为准。
 - 原 `templateId` 是头像/角色兼容字段，不能用它传新模板 ID。
 
+- OpenCode（`runtimeId: 'opencode'`）不经 `POST /api/bot-cat-templates/instantiate`（P005 仅列举 `claude`/`codex`/`kimi`）：`POST /xbot-api/bots` 组合读取 `/api/bot-cat-templates`、OpenCode 探测结果与未打补丁 `POST /api/cats`（带 `onboarding:clowder-bot-template:cat:<idempotencyKey>` 幂等键，显式 `effort` 返回 422），`POST /xbot-api/agents/opencode/models` 在已安装时返回 `{status:'configured', models:[], effortOptions:[], defaultModelSource:'tool_config', message:'configured_only'}`。
+
 ## 已有猫猫
 
 `GET /xbot-api/bots/:name` 增加 `cat_config:CatConfig|null` 与 `source_template:{id,revision,name}|null`；配置来自原生 cat，不从后来被修改的模板读。
 原“人设卡”选择不能继续承诺实时绑定模板；编辑资料里保留直接职责编辑，新增模板只影响新建；去掉旧“应用人设卡”控件。资料 JSON 导入导出更名为“导入资料/导出资料”以免与模板混淆，行为保留。
 
-若已有缅因猫报 `model_not_found`，在猫猫详情的「执行 Agent」里重新选择 Codex，点「改用此 Agent」。现有 `PUT /xbot-api/bots/:name/agent` 会清除该成员的模型和推理强度覆盖，保留猫与聊天记录。有任务正在执行或排队时先等待或停止，再更换并重新发消息。
+若已有缅因猫等本机 `native_tool` 猫猫因成员上残留的旧显式 `defaultModel` 报 `model_not_found`：
+- 单聊与群聊的 `ended` 会带上原生 `metadata.cliDiagnostics.reasonCode`（`code: 'model_not_found'` 与可读详情），且仅在该成员仍为带非空 `defaultModel` 的受支持 `native_tool` 时附带 `resetAgent: { bot: string }`。
+- `PUT /xbot-api/bots/:name/agent` 除 `{ runtimeId }` 外还接受 `{ resetDefaults: true }`，校验当前可恢复的本机 Agent 并校验非忙状态后，重新绑定该 Agent 并清回默认模型与推理强度（`defaultModel: ''`, `cli.effort: null`, `cli.serviceTier: null`），保留猫与聊天记录；也可在资料 › 高级 ›「执行 Agent」里手动重选。有任务正在执行或排队时 409 拒绝，不强行中断。

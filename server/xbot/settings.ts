@@ -3,7 +3,7 @@ import { hostname } from 'node:os';
 import { z } from 'zod';
 import { ApiError } from '../errors.js';
 import { BotBridge, encode } from '../native/bridge.js';
-import { agentInventory, bindAgent, startSummary } from '../native/agents.js';
+import { agentInventory, bindAgent, resetAgentDefaults, startSummary } from '../native/agents.js';
 import { type CatTemplate, presentTemplate } from '../native/cat-templates.js';
 
 export function createXbotSettingsRouter(bridge: BotBridge) {
@@ -13,6 +13,13 @@ export function createXbotSettingsRouter(bridge: BotBridge) {
   router.get('/start', async (req, res) => res.json(await startSummary(bridge, req.query.refresh === '1')));
   router.post('/agents/:id/models', async (req, res) => {
     const input = z.object({ model: z.string().max(512).optional(), refresh: z.boolean().optional() }).strict().parse(req.body ?? {});
+    if (req.params.id === 'opencode') {
+      const runtime = (await bridge.runtimes(Boolean(input.refresh))).find(r => r.id === 'opencode');
+      if (!runtime) throw new ApiError(404, '运行工具不存在，请重新探测');
+      return res.json(runtime.installed
+        ? { status: 'configured', models: [], effortOptions: [], defaultModelSource: 'tool_config', message: 'configured_only' }
+        : { status: 'unavailable', models: [], message: 'not_installed' });
+    }
     res.json(await native.request('/api/cats/runtime-models', { method: 'POST', body: { runtimeId: req.params.id, ...input } }));
   });
   router.get('/cat-templates', async (_req, res) => {
@@ -27,8 +34,14 @@ export function createXbotSettingsRouter(bridge: BotBridge) {
   router.put('/cat-templates/:id', async (req, res) => res.json(await native.request(`/api/bot-cat-templates/${encode(req.params.id)}`, { method: 'PUT', body: req.body })));
   router.delete('/cat-templates/:id', async (req, res) => res.json(await native.request(`/api/bot-cat-templates/${encode(req.params.id)}`, { method: 'DELETE', body: req.body })));
   router.put('/bots/:name/agent', async (req, res) => {
-    const { runtimeId } = z.object({ runtimeId: z.string().min(1).max(100) }).strict().parse(req.body);
-    res.json(await bindAgent(bridge, await bridge.cat(req.params.name), runtimeId));
+    const input = z.union([
+      z.object({ runtimeId: z.string().min(1).max(100) }).strict(),
+      z.object({ resetDefaults: z.literal(true) }).strict(),
+    ]).parse(req.body);
+    const cat = await bridge.cat(req.params.name);
+    res.json('resetDefaults' in input
+      ? await resetAgentDefaults(bridge, cat)
+      : await bindAgent(bridge, cat, input.runtimeId));
   });
   const retired = () => { throw new ApiError(410, '模型商店已退出。请在「Agents」里选择。'); };
   for (const path of ['/models', '/providers', '/providers/{*path}', '/setup/key', '/bots/:name/binding']) router.all(path, retired);

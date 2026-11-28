@@ -26,7 +26,7 @@ test('each face is paired with the tool its cat has in the pinned engine', { ski
     assert.deepEqual(faceTools[face].runtimes, runtimesOfClient[variant.clientId]);
   }
   // The tools the app can connect each lead back to one cat; so does a member the engine runs over ACP, by its client.
-  assert.deepEqual(['claude', 'codex', 'kimi'].map(id => faceOfTool({ id, label: id, clientId: '', installed: true, models: [] })), ['ragdoll', 'maine-coon', 'turkish-van']);
+  assert.deepEqual(['claude', 'codex', 'kimi', 'opencode'].map(id => faceOfTool({ id, label: id, clientId: '', installed: true, models: [] })), ['ragdoll', 'maine-coon', 'turkish-van', 'dragon-li']);
   assert.deepEqual([faceOfTool({ id: 'acp:gemini', label: 'x', clientId: 'google', installed: true, models: [] }), faceOfTool({ id: 'acp:other', label: 'x', clientId: 'unknown', installed: true, models: [] })], ['siamese', undefined]);
   // The protocol fixture serves these same templates, word for word.
   assert.deepEqual(catTemplates, upstream.roleTemplates.map(t => [t.id, t.name, t.roleDescription, t.personality, t.teamStrengths, t.nickname]));

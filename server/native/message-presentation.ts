@@ -110,16 +110,30 @@ export function replyInProgress(message: NativeMessage): boolean {
 
 /**
  * How a reply that did not finish normally ended, from the native response
- * lifecycle: stopped by the owner, failed (with native's own reason when it
- * gave one, for an optional details view) or interrupted. Undefined for a
- * reply that completed or is still being written.
+ * lifecycle: stopped by the owner, failed (with native's own reason or
+ * structured CLI diagnostics when it gave one, for an optional details view) or
+ * interrupted. Undefined for a reply that completed or is still being written.
  */
-export function replyEnding(message: NativeMessage): { how: 'stopped' | 'failed' | 'interrupted'; reason?: string } | undefined {
+export function replyEnding(message: NativeMessage): { how: 'stopped' | 'failed' | 'interrupted'; reason?: string; code?: string } | undefined {
   if (message.type !== 'assistant') return undefined;
-  const status = message.lifecycle?.status, reason = message.lifecycle?.reason;
+  const status = message.lifecycle?.status, rawReason = message.lifecycle?.reason;
   const how = status === 'failed' ? 'failed' : status === 'interrupted' ? 'interrupted' : status === 'canceled' || status === 'cancelled' ? 'stopped' : undefined;
   if (!how) return undefined;
-  return { how, ...(how !== 'stopped' && typeof reason === 'string' && reason.trim() ? { reason: reason.trim().slice(0, 2000) } : {}) };
+  if (how === 'stopped') return { how };
+  const diag = record(record(message.metadata).cliDiagnostics);
+  const code = typeof diag.reasonCode === 'string' && diag.reasonCode.trim() ? diag.reasonCode.trim() : undefined;
+  const diagLines = [diag.publicSummary, diag.safeExcerpt]
+    .filter((part): part is string => typeof part === 'string' && !!part.trim())
+    .map(part => part.trim());
+  const lifeReason = typeof rawReason === 'string' && rawReason.trim() ? rawReason.trim() : undefined;
+  const reason = diagLines.length && (!lifeReason || lifeReason === 'PROVIDER_EXECUTION_FAILED')
+    ? diagLines.join('\n')
+    : lifeReason ?? (diagLines.length ? diagLines.join('\n') : undefined);
+  return {
+    how,
+    ...(reason ? { reason: reason.slice(0, 2000) } : {}),
+    ...(code ? { code } : {}),
+  };
 }
 
 /**

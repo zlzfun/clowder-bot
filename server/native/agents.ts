@@ -7,7 +7,7 @@ import type { NativeCat } from './types.js';
 // These are the native carriers the Bot adapter can bind without synthesizing
 // launcher arguments or plugin profiles. Other discovered runtimes stay visible.
 export function supportsRuntime(runtime: NativeRuntime): boolean {
-  return ({ codex: 'openai', claude: 'anthropic', kimi: 'kimi' } as Record<string, string>)[runtime.id] === runtime.clientId
+  return ({ codex: 'openai', claude: 'anthropic', kimi: 'kimi', opencode: 'opencode' } as Record<string, string>)[runtime.id] === runtime.clientId
     && !runtime.acp && !runtime.agyCarrier;
 }
 export function runtimeUnavailable(runtime: NativeRuntime): string | null {
@@ -139,7 +139,7 @@ export function faceTool(face: Face, runtimes: NativeRuntime[]): FaceTool {
   const usable = listed.find(runtime => !runtimeUnavailable(runtime));
   if (usable) return { label: usable.label, state: usable.readiness?.status === 'configured' ? 'ready' : 'unknown', runtime: usable };
   const adapted = listed.filter(supportsRuntime), label = (adapted[0] ?? listed.find(runtime => runtime.installed) ?? listed[0])?.label ?? wanted.label;
-  if (!adapted.length) return { label, state: 'unsupported', reason: `暂不支持 ${label}` };
+  if (!adapted.length) return { label, state: 'unsupported', reason: face === 'bengal' ? 'Antigravity 已停用' : `暂不支持 ${label}` };
   const waiting = adapted.find(runtime => runtime.installed && runtime.readiness?.status === 'login_required');
   if (waiting) return { label, state: 'login', reason: `${label} 还没有登录`, ...(waiting.readiness?.loginCommand ? { loginCommand: waiting.readiness.loginCommand } : {}) };
   return { label, state: 'missing', reason: `这台电脑上还没有装 ${label}` };
@@ -221,4 +221,12 @@ export async function bindAgent(bridge: BotBridge, cat: NativeCat, runtimeId: st
     },
   });
   return { name: updated.name, agent: agentBinding(updated, runtimes) };
+}
+
+/** Re-binds a local native_tool cat to its current Agent, clearing explicit model/effort overrides back to defaults. */
+export async function resetAgentDefaults(bridge: BotBridge, cat: NativeCat) {
+  const runtimes = await bridge.runtimes(true);
+  const runtime = runtimeForCat(cat, runtimes);
+  if (!runtime) throw new ApiError(422, '这只猫猫当前不是可恢复的本机 Agent 接入方式，请在资料 › 高级里选择');
+  return bindAgent(bridge, cat, runtime.id);
 }

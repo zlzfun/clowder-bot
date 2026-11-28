@@ -4,7 +4,7 @@ import { ProductStore } from '../product-store.js';
 import type { NativeCat, NativeMessage, NativeThread, NativeTransport } from './types.js';
 import { defaultRuntime, faceOfTool, faceTool, faceTools, memberCliArgs, runtimeUnavailable, supportsRuntime, faceTemplates, type Face, type FaceTemplate } from './agents.js';
 import { approvalReceipt, approvalReceiptText, engineNote, messageDisplayText, messagePresentation, replyEnding, replyInProgress, rosterRefusals, scheduledReminder } from './message-presentation.js';
-import { avatarBreed, type CatConfig, type SourceTemplate } from './cat-templates.js';
+import { avatarBreed, type CatConfig, type CatTemplate, type SourceTemplate } from './cat-templates.js';
 import { clip } from './text.js';
 import { cardReceipts, messageBlocks, type ApprovalDecision, type RuntimeBlockState } from './blocks.js';
 import { readRuntimeInteractions, runtimeCardBinding, runtimeSummary, runtimeTerminalState } from './runtime-interactions.js';
@@ -71,6 +71,29 @@ const accent = (cat: NativeCat) => hex(cat.color?.primary) && hex(cat.color?.sec
  */
 export const targetRefused = (error: unknown): error is ApiError => error instanceof ApiError && error.status === 409
   && ['ROUTING_TARGET_UNAVAILABLE', 'ROUTING_CONFIRMATION_REQUIRED'].includes(String((error.details as { code?: unknown } | undefined)?.code));
+function inferBreedFromModel(model: string): string | null {
+  const value = model.toLowerCase().trim();
+  const families: [string, RegExp][] = [
+    ['ragdoll', /(?:claude|\bopus\b|\bsonnet\b|\bhaiku\b|\bfable\b)/],
+    ['maine-coon', /(?:\bgpt(?:-|\b)|\bcodex\b|^o[134](?:-|$))/],
+    ['siamese', /gemini/],
+    ['dragon-li', /(?:\bglm(?:-|\b)|zhipu\/)/],
+    ['moonshot', /(?:kimi|moonshot)/],
+    ['dsh', /(?:deepseek|\bdsh\b)/],
+  ];
+  const matches = families.filter(([, pattern]) => pattern.test(value));
+  return matches.length === 1 ? matches[0]![0] : null;
+}
+
+/** Attaches `resetAgent` to `model_not_found` endings only when the sender is a native_tool cat with an explicit model override. */
+function projectEnding(message: NativeMessage, cats: NativeCat[]) {
+  const ending = replyEnding(message);
+  if (ending?.how !== 'failed' || ending.code !== 'model_not_found' || !message.catId) return ending;
+  const sender = cats.find(c => c.id === message.catId);
+  if (!sender || sender.configurationSource !== 'native_tool' || sender.accountRef || sender.agentProvider || sender.carrier === 'acp') return ending;
+  if (!sender.defaultModel?.trim() || !['openai', 'anthropic', 'kimi', 'opencode'].includes(sender.clientId)) return ending;
+  return { ...ending, resetAgent: { bot: sender.name } };
+}
 export class BotBridge {
   private directCreates = new Map<string, Promise<NativeThread>>();
   private greetingRequests = new Map<string, Promise<GreetingAdmission>>();
@@ -99,7 +122,28 @@ export class BotBridge {
   private readonly simpleRequests = new Map<string, { input: string; body: Record<string, unknown>; face: string; tool: string }>();
   /** The resolutions of those requests that are still being worked out, so that identical requests arriving together share one. */
   private readonly simpleResolving = new Map<string, Promise<{ input: string; body: Record<string, unknown>; face: string; tool: string }>>();
-  runtimes(refresh = false): Promise<NativeRuntime[]> { return this.native.request<{ runtimes: NativeRuntime[] }>(`/api/cats/native-runtimes${refresh ? '?refresh=1' : ''}`).then(r => r.runtimes); }
+  /** OpenCode template creation requests in flight or recently resolved, keyed by idempotencyKey. */
+  private readonly templateRequests = new Map<string, { input: string; payload: Record<string, unknown>; sourceTemplate?: SourceTemplate }>();
+  private readonly templateResolving = new Map<string, Promise<{ input: string; payload: Record<string, unknown>; sourceTemplate?: SourceTemplate }>>();
+  async runtimes(refresh = false): Promise<NativeRuntime[]> {
+    const [{ runtimes }, clients] = await Promise.all([
+      this.native.request<{ runtimes: NativeRuntime[] }>(`/api/cats/native-runtimes${refresh ? '?refresh=1' : ''}`),
+      // Upstream exposes OpenCode detection on available-clients rather than native-runtimes; merge it when missing.
+      this.native.request<{ clients?: Array<{ client?: string; label?: string; cli?: string; installed?: boolean; authenticated?: boolean }> }>('/api/first-run/available-clients').catch(() => null),
+    ]);
+    const opencode = clients?.clients?.find(entry => entry.client === 'opencode');
+    if (opencode && !runtimes.some(r => r.id === 'opencode' && r.clientId === 'opencode')) {
+      const installed = opencode.installed === true;
+      return [...runtimes, {
+        id: 'opencode', label: opencode.label || 'OpenCode', clientId: 'opencode', installed,
+        ...(installed ? { command: opencode.cli || 'opencode' } : {}),
+        models: [], transport: 'ndjson',
+        // Upstream checks only auth.json + ANTHROPIC_API_KEY, so unconfirmed OpenCode auth stays 'unknown' (usable to try).
+        readiness: { status: !installed ? 'not_installed' : opencode.authenticated ? 'configured' : 'unknown', checkedAt: Date.now(), loginCommand: 'opencode auth login' },
+      }];
+    }
+    return runtimes;
+  }
   async cat(name: string): Promise<NativeCat> {
     const cat = (await this.cats()).find(c => c.name === name || c.id === name);
     if (!cat) throw new ApiError(404, '找不到这只猫猫');
@@ -206,7 +250,7 @@ export class BotBridge {
       if (note === null) continue;
       const refusal = refusals.get(message.id) ?? (receipt ? approvalReceiptText(receipt) : reminder ? `提醒：${reminder}` : note);
       const text = refusal ?? messageDisplayText(message, thread.id, presentation.speaker?.name), inProgress = replyInProgress(message);
-      const rich = message.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(message, decided, runtimeStates), ending = replyEnding(message);
+      const rich = message.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(message, decided, runtimeStates), ending = projectEnding(message, cats);
       const attachments = this.workspaces.messageFiles(thread.id, message), time = new Date(message.timestamp).toISOString();
       // The owner's or a cat's own words and nothing else: what a reaction is made of, and what one can be drawn on.
       const said = !refusal && presentation.presentation_kind === 'message' && (message.type === 'user' || (message.type === 'assistant' && !!message.catId));
@@ -268,7 +312,7 @@ export class BotBridge {
       const reminder = scheduledReminder(m), note = engineNote(m);
       if (note === null) continue;
       const refusal = refusals.get(m.id) ?? (receipt ? approvalReceiptText(receipt) : reminder ? `提醒：${reminder}` : note);
-      const text = refusal ?? messageDisplayText(m, thread.id, presentation.speaker?.name), inProgress = replyInProgress(m), ending = replyEnding(m);
+      const text = refusal ?? messageDisplayText(m, thread.id, presentation.speaker?.name), inProgress = replyInProgress(m), ending = projectEnding(m, cats);
       const attachments = this.workspaces.messageFiles(thread.id, m), time = new Date(m.timestamp).toISOString();
       const said = !refusal && presentation.presentation_kind === 'message' && (m.type === 'user' || (m.type === 'assistant' && !!m.catId));
       const emoji = said && !inProgress && !ending && !attachments.length && !rich.blocks.length && !rich.hidden ? soleEmoji(text) : undefined;
@@ -491,6 +535,7 @@ export class BotBridge {
     if (input.catConfig) {
       if (source || input.runtimeId || input.templateId || input.persona !== undefined || input.description !== undefined)
         throw new ApiError(400, '创建配置不能与旧版字段混用');
+      if (input.catConfig.runtimeId === 'opencode') return this.createOpencodeTemplateCat(input);
       // The engine's route names the cat after the request key (patches/0005-cat-templates.patch), so its id is known before it exists.
       const key = input.idempotencyKey ?? randomUUID(), expected = `bot-${createHash('sha256').update(key).digest('hex').slice(0, 24)}`;
       const { made: result, notice } = await this.computer.guard(expected, () => this.cats().then(cats => cats.some(known => known.id === expected)), () => this.native.request<{ cat: NativeCat; sourceTemplate: SourceTemplate | null }>('/api/bot-cat-templates/instantiate', {
@@ -529,6 +574,102 @@ export class BotBridge {
     Object.assign(this.store.bot(cat.id), { templateId: template.id, avatarSeed: input.avatar_seed, timezone: input.timezone });
     this.store.save();
     return this.noted(await this.withStartingArguments(cat), notice);
+  }
+  /** Composes OpenCode template creation on unpatched POST /api/cats because P005 rejects opencode. */
+  private async createOpencodeTemplateCat(input: CreateBot): Promise<NativeCat> {
+    const config = input.catConfig!;
+    if (!config.portrait.roleDescription.trim()) throw new ApiError(422, '请填写职责');
+    if (config.effort.mode === 'explicit') throw new ApiError(422, 'OpenCode 不支持设置推理强度');
+    const key = input.idempotencyKey ?? randomUUID(), expected = `bot-${createHash('sha256').update(key).digest('hex').slice(0, 24)}`;
+    const model = config.model.mode === 'explicit' ? config.model.value.replace(/\/+$/, '') : '';
+    const requestHash = createHash('sha256').update(JSON.stringify([input.name, { ...config, model: { ...config.model, ...(config.model.mode === 'explicit' ? { value: model } : {}) } }, input.sourceTemplate ?? null])).digest('hex');
+    const different = () => new ApiError(409, '创建请求的配置已改变，请重新创建');
+    const existing = (await this.cats()).find(known => known.id === expected);
+    let sent = this.templateRequests.get(key);
+    if (sent && sent.input !== requestHash) {
+      if (existing) throw different();
+      this.templateRequests.delete(key);
+      sent = undefined;
+    }
+    if (!sent && existing) {
+      if (existing.name !== input.name || existing.clientId !== 'opencode' || (existing.defaultModel ?? '') !== model
+        || existing.roleDescription !== config.portrait.roleDescription
+        || (config.breed.mode === 'explicit' && existing.breedId && existing.breedId !== config.breed.breedId)) throw different();
+      const meta = this.store.bot(existing.id);
+      const identity = avatarBreed(existing.breedId ?? (config.breed.mode === 'explicit' ? config.breed.breedId : 'dragon-li'));
+      Object.assign(meta, { templateId: identity, avatarSeed: input.avatar_seed || meta.avatarSeed || `cat:${identity}`, ...(input.timezone ? { timezone: input.timezone } : {}) });
+      this.store.save();
+      return this.withStartingArguments(existing);
+    }
+    if (sent && !existing) {
+      const runtime = (await this.runtimes(true)).find(r => r.id === 'opencode');
+      if (!runtime || !runtime.installed || runtimeUnavailable(runtime)) { this.templateRequests.delete(key); sent = undefined; }
+    }
+    if (!sent) {
+      const flight = `${key}:${requestHash}`;
+      let resolving = this.templateResolving.get(flight);
+      if (!resolving) {
+        resolving = this.resolveOpencodeTemplate(input, key, expected, model, requestHash).finally(() => this.templateResolving.delete(flight));
+        this.templateResolving.set(flight, resolving);
+      }
+      const resolved = await resolving, kept = this.templateRequests.get(key);
+      sent = kept?.input === requestHash ? kept : resolved;
+      this.templateRequests.set(key, sent);
+      for (const old of this.templateRequests.keys()) { if (this.templateRequests.size <= 50) break; this.templateRequests.delete(old); }
+    }
+    const journey = 'clowder-bot-template';
+    const { made: result, notice } = await this.computer.guard(expected, () => this.cats().then(known => known.some(c => c.id === expected)), async () => {
+      const latestCats = await this.cats();
+      const createdAlready = latestCats.find(c => c.id === expected);
+      if (!createdAlready && latestCats.some(c => c.name.toLowerCase() === input.name.toLowerCase())) {
+        if (this.templateRequests.get(key) === sent) this.templateRequests.delete(key);
+        throw new ApiError(409, '已有同名猫猫');
+      }
+      return this.native.request<{ cat: NativeCat }>('/api/cats', {
+        method: 'POST',
+        headers: { 'x-cat-cafe-onboarding-journey': journey, 'idempotency-key': `onboarding:${journey}:cat:${key}` },
+        body: sent!.payload,
+      });
+    });
+    const cat = result.cat;
+    if (!cat?.id) throw new ApiError(502, '引擎的创建结果缺少猫猫身份');
+    const resolvedBreed = cat.breedId ?? String(sent.payload.breedId ?? 'dragon-li');
+    const identity = avatarBreed(resolvedBreed);
+    const meta = this.store.bot(cat.id);
+    const sourceTemplate = meta.sourceTemplate ?? sent.sourceTemplate;
+    Object.assign(meta, {
+      templateId: identity, avatarSeed: input.avatar_seed || `cat:${identity}`,
+      timezone: input.timezone, ...(sourceTemplate ? { sourceTemplate } : {}),
+    });
+    this.store.save();
+    return this.noted(await this.withStartingArguments(cat), notice);
+  }
+  private async resolveOpencodeTemplate(input: CreateBot, key: string, expected: string, model: string, requestHash: string) {
+    const config = input.catConfig!;
+    const [cats, catalog, runtimes] = await Promise.all([
+      this.cats(),
+      this.native.request<{ templates: CatTemplate[]; breeds: Array<{ id: string; name: string; color?: { primary: string; secondary: string } }> }>('/api/bot-cat-templates'),
+      this.runtimes(true),
+    ]);
+    const tpl = input.sourceTemplate ? catalog.templates.find(t => t.id === input.sourceTemplate!.id) : undefined;
+    if (input.sourceTemplate && (!tpl || tpl.revision !== input.sourceTemplate.revision))
+      throw new ApiError(409, '模板已更新或删除，请重新选择');
+    const runtime = runtimes.find(r => r.id === 'opencode');
+    if (!runtime || !runtime.installed) throw new ApiError(422, '未检测到所选 Agent');
+    const blocked = runtimeUnavailable(runtime);
+    if (blocked) throw new ApiError(422, blocked);
+    if (cats.some(cat => cat.name.toLowerCase() === input.name.toLowerCase())) throw new ApiError(409, '已有同名猫猫');
+    const breedId = config.breed.mode === 'explicit' ? config.breed.breedId : inferBreedFromModel(model);
+    const breed = catalog.breeds.find(b => b.id === breedId);
+    if (!breed) throw new ApiError(422, config.breed.mode === 'explicit' ? '请选择有效猫种' : '无法判断猫种，请手动选择');
+    const payload: Record<string, unknown> = {
+      catId: expected, name: input.name, displayName: input.name, nickname: input.name, breedId: breed.id,
+      color: breed.color ?? { primary: '#888888', secondary: '#eeeeee' }, mentionPatterns: [`@${input.name}`, `@${expected}`],
+      clientId: 'opencode', configurationSource: 'native_tool', defaultModel: model,
+      cli: { ...(runtime.command ? { command: runtime.command } : {}), effort: null, defaultArgs: [] },
+      ...config.portrait,
+    };
+    return { input: requestHash, payload, ...(tpl ? { sourceTemplate: { id: tpl.id, revision: tpl.revision, name: tpl.name } } : {}) };
   }
   /**
    * The CLI arguments a new cat starts with (memberCliArgs), written as their

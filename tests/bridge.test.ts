@@ -489,3 +489,83 @@ test('Agent binding restores native defaults; retired model APIs cannot mutate c
   assert.deepEqual(claude.cliConfigArgs, ['--settings', '{"skillOverrides":{"schedule":"off","loop":"off"}}', '--disallowedTools', 'RemoteTrigger,CronCreate,CronDelete,CronList']);
   assert.doesNotMatch(claude.cliConfigArgs[1], /\s/, 'the settings JSON has no spaces: the CLI carrier splits arguments on whitespace');
 });
+
+test('model_not_found diagnostics offer one-click default reset and clear stale overrides cleanly', async t => {
+  const r = await setup(t);
+  r.native.cats.push({
+    id: 'cat-coon', name: '砚砚', displayName: '砚砚', roleDescription: '代码审查',
+    clientId: 'openai', configurationSource: 'native_tool', defaultModel: 'gpt-retired',
+    cli: { effort: 'high', serviceTier: 'fast' }, mentionPatterns: ['@砚砚'],
+    color: { primary: '#556677', secondary: '#ddeeff' }, configurationRevision: 'rev-1',
+  });
+  const thread = await r.bridge.direct(r.native.cats[0]!);
+  r.native.messages.set(thread.id, [
+    { id: 'u1', type: 'user', catId: null, content: '帮我检查一下', timestamp: 100 },
+    {
+      id: 'a1', type: 'assistant', catId: 'cat-coon', replyTo: 'u1', content: '{"error":"model_not_found"}', timestamp: 200,
+      lifecycle: { kind: 'response', status: 'failed', reason: 'PROVIDER_EXECUTION_FAILED' },
+      metadata: { cliDiagnostics: { reasonCode: 'model_not_found', publicSummary: '模型名不被支持', safeExcerpt: 'The requested model is not supported.' } },
+    },
+    {
+      id: 'a2', type: 'assistant', catId: 'cat-coon', replyTo: 'u1', content: 'rate limit', timestamp: 300,
+      lifecycle: { kind: 'response', status: 'failed', reason: 'rate_limit' },
+      metadata: { cliDiagnostics: { reasonCode: 'rate_limit', publicSummary: '请求过于频繁' } },
+    },
+  ]);
+
+  const direct = await (await r.call('/xbot-api/bots/%E7%A0%9A%E7%A0%9A/transcript')).json();
+  const failedModelRow = direct.messages.find((m: any) => m.id === 'a1');
+  const failedRateRow = direct.messages.find((m: any) => m.id === 'a2');
+  assert.equal(failedModelRow.ended.code, 'model_not_found');
+  assert.equal(failedModelRow.ended.reason, '模型名不被支持\nThe requested model is not supported.');
+  assert.deepEqual(failedModelRow.ended.resetAgent, { bot: '砚砚' });
+  assert.equal(failedRateRow.ended.code, 'rate_limit');
+  assert.equal(failedRateRow.ended.reason, 'rate_limit');
+  assert.equal(failedRateRow.ended.resetAgent, undefined);
+
+  r.native.cats.push({
+    id: 'cat-managed', name: '云猫', displayName: '云猫', roleDescription: '托管',
+    clientId: 'openai', configurationSource: 'managed_account', accountRef: 'acc-1', defaultModel: 'gpt-retired',
+    mentionPatterns: ['@云猫'], color: { primary: '#112233', secondary: '#ccddee' }, configurationRevision: 'rev-2',
+  });
+  const grp = await (await r.call('/xbot-api/groups', 'POST', { name: '审阅群', members: ['砚砚', '云猫'] })).json();
+  r.native.messages.set(grp.id, [
+    { id: 'gu1', type: 'user', catId: null, content: '@砚砚', timestamp: 100 },
+    {
+      id: 'ga1', type: 'assistant', catId: 'cat-coon', replyTo: 'gu1', content: 'err', timestamp: 200,
+      lifecycle: { kind: 'response', status: 'failed', reason: 'PROVIDER_EXECUTION_FAILED' },
+      metadata: { cliDiagnostics: { reasonCode: 'model_not_found', publicSummary: '模型名不被支持' } },
+    },
+    {
+      id: 'ga2', type: 'assistant', catId: 'cat-managed', replyTo: 'gu1', content: 'err', timestamp: 250,
+      lifecycle: { kind: 'response', status: 'failed', reason: 'PROVIDER_EXECUTION_FAILED' },
+      metadata: { cliDiagnostics: { reasonCode: 'model_not_found', publicSummary: '模型名不被支持' } },
+    },
+  ]);
+  const groupView = await (await r.call(`/xbot-api/groups/${grp.id}`)).json();
+  assert.deepEqual(groupView.messages.find((m: any) => m.id === 'ga1').ended.resetAgent, { bot: '砚砚' });
+  assert.equal(groupView.messages.find((m: any) => m.id === 'ga2').ended.resetAgent, undefined, 'managed_account cannot reset as native_tool');
+
+  // Cannot mix resetDefaults with runtimeId; cannot reset non-native_tool cat; cannot reset while busy.
+  assert.equal((await r.call('/xbot-api/bots/%E7%A0%9A%E7%A0%9A/agent', 'PUT', { resetDefaults: true, runtimeId: 'codex' })).status, 400);
+  assert.equal((await r.call('/xbot-api/bots/%E4%BA%91%E7%8C%AB/agent', 'PUT', { resetDefaults: true })).status, 422);
+  r.native.queues.set(thread.id, { queue: [], activeInvocations: [{ catId: 'cat-coon' }] });
+  assert.equal((await r.call('/xbot-api/bots/%E7%A0%9A%E7%A0%9A/agent', 'PUT', { resetDefaults: true })).status, 409);
+  r.native.queues.set(thread.id, { queue: [], activeInvocations: [] });
+
+  const reset = await r.call('/xbot-api/bots/%E7%A0%9A%E7%A0%9A/agent', 'PUT', { resetDefaults: true });
+  assert.equal(reset.status, 200);
+  const resetBody = await reset.json();
+  assert.equal(resetBody.agent.id, 'codex');
+  assert.equal(resetBody.agent.modelOverride, null);
+  const patch = r.native.calls.findLast(c => c.path === '/api/cats/cat-coon' && c.method === 'PATCH')!.body;
+  assert.equal(patch.defaultModel, '');
+  assert.equal(patch.cli.effort, null);
+  assert.equal(patch.cli.serviceTier, null);
+
+  // Subsequent transcript reads drop resetAgent once defaultModel override is gone.
+  const afterDirect = await (await r.call('/xbot-api/bots/%E7%A0%9A%E7%A0%9A/transcript')).json();
+  assert.equal(afterDirect.messages.find((m: any) => m.id === 'a1').ended.resetAgent, undefined);
+  const afterGroup = await (await r.call(`/xbot-api/groups/${grp.id}`)).json();
+  assert.equal(afterGroup.messages.find((m: any) => m.id === 'ga1').ended.resetAgent, undefined);
+});

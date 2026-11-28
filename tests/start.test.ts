@@ -36,7 +36,7 @@ class StartNative extends NativeFixture {
       return { cat: structuredClone(this.cats.find(cat => cat.id === receipt.id)) } as T;
     }
     if (this.cats.some(cat => cat.id === options.body.catId)) throw new ApiError(409, 'Member ID is occupied', { code: 'member_creation_conflict' });
-    const cat = { ...options.body, id: options.body.catId, breedId: options.body.catId, configurationRevision: 'r1' } as NativeCat;
+    const cat = { ...options.body, id: options.body.catId, breedId: options.body.breedId ?? options.body.catId, configurationRevision: 'r1' } as NativeCat;
     this.cats.push(cat); this.receipts.set(key, { payload, id: cat.id });
     return { cat: structuredClone(cat) } as T;
   }
@@ -222,7 +222,7 @@ test('a face is a cat with its own tool: without that tool here the cat cannot b
     'turkish-van': { label: 'Kimi', state: 'missing', usable: false, reason: '这台电脑上还没有装 Kimi' },
     dsh: { label: 'DSH', state: 'unsupported', usable: false, reason: '暂不支持 DSH' },                    // said before "not installed": installing would not help
     'dragon-li': { label: 'OpenCode', state: 'unsupported', usable: false, reason: '暂不支持 OpenCode' },    // the engine's detection does not list it at all
-    bengal: { label: 'Antigravity', state: 'unsupported', usable: false, reason: '暂不支持 Antigravity' },
+    bengal: { label: 'Antigravity', state: 'unsupported', usable: false, reason: 'Antigravity 已停用' },
     'golden-chinchilla': { label: 'OpenCode', state: 'unsupported', usable: false, reason: '暂不支持 OpenCode' },
   });
   // The cat is made with its own tool, not the usual one (Codex here), and no other tool can be picked for it.
@@ -234,6 +234,7 @@ test('a face is a cat with its own tool: without that tool here the cat cannot b
   const before = creations().length;
   assert.deepEqual(await post('墨墨', { face: 'turkish-van' }), [422, 'face_unavailable', '这台电脑上还没有装 Kimi，这只猫猫现在领不了。装好并登录后再试，或者改用「自定义」。']);
   assert.deepEqual(await post('烁烁', { face: 'siamese' }), [422, 'face_unavailable', '暂不支持 AGY Native，这只猫猫现在领不了。可以改用「自定义」。']);
+  assert.deepEqual(await post('斑斑', { face: 'bengal' }), [422, 'face_unavailable', 'Antigravity 已停用，这只猫猫现在领不了。可以改用「自定义」。']);
   assert.deepEqual(await post('金哥', { face: 'golden-chinchilla' }), [422, 'face_unavailable', '暂不支持 OpenCode，这只猫猫现在领不了。可以改用「自定义」。']);
   assert.equal(creations().length, before);
   // Custom borrows only the looks, so any face goes with a tool that is here: the one picked, or the usual one.
@@ -254,6 +255,18 @@ test('a face is a cat with its own tool: without that tool here the cat cannot b
   assert.deepEqual((await tools())['turkish-van'], { label: 'Kimi', state: 'ready', usable: true, id: 'kimi' });
   assert.deepEqual((await post('墨墨', { face: 'turkish-van' })).slice(0, 2), [201, undefined]);
   assert.equal(creations().at(-1)!.body.clientId, 'kimi');
+  // OpenCode installed via available-clients: 狸花猫 and 金渐层 become usable; unconfirmed auth is 'unknown' (still usable).
+  r.native.availableClients = [{ client: 'opencode', label: 'OpenCode', cli: '/opt/homebrew/bin/opencode', installed: true, authenticated: false }];
+  assert.deepEqual((await tools())['dragon-li'], { label: 'OpenCode', state: 'unknown', usable: true, id: 'opencode' });
+  assert.deepEqual((await tools())['golden-chinchilla'], { label: 'OpenCode', state: 'unknown', usable: true, id: 'opencode' });
+  assert.deepEqual((await post('小狸花', { face: 'dragon-li' })).slice(0, 2), [201, undefined]);
+  assert.equal(creations().at(-1)!.body.clientId, 'opencode');
+  assert.deepEqual((await post('金哥', { face: 'golden-chinchilla' })).slice(0, 2), [201, undefined]);
+  assert.equal(creations().at(-1)!.body.clientId, 'opencode');
+  r.native.availableClients = [{ client: 'opencode', label: 'OpenCode', cli: 'opencode', installed: false, authenticated: false }];
+  assert.deepEqual((await tools())['dragon-li'], { label: 'OpenCode', state: 'missing', usable: false, reason: '这台电脑上还没有装 OpenCode' });
+  r.native.availableClients = [{ client: 'opencode', label: 'OpenCode', cli: 'opencode', installed: true, authenticated: true }];
+  assert.deepEqual((await tools())['golden-chinchilla'], { label: 'OpenCode', state: 'ready', usable: true, id: 'opencode' });
 });
 
 test('the cat that is made is the one that was described, and a repeat reaches native exactly as the first time', async t => {
