@@ -228,3 +228,87 @@ test('native byte transport bounds reads, uses only loopback uploads and refuses
   const bytesCall=calls.at(-1)!;assert.equal(bytesCall.url,'http://127.0.0.1:4331/uploads/file.txt');assert.equal(bytesCall.init?.redirect,'error');
   assert.equal(new Headers(bytesCall.init?.headers).get('Cookie'),'clowder_bot_native_session=fixture');await client.close();
 });
+
+test('read-only matter memory projects catalog, unavailable items, 503 unavailability, and enforces 405 on writers',async t=>{
+  const r=await setup(t),request=r.native.request.bind(r.native);
+  r.native.memoryViews.matters={
+    items:[
+      {matterId:'matter_1',title:'搬家准备',description:'整理租房合同与水电清单',revision:3,status:'active',entryCount:2,summaryStatus:'sources_changed',createdAt:1000,updatedAt:2000,readRef:{kind:'matter',matterId:'matter_1',expectedRevision:3}},
+      {matterId:'matter_hidden',revision:1,status:'active',unavailable:true},
+      {matterId:'matter_2',title:'',description:'旧项目',revision:1,status:'retired',entryCount:0,createdAt:500,updatedAt:900},
+    ],
+    nextCursor:'cursor-next',
+  };
+  const catalog=await(await r.call('/memory/matters?query=%E6%90%AC%E5%AE%B6&limit=10')).json();
+  assert.deepEqual(catalog,{
+    kind:'matters',readStatus:'partial',
+    entries:[
+      {id:'matter_1',title:'搬家准备',content:'整理租房合同与水电清单',revision:3,status:'active',entryCount:2,summaryStatus:'sources_changed',updatedAt:2000,createdAt:1000},
+      {id:'matter_2',title:'未命名事项',content:'旧项目',revision:1,status:'retired',entryCount:0,updatedAt:900,createdAt:500},
+    ],
+    nextCursor:'cursor-next',
+  });
+  assert.equal(r.native.calls.at(-1)?.path,'/api/memory/matters?query=%E6%90%AC%E5%AE%B6&limit=10');
+
+  r.native.memoryViews.matters={items:[{matterId:'matter_hidden',revision:1,status:'active',unavailable:true}]};
+  assert.deepEqual(await(await r.call('/memory/matters')).json(),{kind:'matters',readStatus:'unavailable',entries:[]});
+
+  r.native.request=async(path,options)=>{if(path.startsWith('/api/memory/matters'))throw new ApiError(503,'matter_memory_unavailable',{error:'matter_memory_unavailable'});return request(path,options);};
+  assert.deepEqual(await(await r.call('/memory/matters')).json(),{kind:'matters',readStatus:'unavailable',entries:[]});
+
+  for(const status of [401,403]){
+    r.native.request=async(path,options)=>{if(path.startsWith('/api/memory/matters'))throw new ApiError(status,'forbidden');return request(path,options);};
+    assert.equal((await r.call('/memory/matters')).status,status);
+  }
+  r.native.request=async(path,options)=>{if(path.startsWith('/api/memory/matters'))throw new ApiError(503,'Clowder AI 运行时未连接');return request(path,options);};
+  assert.equal((await r.call('/memory/matters')).status,503);
+
+  assert.equal((await r.call('/memory/matters?extra=1')).status,400);
+  for(const method of ['POST','PUT','PATCH','DELETE']){
+    assert.equal((await r.call('/memory/matters',method,{operation:'create'})).status,405);
+    assert.equal((await r.call('/memory/matters/write',method,{operation:'forget'})).status,405);
+    assert.equal((await r.call('/memory/matters/matter_1',method,{title:'x'})).status,405);
+  }
+  assert.equal((await r.call('/memory/matters/matter_1/write-receipt?actorKey=owner&requestId=r1')).status,405);
+});
+
+test('matter detail projects summaries, verified quotes, source coordinates and native error statuses',async t=>{
+  const r=await setup(t),request=r.native.request.bind(r.native);
+  r.native.matterPages['matter_1']={
+    matter:{matterId:'matter_1',title:'搬家准备',description:'总览说明',revision:3,status:'active',createdAt:1000,updatedAt:2500},
+    summaryStatus:'sources_changed',
+    entries:[
+      {entryId:'entry_1',status:'active',sourceStatus:'current',summary:'约了周五看房',quote:'周五下午两点看房',recordedAt:1500,attribution:'author',source:{threadId:r.thread.id,messageId:'msg-1',segment:'body',start:0,end:8,sourceRevision:'rev-1',author:{kind:'user',userId:'owner'},timestamp:1400}},
+      {entryId:'entry_2',status:'active',sourceStatus:'changed',summary:'旧报价可能已改',quote:'不应透出的旧原文',recordedAt:1600,attribution:'author',source:{kind:'message',threadId:r.thread.id,messageId:'msg-2',origin:'explicit',author:{kind:'agent',catId:'cat-1'},timestamp:1550,sourceRevision:'rev-2',contentRevision:'crev-2'}},
+      {entryId:'entry_3',status:'active',sourceStatus:'thread_only',summary:'仅关联对话',recordedAt:1700,attribution:'author',source:{kind:'thread',threadId:r.thread.id,origin:'invocation'}},
+      {entryId:'entry_4',status:'superseded',sourceStatus:'current',summary:'历史版本',recordedAt:1200,attribution:'author',source:{kind:'thread',threadId:r.thread.id,origin:'explicit'}},
+    ],
+    nextCursor:'page-2',
+  };
+  const detail=await(await r.call('/memory/matters/matter_1?expectedRevision=3&limit=10')).json();
+  assert.deepEqual(detail,{
+    matter:{id:'matter_1',title:'搬家准备',content:'总览说明',revision:3,status:'active',summaryStatus:'sources_changed',updatedAt:2500,createdAt:1000},
+    entries:[
+      {id:'entry_1',status:'active',sourceStatus:'current',summary:'约了周五看房',quote:'周五下午两点看房',recordedAt:1500,source:{canOpen:true,threadId:r.thread.id,messageId:'msg-1',occurredAt:1400}},
+      {id:'entry_2',status:'active',sourceStatus:'changed',summary:'旧报价可能已改',recordedAt:1600,source:{canOpen:true,threadId:r.thread.id,messageId:'msg-2',occurredAt:1550}},
+      {id:'entry_3',status:'active',sourceStatus:'thread_only',summary:'仅关联对话',recordedAt:1700,source:{canOpen:false,threadId:r.thread.id,occurredAt:null}},
+    ],
+    nextCursor:'page-2',
+  });
+  const withHistory=await(await r.call('/memory/matters/matter_1?history=true')).json();
+  assert.equal(withHistory.entries.length,4);
+  assert.equal(withHistory.entries[3].status,'superseded');
+
+  const stale=await r.call('/memory/matters/matter_1?expectedRevision=2');
+  assert.equal(stale.status,409);
+  assert.equal((await stale.json()).code,'stale_revision');
+  const missing=await r.call('/memory/matters/missing');
+  assert.equal(missing.status,404);
+  assert.equal((await missing.json()).code,'not_available');
+  assert.equal((await r.call('/memory/matters/bad%20id')).status,400);
+
+  r.native.request=async(path,options)=>{if(path.startsWith('/api/memory/matters/'))throw new ApiError(503,'matter_memory_unavailable',{error:'matter_memory_unavailable'});return request(path,options);};
+  assert.equal((await r.call('/memory/matters/matter_1')).status,503);
+  r.native.request=async(path,options)=>{if(path.startsWith('/api/memory/matters/'))throw new ApiError(400,'invalid_cursor',{error:'invalid_cursor'});return request(path,options);};
+  assert.equal((await r.call('/memory/matters/matter_1?cursor=stale')).status,400);
+});
