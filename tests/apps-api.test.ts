@@ -75,7 +75,7 @@ test('adding a program: the adapter picks a safe id, sends the engine\'s install
   assert.match(install.id, /^app-[0-9a-f]{8}$/, 'a name with no Latin letters is just "app" and the request\'s code');
   assert.deepEqual({ ...install, id: 'x' }, { id: 'x', transport: 'stdio', command: 'node', args: ['/x/server.mjs', '--flag'], env: { NOTES_TOKEN: 'tok-123' } });
   assert.deepEqual(added.body, { id: `custom:${install.id}`, kind: 'custom', title: '我的笔记', state: 'on',
-    source: { type: 'program', program: 'node', args: ['/x/server.mjs', '--flag'], secrets: ['NOTES_TOKEN'] }, tools: [{ name: 'app_probe', description: 'Returns a fixed marker.' }] });
+    source: { type: 'program', program: 'node', args: ['/x/server.mjs', '--flag'], secrets: ['NOTES_TOKEN'] }, tools: [{ name: 'app_probe', description: 'Returns a fixed marker.' }], cats: [] });
   const stored = JSON.parse(readFileSync(r.dataFile, 'utf8'));
   assert.deepEqual(stored.apps, { [install.id]: { title: '我的笔记' } });
   assert.equal(readFileSync(r.dataFile, 'utf8').includes('tok-123'), false, 'the secret is the engine\'s to keep');
@@ -521,4 +521,137 @@ test('微信\'s picture is the icon of the 微信 installed on this computer: of
   assert.equal((await broken.raw('/wechat/icon')).status, 404);
   // By default (tests, anything that does not say where pictures come from) there is none: nothing here depends on what this machine has installed.
   assert.equal('icon' in wechatOf(await (await setup(t)).call()), false);
+});
+
+test('custom app global pause/resume and per-cat toggles (T-27): reads back native state, preserves truth on readback failure', async t => {
+  const r = await setup(t);
+  r.native.cats.push(
+    { id: 'cat-ragdoll', name: '布偶猫', displayName: '布偶猫', breedId: 'ragdoll', roleDescription: '', clientId: 'anthropic', defaultModel: '', mentionPatterns: [], color: { primary: '#556677', secondary: '#ddeeff' } },
+    { id: 'cat-maine', name: '缅因猫', displayName: '缅因猫', breedId: 'maine-coon', roleDescription: '', clientId: 'openai', defaultModel: '', mentionPatterns: [], color: { primary: '#775544', secondary: '#eeddcc' } },
+  );
+  const added = (await r.call('/custom', 'POST', { name: 'Notes', program: 'node', args: ['s.js'] })).body;
+  const nativeId = nativeOf(added), path = `/${encodeURIComponent(added.id)}`;
+  assert.deepEqual(added.cats.map((c: any) => [c.name, c.enabled]), [['布偶猫', true], ['缅因猫', true]]);
+
+  // Toggle one cat off by name, then back on.
+  const catOff = await r.call(`${path}/cats/${encodeURIComponent('布偶猫')}`, 'PUT', { enabled: false });
+  assert.equal(catOff.status, 200);
+  assert.deepEqual(catOff.body.cats.map((c: any) => [c.name, c.enabled]), [['布偶猫', false], ['缅因猫', true]]);
+  assert.deepEqual(r.apps.rows.find(row => row.id === nativeId)!.blockedCats, ['cat-ragdoll']);
+  const patchCall = r.sent(/^\/api\/capabilities$/, 'PATCH').at(-1)!.body;
+  assert.deepEqual(patchCall, { capabilityId: nativeId, capabilityType: 'mcp', source: 'external', scope: 'cat', catId: 'cat-ragdoll', enabled: false });
+
+  const catOn = await r.call(`${path}/cats/${encodeURIComponent('布偶猫')}`, 'PUT', { enabled: true });
+  assert.deepEqual(catOn.body.cats.map((c: any) => [c.name, c.enabled]), [['布偶猫', true], ['缅因猫', true]]);
+  assert.equal(r.apps.rows.find(row => row.id === nativeId)!.blockedCats, undefined);
+
+  // Unknown cat or WeChat is rejected.
+  assert.equal((await r.call(`${path}/cats/${encodeURIComponent('不存在')}`, 'PUT', { enabled: false })).status, 404);
+  assert.equal((await r.call('/wechat/cats/布偶猫', 'PUT', { enabled: false })).status, 404);
+  assert.equal((await r.call(`${path}/cats/${encodeURIComponent('布偶猫')}`, 'PUT', { enabled: 'yes' })).status, 400);
+
+  // Global pause: state becomes off, all cats read false, no probe on pause.
+  const probesBefore = r.sent(/\/tools$/, 'POST').length;
+  const paused = await r.call(`${path}/enabled`, 'PUT', { enabled: false });
+  assert.equal(paused.status, 200);
+  assert.equal(paused.body.state, 'off');
+  assert.equal(paused.body.reason, '已停用');
+  assert.deepEqual(paused.body.cats.map((c: any) => [c.name, c.enabled]), [['布偶猫', false], ['缅因猫', false]]);
+  assert.equal(r.sent(/\/tools$/, 'POST').length, probesBefore, 'paused app is not probed');
+  // While globally paused, per-cat toggle is refused rather than silently editing blockedCats under globalEnabled=false.
+  const blockedCatToggle = await r.call(`${path}/cats/${encodeURIComponent('布偶猫')}`, 'PUT', { enabled: true });
+  assert.deepEqual([blockedCatToggle.status, blockedCatToggle.body.code], [409, 'app_disabled']);
+
+  // Global resume: probes again and clears blockedCats (matching upstream PATCH /api/capabilities scope=global).
+  const resumed = await r.call(`${path}/enabled`, 'PUT', { enabled: true });
+  assert.equal(resumed.status, 200);
+  assert.equal(resumed.body.state, 'on');
+  assert.deepEqual(resumed.body.cats.map((c: any) => [c.name, c.enabled]), [['布偶猫', true], ['缅因猫', true]]);
+
+  // Truthful readback: if the engine ignores the PATCH or readback fails, return 502 instead of claiming success.
+  const real = r.native.request.bind(r.native);
+  r.native.request = (async (reqPath: string, options: any = {}) => {
+    if (reqPath === '/api/capabilities' && options.method === 'PATCH') return { ok: true };
+    return real(reqPath, options);
+  }) as any;
+  assert.equal((await r.call(`${path}/enabled`, 'PUT', { enabled: false })).status, 502);
+  assert.equal((await r.call(`${path}/cats/${encodeURIComponent('布偶猫')}`, 'PUT', { enabled: false })).status, 502);
+  r.native.request = real as any;
+
+  // If /api/cats cannot be read on detail, omit cats rather than claiming [].
+  r.native.request = (async (reqPath: string, options: any = {}) => {
+    if (reqPath === '/api/cats') throw new ApiError(500, 'cats unavailable');
+    return real(reqPath, options);
+  }) as any;
+  const detailNoCats = await r.call(path);
+  assert.equal(detailNoCats.status, 200);
+  assert.equal('cats' in detailNoCats.body, false);
+});
+
+test('editing custom app program, args, and url (T-28): preserves existing secrets, per-cat blocks, and pause state, re-probes, and validates transport', async t => {
+  const r = await setup(t);
+  r.native.cats.push(
+    { id: 'cat-ragdoll', name: '布偶猫', displayName: '布偶猫', breedId: 'ragdoll', roleDescription: '', clientId: 'anthropic', defaultModel: '', mentionPatterns: [], color: { primary: '#556677', secondary: '#ddeeff' } },
+  );
+  const prog = (await r.call('/custom', 'POST', { name: 'Notes', program: 'node', args: ['old.js'], secrets: { NOTES_TOKEN: 'secret-xyz' } })).body;
+  const progId = nativeOf(prog), progPath = `/${encodeURIComponent(prog.id)}`;
+  await r.call(`${progPath}/cats/${encodeURIComponent('布偶猫')}`, 'PUT', { enabled: false });
+
+  // Edit program + args: preserves env secrets and blockedCats, re-probes.
+  const editedProg = await r.call(progPath, 'PATCH', { program: 'python3', args: ['-m', 'notes_mcp'] });
+  assert.equal(editedProg.status, 200);
+  assert.deepEqual(editedProg.body.source, { type: 'program', program: 'python3', args: ['-m', 'notes_mcp'], secrets: ['NOTES_TOKEN'] });
+  assert.deepEqual(editedProg.body.cats.map((c: any) => [c.name, c.enabled]), [['布偶猫', false]]);
+  assert.deepEqual(r.apps.rows.find(row => row.id === progId)!.mcpServer.env, { NOTES_TOKEN: 'secret-xyz' });
+
+  // Clear args to empty array without changing program.
+  const clearedArgs = await r.call(progPath, 'PATCH', { args: [] });
+  assert.deepEqual(clearedArgs.body.source, { type: 'program', program: 'python3', args: [], secrets: ['NOTES_TOKEN'] });
+  assert.deepEqual(r.apps.rows.find(row => row.id === progId)!.mcpServer.env, { NOTES_TOKEN: 'secret-xyz' });
+
+  // Edit program to a missing binary -> truthful failed state, still preserves secrets.
+  const missingProg = await r.call(progPath, 'PATCH', { program: 'not-a-program-bin' });
+  assert.equal(missingProg.status, 200);
+  assert.deepEqual([missingProg.body.state, missingProg.body.reason, missingProg.body.detail], ['failed', '这台电脑上找不到「not-a-program-bin」', 'ENOENT']);
+  assert.deepEqual(r.apps.rows.find(row => row.id === progId)!.mcpServer.env, { NOTES_TOKEN: 'secret-xyz' });
+
+  // Editing program/args while globally paused is refused (409 app_disabled) so a paused app never spawns a command via upstream install's auto-probe.
+  await r.call(`${progPath}/enabled`, 'PUT', { enabled: false });
+  const installsBeforePausedEdit = r.sent(/mcp\/install$/, 'POST').length;
+  const pausedEdit = await r.call(progPath, 'PATCH', { program: 'node', args: ['fixed.js'] });
+  assert.deepEqual([pausedEdit.status, pausedEdit.body.code], [409, 'app_disabled']);
+  assert.equal(r.sent(/mcp\/install$/, 'POST').length, installsBeforePausedEdit);
+  assert.deepEqual(r.apps.rows.find(row => row.id === progId)!.mcpServer.command, 'not-a-program-bin');
+  assert.deepEqual(r.apps.rows.find(row => row.id === progId)!.mcpServer.env, { NOTES_TOKEN: 'secret-xyz' });
+
+  // URL app: edit url preserves headers secrets and blockedCats, re-probes via /tools.
+  const remote = (await r.call('/custom', 'POST', { name: 'Remote', url: 'https://old.example/mcp', secrets: { Authorization: 'Bearer keep-me' } })).body;
+  const remoteId = nativeOf(remote), remotePath = `/${encodeURIComponent(remote.id)}`;
+  await r.call(`${remotePath}/cats/${encodeURIComponent('布偶猫')}`, 'PUT', { enabled: false });
+  const editedUrl = await r.call(remotePath, 'PATCH', { url: 'https://new.example/mcp' });
+  assert.equal(editedUrl.status, 200);
+  assert.deepEqual(editedUrl.body.source, { type: 'url', url: 'https://new.example/mcp', secrets: ['Authorization'] });
+  assert.equal(editedUrl.body.state, 'on');
+  assert.deepEqual(editedUrl.body.cats.map((c: any) => [c.name, c.enabled]), [['布偶猫', false]]);
+  assert.deepEqual(r.apps.rows.find(row => row.id === remoteId)!.mcpServer.headers, { Authorization: 'Bearer keep-me' });
+
+  // URL app while paused can still update url without probing (streamableHttp install does not auto-probe).
+  await r.call(`${remotePath}/enabled`, 'PUT', { enabled: false });
+  const probesBeforePausedUrl = r.sent(/\/tools$/, 'POST').length;
+  const pausedUrlEdit = await r.call(remotePath, 'PATCH', { url: 'https://paused.example/mcp' });
+  assert.equal(pausedUrlEdit.status, 200);
+  assert.equal(pausedUrlEdit.body.state, 'off');
+  assert.equal(pausedUrlEdit.body.source.url, 'https://paused.example/mcp');
+  assert.equal(r.sent(/\/tools$/, 'POST').length, probesBeforePausedUrl);
+  assert.deepEqual(r.apps.rows.find(row => row.id === remoteId)!.mcpServer.headers, { Authorization: 'Bearer keep-me' });
+
+  // Transport mismatch and validation errors leave engine untouched.
+  const callsBefore = r.native.calls.length;
+  assert.equal((await r.call(progPath, 'PATCH', { url: 'https://x.example/mcp' })).status, 400);
+  assert.equal((await r.call(remotePath, 'PATCH', { program: 'node' })).status, 400);
+  assert.equal((await r.call(remotePath, 'PATCH', { args: ['a'] })).status, 400);
+  assert.equal((await r.call(remotePath, 'PATCH', { url: 'http://example.com/mcp' })).status, 400);
+  assert.equal((await r.call(progPath, 'PATCH', { program: '   ' })).status, 400);
+  assert.equal((await r.call(progPath, 'PATCH', { args: ['bad\narg'] })).status, 400);
+  assert.equal(r.native.calls.filter(c => c.method !== 'GET').slice(callsBefore).length, 0);
 });

@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { ApiError } from '../errors.js';
 import type { ProductStore } from '../product-store.js';
-import type { NativeTransport } from './types.js';
+import type { NativeCat, NativeTransport } from './types.js';
 import { computerEntry } from './computer.js';
 import { noIcons, type AppIcons } from './app-icons.js';
 
@@ -23,7 +23,10 @@ interface NativeMcpServer {
   transport?: string; command?: string; args?: string[]; url?: string;
   env?: Record<string, string>; headers?: Record<string, string>; envKeys?: string[];
 }
-interface NativeCapability { id: string; type: string; source?: string; enabled?: boolean; globalEnabled?: boolean; mcpServer?: NativeMcpServer }
+interface NativeCapability {
+  id: string; type: string; source?: string; enabled?: boolean; globalEnabled?: boolean;
+  mcpServer?: NativeMcpServer; cats?: Record<string, boolean>; blockedCats?: string[];
+}
 interface NativeProbe { connectionStatus?: string; tools?: Array<{ name: string; description?: string }>; error?: string }
 interface NativePlugin {
   pluginId: string; artifact?: string; intent?: string; live?: string; lifecycleRevision?: number; installedVersion?: string;
@@ -36,6 +39,11 @@ interface NativeAuthorization { data?: { armed?: boolean; remainingMs?: number; 
 /** `unchecked`: a custom app that is in the registry; whether it answers is only known after a check (the detail read). */
 export type AppState = 'off' | 'starting' | 'on' | 'failed' | 'unavailable' | 'unchecked';
 export interface AppTool { name: string; description?: string }
+export interface AppCat {
+  name: string; enabled: boolean;
+  avatar?: 'custom' | 'generated'; avatar_seed?: string; avatar_url?: string; templateId?: string;
+  accent?: { primary: string; secondary: string };
+}
 export interface AppRow {
   id: string; kind: 'wechat' | 'custom'; title: string; state: AppState;
   /** 微信: where its picture is served — the icon of the 微信 installed on this computer. Absent when there is none to show. */
@@ -48,6 +56,8 @@ export interface AppRow {
   source?: { type: 'program'; program: string; args: string[]; secrets: string[] } | { type: 'url'; url: string; secrets: string[] };
   /** custom, after a check: what it offers the cats. */
   tools?: AppTool[];
+  /** custom detail: current cats and whether each may use this app, read back from the engine. Absent if cats could not be read. */
+  cats?: AppCat[];
   /** 微信, while on: the plugin's ten-minute authorization (for reading the chat that is open in 微信), as the
    *  plugin answered it. Absent while `on`: it could not be read — unknown, never "not authorized". */
   authorization?: { active: boolean; until?: string; remaining_ms: number };
@@ -69,11 +79,13 @@ const remote = z.string().trim().max(2048).refine(value => {
     return url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname));
   } catch { return false; }
 }, '网址需要以 https:// 开头（本机地址可以用 http://），且不带用户名密码');
+const programField = z.string().trim().min(1, '请填要运行的程序').max(512).refine(oneLine, '不能含换行');
+const argsField = z.array(z.string().max(2048).refine(oneLine, '不能含换行')).max(32);
 // The engine accepts whatever it is sent here (an empty command, any id), so the checking is done on this side.
 const programApp = z.object({
   name: appName, idempotencyKey: z.uuid().optional(),
-  program: z.string().trim().min(1, '请填要运行的程序').max(512).refine(oneLine, '不能含换行'),
-  args: z.array(z.string().max(2048).refine(oneLine, '不能含换行')).max(32).default([]),
+  program: programField,
+  args: argsField.default([]),
   secrets: z.record(z.string(), secretValue).refine(few, '最多 32 项').default({}),
 }).strict();
 const urlApp = z.object({
@@ -103,8 +115,15 @@ function secretNames(given: Record<string, string>, url: boolean): void {
 }
 export const customPatchSchema = z.object({
   name: appName.optional(),
+  program: programField.optional(),
+  args: argsField.optional(),
+  url: remote.optional(),
   secrets: z.record(z.string().min(1).max(128), secretValue).refine(few, '最多 32 项').optional(),
-}).strict().refine(value => value.name !== undefined || value.secrets !== undefined, '没有要改的内容');
+}).strict().refine(
+  value => value.name !== undefined || value.program !== undefined || value.args !== undefined || value.url !== undefined || value.secrets !== undefined,
+  '没有要改的内容',
+);
+export const customEnabledSchema = z.object({ enabled: z.boolean() }).strict();
 
 const customId = (nativeId: string) => `custom:${nativeId}`;
 const sourceOf = (server: NativeMcpServer | undefined): AppRow['source'] => server?.url
@@ -160,9 +179,19 @@ export class BotApps {
   /** Two steps that must not interleave run one after another: picking a free id then installing it; clearing the operation state then acting. */
   private adding: Promise<unknown> = Promise.resolve();
   private acting: Promise<unknown> = Promise.resolve();
+  private appLanes = new Map<string, Promise<unknown>>();
   private inTurn<T>(lane: 'adding' | 'acting', work: () => Promise<T>): Promise<T> {
     const run = this[lane].then(work, work);
     this[lane] = run.catch(() => undefined);
+    return run;
+  }
+  private inAppTurn<T>(id: string, work: () => Promise<T>): Promise<T> {
+    const key = id.startsWith('custom:') ? id : `custom:${id}`;
+    const run = (this.appLanes.get(key) ?? Promise.resolve()).then(work, work);
+    const tail = run.catch(() => undefined).then(() => {
+      if (this.appLanes.get(key) === tail) this.appLanes.delete(key);
+    });
+    this.appLanes.set(key, tail);
     return run;
   }
   constructor(private native: NativeTransport, private store: ProductStore, private platform: NodeJS.Platform = process.platform,
@@ -214,6 +243,37 @@ export class BotApps {
       return false;
     }
   }
+  private async nativeCats(): Promise<NativeCat[] | undefined> {
+    try {
+      const res = await this.native.request<{ cats?: NativeCat[] }>('/api/cats');
+      return Array.isArray(res.cats) ? res.cats : [];
+    } catch {
+      return undefined;
+    }
+  }
+  private catsOf(entry: NativeCapability, nativeCats: NativeCat[] | undefined): AppCat[] | undefined {
+    if (!nativeCats) return undefined;
+    const globalOn = (entry.globalEnabled ?? entry.enabled ?? true) !== false;
+    const hex = (value: unknown): value is string => typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value);
+    return nativeCats.map(cat => {
+      const allowed = entry.cats && typeof entry.cats[cat.id] === 'boolean'
+        ? entry.cats[cat.id] === true
+        : !(entry.blockedCats?.includes(cat.id) ?? false);
+      const meta = this.store.bot(cat.id);
+      const accent = hex(cat.color?.primary) && hex(cat.color?.secondary)
+        ? { primary: cat.color.primary, secondary: cat.color.secondary }
+        : undefined;
+      return {
+        name: cat.name,
+        enabled: globalOn && allowed,
+        avatar: meta.avatarData ? 'custom' : 'generated',
+        avatar_seed: meta.avatarSeed ?? `cat:${meta.templateId ?? cat.breedId ?? 'ragdoll'}`,
+        avatar_url: meta.avatarData ? `/xbot-api/bots/${encode(cat.name)}/avatar?v=${meta.avatarUpdated}` : '',
+        templateId: meta.templateId ?? cat.breedId ?? 'ragdoll',
+        ...(accent ? { accent } : {}),
+      };
+    });
+  }
   private customRow(entry: NativeCapability): AppRow {
     const off = (entry.globalEnabled ?? entry.enabled ?? true) === false;
     return { id: customId(entry.id), kind: 'custom', title: this.title(entry.id), state: off ? 'off' : 'unchecked',
@@ -224,18 +284,37 @@ export class BotApps {
    *  such (`unchecked`), never as a failure of the change. */
   private async checked(entry: NativeCapability, known?: NativeProbe | null, after = false): Promise<AppRow> {
     const row = this.customRow(entry);
-    if (row.state === 'off') return row;
+    if (row.state === 'off') {
+      const cats = this.catsOf(entry, await this.nativeCats());
+      return { ...row, ...(cats !== undefined ? { cats } : {}) };
+    }
+    const catsPromise = this.nativeCats();
     let probe: NativeProbe;
-    try { probe = known ?? await this.native.request<NativeProbe>(`/api/mcp/${encode(entry.id)}/tools`, { method: 'POST', body: {} }); }
-    catch (error) { if (!after) throw error; return { ...row, state: 'unchecked', reason: '没能检查' }; }
-    if (probe.connectionStatus === 'connected') return { ...row, state: 'on', tools: (probe.tools ?? []).map(tool => ({ name: tool.name, ...(tool.description ? { description: tool.description } : {}) })) };
-    if (probe.connectionStatus !== 'disconnected') return { ...row, state: 'unchecked', reason: '没能检查' };
+    try {
+      probe = known ?? await this.native.request<NativeProbe>(`/api/mcp/${encode(entry.id)}/tools`, { method: 'POST', body: {} });
+    } catch (error) {
+      if (!after) { await catsPromise.catch(() => undefined); throw error; }
+      const cats = this.catsOf(entry, await catsPromise);
+      return { ...row, state: 'unchecked', reason: '没能检查', ...(cats !== undefined ? { cats } : {}) };
+    }
+    const cats = this.catsOf(entry, await catsPromise);
+    const catsField = cats !== undefined ? { cats } : {};
+    if (probe.connectionStatus === 'connected') return { ...row, state: 'on', tools: (probe.tools ?? []).map(tool => ({ name: tool.name, ...(tool.description ? { description: tool.description } : {}) })), ...catsField };
+    if (probe.connectionStatus !== 'disconnected') return { ...row, state: 'unchecked', reason: '没能检查', ...catsField };
     const detail = probeDetail(probe.error);
-    return { ...row, state: 'failed', reason: probeReason(probe.error, row.source), ...(detail ? { detail } : {}) };
+    return { ...row, state: 'failed', reason: probeReason(probe.error, row.source), ...(detail ? { detail } : {}), ...catsField };
   }
   /** The row as the engine has it now; when that cannot be read, the one in hand. */
   private async reread(entry: NativeCapability): Promise<NativeCapability> {
     try { return (await this.registry()).find(item => item.id === entry.id) ?? entry; } catch { return entry; }
+  }
+  /** Strict readback after a toggle write: never falls back to the stale pre-write entry. */
+  private async readback(nativeId: string, failureMessage: string): Promise<NativeCapability> {
+    let found: NativeCapability | undefined;
+    try { found = (await this.registry()).find(item => item.id === nativeId); }
+    catch { throw new ApiError(502, failureMessage); }
+    if (!found) throw new ApiError(404, '没有这个应用');
+    return found;
   }
   addCustom(input: CustomAppInput): Promise<AppRow> { return this.inTurn('adding', () => this.install(input)); }
   private async install(input: CustomAppInput): Promise<AppRow> {
@@ -267,32 +346,106 @@ export class BotApps {
     const entry = await this.reread(installed.capability);
     return this.checked(entry, installed.probe?.connectionStatus === 'connected' ? installed.probe : undefined, true);
   }
-  async patchCustom(id: string, input: z.infer<typeof customPatchSchema>): Promise<AppRow> {
-    const entry = await this.custom(id);
-    let changed = false;
-    if (input.secrets && Object.keys(input.secrets).length) {
-      const url = !!entry.mcpServer?.url;
-      secretNames(input.secrets, url);
-      // Both calls merge into what is stored: named secrets are replaced or added, the rest stay.
-      if (url) {
+  patchCustom(id: string, input: z.infer<typeof customPatchSchema>): Promise<AppRow> {
+    return this.inAppTurn(id, async () => {
+      const entry = await this.custom(id);
+      const isUrl = !!entry.mcpServer?.url;
+      if (isUrl && (input.program !== undefined || input.args !== undefined)) throw new ApiError(400, '网址型应用不能修改程序或参数');
+      if (!isUrl && input.url !== undefined) throw new ApiError(400, '本机程序型应用不能修改网址');
+      if (!isUrl && (entry.globalEnabled ?? entry.enabled ?? true) === false && (input.program !== undefined || input.args !== undefined)) {
+        throw new ApiError(409, '应用已停用，请先启用后再修改程序', undefined, 'app_disabled');
+      }
+      const hasSecrets = !!(input.secrets && Object.keys(input.secrets).length);
+      if (hasSecrets) secretNames(input.secrets!, isUrl);
+
+      let changed = false;
+      let installed: { ok?: boolean; capability?: NativeCapability; probe?: NativeProbe | null } | undefined;
+      if (isUrl) {
         // A header is replaced under the spelling it is stored with; another case would be kept beside it and both sent.
         const stored = new Map(Object.keys(entry.mcpServer?.headers ?? {}).map(name => [name.toLowerCase(), name]));
-        const headers = Object.fromEntries(Object.entries(input.secrets).map(([name, value]) => [stored.get(name.toLowerCase()) ?? name, value]));
-        await this.native.request('/api/capabilities/mcp/install', { method: 'POST', body: { id: entry.id, headers } });
-      } else await this.native.request(`/api/capabilities/mcp/${encode(entry.id)}/env`, { method: 'PATCH', body: { env: input.secrets } });
-      changed = true;
-    }
-    // The name alone could not be kept: nothing changed, and that is the answer. After the engine has taken the
-    // secrets it is not — the row comes back with the name it still has.
-    if (input.name !== undefined && !this.keepTitle(entry.id, input.name) && !changed) throw new ApiError(500, '名字没能保存，请再试一次');
-    return this.checked(await this.reread(entry), undefined, changed);
+        const headers = hasSecrets
+          ? Object.fromEntries(Object.entries(input.secrets!).map(([name, value]) => [stored.get(name.toLowerCase()) ?? name, value]))
+          : undefined;
+        if (input.url !== undefined || headers) {
+          installed = await this.native.request<{ ok?: boolean; capability?: NativeCapability; probe?: NativeProbe | null }>(
+            '/api/capabilities/mcp/install',
+            { method: 'POST', body: { id: entry.id, ...(input.url !== undefined ? { transport: 'streamableHttp', url: input.url } : {}), ...(headers ? { headers } : {}) } },
+          );
+          changed = true;
+        }
+      } else if (input.program !== undefined || input.args !== undefined) {
+        installed = await this.native.request<{ ok?: boolean; capability?: NativeCapability; probe?: NativeProbe | null }>(
+          '/api/capabilities/mcp/install',
+          {
+            method: 'POST',
+            body: {
+              id: entry.id,
+              transport: 'stdio',
+              ...(input.program !== undefined ? { command: input.program } : {}),
+              ...(input.args !== undefined ? { args: input.args } : {}),
+              ...(hasSecrets ? { env: input.secrets } : {}),
+            },
+          },
+        );
+        changed = true;
+      } else if (hasSecrets) {
+        await this.native.request(`/api/capabilities/mcp/${encode(entry.id)}/env`, { method: 'PATCH', body: { env: input.secrets } });
+        changed = true;
+      }
+      // The name alone could not be kept: nothing changed, and that is the answer. After the engine has taken the
+      // config/secrets it is not — the row comes back with the name it still has.
+      if (input.name !== undefined && !this.keepTitle(entry.id, input.name) && !changed) throw new ApiError(500, '名字没能保存，请再试一次');
+      const current = await this.reread(installed?.capability ?? entry);
+      return this.checked(current, installed?.probe?.connectionStatus === 'connected' ? installed.probe : undefined, changed);
+    });
   }
-  async removeCustom(id: string): Promise<{ removed: true }> {
-    const entry = await this.custom(id);
-    await this.native.request(`/api/capabilities/mcp/${encode(entry.id)}?hard=true`, { method: 'DELETE' });
-    // It is gone from the engine; a name left behind names nothing (and is dropped at the next chance).
-    if (this.store.state.apps?.[entry.id]) this.keepTitle(entry.id, undefined);
-    return { removed: true };
+  setCustomEnabled(id: string, enabled: boolean): Promise<AppRow> {
+    return this.inAppTurn(id, async () => {
+      const entry = await this.custom(id);
+      await this.native.request('/api/capabilities', {
+        method: 'PATCH',
+        body: { capabilityId: entry.id, capabilityType: 'mcp', source: 'external', scope: 'global', enabled },
+      });
+      const after = await this.readback(entry.id, '没能确认应用开关状态，请再试一次');
+      const actual = (after.globalEnabled ?? after.enabled ?? true) !== false;
+      if (actual !== enabled) throw new ApiError(502, enabled ? '没能启用，请再试一次' : '没能停用，请再试一次');
+      return this.checked(after, undefined, true);
+    });
+  }
+  setCustomCatEnabled(id: string, catName: string, enabled: boolean): Promise<AppRow> {
+    return this.inAppTurn(id, async () => {
+      const [entry, catsRes] = await Promise.all([
+        this.custom(id),
+        this.native.request<{ cats?: NativeCat[] }>('/api/cats'),
+      ]);
+      const cat = (catsRes.cats ?? []).find(c => c.name === catName || c.id === catName);
+      if (!cat) throw new ApiError(404, '找不到这只猫猫');
+      if ((entry.globalEnabled ?? entry.enabled ?? true) === false) {
+        throw new ApiError(409, '应用已停用，请先启用应用', undefined, 'app_disabled');
+      }
+      await this.native.request('/api/capabilities', {
+        method: 'PATCH',
+        body: { capabilityId: entry.id, capabilityType: 'mcp', source: 'external', scope: 'cat', catId: cat.id, enabled },
+      });
+      const after = await this.readback(entry.id, '没能确认这只猫的开关状态，请再试一次');
+      const globalOn = (after.globalEnabled ?? after.enabled ?? true) !== false;
+      const catAllowed = after.cats && typeof after.cats[cat.id] === 'boolean'
+        ? after.cats[cat.id] === true
+        : !(after.blockedCats?.includes(cat.id) ?? false);
+      if ((globalOn && catAllowed) !== enabled) {
+        throw new ApiError(502, enabled ? '没能为这只猫启用，请再试一次' : '没能为这只猫停用，请再试一次');
+      }
+      return this.checked(after, undefined, true);
+    });
+  }
+  removeCustom(id: string): Promise<{ removed: true }> {
+    return this.inAppTurn(id, async () => {
+      const entry = await this.custom(id);
+      await this.native.request(`/api/capabilities/mcp/${encode(entry.id)}?hard=true`, { method: 'DELETE' });
+      // It is gone from the engine; a name left behind names nothing (and is dropped at the next chance).
+      if (this.store.state.apps?.[entry.id]) this.keepTitle(entry.id, undefined);
+      return { removed: true };
+    });
   }
 
   // ---- 微信: the official plugin, through the plugin manager ------------------------------------------

@@ -12,10 +12,13 @@
 // really starts the program or reaches the address), on 再检查, and for 微信
 // every 2 s while it is starting (for about 2 minutes) and once when its
 // authorization runs out; POST …/wechat/connect | disconnect | authorize |
-// revoke; POST …/custom {…, idempotencyKey}; PATCH …/:id {name} | {secrets};
-// DELETE …/:id. Closing abandons everything in flight; nothing is read on a
-// timer while the dialog is closed, and nothing is shown that the engine did
-// not answer.
+// revoke; POST …/custom {…, idempotencyKey}; PATCH …/:id {name} | {secrets} |
+// {program, args} | {url} (item 60: changed in place; a program's only while it
+// is not turned off); PUT …/:id/enabled
+// {enabled} (停用 / 启用) and PUT …/:id/cats/:name {enabled} (one cat's
+// switch, item 60); DELETE …/:id. Closing abandons everything in flight;
+// nothing is read on a timer while the dialog is closed, and nothing is shown
+// that the engine did not answer (a switch moves when the answer says so).
 (() => {
   "use strict";
   const R = window.ClowderAppsRules;
@@ -219,6 +222,8 @@
       checks: new Map(),         // id → {status: "queued" | "running", ctrl, token}
       lanes: new Map(),          // id → the promise its writes run in, one after another
       writes: new Map(),         // id → how many writes are waiting or on their way
+      cseq: 0,                   // custom apps' evidence, in order: each list read takes the next number as it starts,
+      lastWriteSeq: new Map(),   // and each write (an add, once it has an id) as its answer comes in (readList)
       queue: [], round: null,
       ctrls: new Set(), timers: new Set(),
       poll: null,                // 微信 starting: {started, timer, reading, gaveUp, error}
@@ -227,6 +232,8 @@
       badIcons: new Set(),       // icon addresses that did not load: their tiles keep the drawn mark
       wseq: 0, wseen: 0, wwrites: 0, winflight: 0, // 微信's evidence, in the order its requests started (wechatAsk)
       notes: new Map(),          // id → {text, bad} shown on its page
+      busy: new Map(),           // id → {kind: "toggle" | "cat", on, cat}: its 停用 / 启用 or one cat's switch on its way
+      catNotes: new Map(),       // id → {text}: what failed about a cat's switch, under the cats
       draft: null, from: null, layer: null,
     };
     let view = null;
@@ -256,7 +263,8 @@
     }
     // Focus that waited on the card (or still sits where a page starts, in a browser that does not focus a clicked button) follows the answer.
     const focusWasHeld = () => document.activeElement === card || document.activeElement === title || !card.contains(document.activeElement);
-    const checkOf = (id) => (S.checks.get(id) && S.checks.get(id).status === "running" ? "running" : "");
+    // A request on its way that checks it (a check, or a write whose answer is a fresh check); 停用 checks nothing (still).
+    const checkOf = (id) => { const c = S.checks.get(id); return c && c.status === "running" && !c.still ? "running" : ""; };
 
     // ---- keys, clicks ----
     root.addEventListener("keydown", (ev) => {
@@ -409,8 +417,13 @@
     }
 
     // The list, read fresh. A custom app already checked here keeps what its check said (the list itself
-    // checks nothing and calls every row unchecked); one the list no longer has is gone.
+    // checks nothing and calls every row unchecked); one the list no longer has is gone. An app a write of this
+    // page overlapped (still waiting or on its way when the list answers, or answered after the list was asked
+    // for) is left as the write's answer put it: what the list says about it may be from before the write, so it
+    // is neither taken nor counted as gone. A list asked for after a write's answer (the read a lost answer is
+    // followed by) is newer, and is taken.
     async function readList(why) {
+      const listSeq = ++S.cseq;
       S.reading = true;
       if (why === "again") S.listError = "";
       paintList();
@@ -431,25 +444,41 @@
       S.listError = "";
       const apps = Array.isArray(data && data.apps) ? data.apps.filter((a) => a && a.id) : [];
       const custom = apps.filter((a) => a.kind === "custom");
+      const newer = (id) => !!S.writes.get(id) || (S.lastWriteSeq.get(id) || 0) > listSeq;
       // A check's answer belongs to what it checked: kept only while the app is still what was checked.
       const changed = new Set();
+      const shownBefore = view && view.name === "app" ? S.apps.get(view.id) : null;
       for (const a of custom) {
+        if (newer(a.id)) continue;
         const known = S.apps.get(a.id), same = !known || R.sameSource(known.source, a.source);
-        if (known && a.state === "unchecked" && known.state !== "unchecked" && same) S.apps.set(a.id, Object.assign({}, known, { title: a.title }));
+        // What a check found (on, failed) stays while the list calls it unchecked and it is still what was checked.
+        // Anything else the list says is taken as it is: turned off, or on again after being off (never kept off).
+        const kept = !!known && a.state === "unchecked" && (known.state === "on" || known.state === "failed") && same;
+        if (kept) S.apps.set(a.id, Object.assign({}, known, { title: a.title }));
         else S.apps.set(a.id, a);
         // Changed: a check begun on what was there before is not about it — it loses its claim (revokeCheck).
         if (!same) { changed.add(a.id); revokeCheck(a.id); }
       }
       if (changed.size) pump();
       const keep = new Set(custom.map((a) => a.id));
+      for (const id of S.apps.keys()) if (id !== R.WECHAT && newer(id)) keep.add(id);
       const next = view && view.name === "app" && !keep.has(view.id) ? survivor(view.id, keep) : null;
       for (const id of [...S.apps.keys()]) if (id !== R.WECHAT && !keep.has(id)) { dismissLayer(id); forget(id); }
-      S.order = custom.map((a) => a.id);
+      // The list's order; an app it cannot have known of yet (added since it was asked for) stays where it was, and one
+      // removed since then is not brought back.
+      const order = custom.map((a) => a.id).filter((id) => S.apps.has(id));
+      (S.order || []).forEach((id, at) => { if (S.apps.has(id) && !order.includes(id)) order.splice(Math.min(at, order.length), 0, id); });
+      S.order = order;
       const w = apps.find((a) => a.id === R.WECHAT);
       if (w && wechatTake(asked)) setApp(w, "list");
       paintList();
-      // The page open on a changed app says so at once (未检查, no tools); nothing new is checked for it.
-      if (view && view.name === "app" && changed.has(view.id) && S.apps.has(view.id)) view.paint();
+      // The page open on a changed app says so at once (未检查, no tools); nothing new is checked for it. Its editor of
+      // what it is started from what was there before, so it closes (not while it saves: that answer is the newer one);
+      // so does a program's editor once the list says it is turned off (sourceFixed). The page open on an app the
+      // list says something new about (changed, turned off or on elsewhere) follows it.
+      const V = view && view.name === "app" && S.apps.has(view.id) ? view : null;
+      if (V && V.sourceEdit && !V.sourceEdit.saving && (changed.has(V.id) || sourceFixed(S.apps.get(V.id)))) ease(card, () => { V.sourceEdit = null; V.paint(); });
+      else if (V && S.apps.get(V.id) !== shownBefore) V.paint();
       if (view && view.name === "app" && !S.apps.has(view.id)) { S.from = next; goList(); }
       if (!S.checkedOnce) {
         S.checkedOnce = true;
@@ -460,13 +489,15 @@
       }
       return true;
     }
-    // An app that is no longer there: its checks stop, its row goes.
+    // An app that is no longer there: its checks stop, its row goes (the mark of its last write stays: a list asked
+    // for before its removal does not bring it back).
     function forget(id) {
       const c = S.checks.get(id);
       if (c && c.ctrl) { try { c.ctrl.abort(); } catch { /* done */ } }
       S.checks.delete(id);
       S.apps.delete(id);
       S.notes.delete(id);
+      S.catNotes.delete(id);
       if (S.order) S.order = S.order.filter((x) => x !== id);
       if (S.round) { S.round.ids.delete(id); settled(id); }
     }
@@ -500,9 +531,14 @@
     }
     // One write at a time per app (a rename, a secret, a removal): a later one waits for the earlier, and its
     // editor says it is saving meanwhile. A write never cuts another off, so none is left half-shown.
+    // Its answer, or its failure, is marked as it comes in (before its caller goes on): a list asked for before that
+    // may not have seen it (readList).
     function inTurn(id, work) {
       S.writes.set(id, (S.writes.get(id) || 0) + 1);
-      const run = (S.lanes.get(id) || Promise.resolve()).then(() => (S.alive && S.apps.has(id) ? work() : undefined));
+      const run = (S.lanes.get(id) || Promise.resolve()).then(async () => {
+        if (!S.alive || !S.apps.has(id)) return undefined;
+        try { return await work(); } finally { S.lastWriteSeq.set(id, ++S.cseq); }
+      });
       const after = run.catch(() => undefined).then(() => {
         const n = (S.writes.get(id) || 1) - 1;
         if (n > 0) S.writes.set(id, n); else S.writes.delete(id);
@@ -514,11 +550,16 @@
       S.lanes.set(id, after);
       return run;
     }
-    // What a check found no longer holds (a failed check, a write whose answer was lost): not known to answer.
+    // What a check found no longer holds (a failed check, a write whose answer was lost): not known to answer. One
+    // turned off stays off (a lost new address or secret does not turn it on; 启用 is still what it offers).
+    const offOf = (known) => Object.assign({}, known, { state: "off", reason: "已停用", tools: undefined, detail: undefined });
     function invalidate(id) {
       const known = S.apps.get(id);
-      if (known) S.apps.set(id, Object.assign({}, known, { state: "unchecked", reason: "没能检查", tools: undefined, detail: undefined }));
+      if (known) S.apps.set(id, known.state === "off" ? offOf(known) : Object.assign({}, known, { state: "unchecked", reason: "没能检查", tools: undefined, detail: undefined }));
     }
+    // A program's app turned off is not changed in what it runs: the engine would start it to take the change
+    // (docs/apps-api.md, 409 app_disabled). Its address, its name and its secrets still are.
+    const sourceFixed = (app) => !!app && app.state === "off" && kindOf(app) !== "url";
     // The row after a vanishing app among those that stay (else 添加自定义应用): where focus goes.
     function survivor(id, stays) {
       const order = S.order || [], at = order.indexOf(id);
@@ -528,13 +569,14 @@
     // A confirmation belongs to its app: when the app goes, so does its confirmation (and a removal on its way is let go).
     function dismissLayer(id) { if (S.layer && S.layer.id === id) S.layer.dismiss(); }
     // A write for an app supersedes its check: the write's own answer is the newer one.
-    // check: a read of its detail (an opening check, 再检查), not a write.
-    function claim(id, check) {
+    // check: a read of its detail (an opening check, 再检查), not a write. still: a write whose answer checks
+    // nothing (停用: the engine does not start it), so its state is not shown as being checked meanwhile.
+    function claim(id, check, still) {
       const c = S.checks.get(id);
       if (c && c.ctrl) { try { c.ctrl.abort(); } catch { /* done */ } }
       S.queue = S.queue.filter((x) => x !== id);
       const ctrl = typeof AbortController === "function" ? new AbortController() : null, token = {};
-      S.checks.set(id, { status: "running", ctrl, token, check: !!check });
+      S.checks.set(id, { status: "running", ctrl, token, check: !!check, still: !!still });
       paintRow(id);
       if (view && view.id === id) view.paint();
       return { ctrl, token, mine: () => S.alive && S.checks.get(id) && S.checks.get(id).token === token };
@@ -951,15 +993,33 @@
       const detail = details();
       tx.append(state, detail.wrap);
       const again = button("secondary ap-check", "再检查", () => recheck(id));
+      // 停用 / 启用, by the state (as 微信's 关闭 / 打开): turned off, no cat can use it and it is not started.
+      const toggle = button("secondary ap-toggle", "停用", () => toggleApp(V));
       const acts = node("div", "ap-hero-acts");
-      acts.append(again);
+      acts.append(toggle, again);
       hero.append(tile, tx, acts);
       const note = node("p", "ap-note"), hint = node("p", "ap-hint", R.SLOW_HINT);
       // What came of 再检查 or a save is said here, and focus lands here to say it.
       note.setAttribute("tabindex", "-1");
-      // What it is: the program and its arguments, or the address (the tile above says which).
-      const what = node("div", "ap-cmd"), whatText = node("code", "");
+      // What it is: the program and its arguments, or the address (the tile above says which), and 编辑 beside it,
+      // which puts the editor in its place (editSource).
+      const src = node("div", "ap-src"), what = node("div", "ap-cmd"), whatText = node("code", "");
       what.append(whatText);
+      const editSrc = button("text-btn ap-src-btn", "编辑", () => editSource(V));
+      src.append(what, editSrc);
+      const srcSlot = node("div", "ap-src-slot");
+      srcSlot.hidden = true;
+      // Which cats may use it: each by its face and name, with its own switch (the server's answer moves it).
+      const cats = node("section", "ap-sec ap-cats-sec"), catsHead = node("h3", "", "猫猫"), catList = node("ul", "ap-cats");
+      catsHead.id = uid("cats");
+      catList.setAttribute("aria-labelledby", catsHead.id);
+      // What failed about a switch, under the cats (role alert: said where the switch was pressed).
+      const catNote = node("p", "ap-note bad ap-cat-note");
+      catNote.setAttribute("role", "alert");
+      catNote.setAttribute("tabindex", "-1");
+      catNote.hidden = true;
+      cats.append(catsHead, catList, catNote);
+      cats.hidden = true;
       // Its secrets, by name only.
       const secrets = node("section", "ap-sec"), secretsHead = node("h3", ""), names = node("ul", "ap-names");
       secretsHead.id = uid("secrets");
@@ -973,14 +1033,15 @@
       tools.append(toolsHead, toolList);
       const end = node("div", "ap-end"), remove = button("text-btn danger ap-remove", "移除", () => confirmRemove(id, remove));
       end.append(remove);
-      el.append(hero, detail.box, note, hint, what, secrets, tools, end);
+      el.append(hero, detail.box, note, hint, src, srcSlot, secrets, cats, tools, end);
       // The name, in the dialog's title: a button that turns into its field.
       const nameBtn = button("ap-name", null, () => startRename(V)), nameText = node("span", "ap-name-text");
       nameBtn.append(nameText, node("span", "visually-hidden", "，改名"), icon("pencil", "ap-name-mark"));
       nameBtn.dataset.tip = "改名";
       const V = {
-        name: "app", id, el, state, mark, word, detail, again, note, hint, tile, tileKey: "", whatText, secrets, secretsHead, names,
-        addSecret, tools, toolsHead, toolList, remove, nameBtn, nameText, markKind: "", editing: null, secretEdit: null, open: new Set(),
+        name: "app", id, el, state, mark, word, detail, again, toggle, note, hint, tile, tileKey: "", src, whatText, editSrc, srcSlot, secrets, secretsHead, names,
+        addSecret, cats, catList, catNote, catRows: new Map(), tools, toolsHead, toolList, remove, nameBtn, nameText, markKind: "",
+        editing: null, secretEdit: null, sourceEdit: null, open: new Set(),
         head: () => [V.editing ? V.editing.input : V.nameBtn],
         paint: () => paintApp(V),
       };
@@ -990,7 +1051,7 @@
       const app = S.apps.get(V.id);
       if (!app) return;
       // What has focus now; if this paint hides or replaces it, focus moves to the state line.
-      const had = document.activeElement, inside = !!had && V.el.contains(had) && had !== V.again;
+      const had = document.activeElement, inside = !!had && V.el.contains(had) && had !== V.again && had !== V.toggle;
       const ck = checkOf(V.id), lk = R.look(app, ck), kind = kindOf(app), src = app.source || {};
       setText(V.nameText, R.trim(app.title) || V.id);
       paintMark(V, lk.mark);
@@ -998,18 +1059,37 @@
       V.word.classList.toggle("bad", lk.mark === "bad");
       V.detail.set(app.state === "failed" ? app.detail : "");
       paintTile(V, app);
-      const hadFocus = document.activeElement === V.again;
       V.again.hidden = app.state === "off";
       // A write's answer is its own check: no second one while a write waits or is on its way.
       V.again.disabled = !!ck || !!S.writes.get(V.id);
       setText(V.again, ck ? R.BUSY.check : app.state === "failed" ? "再试一次" : "再检查");
-      if (hadFocus && V.again.disabled) card.focus();
+      // 停用 / 启用: what it is doing while on its way; never another write of this app at the same time.
+      const busy = S.busy.get(V.id) || null, toggling = busy && busy.kind === "toggle" ? busy : null;
+      V.toggle.className = (app.state === "off" ? "primary" : "secondary") + " ap-toggle";
+      setText(V.toggle, R.toggleLabel(app, toggling));
+      V.toggle.disabled = !!busy || !!S.writes.get(V.id);
+      // A focused button about to be unusable would drop focus to the page: it waits on the card for the answer
+      // (or, where 再检查 goes because it was turned off, moves to the state that says so).
+      if (had === V.again && V.again.hidden) V.state.focus();
+      else if ((had === V.again && V.again.disabled) || (had === V.toggle && V.toggle.disabled)) card.focus();
       const n = S.notes.get(V.id);
       setText(V.note, n ? n.text : "");
       V.note.hidden = !n;
       V.note.classList.toggle("bad", !!(n && n.bad));
       V.hint.hidden = ck === "running" || !R.slowFirstRun(app);
       setText(V.whatText, kind === "url" ? R.trim(src.url) : R.commandLine(R.trim(src.program), Array.isArray(src.args) ? src.args : []));
+      // What it is, or its editor in the same place. A program's app turned off offers no 编辑 (sourceFixed); an editor
+      // open when it was turned off goes (not while it saves: that answer is the newer one).
+      const fixed = sourceFixed(app);
+      V.editSrc.hidden = fixed;
+      if (fixed && V.sourceEdit && !V.sourceEdit.saving) V.sourceEdit = null;
+      const E = V.sourceEdit;
+      V.src.hidden = !!E;
+      V.srcSlot.hidden = !E;
+      if (E && E.box.parentElement !== V.srcSlot) V.srcSlot.replaceChildren(E.box);
+      if (!E && V.srcSlot.children.length) V.srcSlot.replaceChildren();
+      V.editSrc.setAttribute("aria-label", kind === "url" ? "编辑网址" : "编辑程序和参数");
+      paintCats(V, app);
       // Secrets: names, each with 换一个值; one editor at a time.
       const word = R.SECRETS_WORD[kind === "url" ? "url" : "program"];
       setText(V.secretsHead, word);
@@ -1083,6 +1163,358 @@
         const twin = keepName ? [...V.toolList.querySelectorAll("button")].find((b) => b.textContent === keepName) : null;
         if (twin) twin.focus();
       }
+    }
+
+    // ---- which cats may use it ----
+    // A cat's face as the rest of the app draws it: its uploaded photo, else its clay portrait (cat-avatars.js); with
+    // neither (the portrait helper not loaded) the empty round tile. Decorative: its name is beside it. app.js redraws
+    // every face marked data-avatar-bot when a cat's picture changes; the signature is the one it compares.
+    function paintFace(r, cat) {
+      const seed = String(cat.avatar_seed || cat.name || ""), url = R.trim(cat.avatar_url), tmpl = String(cat.templateId || "");
+      const key = JSON.stringify([url, seed, tmpl]);
+      if (r.faceKey === key) return;
+      r.faceKey = key;
+      const av = r.face, A = window.ClowderAvatars;
+      av.dataset.avatarBot = R.trim(cat.name);
+      av.dataset.avatarSize = "";
+      av.dataset.avatarSignature = key;
+      const portrait = () => { av.replaceChildren(...(A && typeof A.createPortrait === "function" ? [A.createPortrait(seed, tmpl, R.trim(cat.name))] : [])); };
+      if (!url) { portrait(); return; }
+      const img = document.createElement("img");
+      img.setAttribute("alt", "");
+      img.decoding = "async";
+      img.draggable = false;
+      img.addEventListener("error", () => { if (r.faceKey === key && img.parentElement === av) portrait(); });
+      img.src = url;
+      av.replaceChildren(img);
+    }
+    // One cat's row: face, name, its switch. The whole row is the switch's label (as 资料's 置顶).
+    function catRow(V, name) {
+      const li = node("li", "ap-cat"), face = node("span", "avatar ap-cat-face"), label = node("span", "ap-cat-name", name);
+      face.setAttribute("aria-hidden", "true");
+      li.dataset.cat = name;
+      label.id = uid("cat");
+      const spin = node("span", "ap-cat-spin");
+      spin.setAttribute("aria-hidden", "true");
+      spin.append(icon("spinner", "st-spin"));
+      spin.hidden = true;
+      const sw = button("g7-switch ap-cat-switch", null, () => toggleCat(V, name));
+      sw.setAttribute("role", "switch");
+      sw.setAttribute("aria-label", name);
+      sw.setAttribute("aria-checked", "false");
+      sw.dataset.cat = name;
+      li.append(face, label, spin, sw);
+      li.addEventListener("click", (ev) => { if (!sw.contains(ev.target)) sw.click(); });
+      return { li, face, label, spin, sw, faceKey: "" };
+    }
+    // The cats with their switches, where it is not turned off and the server said which cats there are. A switch
+    // shows what the server answered; while one is on its way it says so (aria-busy, the spinner beside it) and every
+    // switch of this app waits (aria-disabled: it keeps focus, unlike a disabled button). Rows are kept by name, so a
+    // switch with focus keeps it when the answer repaints the list.
+    function paintCats(V, app) {
+      const cats = R.catsOf(app);
+      V.cats.hidden = !cats.length;
+      const busy = S.busy.get(V.id) || null, locked = !!busy || !!S.writes.get(V.id);
+      const here = V.catList.contains(document.activeElement) ? document.activeElement : null;
+      const names = cats.map((c) => R.trim(c.name));
+      for (const n of [...V.catRows.keys()]) if (!names.includes(n)) V.catRows.delete(n);
+      const want = cats.map((c) => {
+        const n = R.trim(c.name);
+        let r = V.catRows.get(n);
+        if (!r) { r = catRow(V, n); V.catRows.set(n, r); }
+        paintFace(r, c);
+        r.sw.setAttribute("aria-checked", String(c.enabled === true));
+        const mine = !!busy && busy.kind === "cat" && busy.cat === n;
+        if (locked) r.sw.setAttribute("aria-disabled", "true"); else r.sw.removeAttribute("aria-disabled");
+        if (mine) r.sw.setAttribute("aria-busy", "true"); else r.sw.removeAttribute("aria-busy");
+        r.spin.hidden = !mine;
+        r.li.classList.toggle("is-locked", locked);
+        return r.li;
+      });
+      const kids = V.catList.children;
+      if (want.length !== kids.length || want.some((li, i) => kids[i] !== li)) {
+        V.catList.replaceChildren(...want);
+        if (here && here.isConnected && document.activeElement !== here) here.focus();
+      }
+      const cn = S.catNotes.get(V.id);
+      setText(V.catNote, cn ? cn.text : "");
+      V.catNote.hidden = !cn;
+    }
+    const catSwitch = (V, name) => { const r = V && V.catRows && V.catRows.get(R.trim(name)); return r && r.sw.isConnected && visible(r.sw) ? r.sw : null; };
+
+    // One cat's switch: PUT …/cats/:name {enabled: the other way}. Nothing moves until the server answers (its answer
+    // is a fresh check, with every cat). Focus stays on the switch; what failed is said under the cats.
+    async function toggleCat(V, name) {
+      const id = V.id, app = S.apps.get(id);
+      const cat = R.catsOf(app).find((c) => R.trim(c.name) === name);
+      if (!cat || S.busy.has(id) || S.writes.get(id)) return;
+      const want = cat.enabled !== true;
+      S.notes.delete(id);
+      S.catNotes.delete(id);
+      S.busy.set(id, { kind: "cat", cat: name, on: want });
+      let answer = null, error = null, mine = false;
+      const run = inTurn(id, async () => {
+        const T = claim(id);
+        try { answer = await call(R.path(id) + "/cats/" + encodeURIComponent(name), { method: "PUT", body: { enabled: want } }, T.ctrl); } catch (err) { error = err; }
+        mine = T.mine();
+        if (mine) release(id, T.token);
+      });
+      if (view && view.id === id) view.paint();
+      await run;
+      S.busy.delete(id);
+      if (!S.alive) return;
+      const P = () => (view && view.name === "app" && view.id === id ? view : null);
+      const held = (!!P() && document.activeElement === catSwitch(P(), name)) || focusWasHeld();
+      if (!mine) { paintRow(id); if (P()) P().paint(); return; }
+      // Focus follows the answer: the switch, while it is there; else the line that says how it now stands.
+      const land = () => { const p = P(); if (!held || !p) return; const sw = catSwitch(p, name); if (sw) sw.focus(); else outcome(p); };
+      if (answer) { setApp(answer, "cat"); settled(id); land(); return; }
+      const what = R.patchError(error, "cat", want, name);
+      settled(id);
+      if (what.kind === "gone") {
+        // The app, or the cat: the list (it checks nothing) says which.
+        const was = S.apps.get(id), listed = await readList("cat");
+        if (!S.alive) return;
+        if (!S.apps.has(id)) { if (was) announce("「" + R.trim(was.title) + "」已经不在了。"); return; }
+        if (listed) {
+          // The app is there: the cat is not (deleted elsewhere). Its row goes, as the engine answered.
+          const now = S.apps.get(id);
+          if (Array.isArray(now.cats)) S.apps.set(id, Object.assign({}, now, { cats: now.cats.filter((c) => !c || R.trim(c.name) !== name) }));
+          S.catNotes.set(id, { text: "「" + name + "」已经不在了。" });
+        } else S.catNotes.set(id, { text: R.patchError(null, "cat", want, name).text });
+      } else if (what.kind === "disabled") {
+        // Turned off meanwhile: the list says so (no cat's switch works until it is on again); unread, the refusal
+        // itself says so (as for a save, saveSource), unless a write of this page answered since. Said at the top.
+        const failSeq = S.lastWriteSeq.get(id) || 0, listed = await readList("cat");
+        if (!S.alive || !S.apps.has(id)) return;
+        if (!listed && !S.writes.get(id) && (S.lastWriteSeq.get(id) || 0) <= failSeq) {
+          S.apps.set(id, offOf(S.apps.get(id)));
+          // A program's editor open on its page goes with it (not while it saves: that answer is the newer one).
+          const v = P();
+          if (v && v.sourceEdit && !v.sourceEdit.saving && sourceFixed(S.apps.get(id))) ease(card, () => { v.sourceEdit = null; v.paint(); });
+        }
+        S.notes.set(id, { text: what.text, bad: true });
+      } else S.catNotes.set(id, { text: what.text });
+      paintRow(id);
+      const p = P();
+      if (p) p.paint();
+      // The switch that was pressed, while it is there (what failed is said under the cats, as an alert); else what
+      // says why it went: the line under the cats, or the page's own line.
+      if (held && p) {
+        const sw = catSwitch(p, name);
+        if (sw) sw.focus();
+        else if (visible(p.catNote)) p.catNote.focus();
+        else outcome(p);
+      }
+    }
+
+    // 停用 / 启用: PUT …/enabled. Turned off, it is not started and no cat can use it (the cats' switches go: turning it
+    // on again gives it to every cat, as upstream does); turned on, the answer is a fresh check. Nothing changes on the
+    // page before the answer; meanwhile the button says what it is doing. A lost answer is followed by one read of the
+    // list (it checks nothing), which says whether it was done.
+    async function toggleApp(V) {
+      const id = V.id, app = S.apps.get(id);
+      if (!app || S.busy.has(id) || S.writes.get(id)) return;
+      const want = app.state === "off";
+      S.notes.delete(id);
+      S.catNotes.delete(id);
+      S.busy.set(id, { kind: "toggle", on: want });
+      hold();
+      let answer = null, error = null, mine = false;
+      const run = inTurn(id, async () => {
+        const T = claim(id, false, !want);
+        try { answer = await call(R.path(id) + "/enabled", { method: "PUT", body: { enabled: want } }, T.ctrl); } catch (err) { error = err; }
+        mine = T.mine();
+        if (mine) release(id, T.token);
+      });
+      if (view && view.id === id) view.paint();
+      await run;
+      S.busy.delete(id);
+      if (!S.alive) return;
+      const held = focusWasHeld();
+      const P = () => (view && view.name === "app" && view.id === id ? view : null);
+      if (!mine) { paintRow(id); if (P()) P().paint(); return; }
+      if (answer) {
+        if (P()) ease(card, () => setApp(answer, "toggle")); else setApp(answer, "toggle");
+        settled(id);
+        if (held && P()) outcome(P());
+        return;
+      }
+      const what = R.patchError(error, "toggle", want);
+      settled(id);
+      if (what.kind === "gone") { goneApp(id); return; }
+      if (what.kind === "unsure") {
+        // The list says whether it is off now: done, its state says so; not done, what failed. Unread too, nothing is
+        // known: what its last check found no longer holds where it was on (off stays the last thing known, so 启用
+        // can be pressed again), and the note says it could not be confirmed.
+        const listed = await readList("toggle");
+        if (!S.alive || !S.apps.has(id)) return;
+        const now = S.apps.get(id);
+        if (!listed) { invalidate(id); S.notes.set(id, { text: what.text, bad: true }); }
+        else if (want ? now.state === "off" : now.state !== "off") S.notes.set(id, { text: R.toggleFailed(want, error), bad: true });
+      } else S.notes.set(id, { text: what.text, bad: true });
+      paintRow(id);
+      if (P()) ease(card, () => P().paint());
+      if (held && P()) outcome(P());
+    }
+
+    // ---- what it is, changed in place ----
+    // A whole command line pasted where the program goes is split for the owner, when that is unambiguous: into an
+    // empty (or wholly selected) 程序, while 参数 holds nothing the owner typed (free) and nothing is being sent (busy).
+    function splitPaste(programIn, argsIn, hint, free, busy, marked) {
+      programIn.addEventListener("paste", (ev) => {
+        const text = ev.clipboardData && typeof ev.clipboardData.getData === "function" ? ev.clipboardData.getData("text") : "";
+        const had = programIn.value || "";
+        const all = had === "" || (programIn.selectionStart === 0 && programIn.selectionEnd === had.length);
+        if (!all || !free() || busy()) return;
+        const words = R.splitCommand(text);
+        if (!words) return;
+        ev.preventDefault();
+        programIn.value = words[0];
+        argsIn.value = words.slice(1).join("\n");
+        marked();
+        hint.hidden = false;
+      });
+      programIn.addEventListener("input", () => { hint.hidden = true; });
+    }
+    // 编辑: the program and its arguments (one per line), or the address, in fields where the box was; 保存 sends only
+    // what changed (PATCH), 取消 or Escape puts the box back (Escape in it goes no further than the editor).
+    function editSource(V) {
+      if (V.sourceEdit) return;
+      const app = S.apps.get(V.id);
+      if (!app) return;
+      const src = app.source || {}, kind = kindOf(app) === "url" ? "url" : "program";
+      const box = node("div", "ap-src-form");
+      // Where focus waits while it saves (its fields are read-only and its buttons disabled meanwhile).
+      box.setAttribute("tabindex", "-1");
+      const err = node("p", "ap-err ap-src-err");
+      err.setAttribute("role", "alert");
+      const E = { box, kind, err, saving: false, programF: null, argsF: null, urlF: null, hint: null, prefill: "" };
+      if (kind === "url") {
+        const urlIn = textInput("", R.URL_MAX * 2);
+        urlIn.type = "url";
+        urlIn.placeholder = "https://";
+        urlIn.value = R.trim(src.url);
+        E.urlF = field("网址", urlIn);
+        box.append(E.urlF.wrap);
+      } else {
+        const programIn = textInput("", R.PROGRAM_MAX * 2);
+        programIn.placeholder = "名称或路径";
+        programIn.value = R.trim(src.program);
+        E.programF = field("程序", programIn);
+        E.hint = node("p", "ap-hint ap-split", "参数已经分到下面。");
+        E.hint.hidden = true;
+        E.programF.wrap.insertBefore(E.hint, E.programF.err);
+        const argsIn = node("textarea", "");
+        argsIn.rows = 3;
+        argsIn.spellcheck = false;
+        argsIn.placeholder = "每行一个";
+        argsIn.value = (Array.isArray(src.args) ? src.args : []).join("\n");
+        E.prefill = argsIn.value;
+        E.argsF = field("参数", argsIn);
+        box.append(E.programF.wrap, E.argsF.wrap);
+        splitPaste(programIn, argsIn, E.hint, () => !R.trim(argsIn.value) || argsIn.value === E.prefill, () => E.saving, () => { E.programF.mark(""); E.argsF.mark(""); });
+      }
+      for (const f of [E.programF, E.argsF, E.urlF]) if (f) f.input.addEventListener("input", () => setText(err, ""));
+      E.save = button("primary ap-small", "保存", () => saveSource(V));
+      E.drop = button("text-btn", "取消", () => closeSource(V, true));
+      const acts = node("div", "ap-secret-acts ap-src-acts");
+      acts.append(E.save, E.drop);
+      box.append(acts, err);
+      box.addEventListener("keydown", (ev) => {
+        if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); closeSource(V, true); }
+        else if (ev.key === "Enter" && ev.target && ev.target.tagName === "INPUT") { ev.preventDefault(); saveSource(V); }
+      });
+      V.sourceEdit = E;
+      ease(card, () => paintApp(V));
+      const first = (E.urlF || E.programF).input;
+      first.focus();
+      if (typeof first.select === "function") first.select();
+    }
+    const sourceFields = (E) => [E.programF, E.argsF, E.urlF].filter(Boolean);
+    function closeSource(V, refocus) {
+      const E = V.sourceEdit;
+      if (!E || E.saving) return;
+      ease(card, () => { V.sourceEdit = null; paintApp(V); });
+      if (refocus && view === V) (visible(V.editSrc) ? V.editSrc : V.state).focus();
+    }
+    async function saveSource(V) {
+      const E = V.sourceEdit;
+      if (!E || E.saving) return;
+      const app = S.apps.get(V.id);
+      if (!app) return;
+      const values = { program: E.programF ? E.programF.input.value : "", args: E.argsF ? E.argsF.input.value : "", url: E.urlF ? E.urlF.input.value : "" };
+      const { body, changed, problems } = R.sourceChange(app.source, values);
+      for (const f of sourceFields(E)) f.mark("");
+      setText(E.err, "");
+      // The same as it is: nothing to send.
+      if (!changed) { closeSource(V, true); return; }
+      if (problems.length) {
+        let first = null;
+        for (const p of problems) {
+          const f = { program: E.programF, args: E.argsF, url: E.urlF }[p.field];
+          if (f && !f.err.textContent) { f.mark(p.text); first = first || f.input; }
+        }
+        if (first) first.focus();
+        return;
+      }
+      // Locked from now (it may wait for another write of this app first); focus waits on the editor itself.
+      E.saving = true;
+      if (E.box.contains(document.activeElement)) E.box.focus();
+      for (const f of sourceFields(E)) f.input.readOnly = true;
+      E.save.disabled = E.drop.disabled = true;
+      setText(E.save, "正在保存…");
+      S.notes.delete(V.id);
+      let answer = null, error = null, mine = false;
+      await inTurn(V.id, async () => {
+        const T = claim(V.id);
+        try { answer = await call(R.path(V.id), { method: "PATCH", body }, T.ctrl); } catch (err) { error = err; }
+        mine = T.mine();
+        if (mine) release(V.id, T.token);
+      });
+      E.saving = false;
+      const unlock = () => {
+        for (const f of sourceFields(E)) f.input.readOnly = false;
+        E.save.disabled = E.drop.disabled = false;
+        setText(E.save, "保存");
+      };
+      if (!mine) { unlock(); return; }
+      // Focus that waited in the editor (or nowhere) follows the answer; focus the owner moved elsewhere stays.
+      const held = E.box.contains(document.activeElement) || focusWasHeld();
+      if (answer) {
+        if (V.sourceEdit === E) V.sourceEdit = null;
+        S.notes.set(V.id, { text: "已保存。", bad: false });
+        if (view === V) ease(card, () => setApp(answer, "source")); else setApp(answer, "source");
+        settled(V.id);
+        if (held && view === V) V.note.focus();
+        return;
+      }
+      const what = R.patchError(error, "source");
+      settled(V.id);
+      if (what.kind === "gone") { goneApp(V.id); return; }
+      if (what.kind === "disabled") {
+        // Turned off meanwhile (elsewhere), so what it runs is not changed: the list says it is off, and the editor goes
+        // with it (sourceFixed); unread, the refusal itself says so (unless a write of this page answered since, which is
+        // newer). What the server said is at the top; focus lands on it.
+        const failSeq = S.lastWriteSeq.get(V.id) || 0, listed = await readList("source");
+        if (!S.alive || !S.apps.has(V.id)) return;
+        if (!listed && !S.writes.get(V.id) && (S.lastWriteSeq.get(V.id) || 0) <= failSeq) S.apps.set(V.id, offOf(S.apps.get(V.id)));
+        if (sourceFixed(S.apps.get(V.id))) {
+          if (V.sourceEdit === E) V.sourceEdit = null;
+          S.notes.set(V.id, { text: what.text, bad: true });
+          paintRow(V.id);
+          if (view === V) { ease(card, () => paintApp(V)); if (held) V.note.focus(); }
+          return;
+        }
+        // On again by now: what was typed stays, with what the server said, and 保存 can be pressed again.
+      }
+      // Unsure: it may run the new program (or address) or the old one, so what its last check found no longer holds.
+      if (what.kind === "unsure") invalidate(V.id);
+      unlock();
+      setText(E.err, what.text);
+      paintRow(V.id);
+      if (view === V) paintApp(V);
+      if (held && view === V && V.sourceEdit === E) (E.urlF || E.programF).input.focus();
     }
 
     // 再检查 / 再试一次: one fresh read of its detail (the engine starts or reaches it once more). A check that
@@ -1328,7 +1760,8 @@
         const pending = giveUp();
         C.remove();
         if (refocus && from && from.isConnected) from.focus();
-        if (pending) readList("abandoned");
+        // Read once the removal let go of is out of this app's turn (a list asked for before would give way to it).
+        if (pending) (S.lanes.get(id) || Promise.resolve()).then(() => { if (S.alive) readList("abandoned"); });
       }
       shade.addEventListener("keydown", (ev) => {
         if (ev.key === "Escape") { ev.preventDefault(); done(true); }
@@ -1438,21 +1871,7 @@
       program.append(programF.wrap, argsF.wrap, secrets.program.el);
       url.append(urlF.wrap, secrets.url.el);
       // A whole command line pasted where the program goes is split for the owner, when that is unambiguous.
-      programIn.addEventListener("paste", (ev) => {
-        const text = ev.clipboardData && typeof ev.clipboardData.getData === "function" ? ev.clipboardData.getData("text") : "";
-        const had = programIn.value || "";
-        const all = had === "" || (programIn.selectionStart === 0 && programIn.selectionEnd === had.length);
-        if (!all || R.trim(argsIn.value) || F.busy) return;
-        const words = R.splitCommand(text);
-        if (!words) return;
-        ev.preventDefault();
-        programIn.value = words[0];
-        argsIn.value = words.slice(1).join("\n");
-        programF.mark("");
-        argsF.mark("");
-        split.hidden = false;
-      });
-      programIn.addEventListener("input", () => { split.hidden = true; });
+      splitPaste(programIn, argsIn, split, () => !R.trim(argsIn.value), () => F.busy, () => { programF.mark(""); argsF.mark(""); });
       // In front of 添加, the one thing a person would be misled without: every cat may use it, unasked.
       const conseq = node("p", "ap-conseq", R.ADD_SCOPE);
       conseq.id = uid("conseq");
@@ -1617,7 +2036,8 @@
         if (S.draft === F && view === F) F.go.focus();
         return;
       }
-      // 201: it is in the engine, whatever its state; its state is the check.
+      // 201: it is in the engine, whatever its state; its state is the check (a list asked for before it gives way).
+      S.lastWriteSeq.set(app.id, ++S.cseq);
       if (S.draft === F) S.draft = null;
       if (S.order && !S.order.includes(app.id)) S.order.push(app.id);
       // Added is added: said plainly, not as a failure (the state line says it does not answer, and why).

@@ -3,8 +3,10 @@
 // (docs/apps-api.md): GET/POST/PATCH/DELETE /xbot-api/apps…. Here: what each
 // state is called and drawn as, what can be done in it, the starting poll and
 // the authorization countdown, the custom-app form's checks (mirroring the
-// adapter's own: server/native/apps.ts), the idempotency fingerprint, what a
-// failed request says, and the words (docs/apps-api.md 「界面怎么说」: in
+// adapter's own: server/native/apps.ts) and the same checks for a program,
+// its arguments or an address changed in place (item 60), which cats are
+// shown with their switches, the idempotency fingerprint, what a failed
+// request says, and the words (docs/apps-api.md 「界面怎么说」: in
 // front of a button only what a person would be misled without; the rest of
 // what is true one click away).
 // The word MCP appears only in the custom-app form's one line: everyone else
@@ -256,6 +258,34 @@
   // The same thing to check: program or address, its arguments, and the names of its secrets.
   const sameSource = (a, b) => fingerprint(a || null) === fingerprint(b || null);
 
+  // ---- 自定义应用: what it is, changed in place ----
+  // The editor's fields (program, and the arguments one per line; or the address) against the source the server
+  // answered → the PATCH body with only what changed (the adapter keeps the rest: arguments the owner did not
+  // touch are never rewritten), whether anything changed at all (nothing: the editor just closes), and every
+  // problem in the order of the fields — the same checks as the add form, which are the adapter's.
+  // source: the app's `source`; form: {program, args (the text), url}.
+  function sourceChange(source, form) {
+    const src = source || {}, f = form || {}, problems = [], body = {};
+    if (src.type === "url") {
+      const url = trim(f.url), up = urlProblem(url);
+      if (up) problems.push({ field: "url", text: up });
+      if (url !== trim(src.url)) body.url = url;
+    } else {
+      const program = trim(f.program), args = argsOf(f.args), pp = programProblem(program), ap = argsProblem(args);
+      if (pp) problems.push({ field: "program", text: pp });
+      if (ap) problems.push({ field: "args", text: ap });
+      if (program !== trim(src.program)) body.program = program;
+      // As written in the editor, the old arguments read one per line too.
+      if (fingerprint(args) !== fingerprint(argsOf((Array.isArray(src.args) ? src.args : []).join("\n")))) body.args = args;
+    }
+    return { body, changed: Object.keys(body).length > 0, problems };
+  }
+  // Who may use it: the cats the server answered (absent: not known, so not shown), while it is not turned off —
+  // turned off, no cat can, and turning it on again gives it back to every cat (upstream's own rule).
+  const catsOf = (app) => (app && app.kind === "custom" && app.state !== "off" && Array.isArray(app.cats) ? app.cats.filter((c) => c && trim(c.name)) : []);
+  // The app turned off or on (PUT …/enabled): the control at the top, by the state; while it is on its way, what it is doing.
+  const toggleLabel = (app, busy) => (busy ? (busy.on ? "正在启用…" : "正在停用…") : app && app.state === "off" ? "启用" : "停用");
+
   // A whole command line pasted where the program goes, split for the owner — only when the split is
   // the one a shell would make and nothing else could be meant: words and quotes, no pipes, redirections,
   // substitutions or leading NAME=value, more than one word, and not a lone path (a path pasted from
@@ -352,20 +382,38 @@
     if (err && err.status === 404) return { kind: "gone", text: "它已经不在了。" };
     return { kind: unsure(err) ? "unsure" : "form", text: unsure(err) ? failed("没能检查", err) : sentence(err) || "没能检查，稍后再试。" };
   }
-  // what: "rename" | "secret"
-  function patchError(err, what) {
+  // what: "rename" | "secret" | "source" (program, arguments or address) | "toggle" (the app turned off or on: on,
+  // what was asked for) | "cat" (one cat's switch: on, what was asked for; who, the cat).
+  // gone: 404 — for a cat's switch, the app or the cat (the list read after it says which).
+  // disabled: 409 app_disabled — the app was turned off meanwhile; no cat's switch works until it is on again, and a
+  // program's app does not take a new program or arguments (the engine would start it to take them).
+  // unsure: the answer was lost — it may have been done; the same request again is safe (the same thing is asked for).
+  function patchError(err, what, on, who) {
     if (err && err.status === 404) return { kind: "gone", text: "它已经不在了。" };
-    if (unsure(err)) return { kind: "unsure", text: what === "rename" ? "没能确认改好了没有，可以再试一次。" : "没能确认保存好了没有，可以再试一次。" };
-    return { kind: "form", text: sentence(err) || (what === "rename" ? "没能改名。" : "没能保存。") };
+    if ((what === "cat" || what === "source") && err && err.code === "app_disabled") return { kind: "disabled", text: sentence(err) || "它已经停用了，先启用它。" };
+    const cat = "「" + trim(who) + "」";
+    if (unsure(err)) {
+      const text = what === "rename" ? "没能确认改好了没有，可以再试一次。"
+        : what === "toggle" ? "没能确认" + (on ? "启用" : "停用") + "了没有，可以再试一次。"
+        : what === "cat" ? "没能确认" + cat + "改好了没有，可以再试一次。"
+        : "没能确认保存好了没有，可以再试一次。";
+      return { kind: "unsure", text };
+    }
+    const fallback = what === "rename" ? "没能改名。" : what === "toggle" ? (on ? "没能启用。" : "没能停用。") : what === "cat" ? "没能改好" + cat + "，稍后再试。" : "没能保存。";
+    return { kind: "form", text: sentence(err) || fallback };
   }
+  // A lost answer to 停用 / 启用, after the list read again shows it was not done: what failed, briefly.
+  const toggleFailed = (on, err) => failed(on ? "没能启用" : "没能停用", err);
   function removeError(err) {
     if (err && err.status === 404) return { kind: "gone", text: "" };
     if (unsure(err)) return { kind: "unsure", text: "没能确认移除了没有。它还在列表里，可以再试一次。" };
     return { kind: "form", text: sentence(err) || "没能移除，稍后再试。" };
   }
   const listError = (err) => failed("没能读到应用", err);
-  // The checks made on opening, said once when the last one settles (to a screen reader).
-  function checked(apps) {
+  // The checks made on opening, said once when the last one settles (to a screen reader). One turned off meanwhile
+  // was not checked and is not counted.
+  function checked(list) {
+    const apps = (list || []).filter((a) => a && a.state !== "off");
     const n = (s) => apps.filter((a) => a && a.state === s).length;
     const on = n("on"), bad = n("failed"), rest = apps.length - on - bad;
     if (!apps.length) return "";
@@ -379,7 +427,8 @@
     WECHAT_LEAD, BY_NAME, BY_NAME_ON, OPEN_CHAT, OPEN_OFF, OPEN_LEFT, OPEN_UNKNOWN, authKnown, MORE, WECHAT_NOTES, sourceLabel, SOURCE_NOTE, sourceNote, WECHAT_SLOW, WECHAT_STILL, SAID,
     NAME_MAX, PROGRAM_MAX, ARGS_MAX, ARG_MAX, URL_MAX, SECRETS_MAX, VALUE_MAX, SECRETS_WORD, URL_SAID, EMPTY_SECRET,
     nameProblem, programProblem, argsOf, argsProblem, urlProblem, secretNameProblem, secretValueProblem, secretsOf, check, fingerprint, sameSource,
+    sourceChange, catsOf, toggleLabel,
     splitCommand, commandLine, slowFirstRun, CUSTOM_LEAD, ADD_SCOPE, SECRETS_KEPT, added, SLOW_HINT, REMOVE_NOTE, removeTitle,
-    sentence, ADD_UNSURE, addError, wechatError, checkError, patchError, removeError, listError, checked,
+    sentence, ADD_UNSURE, addError, wechatError, checkError, patchError, toggleFailed, removeError, listError, checked,
   });
 })(typeof window !== "undefined" ? window : globalThis);

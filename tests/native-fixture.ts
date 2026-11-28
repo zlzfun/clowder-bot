@@ -114,6 +114,8 @@ export class NativeFixture implements NativeTransport {
       return { ok: true, capability: found(id), probe: { connectionStatus: 'connected', tools: [] } };
     };
     if (url.pathname === '/api/capabilities' && method === 'PATCH') return () => {
+      const appResult = body?.capabilityId !== 'computer' ? this.apps.patchCapability(body, this.cats.map(c => c.id)) : undefined;
+      if (appResult) return appResult;
       const entry = found(body.capabilityId);
       if (!entry || body.capabilityType !== 'mcp' || body.source !== 'external') throw new ApiError(404, `Capability "${body.capabilityId}" (type=${body.capabilityType}) not found`);
       const blocked = new Set(entry.blockedCats ?? []);
@@ -178,13 +180,14 @@ export class NativeFixture implements NativeTransport {
       // The engine takes a deleted cat off every block list.
       this.cats = this.cats.filter(known => known.id !== parts[3]);
       for (const entry of this.capabilities) if (entry.blockedCats) { entry.blockedCats = entry.blockedCats.filter(id => id !== parts[3]); if (!entry.blockedCats.length) delete entry.blockedCats; }
+      for (const row of this.apps.rows) if (row.blockedCats) { row.blockedCats = row.blockedCats.filter(id => id !== parts[3]); if (!row.blockedCats.length) delete row.blockedCats; }
       result = { deleted: true, id: parts[3] };
     }
     else if (url.pathname.startsWith('/api/capabilities')) {
       const key = `${method} ${url.pathname}`, kind = method === 'PATCH' ? `PATCH:${body?.scope}` : key;
       if (this.capabilityFailures.has(key) || this.capabilityFailures.has(kind)) throw new ApiError(500, 'capability store failed');
       if (url.pathname === '/api/capabilities' && method === 'GET')
-        result = { items: [...this.apps.items(), ...this.capabilities.map(entry => ({ ...entry, cats: Object.fromEntries(this.cats.map(cat => [cat.id, !entry.blockedCats?.includes(cat.id)])) }))], catFamilies: [], projectPath: '/fixture' };
+        result = { items: [...this.apps.items(this.cats.map(c => c.id)), ...this.capabilities.map(entry => ({ ...entry, cats: Object.fromEntries(this.cats.map(cat => [cat.id, !entry.blockedCats?.includes(cat.id)])) }))], catFamilies: [], projectPath: '/fixture' };
       else {
         const apply = this.capabilityWrite(method, url, parts, body), held = this.capabilityHold;
         if (held && (held.key === key || held.key === kind)) {
