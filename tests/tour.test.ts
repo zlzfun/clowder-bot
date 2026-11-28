@@ -559,8 +559,9 @@ test('回复是活的 says once that every cat talks as in a chat by default, wi
   assert.doesNotMatch(section, /同一条回复把你后来说的也一起回答/);
   assert.match(section, /<p class="t-try"><span class="t-try-k">怎么试<\/span>[^<]*；或者趁它还在写再说一句，看它在同一条回复里接着回答<\/p>/);
   // The picture of 资料 is the page as it is now: 置顶, 新对话 and 历史对话, nothing for how a cat talks; its words say so.
-  // Item 46: its description first (no 职责 heading on screen), retaken at the new height.
-  assert.match(html, /<img src="shots\/profile-light\.png" width="384" height="437" decoding="async" alt="宪宪的资料页：最上面是它负责什么，下面是开着的「置顶」、新对话和历史对话，收起的「高级」，最下面是「删除猫猫」。">/);
+  // Item 46: its description first (no 职责 heading on screen), retaken at the new height. Item 66: beside the chat,
+  // × at its top right, the pointer on its face showing the pencil, and 可以用这台电脑 (on for 宪宪) under 置顶.
+  assert.match(html, /<img src="shots\/profile-light\.png" width="384" height="491" decoding="async" alt="宪宪的资料页：右上角是 ×，鼠标停在它的头像上，头像角上出现一支笔；最上面是它负责什么，下面是开着的「置顶」和「可以用这台电脑」、新对话和历史对话，收起的「高级」，最下面是「删除猫猫」。">/);
 });
 
 test('item 46: the guide\'s pictures and their words show the screens without the captions this sweep removed — no 「全体 · @ 群里每一只」, no sentence under 桌面通知, no 「最多选 3 项」 beside two picks, the groups after a gap in the list', () => {
@@ -568,7 +569,8 @@ test('item 46: the guide\'s pictures and their words show the screens without th
   const alts = [...html.matchAll(/\salt="([^"]*)"/g)].map(m => m[1]).join('\n');
   assert.doesNotMatch(alts, /群里每一只|一句说明|注明最多选|职责，/);
   assert.match(html, /alt="在群里输入 @ 弹出的列表：宪宪、砚砚、烁烁，最后是「全体」。"/);
-  assert.match(html, /alt="设置的「通用」页：主题「跟随系统」，下面是「桌面通知」的开关。"/);
+  // 通用 holds the palettes since item 48 (retaken in item 66); still nothing written under 桌面通知.
+  assert.match(html, /alt="设置的「通用」页：主题「跟随系统」，下面是十一套配色，再下面是「桌面通知」的开关。"/);
   assert.match(html, /隔开一段是群聊，「产品评审」有 3 条未读。/);
 });
 
@@ -590,4 +592,147 @@ test('the way in to 新建 that the page describes and the capture script clicks
   assert.match(start, /<p class="t-try"><span class="t-try-k">怎么试<\/span>点左栏上方的「＋」（新建），在弹窗里切换「猫猫」或「群聊」<\/p>/);
   assert.match(start, /alt="「新建」弹窗的「猫猫」一边（右上角可以切到「群聊」）：/);
   assert.doesNotMatch(html, /左上角「新建」|新建猫猫，或新建群聊|「新建猫猫」弹层/);
+});
+
+// ---------------------------------------------------------------- item 66: what came after the first guide
+// Item 66 (T-30): the guide catches up with 回复与表情回应 (item 49), 可以用这台电脑 (items 52, 55–58), 应用 (items 54, 60),
+// the detail panel beside the chat (items 50, 51), 改消息 under 定时 (item 61) and 事项 under 记忆 (item 62). What it puts
+// in 「」 is the product's own word, read here from the product's files, so a renamed button shows up as a failure here.
+const sectionOf = (id: string) => new RegExp(`<section[^>]*id="${id}"[\\s\\S]*?<\\/section>`).exec(html)![0];
+const proseOf = (part: string) => part.replace(/<[^>]*\salt="[^"]*"[^>]*>/g, ' ').replace(/<[^>]+>/g, ' ');
+const altOf = (name: string) => new RegExp(`<img src="shots/${name}-light\\.png"[^>]*\\salt="([^"]*)"`).exec(html)?.[1] ?? '';
+
+test('item 66: 回复与表情回应 is hosted in 读书会, where the scene stages the quote and the chips; it says the two limits as they are', () => {
+  const part = sectionOf('a-react'), prose = proseOf(part);
+  // The one group whose staged chat has a quoted reply and folded reactions; its row in the opening list leads here.
+  assert.match(part, /data-host="读书会">/);
+  assert.match(html, /<a class="t-row" href="#a-react" data-row="读书会"/);
+  assert.match(scene, /room\.reply\(van, [^)]*\{ to: whalePick\.id \}\)/, 'the scene stages 墨墨 quoting 鲸鲸');
+  assert.match(scene, /room\.say\([^)]*'👍', \{ replyTo: decided\.id \}\)/, 'and your 👍 on 鲸鲸\'s 定了');
+  assert.match(scene, /room\.reply\(whale, [^)]*'🐾', \{ to: thanks\.id \}\)/, 'and 鲸鲸\'s 🐾 on your 辛苦鲸鲸啦');
+  // The two buttons by their names in the app, where a hover shows them; the corner; the cat answering a quote of its words.
+  const reactions = read('client/public/chat-reactions.js');
+  for (const word of ['表情', '回复']) assert.ok(reactions.includes(`"${word}"`), word + ' is the button\'s own name');
+  assert.match(prose, /鼠标停在一条消息上，旁边出现「表情」和「回复」；手机上长按消息，菜单里也有。挑一个表情，它就贴在那句话的角上；猫也会这样回你一个 🐾。/);
+  assert.match(prose, /「回复」把那句话引在你的消息上面；在群里回复哪只猫的话，就由它来接。/);
+  // Honest limits (item 49's two gates): not undone, not changed, and each one reaches the cat, which answers it.
+  assert.match(prose, /表情发出去就收不回，也换不了；它跟一句话一样会送到猫那里，每回一个，猫都会再回你。/);
+  assert.doesNotMatch(prose, /撤回表情|取消表情|换一个表情/);
+  // The try line points at a cat's words the scene stages (墨墨's), and the 🐾 the showcase answers a lone emoji with.
+  assert.match(part, /<p class="t-try"><span class="t-try-k">怎么试<\/span>鼠标停在墨墨那句话上，点「表情」挑一个；它会回你一个 🐾，贴在同一句话上<\/p>/);
+  assert.match(read('scripts/preview-fixture.ts'), /: '🐾';/);
+  assert.match(part, /<a class="t-btn t-btn-primary" data-chat="读书会">打开这个群<\/a>/);
+  assert.doesNotMatch(part, /data-play=/, 'no demo: the 读书会 demo line is about the next meeting, not about reactions');
+  const alt = altOf('react');
+  for (const said of ['「表情」「回复」两个小按钮', '👍 ❤️ 🎉 👀 🐾', '你回过的 👍 圈着', '你的 👍 和鲸鲸的 🐾', '墨墨的回复上方引着鲸鲸的一句话，带着鲸鲸的小头像', '「辛苦鲸鲸啦，周六见。」，角上是鲸鲸回的 🐾']) assert.ok(alt.includes(said), said);
+});
+
+test('item 66: 可以用这台电脑 says the switch, the question asked each time, 在用电脑, how it stops, one cat at a time — and that the showcase does not really use this computer', () => {
+  const part = sectionOf('a-computer'), prose = proseOf(part);
+  const window: Any = {};
+  vm.runInNewContext(read('client/public/profile-rules.js'), { window });
+  const P = window.ClowderProfileRules;
+  assert.match(part, /data-host="宪宪">/);
+  assert.match(scene, /await call\('PUT', `\/bots\/\$\{enc\(ragdoll\.name\)\}\/computer`, \{ enabled: true \}\);/, 'the scene switches it on for 宪宪');
+  // The switch by its title in 资料, what switching it on lets the cat do, and the question that comes first (every time).
+  assert.equal(P.COMPUTER.TITLE, '可以用这台电脑');
+  assert.match(prose, /在猫的资料里打开「可以用这台电脑」，它就能看到并操作这台电脑上的应用；看到的画面会发给它用的模型，所以每次打开都先问你。/);
+  // The quiet line under the reply is the app's own words, and stopping: the stop button, or the switch (which ends the reply).
+  assert.match(read('client/public/chat-live-rules.js'), /if \(area === "computer"\) return "在用电脑";/);
+  assert.match(prose, /它在用电脑时，回复下面写着「在用电脑」。想让它停，按停止键；把开关关掉，它正在写的回复也会停下。/);
+  // One cat at a time (item 55): said once, and that the question names whose goes off.
+  assert.match(prose, /同一时间只有一只猫能用。给另一只猫打开时，会先说清谁的会关掉。/);
+  assert.equal((html.match(/同一时间只有一只猫能用/g) || []).length, 2, 'once in the words, once in the picture of the question');
+  // The try line: a sentence with 电脑 makes the showcase's 宪宪 go through the steps (its staged script steps aside), and
+  // it says the steps are acted, not done on the visitor's computer.
+  assert.match(scene, /live\.set\(room\.threadId, \(cat, said\) => \/电脑\/\.test\(said\) \? undefined/);
+  assert.match(part, /<p class="t-try"><span class="t-try-k">怎么试<\/span>对宪宪说「用电脑帮我算一下 12 × 12」（示例里只是演一遍，不会真的动这台电脑）；再到砚砚的资料里点这个开关，看它问你什么<\/p>/);
+  // The pictures: the step, and the question for 砚砚 while 宪宪 has it on, in the product's own sentences.
+  assert.match(altOf('computer'), /「用电脑帮我算一下 12 × 12」，它的回复还在写，下面一行「在用电脑」；输入框右边的发送键变成了停止键。/);
+  const ask = altOf('computer-ask'), consent = P.computerConsent('砚砚', ['宪宪']);
+  assert.ok(ask.includes(consent.title), consent.title);
+  assert.ok(ask.includes(consent.text.replace(/。$/, '')), consent.text);
+  assert.ok(ask.includes(consent.handover), consent.handover);
+  assert.match(ask, /按钮是「取消」和「打开」。$/);
+  // A dialog's corners are its own: the picture is rounded as the card is (20px), so nothing behind it shows.
+  assert.match(part, /<picture class="t-inset t-float" style="--t-r: 20px"><source srcset="shots\/computer-ask-dark\.png"/);
+});
+
+test('item 66: 应用 is the sidebar\'s dialog: 微信 read by name until switched off, the open chat only with the 10 minutes, apps of your own; MCP is said once, there', () => {
+  const part = sectionOf('a-apps'), prose = proseOf(part);
+  const appRules = read('client/public/apps-dialog-rules.js'), apps = read('client/public/apps-dialog.js');
+  assert.doesNotMatch(part, /data-host=/, 'not a chat: it opens from the sidebar');
+  assert.match(part, /<p class="t-host"><span class="t-host-k">左栏底部<\/span><\/p>/);
+  assert.match(read('client/index.html'), /id="side-apps"[^>]*aria-label="应用"/);
+  assert.match(prose, /「应用」打开一个弹窗：微信在最上面，下面是你自己加的应用，每个一行，写着现在怎么样。/);
+  assert.equal((part.match(/左栏底部/g) || []).length, 2, 'where it is, said where it starts and in the try line');
+  // 微信: the product's own sentence before 打开 (by a contact's name, until switched off), the 10 minutes for the open chat, read only.
+  assert.match(appRules, /const WECHAT_LEAD = "打开后，猫猫可以按联系人的名字读这台 Mac 上的微信，直到你关闭。";/);
+  assert.match(prose, /微信打开后，猫猫可以按联系人的名字读这台 Mac 上的微信，直到你关掉；要它读你正开着的那段聊天，得另外授权 10 分钟。两种都只是读。/);
+  assert.ok(apps.includes('"授权 10 分钟"'));
+  // Apps of your own: MCP said once on the whole page, as the product says it once (its add form).
+  assert.match(appRules, /const CUSTOM_LEAD = "接入一个 MCP 服务。";/);
+  assert.equal((proseOf(html.replace(/<script[\s\S]*?<\/script>|<!--[\s\S]*?-->/g, ' ')).match(/MCP/g) || []).length, 1);
+  assert.match(prose, /也可以自己加一个：接一个 MCP 服务，本机程序或网址都行。加好的可以停用、再启用，原地改程序或网址，也能给某只猫单独关掉。/);
+  for (const word of ['"停用"', '"编辑"', '"添加自定义应用"']) assert.ok(apps.includes(word), word);
+  assert.match(appRules, /: app && app\.state === "off" \? "启用" : "停用"\)/);
+  // The try line names what the scene stages: 网页阅读 with 斑斑 switched off; 本地笔记索引 paused.
+  assert.match(scene, /call\('POST', '\/apps\/custom', \{ name: '网页阅读'/);
+  assert.match(scene, /call\('PUT', `\/apps\/\$\{enc\(reader\.id\)\}\/cats\/\$\{enc\(bengal\.name\)\}`, \{ enabled: false \}\)/);
+  assert.match(scene, /call\('POST', '\/apps\/custom', \{ name: '本地笔记索引'[\s\S]*?call\('PUT', `\/apps\/\$\{enc\(notesApp\.id\)\}\/enabled`, \{ enabled: false \}\)/);
+  assert.match(part, /<p class="t-try"><span class="t-try-k">怎么试<\/span>点左栏底部的「应用」，打开「网页阅读」：斑斑那一行是关着的<\/p>/);
+  assert.match(part, /<a class="t-btn t-btn-primary" href="\/" data-app>打开 clowder-bot<\/a>/);
+  for (const word of ['未打开', '已连接', '已停用']) assert.ok(appRules.includes(`word: "${word}"`) || appRules.includes(`|| "${word}"`), word + ' is the list\'s own word');
+  assert.equal(altOf('apps'), '「应用」弹窗：最上面是微信，未打开；下面一组是自己加的应用，「网页阅读」已连接，「本地笔记索引」已停用，最后一行「添加自定义应用」。');
+  assert.match(part, /<figure class="t-fig t-float" style="--t-r: 20px">/);
+});
+
+test('item 66: the detail panel opens beside the chat from the name or a cat\'s face, × closes it, its face edits it; 定时 changes a repeating message, 记忆 has 事项', () => {
+  const daily = sectionOf('a-daily');
+  assert.match(proseOf(daily), /点顶栏的名字或对话里猫的头像，资料就在聊天旁边打开，两边都能接着用；右上角 × 关上，点它的头像改资料。资料、文件、记忆、定时；用哪个 Agent、哪个模型，收在「高级」里，平时用不到。/);
+  assert.doesNotMatch(html, /抽屉|铅笔/, 'the panel is no drawer over the chat, and its top right is no pencil any more');
+  // 定时: the button is the product's 改消息, for repeating ones.
+  assert.match(read('client/public/schedules.js'), /button\("secondary sched-edit-btn", "改消息"/);
+  assert.match(proseOf(sectionOf('a-reminder')), /之后在它资料的「定时」里看得到，重复的提醒点开还能改消息。/);
+  // 记忆: the four groups in the product's own words and order, 事项 among them; its picture shows the scene's matter and the way back.
+  const memory = proseOf(sectionOf('a-memory'));
+  assert.match(read('client/public/chat-experience-rules.js'), /const MEMORY = \{ profile: "关于你", taste: "你的偏好", matters: "事项" \};/);
+  assert.match(memory, /在它资料的「记忆」里看得到：关于你、你的偏好、事项和这个对话的便笺，只能看、不在这里改。记住的偏好记下了出处时，还能回到当初说的那句话；事项的记录也一样。/);
+  assert.match(scene, /title: '「页边」首页改版'/);
+  assert.match(scene, /sourceStatus: 'current'/);
+  assert.match(read('client/public/chat-experience.js'), /button\("text-btn ws-link", "在对话里查看"/);
+  assert.equal(altOf('memory-tab'), '小狸花资料里的「记忆」页：「事项」展开着，记着「「页边」首页改版」；它的一条记录引着你的原话，旁边是「在对话里查看」。下面是这个对话的一条便笺。');
+  // A host cat's colour behind a picture (.t-tinted) is wider than the picture: on a phone the page does not scroll sideways for it.
+  assert.match(css, /\.t-page main \{ overflow-x: clip; \}/);
+  // 通用's palettes in its picture are the product's eleven.
+  assert.equal(JSON.parse(read('client/public/theme-lab/palettes.json')).length, 11);
+  // ⌘K 纸页感 also finds 小狸花's 事项 chat, which the scene now stages.
+  assert.match(scene, /'「页边」首页改版定下来走纸页感了，先把这个事项记一下。'/);
+  assert.match(altOf('search'), /^⌘K 搜索「纸页感」：结果来自烁烁、产品评审和小狸花，/);
+});
+
+test('item 66: the capture script takes the new pictures without leaving its marks: one question to 宪宪 through the adapter, the 这台电脑 question cancelled, nothing picked, 微信\'s drawn mark put back', () => {
+  const shots = read('scripts/showcase-shots.mjs');
+  // Every picture the page shows is one the script takes (the set itself: see "every picture is a real screenshot").
+  const taken = [...shots.matchAll(/await shoot\('([\w-]+)'/g)].map(m => m[1]).sort();
+  const shown = [...html.matchAll(/<img src="shots\/([\w-]+)-light\.png"/g)].map(m => m[1]).sort();
+  assert.deepEqual(taken, shown);
+  for (const name of ['react', 'computer', 'computer-ask', 'apps']) assert.ok(shown.includes(name), name);
+  // 宪宪 is asked once, through the adapter's own route, not typed into each page (that would send it twice).
+  assert.equal((shots.match(/\/messages'/g) || []).length, 1);
+  assert.match(shots, /fetch\(new URL\('\/xbot-api\/bots\/' \+ encodeURIComponent\('宪宪'\) \+ '\/messages', base\), \{ method: 'POST'[^\n]*text: '用电脑帮我算一下 12 × 12'/);
+  assert.doesNotMatch(shots, /#input'\)\.fill\(/);
+  // The slowed playback is put back whatever happens, and the reply is let finish before the next picture.
+  assert.match(shots, /await preview\(\{ speed: 4 \}\);\n\s+try \{[\s\S]*?\} finally \{ await preview\(\{ speed: 1 \}\); \}/);
+  // The question for 砚砚 is cancelled: nothing switched on, 宪宪 keeps it.
+  assert.match(shots, /getByRole\('button', \{ name: '取消', exact: true \}\)\.click\(\); await page\.locator\('\.pf-modal'\)\.waitFor\(\{ state: 'detached' \}\)/);
+  assert.doesNotMatch(shots, /name: '打开'/);
+  // The emoji row is opened and closed again without a pick.
+  assert.match(shots, /await page\.keyboard\.press\('Escape'\); await page\.locator\('\.rx-pick'\)\.waitFor\(\{ state: 'detached' \}\)/);
+  assert.doesNotMatch(shots, /\.rx-pick'\)\.getByText|rx-emo'\)\.click/);
+  // 微信's drawn mark, whichever computer retakes it, and its own icon put back afterwards.
+  assert.match(shots, /await preview\(\{ wechat: 'icon-off' \}\);\n\s+try \{[\s\S]*?\} finally \{ await preview\(\{ wechat: 'icon-on' \}\); \}/);
+  // The panel is framed as it stands beside the chat now, and hovers only where the picture is of the hover.
+  assert.match(shots, /The detail panel from its top to the end of what it shows/);
+  assert.equal((shots.match(/\{ keep: true \}/g) || []).length, 2, 'the emoji row over 鲸鲸\'s words, and the pencil on 宪宪\'s face');
 });

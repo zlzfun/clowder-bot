@@ -73,7 +73,7 @@
       <p class="t-rows-label">群聊</p>
       <ul class="t-rows">
         <li><a class="t-row" href="#a-group" data-row="产品评审" data-group="宪宪 砚砚 烁烁"><span class="t-row-face" aria-hidden="true"></span><span class="t-row-main"><span class="t-row-top"><span class="t-row-name">产品评审</span><span class="t-row-what">群聊</span><time class="t-row-time"></time></span><span class="t-row-sub"><span class="t-row-line">三只猫，@ 谁谁答</span></span></span></a></li>
-        <li><a class="t-row" href="#a-group" data-row="读书会" data-group="鲸鲸 小狸花 墨墨 金哥"><span class="t-row-face" aria-hidden="true"></span><span class="t-row-main"><span class="t-row-top"><span class="t-row-name">读书会</span><span class="t-row-what">群聊</span><time class="t-row-time"></time></span><span class="t-row-sub"><span class="t-row-line">四只猫，一起投了票</span></span></span></a></li>
+        <li><a class="t-row" href="#a-react" data-row="读书会" data-group="鲸鲸 小狸花 墨墨 金哥"><span class="t-row-face" aria-hidden="true"></span><span class="t-row-main"><span class="t-row-top"><span class="t-row-name">读书会</span><span class="t-row-what">群聊</span><time class="t-row-time"></time></span><span class="t-row-sub"><span class="t-row-line">四只猫，引用和表情回应</span></span></span></a></li>
       </ul>
     </nav>
   </section>
@@ -156,7 +156,7 @@
     <div class="t-copy">
       <p class="t-host"><span class="t-host-face" data-face="dsh" aria-hidden="true"></span>在「鲸鲸」的对话里</p>
       <h2 id="a-reminder-h">说一句就设提醒</h2>
-      <p>说一句「每天早上 9 点提醒我…」，它在对话里出一张确认卡；点「设上」才生效，之后在它资料的「定时」里看得到。</p>
+      <p>说一句「每天早上 9 点提醒我…」，它在对话里出一张确认卡；点「设上」才生效，之后在它资料的「定时」里看得到，重复的提醒点开还能改消息。</p>
       <p>到点了，对话里出现一行提醒，它接着跟进。</p>
       <p class="t-try"><span class="t-try-k">怎么试</span>最下面「写周报」那张卡还在等你，点「设上」</p>
       <div class="t-actions" hidden><a class="t-btn t-btn-primary" data-chat="鲸鲸">打开这个对话</a><button type="button" class="t-btn" data-play="鲸鲸">看它现场演示</button></div>
@@ -173,14 +173,14 @@
       <p class="t-host"><span class="t-host-face" data-face="dragon-li" aria-hidden="true"></span>在「小狸花」的对话里</p>
       <h2 id="a-memory-h">要记住的事先问你</h2>
       <p>它想记住你的一个习惯，会先出一张卡片问你：记住，还是不用记。</p>
-      <p>记住了什么，在它资料的「记忆」里看得到：关于你、你的偏好、这个对话的便笺，只能看、不在这里改。记住的偏好记下了出处时，还能回到当初说的那句话。</p>
+      <p>记住了什么，在它资料的「记忆」里看得到：关于你、你的偏好、事项和这个对话的便笺，只能看、不在这里改。记住的偏好记下了出处时，还能回到当初说的那句话；事项的记录也一样。</p>
       <p class="t-try"><span class="t-try-k">怎么试</span>点卡片上的「记住」，再点顶栏的名字，打开「记忆」</p>
       <div class="t-actions" hidden><a class="t-btn t-btn-primary" data-chat="小狸花">打开这个对话</a><button type="button" class="t-btn" data-play="小狸花">看它现场演示</button></div>
       <p class="t-note" role="status"></p>
     </div>
     <figure class="t-fig t-pair">
       <picture class="t-main"><source srcset="shots/memory-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/memory-light.png" width="720" height="352" decoding="async" alt="小狸花想记住你的一个偏好：「引用资料时带上出处」，下面引着你的原话，按钮是「不用记」和「记住」。"></picture>
-      <picture class="t-inset t-float"><source srcset="shots/memory-tab-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/memory-tab-light.png" width="384" height="516" decoding="async" alt="小狸花资料里的「记忆」页：「你的偏好」展开着，记着「回答时先说结论，再给依据」和它的来源；下面是这个对话的一条便笺。"></picture>
+      <picture class="t-inset t-float"><source srcset="shots/memory-tab-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/memory-tab-light.png" width="384" height="560" decoding="async" alt="小狸花资料里的「记忆」页：「事项」展开着，记着「「页边」首页改版」；它的一条记录引着你的原话，旁边是「在对话里查看」。下面是这个对话的一条便笺。"></picture>
     </figure>
   </section>
 
@@ -209,7 +209,7 @@
       <div class="t-actions" hidden><a class="t-btn t-btn-primary" data-chat="金哥">打开这个对话</a></div>
     </div>
     <figure class="t-fig t-float" style="--t-r: 16px">
-      <picture><source srcset="shots/search-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/search-light.png" width="640" height="356" decoding="async" alt="⌘K 搜索「纸页感」：结果来自烁烁和产品评审，命中的字带底色；下面写着「只搜了最近的消息，更早的里可能还有。」"></picture>
+      <picture><source srcset="shots/search-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/search-light.png" width="640" height="475" decoding="async" alt="⌘K 搜索「纸页感」：结果来自烁烁、产品评审和小狸花，命中的字带底色；下面写着「只搜了最近的消息，更早的里可能还有。」"></picture>
     </figure>
   </section>
 
@@ -229,6 +229,52 @@
     </figure>
   </section>
 
+  <section class="t-ability t-wrap t-reveal" id="a-react" aria-labelledby="a-react-h" data-host="读书会">
+    <div class="t-copy">
+      <p class="t-host"><span class="t-host-face t-host-group" data-group="鲸鲸 小狸花 墨墨 金哥" aria-hidden="true"></span>在「读书会」群里</p>
+      <h2 id="a-react-h">回复与表情回应</h2>
+      <p>鼠标停在一条消息上，旁边出现「表情」和「回复」；手机上长按消息，菜单里也有。挑一个表情，它就贴在那句话的角上；猫也会这样回你一个 🐾。</p>
+      <p>「回复」把那句话引在你的消息上面；在群里回复哪只猫的话，就由它来接。</p>
+      <p>表情发出去就收不回，也换不了；它跟一句话一样会送到猫那里，每回一个，猫都会再回你。</p>
+      <p class="t-try"><span class="t-try-k">怎么试</span>鼠标停在墨墨那句话上，点「表情」挑一个；它会回你一个 🐾，贴在同一句话上</p>
+      <div class="t-actions" hidden><a class="t-btn t-btn-primary" data-chat="读书会">打开这个群</a></div>
+    </div>
+    <figure class="t-fig">
+      <picture><source srcset="shots/react-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/react-light.png" width="716" height="304" decoding="async" alt="读书会群里，鼠标停在鲸鲸那句「定了，《清单革命》……」上：气泡旁是「表情」「回复」两个小按钮和时间，上面弹出一排 👍 ❤️ 🎉 👀 🐾，你回过的 👍 圈着；这句话的角上贴着你的 👍 和鲸鲸的 🐾。下面墨墨的回复上方引着鲸鲸的一句话，带着鲸鲸的小头像；最后你说「辛苦鲸鲸啦，周六见。」，角上是鲸鲸回的 🐾。"></picture>
+    </figure>
+  </section>
+
+  <section class="t-ability t-wrap t-reveal" id="a-computer" aria-labelledby="a-computer-h" data-host="宪宪">
+    <div class="t-copy">
+      <p class="t-host"><span class="t-host-face" data-face="ragdoll" aria-hidden="true"></span>在「宪宪」的对话里</p>
+      <h2 id="a-computer-h">可以用这台电脑</h2>
+      <p>在猫的资料里打开「可以用这台电脑」，它就能看到并操作这台电脑上的应用；看到的画面会发给它用的模型，所以每次打开都先问你。</p>
+      <p>它在用电脑时，回复下面写着「在用电脑」。想让它停，按停止键；把开关关掉，它正在写的回复也会停下。</p>
+      <p>同一时间只有一只猫能用。给另一只猫打开时，会先说清谁的会关掉。</p>
+      <p class="t-try"><span class="t-try-k">怎么试</span>对宪宪说「用电脑帮我算一下 12 × 12」（示例里只是演一遍，不会真的动这台电脑）；再到砚砚的资料里点这个开关，看它问你什么</p>
+      <div class="t-actions" hidden><a class="t-btn t-btn-primary" data-chat="宪宪">打开这个对话</a></div>
+    </div>
+    <figure class="t-fig t-pair t-pair-wide">
+      <picture class="t-main"><source srcset="shots/computer-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/computer-light.png" width="712" height="268" decoding="async" alt="宪宪的对话：你说「用电脑帮我算一下 12 × 12」，它的回复还在写，下面一行「在用电脑」；输入框右边的发送键变成了停止键。"></picture>
+      <picture class="t-inset t-float" style="--t-r: 20px"><source srcset="shots/computer-ask-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/computer-ask-light.png" width="440" height="240" decoding="async" alt="在砚砚的资料里点「可以用这台电脑」后弹出的问题：「让「砚砚」用这台电脑？」下面说它能看到并操作这台电脑上的应用，看到的画面会发给它用的模型；同一时间只有一只猫能用这台电脑：打开后，「宪宪」的会关掉；它要是正在回复，那条回复会停下。按钮是「取消」和「打开」。"></picture>
+    </figure>
+  </section>
+
+  <section class="t-ability t-wrap t-reveal" id="a-apps" aria-labelledby="a-apps-h">
+    <div class="t-copy">
+      <p class="t-host"><span class="t-host-k">左栏底部</span></p>
+      <h2 id="a-apps-h">应用</h2>
+      <p>「应用」打开一个弹窗：微信在最上面，下面是你自己加的应用，每个一行，写着现在怎么样。</p>
+      <p>微信打开后，猫猫可以按联系人的名字读这台 Mac 上的微信，直到你关掉；要它读你正开着的那段聊天，得另外授权 10 分钟。两种都只是读。</p>
+      <p>也可以自己加一个：接一个 MCP 服务，本机程序或网址都行。加好的可以停用、再启用，原地改程序或网址，也能给某只猫单独关掉。</p>
+      <p class="t-try"><span class="t-try-k">怎么试</span>点左栏底部的「应用」，打开「网页阅读」：斑斑那一行是关着的</p>
+      <div class="t-actions" hidden><a class="t-btn t-btn-primary" href="/" data-app>打开 clowder-bot</a></div>
+    </div>
+    <figure class="t-fig t-float" style="--t-r: 20px">
+      <picture><source srcset="shots/apps-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/apps-light.png" width="600" height="338" decoding="async" alt="「应用」弹窗：最上面是微信，未打开；下面一组是自己加的应用，「网页阅读」已连接，「本地笔记索引」已停用，最后一行「添加自定义应用」。"></picture>
+    </figure>
+  </section>
+
   <section class="t-daily t-wrap t-reveal" id="a-daily" aria-labelledby="a-daily-h">
     <h2 id="a-daily-h">像平常用的聊天软件</h2>
     <div class="t-tiles">
@@ -239,15 +285,15 @@
       </article>
       <article class="t-tile" aria-labelledby="t-profile-h">
         <h3 id="t-profile-h">资料页</h3>
-        <p>点顶栏的名字：资料、文件、记忆、定时。用哪个 Agent、哪个模型，收在「高级」里，平时用不到。</p>
-        <picture class="t-tile-pic t-float"><source srcset="shots/profile-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/profile-light.png" width="384" height="437" decoding="async" alt="宪宪的资料页：最上面是它负责什么，下面是开着的「置顶」、新对话和历史对话，收起的「高级」，最下面是「删除猫猫」。"></picture>
+        <p>点顶栏的名字或对话里猫的头像，资料就在聊天旁边打开，两边都能接着用；右上角 × 关上，点它的头像改资料。资料、文件、记忆、定时；用哪个 Agent、哪个模型，收在「高级」里，平时用不到。</p>
+        <picture class="t-tile-pic t-float"><source srcset="shots/profile-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/profile-light.png" width="384" height="491" decoding="async" alt="宪宪的资料页：右上角是 ×，鼠标停在它的头像上，头像角上出现一支笔；最上面是它负责什么，下面是开着的「置顶」和「可以用这台电脑」、新对话和历史对话，收起的「高级」，最下面是「删除猫猫」。"></picture>
       </article>
       <article class="t-tile t-tile-wide" aria-labelledby="t-notify-h">
         <div>
           <h3 id="t-notify-h">通知</h3>
           <p>在设置里打开桌面通知：别的对话有了回复，或有事等你确认，就提醒你。正在看的对话不提醒，也没有声音。</p>
         </div>
-        <picture class="t-tile-pic t-float" style="--t-r: 18px"><source srcset="shots/notify-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/notify-light.png" width="820" height="237" decoding="async" alt="设置的「通用」页：主题「跟随系统」，下面是「桌面通知」的开关。"></picture>
+        <picture class="t-tile-pic t-float" style="--t-r: 18px"><source srcset="shots/notify-dark.png" media="(prefers-color-scheme: dark)"><img src="shots/notify-light.png" width="820" height="457" decoding="async" alt="设置的「通用」页：主题「跟随系统」，下面是十一套配色，再下面是「桌面通知」的开关。"></picture>
       </article>
     </div>
   </section>
