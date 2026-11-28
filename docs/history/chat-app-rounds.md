@@ -263,6 +263,15 @@
 
 **前端**：已完成并合入（第 61 项，`f38f217d`）：由本机 Claude Code（`claude-opus-5-5`，xhigh）实现。`schedules.js`／`schedules.css` 在周期定时展开卡片内新增「改消息」原位编辑框（一次性任务不显示），在自动刷新与启停切换期间保留草稿、保存途中锁住行级操作并保持焦点。经过 Codex（`gpt-6-astra`，xhigh）两轮只读检视，4 条问题全部修正（保存途中捕获 Esc 防止关闭抽屉、404/409 后等待列表重读完成再如实提示、暂停途中取消编辑的焦点回退、按行 `editSeq` 防止迟到的重读状态串写）。全量 902 项测试（898 通过，4 项按原因跳过）通过。
 
+<a id="round-25"></a>
+### 第 25 轮 · 历史对话管理、附件清理与目录文件预览（2026-11-28）
+
+**内容**：完成待办 `T-05`、`T-20` 与 `T-21`。支持单聊历史对话重命名与删除（群聊本身对应单个原生 Thread，不另设多段历史对话）、移除未发送附件时的服务端清理、工作目录文件受限纯文本/位图预览，以及文件上传进度百分比显示。
+
+**后端（适配层）**：已完成并合入（`f4083a0c`）：`PATCH /xbot-api/bots/:chat/conversations/:id` 校验单聊归属后调用原生 `PATCH /api/threads/:id` 修改标题并读回确认（记录重命名过的旧项目对话以免被旧项目名遮盖）；`DELETE /xbot-api/bots/:chat/conversations/:id` 串行校验非当前对话、无运行/排队任务、无启用中的提醒后调用原生 `DELETE /api/threads/:id` 并清理引用；`DELETE /xbot-api/(bots|groups)/:chat/files/:id` 与 `BotBridge.send()` 互斥协调（对超时/5xx 发送状态不明的附件保留 5 分钟保护），确认未被任何消息引用后同步校验目录与符号链接并删除；`GET .../workspace-file/{preview,image}` 绑定 `expectedThreadId`，提供带严格 CSP（`default-src 'none'; sandbox`）的 128 KB 纯文本与魔数核验位图预览。详见 [聊天文件适配](../workspaces.md)。
+
+**前端**：已完成并合入（第 63 项，`5e222f46`）：由本机 Claude Code（`claude-opus-5-5`，xhigh）实现。`workspace*` 支持历史对话原位改名与非当前对话确认删除、输入框附件芯片移除时同步清理服务端未发送文件、基于 `XMLHttpRequest` 的「正在上传 N%…」进度显示，以及「更多文件」目录内文本与位图受限预览。经过 Codex（`gpt-6-astra`，xhigh）两轮只读检视，7 条问题全部修正。全量 921 项测试（917 通过，4 项按原因跳过）通过。
+
 ## 部署记录
 
 部署的做法在 [验证环境与部署](../operations.md)。第 17、18 轮的部署、2026-11-26 日常实例换引擎和 2026-11-27 部署「同一时间只有一只猫」只写在上面各轮自己的记录里，换引擎的经过另见 [上游维护记录](upstream-records.md)。

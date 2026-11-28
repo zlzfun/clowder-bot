@@ -71,7 +71,12 @@ button.wsf-tile:disabled { cursor: default; }
 .ws-modal .modal-card { width: min(440px, 100%); }
 .ws-modal.wide .modal-card { width: min(720px, 100%); }
 .ws-card:focus { outline: none; }
+/* A destructive confirmation (删除这段对话): quiet, in the danger colour, as 删除群聊 is. */
+.secondary.ws-danger { color: var(--x-danger); }
+.secondary.ws-danger:hover:not(:disabled) { background: var(--x-danger-bg); }
 .ws-dialog-body > .ws-note { margin-top: var(--x-s4); }
+/* A confirmation's sentence wraps without a lone last character (as profile.css's pf-cwhy). */
+.ws-dialog-body > p.note { text-wrap: pretty; }
 pre.ws-preview {
   margin: var(--x-s3) 0 0; max-height: min(60vh, 520px); overflow: auto; padding: var(--x-s5) 14px;
   border-radius: var(--x-r-sm); background: var(--x-code); color: var(--x-text);
@@ -140,16 +145,41 @@ a.ws-link:hover, a.ws-link:focus-visible { background: var(--x-text-link-hover);
 .ws-row-err { flex-basis: 100%; padding-left: 24px; font-size: 12px; line-height: 1.5; color: var(--x-danger); }
 .ws-more-body > .ws-note + .ws-tree, .ws-tree + .ws-note { margin-top: var(--x-s2); }
 
-/* ---- Drawer 详情: a cat's saved conversations (历史对话, a task-details fold); the current one marked. */
+/* ---- Drawer 资料: a cat's saved conversations (历史对话, a task-details fold); the current one marked. */
 .psec.ws-convs { padding-top: var(--x-s1); }
 .ws-conv-fold > summary { min-height: 24px; }
 .ws-conv-list { list-style: none; margin: var(--x-s2) 0 0; padding: var(--x-s1); border-radius: var(--x-r-card); background: var(--x-panel-card); }
-.ws-row.ws-conv { min-height: 40px; }
-button.ws-row.ws-conv { cursor: pointer; }
-button.ws-row.ws-conv:hover:not(:disabled) { background: var(--x-fill-2); }
-button.ws-row.ws-conv:disabled { cursor: progress; }
-.ws-row.ws-conv.here:focus { outline: none; }
-.ws-row.ws-conv.here:focus-visible { outline: 2px solid var(--x-muted); outline-offset: 1px; }
+/* A row: the conversation itself (a switch, or the marked one open now), then
+   its own 重命名 / 删除 beside it. Where a pointer can hover they show on the
+   row's hover or focus, as the drawer's name pencil does (profile.css). */
+.ws-row.ws-conv { min-height: 40px; gap: 2px; padding: 0 var(--x-s1) 0 0; }
+.ws-conv-main {
+  flex: 1; min-width: 0; align-self: stretch; display: flex; align-items: center; gap: var(--x-s3);
+  min-height: 40px; padding: var(--x-s1) var(--x-s3); border: 0; border-radius: var(--x-r-sm);
+  background: transparent; color: inherit; font: inherit; text-align: left;
+}
+button.ws-conv-main { cursor: pointer; }
+button.ws-conv-main:disabled { cursor: progress; }
+.ws-row.ws-conv:has(> button.ws-conv-main:hover:not(:disabled)) { background: var(--x-fill-2); }
+div.ws-conv-main:focus { outline: none; }
+div.ws-conv-main:focus-visible { outline: 2px solid var(--x-muted); outline-offset: 1px; }
+.ws-conv-acts { flex: none; display: flex; align-items: center; gap: 2px; }
+@media (hover: hover) {
+  .ws-conv-acts { opacity: 0; }
+  .ws-row.ws-conv:is(:hover, :focus-within) .ws-conv-acts { opacity: 1; }
+}
+/* 重命名 in place: one line of input and its two buttons (the 请求传球 form's sizes), the error under it. */
+.ws-conv-edit { padding: var(--x-s1); }
+.ws-conv-edit-row { display: flex; align-items: center; gap: var(--x-s2); }
+.ws-conv-input {
+  flex: 1; min-width: 0; min-height: 32px; padding: 5px 10px; border: 0; border-radius: var(--x-r-sm);
+  background: var(--x-fill-2); color: var(--x-text); font: inherit; font-size: 13px;
+}
+.ws-conv-input:focus { outline: 2px solid var(--x-muted); outline-offset: 0; }
+.ws-conv-input[readonly] { opacity: .7; cursor: progress; }
+.ws-conv-edit .primary { flex: none; min-height: 30px; padding: 5px 12px; font-size: 12.5px; }
+.ws-conv-edit .text-btn { flex: none; min-height: 30px; font-size: 12.5px; }
+.ws-conv-err { margin: var(--x-s1) 0 0; font-size: 12px; line-height: 1.5; color: var(--x-danger); }
 .ws-conv-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .ws-conv-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--x-text-2); }
 .ws-conv.here .ws-conv-title { font-weight: 600; color: var(--x-text); }

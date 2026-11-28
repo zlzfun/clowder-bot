@@ -7,9 +7,11 @@
 // attachment calls.
 //
 // - Composer: any file from the picker, a paste or a drop is uploaded at once
-//   to the open conversation's exact native thread (expectedThreadId). A send
-//   that does not go out hands its files back; a conversation or thread change
-//   aborts uploads and empties the list, because file ids belong to one thread.
+//   to the open conversation's exact native thread (expectedThreadId), its
+//   percentage shown while it goes. A send that does not go out hands its
+//   files back; a conversation or thread change aborts uploads and empties the
+//   list, because file ids belong to one thread. Removing an uploaded file
+//   nobody sent deletes its record too; a refusal is said, not hidden.
 // - File cards (history and drawer): name, size, download, a text or image
 //   preview only where the server offers one, and an honest missing state.
 //   A native file view (nativeSource) is called 成果, never a snapshot; a
@@ -18,12 +20,14 @@
 // - Drawer 文件: 成果 (the cats' native results, once the server reads that
 //   record; a failed read keeps the rest and says so), deliverables
 //   (snapshots) and attachments. The working
-//   directory — its path, read-only browsing and saving one of its files as a
+//   directory — its path, read-only browsing, a restricted preview of the
+//   text or pictures the server marks, and saving one of its files as a
 //   deliverable — stays folded away under 更多文件.
 // - Drawer 资料 (a cat): a folded 历史对话, there once the server has listed
 //   the cat's conversations (even with only the one open now), opens one of
-//   them again. It moves between threads the server already knows for the
-//   cat; nothing here creates a thread or project (新对话 is chat-history.js's).
+//   them again, renames one in place and deletes one that is not open, after
+//   asking. It moves between threads the server already knows for the cat;
+//   nothing here creates a thread or project (新对话 is chat-history.js's).
 //   switchTo() runs the same switch from elsewhere (the search palette, for a
 //   message found in an earlier conversation) and says how it ended.
 // - 任务 in the drawer's 高级 (profile.js) and one summary line above the
@@ -149,7 +153,7 @@
     view: null, viewState: "idle", viewError: "", viewReq: 0,
     files: null, filesFor: "", filesState: "idle", filesError: "", filesReq: 0, filesStale: false, nativeRead: null, nativeError: "",
     tree: freshTree(),
-    convs: null, convState: "idle", convReq: 0, convBusy: false, convLine: null, switching: null,
+    convs: null, convState: "idle", convReq: 0, convBusy: false, convLine: null, switching: null, convEdit: null,
     tasks: null, tasksFor: "", cats: [], historyAvailable: false, tasksState: "idle", tasksError: "", tasksReq: 0, tasksAt: 0,
     pending: [], note: "", parked: new Map(),
     marks: {}, marking: {}, markErrors: {}, handoffs: {}, lines: {}, roots: {},
@@ -176,7 +180,7 @@
       sel: sel && sel.id ? { type: sel.type === "group" ? "group" : "bot", id: sel.id } : null,
       threadId: "", view: null, viewState: "idle", viewError: "",
       files: null, filesFor: "", filesState: "idle", filesError: "", filesStale: false, tree: freshTree(), nativeRead: null, nativeError: "",
-      convs: null, convState: "idle", convBusy: false, convLine: null, switching: null,
+      convs: null, convState: "idle", convBusy: false, convLine: null, switching: null, convEdit: null,
       tasks: null, tasksFor: "", cats: [], historyAvailable: false, tasksState: "idle", tasksError: "", tasksAt: 0,
       note: "", marks: {}, marking: {}, markErrors: {}, handoffs: {}, lines: {}, roots: {},
     });
@@ -315,7 +319,8 @@
 
   function chipStatus(row) {
     if (row.status === "waiting") return "等待上传";
-    if (row.status === "uploading") return "上传中…";
+    // The percentage once the browser reports how much has gone out.
+    if (row.status === "uploading") return Number.isFinite(row.progress) ? "正在上传 " + row.progress + "%…" : "上传中…";
     if (row.status === "failed") return "没传上去：" + row.error;
     return R.size(row.size);
   }
@@ -353,7 +358,17 @@
     box.append(copy);
     if (row.status === "failed") box.append(iconButton("refresh-cw", "重新上传 " + row.name, () => retry(row), row.key + ":retry"));
     box.append(iconButton("x", "移除附件 " + row.name, () => removeRow(row), row.key + ":remove"));
+    // Progress ticks rewrite this chip's line in place (showProgress), not the list.
+    row.chipEl = box;
+    row.statusEl = meta;
     return box;
+  }
+  function showProgress(row) {
+    const text = chipStatus(row), box = row.chipEl, line = row.statusEl;
+    if (!box || !line || !box.isConnected) { paintComposer(); return; }
+    line.textContent = text;
+    line.title = text;
+    box.setAttribute("aria-label", row.name + "，" + text);
   }
 
   function paintComposer() {
@@ -387,7 +402,7 @@
     const rows = accepted.map((file) => ({
       key: "a" + ++rowSeq, file, name: file.name || "未命名文件", size: file.size, mime: file.type || "",
       status: "waiting", id: "", error: "", url: LOCAL_IMAGE.test(file.type || "") ? URL.createObjectURL(file) : "",
-      meta: null, threadId: "", ctrl: null,
+      meta: null, threadId: "", ctrl: null, progress: null,
     }));
     S.pending.push(...rows);
     paintComposer();
@@ -412,25 +427,61 @@
     // The thread it goes to: a move empties the list and ends this epoch.
     const t = ticket();
     const ctrl = new AbortController();
-    Object.assign(row, { status: "uploading", error: "", ctrl });
+    Object.assign(row, { status: "uploading", error: "", progress: null, ctrl });
     paintComposer();
     try {
-      const res = await H.apiFetch(scopePath() + "/files?" + new URLSearchParams({ name: row.name, expectedThreadId: threadId }), {
-        method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/octet-stream" }, body: row.file, signal: ctrl.signal,
+      const res = await post(scopePath() + "/files?" + new URLSearchParams({ name: row.name, expectedThreadId: threadId }), row.file, ctrl.signal, (pct) => {
+        if (ctrl.signal.aborted || !live(t) || !S.pending.includes(row) || row.status !== "uploading" || pct === row.progress) return;
+        row.progress = pct;
+        showProgress(row);
       });
-      const data = await res.json().catch(() => ({}));
+      const data = res.data;
       if (!res.ok) throw apiError(res, data);
       if (!data.file || !data.file.id) throw new Error("服务端没有返回文件记录");
       if (!live(t) || !S.pending.includes(row)) return;
       if (row.url) { URL.revokeObjectURL(row.url); row.url = ""; }
-      Object.assign(row, { status: "ready", id: String(data.file.id), meta: data.file, threadId, ctrl: null, file: null });
+      Object.assign(row, { status: "ready", id: String(data.file.id), meta: data.file, threadId, ctrl: null, file: null, progress: null });
     } catch (e) {
       if (ctrl.signal.aborted || !live(t) || !S.pending.includes(row)) return;
-      Object.assign(row, { status: "failed", error: R.fileError(e, "稍后再试"), ctrl: null });
+      Object.assign(row, { status: "failed", error: R.fileError(e, "稍后再试"), ctrl: null, progress: null });
       // The thread moved under the upload: the next read will say where to.
-      if (e.status === 409) H.reload?.();
+      // (401: that read is also what brings back the sign-in.)
+      if (e.status === 409 || e.status === 401) H.reload?.();
     }
     paintComposer();
+  }
+
+  // POST <chat>/files with the raw bytes. Through XMLHttpRequest where the
+  // page has it, whose upload events say how much has gone out; else the
+  // shell's fetch, without a percentage. Both answer {ok, status, data} and
+  // fail as the shell's fetch does: no connection, or the server's 5xx.
+  function post(path, file, signal, onProgress) {
+    if (typeof XMLHttpRequest !== "function") {
+      return H.apiFetch(path, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/octet-stream" }, body: file, signal })
+        .then(async (res) => ({ ok: res.ok, status: res.status, data: (await res.json().catch(() => null)) || {} }));
+    }
+    return new Promise((resolve, reject) => {
+      const aborted = () => Object.assign(new Error("aborted"), { name: "AbortError" });
+      if (signal.aborted) { reject(aborted()); return; }
+      const xhr = new XMLHttpRequest();
+      const stop = () => xhr.abort();
+      const done = () => signal.removeEventListener("abort", stop);
+      xhr.open("POST", path);
+      xhr.withCredentials = true;
+      xhr.setRequestHeader("Content-Type", "application/octet-stream");
+      xhr.upload.onprogress = (ev) => { const pct = R.progress(ev); if (pct != null) onProgress(pct); };
+      xhr.onload = () => {
+        done();
+        if (xhr.status >= 500) { reject(Object.assign(new Error("服务出了点问题，请稍后再试。"), { status: xhr.status })); return; }
+        let data = null;
+        try { data = JSON.parse(xhr.responseText || "null"); } catch { data = null; }
+        resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, data: data && typeof data === "object" ? data : {} });
+      };
+      xhr.onerror = () => { done(); reject(new Error("连不上 clowder-bot")); };
+      xhr.onabort = () => { done(); reject(aborted()); };
+      signal.addEventListener("abort", stop, { once: true });
+      xhr.send(file);
+    });
   }
 
   function retry(row) {
@@ -459,6 +510,61 @@
     const list = $("attach-list"), next = list && (list.children[at] || list.children[at - 1]);
     const target = next ? next.querySelector("button:last-of-type") : $("input");
     if (target) target.focus({ preventScroll: true });
+    // Uploaded to this thread and never sent: its record goes too. Not on a
+    // conversation or thread change (clearPending), where the server would
+    // check the file against the thread the chat has moved to.
+    if (row.status === "ready" && row.id && (!row.threadId || row.threadId === S.threadId)) discard(row);
+  }
+
+  // DELETE <chat>/files/:id. The chip is already gone; 文件 drops the file
+  // once the server has. A refusal (409: sent after all, not an attachment,
+  // or another thread's: the conversation moved elsewhere) says the file is
+  // still there; only 404 means its record already is not. With no answer
+  // (no connection, or a 5xx) the server may have deleted it all the same:
+  // 文件 is read at once, open or not, and the line says what that read found.
+  async function discard(row) {
+    const t = ticket(), name = R.clip(row.name, 24);
+    try {
+      await H.api(scopePath() + "/files/" + enc(row.id), { method: "DELETE" });
+      if (live(t)) fileGone(row.id);
+    } catch (e) {
+      if (!live(t)) return;
+      if (e.status === 404) { fileGone(row.id); return; }
+      if (!e.status || e.status >= 500) { settleDiscard(t, row.id, name); return; }
+      const why = R.said(e, "");
+      setNote("「" + name + "」没能从「文件」里删掉" + (why ? "：" + why : "") + "。");
+      // The server's thread may not be the one this page shows: read the conversation again.
+      if (e.status === 409) { H.reload?.(); loadView(); }
+      if (visible("files")) loadFiles();
+      else S.filesStale = true;
+    }
+  }
+  // A deletion whose answer was lost. The read asked here replaces any older
+  // one; the line changes only while it still says this.
+  async function settleDiscard(t, id, name) {
+    const msg = "没能确认「" + name + "」有没有从「文件」里删掉，正在核对。";
+    setNote(msg);
+    const read = await loadFiles();
+    if (!live(t) || S.note !== msg) return;
+    if (!read) {
+      S.filesStale = true;
+      setNote("没能确认「" + name + "」有没有从「文件」里删掉，可以到「文件」里看看。");
+    } else if ((S.files || []).some((f) => String(f.id) === String(id))) {
+      setNote("「" + name + "」没能从「文件」里删掉。");
+    } else setNote("");
+  }
+  // The server no longer has the file. A 文件 read asked before it answered
+  // may still list it: that read is dropped and 文件 asked again.
+  function fileGone(id) {
+    S.filesReq++;
+    dropFile(id);
+    if (visible("files") || S.filesState === "loading") loadFiles();
+    else S.filesStale = true;
+  }
+  function dropFile(id) {
+    if (!S.files || !S.files.some((f) => String(f.id) === String(id))) return;
+    S.files = S.files.filter((f) => String(f.id) !== String(id));
+    paintFiles();
   }
 
   function clearPending() {
@@ -696,8 +802,11 @@
     }
   }
   // The original modal card, one at a time. Escape, Tab and every other key
-  // stay inside it; closing returns focus to whatever opened it.
-  function openDialog({ title, body, opener = document.activeElement, submit, onSubmit, onClose, cancel = "取消", wide = false, extra = [] }) {
+  // stay inside it; closing returns focus to whatever opened it (opener may
+  // be a function, asked at closing, for an opener a redraw can replace). A
+  // destructive submit (danger) is drawn quiet in the danger colour, and
+  // focus: "cancel" starts on 取消 rather than on it.
+  function openDialog({ title, body, opener = document.activeElement, submit, onSubmit, onClose, cancel = "取消", wide = false, extra = [], danger = false, focus = "" }) {
     if (layer) layer.close(true);
     const root = node("div", "modal ws-modal" + (wide ? " wide" : ""));
     const card = node("form", "modal-card ws-card");
@@ -718,7 +827,7 @@
     const no = button("secondary", cancel, () => d.close());
     acts.append(no);
     let ok = null;
-    if (submit) { ok = node("button", "primary", submit); ok.type = "submit"; acts.append(ok); }
+    if (submit) { ok = node("button", danger ? "secondary ws-danger" : "primary", submit); ok.type = "submit"; acts.append(ok); }
     card.append(h, box, err, acts);
     root.append(card);
     document.body.append(root);
@@ -734,7 +843,8 @@
         root.remove();
         if (layer === d) layer = null;
         // A history redraw may have replaced the opener: the composer is the next best place.
-        if (opener && opener.isConnected && typeof opener.focus === "function") opener.focus({ preventScroll: true });
+        const back = typeof opener === "function" ? opener() : opener;
+        if (back && back.isConnected && typeof back.focus === "function") back.focus({ preventScroll: true });
         else $("input")?.focus({ preventScroll: true });
         if (onClose) onClose();
       },
@@ -748,7 +858,7 @@
     root.addEventListener("click", (ev) => { if (ev.target === root && downOnRoot) d.close(); downOnRoot = false; });
     card.addEventListener("submit", (ev) => { ev.preventDefault(); if (!busy && onSubmit) onSubmit(); });
     layer = d;
-    (box.querySelector("input:not([type=checkbox]), textarea, select") || ok || no).focus();
+    (focus === "cancel" ? no : box.querySelector("input:not([type=checkbox]), textarea, select") || ok || no).focus();
     return d;
   }
 
@@ -790,10 +900,18 @@
   // and the chat then opens afresh in it. The server refuses while either
   // conversation is busy; the refusal is shown and nothing moves.
   //
+  // Each row also renames its conversation in place (PATCH conversations/:id;
+  // the open one too) and, unless it is the one open now, deletes it after a
+  // confirmation (DELETE conversations/:id). The server checks both: a
+  // refusal is said where it was asked, and the list is read again whenever
+  // it may have changed under the row. One title is edited at a time; its
+  // editor is one node kept across redraws (S.convEdit), so what was typed,
+  // the caret and focus stay.
+  //
   // The 资料 page is brought up to date whenever the transcript changes, and this
   // fold is the same node each time. A control focused in it before a redraw
   // gets focus back after it, unless the owner has gone elsewhere since.
-  let convFocus = "";
+  let convFocus = "", editSeq = 0;
 
   function conversationsView(sel) {
     if (!S.sel || isGroup() || R.key(sel) !== S.key) return null;
@@ -873,7 +991,10 @@
     const show = list.length > 0 && S.convState !== "unavailable";
     root.hidden = !show;
     const current = currentConv(list);
-    const sig = JSON.stringify([show, list, current, S.switching && S.switching.id, S.convLine]);
+    // An editor whose conversation has left the list goes with it (unless its save is out: that answer says).
+    if (S.convEdit && !S.convEdit.busy && !list.some((c) => c.id === S.convEdit.id)) S.convEdit = null;
+    const edit = S.convEdit ? [S.convEdit.id, S.convEdit.busy] : null;
+    const sig = JSON.stringify([show, list, current, S.switching && S.switching.id, S.convLine, edit]);
     if (w.sig === sig) return;
     w.sig = sig;
     if (!show) { w.list.replaceChildren(); return; }
@@ -890,34 +1011,228 @@
     else regain(root);
   }
 
+  // A row: the conversation itself (a switch, or the marked one open now) and,
+  // beside it, never inside it, its own two icons: 重命名, and 删除 unless it
+  // is the one open now. A row whose title is being edited is that editor.
   function convRow(c, current) {
     const li = node("li");
+    if (S.convEdit && S.convEdit.id === c.id) { li.append(titleEditor(S.convEdit)); return li; }
     const title = convTitle(c), when = stamp(c.createdAt);
     const going = !!S.switching && S.switching.id === c.id;
-    let row;
+    const row = node("div", "ws-row ws-conv" + (current ? " here" : ""));
+    let main;
     if (current) {
       // Where the chat is now: marked, not a control.
-      row = node("div", "ws-row ws-conv here");
-      row.setAttribute("aria-current", "true");
-      row.tabIndex = -1;
+      main = node("div", "ws-conv-main");
+      main.setAttribute("aria-current", "true");
+      main.tabIndex = -1;
     } else {
-      row = button("ws-row ws-conv", null, (ev) => switchConversation(c, ev.currentTarget), "切换到「" + title + "」" + (when ? "，开始于 " + when : ""));
-      row.disabled = !!S.switching;
-      if (going) row.setAttribute("aria-busy", "true");
+      main = button("ws-conv-main", null, (ev) => switchConversation(c, ev.currentTarget), "切换到「" + title + "」" + (when ? "，开始于 " + when : ""));
+      main.disabled = !!S.switching;
+      if (going) main.setAttribute("aria-busy", "true");
     }
-    row.dataset.wsFocus = "conv:" + c.id;
+    main.dataset.wsFocus = "conv:" + c.id;
     const copy = node("span", "ws-conv-copy");
     const name = node("span", "ws-conv-title", title);
     name.title = title;
     const meta = going ? "正在切换…" : when ? "开始于 " + when : "";
     copy.append(name);
     if (meta) copy.append(node("span", "ws-conv-meta", meta));
-    row.append(copy);
+    main.append(copy);
     // Where the chat is now: a check mark on its row (bold already); the words
     // are for a screen reader (item 46).
-    if (current) row.append(icon("check", "ws-conv-here"), node("span", "visually-hidden", "当前对话"));
+    if (current) main.append(icon("check", "ws-conv-here"), node("span", "visually-hidden", "当前对话"));
+    // A switch on its way holds both; a title being saved holds the other rows' 重命名.
+    const acts = node("span", "ws-conv-acts");
+    const rename = iconButton("pencil", "重命名「" + title + "」", () => startRename(c), "rename:" + c.id);
+    rename.disabled = !!S.switching || !!(S.convEdit && S.convEdit.busy);
+    acts.append(rename);
+    if (!current) {
+      const remove = iconButton("trash-2", "删除「" + title + "」", (ev) => confirmDelete(c, ev.currentTarget), "delete:" + c.id);
+      remove.setAttribute("aria-haspopup", "dialog");
+      remove.disabled = !!S.switching;
+      acts.append(remove);
+    }
+    row.append(main, acts);
     li.append(row);
     return li;
+  }
+
+  // ---- 重命名: in place, Enter saves, Escape goes back to the row's 重命名.
+  function startRename(c) {
+    if (!S.sel || isGroup() || S.switching || (S.convEdit && S.convEdit.busy)) return;
+    S.convEdit = { id: c.id, value: convTitle(c), busy: false, error: "", box: null };
+    paintConvs();
+    const input = S.convEdit && S.convEdit.input;
+    if (input && input.isConnected) {
+      input.focus({ preventScroll: true });
+      if (input.select) input.select();
+    }
+  }
+
+  function titleEditor(edit) {
+    if (!edit.box) {
+      const box = node("div", "ws-conv-edit");
+      box.setAttribute("role", "group");
+      const c = (S.convs || []).find((x) => x.id === edit.id);
+      box.setAttribute("aria-label", "重命名「" + (c ? convTitle(c) : edit.value) + "」");
+      const line = node("div", "ws-conv-edit-row");
+      const input = node("input", "ws-conv-input");
+      input.type = "text";
+      input.maxLength = R.TITLE_MAX;
+      input.value = edit.value;
+      input.autocomplete = "off";
+      input.setAttribute("aria-label", "对话标题");
+      input.dataset.wsFocus = "title:" + edit.id;
+      const save = button("primary ws-conv-save", "保存", () => saveTitle(edit));
+      save.dataset.wsFocus = "title-save:" + edit.id;
+      const cancel = button("text-btn ws-conv-cancel", "取消", () => closeRename(edit, true));
+      cancel.dataset.wsFocus = "title-cancel:" + edit.id;
+      const err = node("p", "ws-conv-err");
+      err.id = "ws-conv-err-" + ++editSeq;
+      err.setAttribute("role", "alert");
+      err.hidden = true;
+      input.setAttribute("aria-describedby", err.id);
+      line.append(input, save, cancel);
+      box.append(line, err);
+      input.addEventListener("input", () => {
+        edit.value = input.value;
+        if (edit.error) { edit.error = ""; paintEditor(edit); }
+      });
+      box.addEventListener("keydown", (ev) => {
+        if (ev.isComposing || ev.keyCode === 229) return;
+        if (ev.key === "Enter" && ev.target === input) { ev.preventDefault(); saveTitle(edit); }
+        // Only the editor closes: the drawer around it stays.
+        else if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); if (!edit.busy) closeRename(edit, true); }
+      });
+      Object.assign(edit, { box, input, save, cancel, err });
+    }
+    paintEditor(edit);
+    return edit.box;
+  }
+  function paintEditor(edit) {
+    if (!edit.box) return;
+    edit.input.readOnly = edit.busy;
+    edit.save.disabled = edit.busy;
+    edit.save.textContent = edit.busy ? "正在保存…" : "保存";
+    edit.cancel.disabled = edit.busy;
+    edit.box.setAttribute("aria-busy", String(edit.busy));
+    edit.err.textContent = edit.error;
+    edit.err.hidden = !edit.error;
+    edit.input.setAttribute("aria-invalid", String(!!edit.error && !edit.busy));
+  }
+  function closeRename(edit, back) {
+    if (S.convEdit !== edit) return;
+    S.convEdit = null;
+    paintConvs();
+    if (back) refocus(S.roots.convs, "rename:" + edit.id);
+  }
+
+  async function saveTitle(edit) {
+    if (S.convEdit !== edit || edit.busy || !S.sel) return;
+    const c = (S.convs || []).find((x) => x.id === edit.id);
+    if (!c) { closeRename(edit, false); return; }
+    const { title, problem } = R.conversationTitle(edit.input.value);
+    if (problem) {
+      edit.error = problem === "empty" ? "标题不能为空。" : "标题最多 " + R.TITLE_MAX + " 个字。";
+      paintEditor(edit);
+      edit.input.focus({ preventScroll: true });
+      return;
+    }
+    // The title it has (or the name shown for none): nothing to ask.
+    if (title === convTitle(c)) { closeRename(edit, true); return; }
+    const gen = S.gen;
+    // Focus stays in the editor: the input, read-only while it saves.
+    edit.input.focus({ preventScroll: true });
+    edit.busy = true;
+    edit.error = "";
+    paintEditor(edit);
+    paintConvs();
+    try {
+      const data = await H.api(scopePath() + "/conversations/" + enc(c.id), { method: "PATCH", body: { title } });
+      if (gen !== S.gen) return;
+      edit.busy = false;
+      const said = data && data.conversation && typeof data.conversation.title === "string" ? R.oneLine(data.conversation.title) : "";
+      if (S.convs) S.convs = S.convs.map((x) => (x.id === c.id ? { ...x, title: said || title } : x));
+      const here = !!edit.box && edit.box.contains(document.activeElement);
+      if (S.convEdit === edit) S.convEdit = null;
+      paintConvs();
+      if (here) refocus(S.roots.convs, "rename:" + c.id);
+      H.toast("已重命名");
+      loadConversations();
+    } catch (e) {
+      if (gen !== S.gen) return;
+      edit.busy = false;
+      if (S.convEdit !== edit) return;
+      if (e.status === 404) {
+        // Gone meanwhile: the row leaves with the next list; the fold says why.
+        const here = !!edit.box && edit.box.contains(document.activeElement);
+        S.convEdit = null;
+        convSay(R.said(e, "这段对话已不在了") + "。", true);
+        loadConversations();
+        if (here) refocus(S.roots.convs, "convs");
+        return;
+      }
+      // No answer, or a 5xx: the title may or may not have changed.
+      const unknown = !e.status || e.status >= 500;
+      edit.error = unknown ? "没能确认改好了没有，可以再试一次。" : R.said(e, "没能重命名") + "。";
+      paintEditor(edit);
+      paintConvs();
+      if (unknown) loadConversations();
+    }
+  }
+
+  // ---- 删除: a conversation that is not open now, after asking. Focus goes
+  // back to its 删除 while the row is there, else to the row that took its
+  // place (the next one, or the one before), else to the fold.
+  function confirmDelete(c, opener) {
+    if (!S.sel || isGroup() || S.switching) return;
+    const gen = S.gen, title = convTitle(c), root = S.roots.convs;
+    const ids = (S.convs || []).map((x) => x.id), at = ids.indexOf(c.id);
+    const near = at < 0 ? [] : [...ids.slice(at + 1), ...ids.slice(0, at).reverse()];
+    const keyed = (key) => (root ? [...root.querySelectorAll("[data-ws-focus]")].find((n) => n.dataset.wsFocus === key && !n.disabled) : null);
+    const back = () => {
+      if (opener && opener.isConnected) return opener;
+      for (const id of near) { const n = keyed("conv:" + id); if (n) return n; }
+      return keyed("convs");
+    };
+    let busy = false;
+    const d = openDialog({
+      title: "删除这段对话", opener: back, submit: "删除", danger: true, focus: "cancel",
+      body: [node("p", "note", "删除「" + title + "」？它会从历史对话里消失，不能再切回去。")],
+      onSubmit: async () => {
+        if (busy) return;
+        busy = true;
+        d.busy(true);
+        d.error("");
+        try {
+          await H.api(scopePath() + "/conversations/" + enc(c.id), { method: "DELETE" });
+          busy = false;
+          if (gen !== S.gen) return;
+          if (S.convs) S.convs = S.convs.filter((x) => x.id !== c.id);
+          paintConvs();
+          if (d.alive()) d.close(true);
+          H.toast("已删除「" + title + "」");
+          loadConversations();
+        } catch (e) {
+          busy = false;
+          if (gen !== S.gen || !d.alive()) return;
+          d.busy(false);
+          // No answer, or a 5xx: it may be gone already. The list read says;
+          // if it no longer lists it, the dialog has nothing left to ask.
+          const unknown = !e.status || e.status >= 500;
+          d.error(unknown ? "没能确认删掉了没有，可以再试一次。" : R.said(e, "没能删除这段对话") + "。");
+          if (unknown || e.status === 404 || e.status === 409) {
+            loadConversations().then(() => {
+              if (!unknown || busy || !d.alive() || gen !== S.gen || S.convState !== "ready") return;
+              if ((S.convs || []).some((x) => x.id === c.id)) return;
+              d.close(true);
+              H.toast("已删除「" + title + "」");
+            });
+          }
+        }
+      },
+    });
   }
 
   // 历史对话 asked for from the chat header's menu: the list is read now and
@@ -1258,6 +1573,8 @@
     const name = node("span", "ws-row-name", e.name);
     name.title = e.name;
     row.append(icon("file"), name, node("span", "ws-size", R.size(e.size)));
+    // Only what the server marks as text or a picture; it checks the bytes again when asked.
+    if (R.treePreview(e) !== "none") row.append(iconButton("eye", "预览 " + e.name, (ev) => previewWorkspaceFile(e, ev.currentTarget), "preview:" + e.path));
     const k = S.tree.area + ":" + e.path, marked = S.marks[k], saving = !!S.marking[k];
     // A snapshot each time: a second one after edits is a new deliverable.
     const mark = button("secondary ws-mark", saving ? "正在保存…" : marked ? "再存一份" : "存为交付物", () => markDeliverable(e), "把 " + e.name + " 存为交付物");
@@ -1272,6 +1589,63 @@
     }
     li.append(row);
     return li;
+  }
+
+  // A working-directory file, read only: text in the preview dialog (the
+  // server's first 128 KB, shown as text, never as markup), a picture in the
+  // shell's own viewer. There is no download here (存为交付物 makes one), so
+  // the dialog only closes. An answer after the conversation moved is not
+  // shown: the listing it came from is gone with it.
+  //
+  // Both are asked of the thread this page has confirmed (expectedThreadId):
+  // a server whose conversation has moved on (in another tab, say) refuses
+  // with 409 instead of showing that thread's file, and the conversation is
+  // read again. The viewer loads its picture itself, so a refused picture is
+  // its own 「图片暂时无法显示」.
+  async function previewWorkspaceFile(entry, opener) {
+    const kind = R.treePreview(entry);
+    if (kind === "none" || !S.sel) return;
+    const sel = S.sel, area = S.tree.area, files = S.roots.files, t = ticket();
+    const url = (mode, threadId) => R.workspaceFileUrl(sel, mode, entry.path, area, threadId);
+    if (kind === "image") {
+      // Not knowing the thread yet, it waits as an upload does; one that never comes is said on the row.
+      const k = area + ":" + entry.path, late = "没能预览：还没读到当前对话";
+      if (S.markErrors[k] === late) { const errors = { ...S.markErrors }; delete errors[k]; S.markErrors = errors; paintFiles(); }
+      try {
+        const threadId = S.threadId || await whenThread(t.gen);
+        if (live(t)) H.openImage(url("image", threadId), opener);
+      } catch (e) {
+        if (!live(t) || !e.late) return;
+        S.markErrors = { ...S.markErrors, [k]: late };
+        paintFiles();
+      }
+      return;
+    }
+    const body = node("div", "ws-preview-body");
+    body.append(waiting("正在读取…"));
+    // A redraw of the listing may replace the eye: its new one by the same key.
+    const back = () => (opener && opener.isConnected ? opener
+      : files && [...files.querySelectorAll("[data-ws-focus]")].find((n) => n.dataset.wsFocus === "preview:" + entry.path) || null);
+    const d = openDialog({ title: entry.name || "预览", body: [body], wide: true, opener: back, cancel: "关闭" });
+    try {
+      const threadId = S.threadId || await whenThread(t.gen);
+      if (!d.alive()) return;
+      if (!live(t)) { d.close(true); return; }
+      const data = await H.api(url("preview", threadId));
+      if (!d.alive()) return;
+      if (!live(t)) { d.close(true); return; }
+      const pre = node("pre", "ws-preview", String((data && data.text) ?? ""));
+      pre.tabIndex = 0;
+      pre.setAttribute("aria-label", "文件内容");
+      body.replaceChildren(...(data && data.truncated ? [note("文件较大，这里只显示前 128 KB。")] : []), pre);
+    } catch (e) {
+      if (!d.alive()) return;
+      if (!live(t)) { d.close(true); return; }
+      // 409: the server's conversation is not the thread this page shows. Read it again (a move drops this listing).
+      if (e.status === 409) { H.reload?.(); loadView(); }
+      // 415: its bytes are not plain text after all (the server's words offer a download this page does not have).
+      body.replaceChildren(failure("没能预览：" + (e.status === 415 ? "这个文件不是纯文本" : R.fileError(e, "稍后再试")) + "。"));
+    }
   }
 
   // The listing on screen stays until the next folder has been read, so the
@@ -1327,28 +1701,33 @@
     }
   }
 
+  // True once this read's list is the one shown; false when it failed, was
+  // overtaken by a newer read, or answered for another thread.
   async function loadFiles() {
-    if (!S.sel) return;
+    if (!S.sel) return false;
     const t = ticket(), req = ++S.filesReq;
+    let landed = false;
     if (!S.files) S.filesState = "loading";
     paintFiles();
     try {
       const data = await H.api(scopePath() + "/files");
-      if (!live(t) || req !== S.filesReq) return;
+      if (!live(t) || req !== S.filesReq) return false;
       const from = listThread(t, data);
       // Another thread's files: what is shown stays, and the next poll reads again.
-      if (from === null) { S.filesStale = true; return; }
+      if (from === null) { S.filesStale = true; return false; }
       S.files = (Array.isArray(data && data.files) ? data.files : []).filter((f) => f && f.id);
       // Whether the native record could be read for this list (absent on an older server).
       const nativeRead = data && (data.nativeReadStatus === "ready" || data.nativeReadStatus === "unavailable") ? data.nativeReadStatus : null;
       const nativeError = nativeRead === "unavailable" ? R.said({ message: data.nativeError }, "") : "";
       Object.assign(S, { filesFor: from, filesState: "ready", filesError: "", nativeRead, nativeError });
+      landed = true;
     } catch (e) {
-      if (!live(t) || req !== S.filesReq) return;
+      if (!live(t) || req !== S.filesReq) return false;
       if (e.status === 404 && !S.files) S.filesState = "unavailable";
       else Object.assign(S, { filesState: "error", filesError: H.visibleError(e, "没能读取文件") });
     }
     paintFiles();
+    return landed;
   }
 
   // ---------------------------------------------------------------- 任务

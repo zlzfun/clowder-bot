@@ -248,7 +248,8 @@ function deferred<T = unknown>() {
 }
 type Call = { path: string; method: string; body?: Any };
 type Route = (path: string, method: string, body: Any) => unknown;
-function page(route: Route, fetchRoute: (path: string, opt: Any) => unknown = () => { throw new Error('no fetch'); }, hooks: Record<string, unknown> = {}) {
+// globals: what else the page's window has (XMLHttpRequest, for the upload progress tests).
+function page(route: Route, fetchRoute: (path: string, opt: Any) => unknown = () => { throw new Error('no fetch'); }, hooks: Record<string, unknown> = {}, globals: Record<string, unknown> = {}) {
   const doc = new Doc();
   const h = (tag: string, props: Record<string, unknown> = {}, ...kids: Array<El | string>) => {
     const e = doc.createElement(tag);
@@ -271,6 +272,7 @@ function page(route: Route, fetchRoute: (path: string, opt: Any) => unknown = ()
   const context = vm.createContext({
     window, document: doc, setTimeout, clearTimeout, setInterval, clearInterval, URLSearchParams, AbortController, console,
     URL: { createObjectURL: () => `blob:${++blob}`, revokeObjectURL() {} },
+    ...globals,
   });
   for (const file of ['client/public/runtime-tasks.js', 'client/public/workspace-rules.js', 'client/public/workspace.js']) vm.runInContext(read(file), context);
   const ws = window.ClowderWorkspace;
@@ -448,6 +450,456 @@ test('an upload refused by the server keeps its row with the reason and a retry;
   all(p.chips()[0]).find(e => e.getAttribute('aria-label') === '移除附件 report.md')!.click();
   assert.equal(p.chips().length, 0);
   same(p.doc.activeElement, p.doc.getElementById('input'), 'focus moves to the input');
+});
+
+test('working-directory previews, upload percentages and new conversation titles are judged without the DOM', () => {
+  const window: Any = {};
+  vm.runInNewContext(read('client/public/workspace-rules.js'), { window });
+  const R = window.ClowderWorkspaceRules;
+  // Only a file the server marks as text or a picture previews; a folder never does, whatever it says.
+  assert.deepEqual([
+    { type: 'file', previewable: 'text' }, { type: 'file', previewable: 'image' }, { type: 'file', previewable: null },
+    { type: 'file' }, { type: 'file', previewable: 'html' }, { type: 'directory', previewable: 'text' }, null,
+  ].map(R.treePreview), ['text', 'image', 'none', 'none', 'none', 'none', 'none']);
+  // Its URL is built here from the relative path and area, every part encoded.
+  assert.equal(R.workspaceFileUrl({ type: 'bot', id: 'Ada' }, 'preview', 'drafts/notes v2#1.md', 'workspace'),
+    '/xbot-api/bots/Ada/workspace-file/preview?path=drafts%2Fnotes%20v2%231.md&area=workspace');
+  assert.equal(R.workspaceFileUrl({ type: 'group', id: 'g 1' }, 'image', 'a&b=c.png', 'shared'),
+    '/xbot-api/groups/g%201/workspace-file/image?path=a%26b%3Dc.png&area=shared');
+  assert.equal(R.workspaceFileUrl({ type: 'bot', id: 'Ada' }, 'download', 'x.md', 'elsewhere'),
+    '/xbot-api/bots/Ada/workspace-file/preview?path=x.md&area=workspace', 'only the two read-only modes and areas');
+  // Asked of the thread the page has confirmed: the server refuses (409) one it has moved on from.
+  assert.equal(R.workspaceFileUrl({ type: 'bot', id: 'Ada' }, 'preview', 'a.md', 'workspace', 'thread A/1'),
+    '/xbot-api/bots/Ada/workspace-file/preview?path=a.md&area=workspace&expectedThreadId=thread%20A%2F1');
+  assert.equal(R.workspaceFileUrl({ type: 'group', id: 'g-1' }, 'image', 'b.png', 'shared', 'g-1'),
+    '/xbot-api/groups/g-1/workspace-file/image?path=b.png&area=shared&expectedThreadId=g-1');
+  // How much of an upload has gone out: 0–100, none while the total is unknown.
+  assert.deepEqual([
+    { lengthComputable: true, loaded: 45, total: 100 }, { lengthComputable: true, loaded: 1, total: 3 }, { lengthComputable: true, loaded: 0, total: 10 },
+    { lengthComputable: true, loaded: 250, total: 100 }, { lengthComputable: false, loaded: 5, total: 10 }, { lengthComputable: true, loaded: 5, total: 0 }, null,
+  ].map(R.progress), [45, 33, 0, 100, null, null, null]);
+  // A new title: one line, trimmed, 1–120 characters, as the server takes it.
+  assert.deepEqual(plain(R.conversationTitle('  官网\t改版\n 第二期 ')), { title: '官网 改版 第二期', problem: '' });
+  assert.deepEqual(plain(R.conversationTitle(' \u0007 \t')), { title: '', problem: 'empty' });
+  assert.equal(R.conversationTitle('字'.repeat(120)).problem, '');
+  assert.equal(R.conversationTitle('字'.repeat(121)).problem, 'long');
+  assert.equal(R.TITLE_MAX, 120);
+});
+
+// The browser's XMLHttpRequest as workspace.js uses it for an upload: open,
+// the one header, withCredentials, upload.onprogress, send, abort, and its
+// three endings (an answer, no connection, aborted).
+function fakeXhr() {
+  const made: Any[] = [];
+  class FakeXHR {
+    upload: Any = {}; status = 0; responseText = ''; withCredentials = false; headers: Record<string, string> = {};
+    method = ''; url = ''; body: Any = null; aborted = false;
+    onload: (() => void) | null = null; onerror: (() => void) | null = null; onabort: (() => void) | null = null;
+    open(method: string, url: string) { this.method = method; this.url = url; }
+    setRequestHeader(k: string, v: string) { this.headers[k] = v; }
+    send(body: unknown) { this.body = body; made.push(this); }
+    abort() { if (this.aborted) return; this.aborted = true; this.onabort?.(); }
+    tick(loaded: number, total: number, lengthComputable = true) { this.upload.onprogress?.({ lengthComputable, loaded, total }); }
+    answer(status: number, data: unknown) { this.status = status; this.responseText = JSON.stringify(data); this.onload?.(); }
+    drop() { this.onerror?.(); }
+  }
+  return { XMLHttpRequest: FakeXHR, made };
+}
+const meta = (chip: El) => chip.querySelector('.wsf-meta')!.textContent;
+
+test('an upload says how much has gone out (XMLHttpRequest), rewriting the same chip in place, and ends ready; with no total known it says 上传中…', async () => {
+  const x = fakeXhr();
+  const p = page(path => (path.endsWith('/workspace') ? view() : { threadId: 'thread-A', tasks: [], cats }), undefined, {}, { XMLHttpRequest: x.XMLHttpRequest });
+  p.ws.select(ada);
+  p.ws.observe(ada, 'thread-A', true);
+  p.ws.addFiles([file('report.md', 2048)]);
+  await settle();
+  const xhr = x.made[0];
+  assert.ok(xhr, 'sent through XMLHttpRequest');
+  assert.deepEqual([xhr.method, xhr.url, xhr.withCredentials, xhr.headers['Content-Type']],
+    ['POST', '/xbot-api/bots/Ada/files?name=report.md&expectedThreadId=thread-A', true, 'application/octet-stream']);
+  assert.equal(xhr.body.name, 'report.md', 'the raw file is the body');
+  assert.equal(p.fetches.length, 0, 'not through fetch');
+  const chip = p.chips()[0];
+  assert.equal(meta(chip), '上传中…');
+  xhr.tick(5, 10, false);
+  assert.equal(meta(chip), '上传中…', 'no total known yet');
+  xhr.tick(45, 100);
+  same(p.chips()[0], chip, 'the same chip: a tick does not redraw the list (focus and scroll hold)');
+  assert.equal(meta(chip), '正在上传 45%…');
+  assert.equal(chip.querySelector('.wsf-meta')!.title, '正在上传 45%…');
+  assert.equal(chip.getAttribute('aria-label'), 'report.md，正在上传 45%…');
+  xhr.tick(250, 100);
+  assert.equal(meta(chip), '正在上传 100%…', 'never past 100');
+  xhr.answer(201, { file: served() });
+  await settle();
+  assert.equal(p.chips()[0].dataset.status, 'ready');
+  assert.equal(meta(p.chips()[0]), '2 KB');
+  assert.equal(p.ws.attachReady(), 1);
+  assert.equal(p.chips()[0].getAttribute('aria-label'), 'report.md，2 KB', 'read aloud as its size again');
+});
+
+test('XMLHttpRequest uploads: removing the chip or switching away aborts one and sends no DELETE; no connection, a refusal and a 5xx each say why, with a retry', async () => {
+  const x = fakeXhr();
+  const p = page(path => (path.endsWith('/workspace') ? view() : { threadId: 'thread-A', tasks: [], cats }), undefined, {}, { XMLHttpRequest: x.XMLHttpRequest });
+  p.ws.select(ada);
+  p.ws.observe(ada, 'thread-A', true);
+  p.ws.addFiles([file('a.md', 10)]);
+  await settle();
+  x.made[0].tick(5, 10);
+  labelled(p.doc.body, '移除附件 a.md').click();
+  assert.equal(x.made[0].aborted, true, 'removing the chip aborts its upload');
+  assert.equal(p.chips().length, 0);
+  same(p.doc.activeElement, p.doc.getElementById('input'), 'focus moves to the input');
+  await settle();
+  assert.ok(!p.calls.some(c => c.method === 'DELETE'), 'nothing of it is on the server: nothing to delete');
+
+  p.ws.addFiles([file('b.md', 10)]);
+  await settle();
+  const b = x.made[1];
+  b.tick(3, 10);
+  p.ws.select(bob);
+  assert.equal(b.aborted, true, 'a switch aborts it');
+  b.answer(201, { file: served({ id: 'f-b', name: 'b.md' }) });
+  await settle();
+  assert.equal(p.chips().length, 0, 'its late answer lands nowhere');
+  assert.ok(!p.calls.some(c => c.method === 'DELETE'));
+
+  p.ws.select(ada);
+  p.ws.observe(ada, 'thread-A', true);
+  p.ws.addFiles([file('c.md', 10), file('d.md', 10), file('e.md', 10)]);
+  await settle();
+  x.made[2].drop();
+  await settle();
+  x.made[3].answer(409, { error: '对话已变化，请刷新后重试' });
+  await settle();
+  x.made[4].answer(503, { error: 'upstream exploded' });
+  await settle();
+  assert.deepEqual(p.chips().map(c => [c.dataset.status, meta(c)]), [
+    ['failed', '没传上去：连不上 clowder-bot'], ['failed', '没传上去：对话已变化，请刷新后重试'], ['failed', '没传上去：服务出了点问题，请稍后再试']]);
+  // A failed row never reached the server either: removing it deletes nothing.
+  labelled(p.doc.body, '重新上传 c.md');
+  labelled(p.doc.body, '移除附件 e.md').click();
+  await settle();
+  assert.ok(!p.calls.some(c => c.method === 'DELETE'));
+});
+
+test('removing an uploaded file nobody sent deletes its record too, and 文件 drops it once the server has; a refusal or a failure says the file is still there', async () => {
+  const saved: Any[] = [];
+  let refuse: unknown = null, id = 0;
+  const gate: { hold: Promise<unknown> | null } = { hold: null };
+  const p = page((path, method) => {
+    const bare = path.split('?')[0];
+    if (bare === '/xbot-api/bots/Ada/workspace') return view();
+    if (bare === '/xbot-api/bots/Bob/workspace') return view({ threadId: 'thread-B' });
+    if (/\/bots\/(Ada|Bob)\/files$/.test(bare) && method === 'GET') return { threadId: bare.includes('/Bob/') ? 'thread-B' : 'thread-A', files: bare.includes('/Bob/') ? [] : saved };
+    const del = /^\/xbot-api\/bots\/Ada\/files\/([^/]+)$/.exec(bare);
+    if (del && method === 'DELETE') {
+      const go = () => {
+        if (refuse) throw refuse;
+        const at = saved.findIndex(f => f.id === decodeURIComponent(del[1]));
+        if (at < 0) throw failure(404, '这个文件不属于当前对话');
+        saved.splice(at, 1);
+        return { deleted: true };
+      };
+      return gate.hold ? gate.hold.then(go) : go();
+    }
+    if (/\/tasks$/.test(bare)) return { threadId: bare.includes('/Bob/') ? 'thread-B' : 'thread-A', tasks: [], cats };
+    throw failure(404, 'unexpected ' + method + ' ' + path);
+  }, (path) => {
+    const made = served({ id: 'f-' + ++id, name: new URLSearchParams(path.split('?')[1]).get('name') });
+    saved.push(made);
+    return json(201, { file: made });
+  });
+  p.ws.select(ada);
+  p.ws.observe(ada, 'thread-A', true);
+  const root = p.ws.filesView(ada) as El;
+  p.panel.append(root);
+  p.ws.addFiles([file('a.md', 10), file('b.md', 10), file('c.md', 10)]);
+  await settle();
+  labelled(root, '刷新文件').click();
+  await settle();
+  assert.deepEqual(namesIn(sectionOf(root, '附件')), ['a.md', 'b.md', 'c.md']);
+  const note = p.doc.getElementById('attach-note')!;
+  const fileReads = () => p.calls.filter(c => c.method === 'GET' && c.path === '/xbot-api/bots/Ada/files').length;
+
+  labelled(p.doc.body, '移除附件 a.md').click();
+  assert.deepEqual(p.chips().map(c => textOf(c.querySelector('.wsf-name')!)), ['b.md', 'c.md'], 'the chip leaves at once');
+  await settle();
+  assert.deepEqual(p.calls.filter(c => c.method === 'DELETE').map(c => c.path), ['/xbot-api/bots/Ada/files/f-1']);
+  assert.deepEqual(namesIn(sectionOf(root, '附件')), ['b.md', 'c.md'], '文件 drops it once the server has');
+  assert.equal(note.hidden, true, 'nothing to say');
+
+  // Refused (sent after all): the server's reason, the file said to be still there, 文件 read again.
+  refuse = failure(409, '这个附件已经发在对话里，不能删除');
+  let reads = fileReads();
+  labelled(p.doc.body, '移除附件 b.md').click();
+  await settle();
+  assert.deepEqual([note.hidden, note.textContent], [false, '「b.md」没能从「文件」里删掉：这个附件已经发在对话里，不能删除。']);
+  assert.equal(fileReads(), reads + 1, '文件 is read again');
+  assert.deepEqual(namesIn(sectionOf(root, '附件')), ['b.md', 'c.md'], 'never shown as deleted');
+  // No answer (503) and 文件 still lists it: said plainly, the line shows even with no chip left.
+  refuse = failure(503, '服务出了点问题，请稍后再试。');
+  labelled(p.doc.body, '移除附件 c.md').click();
+  await settle();
+  assert.equal(p.chips().length, 0);
+  assert.deepEqual([note.hidden, note.textContent], [false, '「c.md」没能从「文件」里删掉。']);
+  assert.equal(p.doc.getElementById('attach-bar')!.hidden, false);
+  assert.deepEqual(namesIn(sectionOf(root, '附件')), ['b.md', 'c.md']);
+
+  // Already gone (404): 文件 drops it, there is nothing to say, and 文件 (open) is read once more.
+  refuse = null;
+  p.ws.addFiles([file('d.md', 10)]);
+  await settle();
+  labelled(root, '刷新文件').click();
+  await settle();
+  saved.splice(saved.findIndex(f => f.name === 'd.md'), 1);
+  reads = fileReads();
+  labelled(p.doc.body, '移除附件 d.md').click();
+  await settle();
+  assert.equal(note.hidden, true);
+  assert.deepEqual(namesIn(sectionOf(root, '附件')), ['b.md', 'c.md']);
+  assert.equal(fileReads(), reads + 1, 'read again, so no earlier read can bring it back');
+
+  // An answer after another cat opened lands nowhere.
+  p.ws.addFiles([file('e.md', 10)]);
+  await settle();
+  const late = deferred();
+  gate.hold = late.promise;
+  refuse = failure(409, '这个附件已经发在对话里，不能删除');
+  labelled(p.doc.body, '移除附件 e.md').click();
+  p.ws.select(bob);
+  p.ws.observe(bob, 'thread-B', true);
+  late.resolve(undefined);
+  await settle();
+  assert.equal(note.hidden, true, 'Bob\'s composer hears nothing of it');
+});
+
+test('a deletion whose answer is lost (a 5xx or no connection) reads 文件 at once, open or not, and the line says what that read found: deleted after all, still there, or not known', async () => {
+  const saved: Any[] = [];
+  let id = 0, lands = true, lose: (() => Error) | null = null, readFails = false, hold: Promise<unknown> | null = null;
+  const p = page((path, method) => {
+    const bare = path.split('?')[0];
+    if (bare === '/xbot-api/bots/Ada/workspace') return view();
+    if (bare === '/xbot-api/bots/Ada/files' && method === 'GET') {
+      if (readFails) throw failure(503, '服务出了点问题，请稍后再试。');
+      // What the server had when the read was asked.
+      const answer = { threadId: 'thread-A', files: [...saved] };
+      return hold ? hold.then(() => answer) : answer;
+    }
+    const del = /^\/xbot-api\/bots\/Ada\/files\/([^/]+)$/.exec(bare);
+    if (del && method === 'DELETE') {
+      const at = saved.findIndex(f => f.id === decodeURIComponent(del[1]));
+      if (at < 0) throw failure(404, '文件记录不存在');
+      // Whether the server deleted it before its answer was lost.
+      if (lands) saved.splice(at, 1);
+      if (lose) throw lose();
+      return { deleted: true };
+    }
+    if (bare === '/xbot-api/bots/Ada/tasks') return { threadId: 'thread-A', tasks: [], cats };
+    throw failure(404, 'unexpected ' + method + ' ' + path);
+  }, (path) => {
+    const made = served({ id: 'f-' + ++id, name: new URLSearchParams(path.split('?')[1]).get('name') });
+    saved.push(made);
+    return json(201, { file: made });
+  });
+  p.ws.select(ada);
+  p.ws.observe(ada, 'thread-A', true);
+  const root = p.ws.filesView(ada) as El;
+  p.panel.append(root);
+  p.ws.addFiles([file('a.md', 10), file('b.md', 10), file('c.md', 10), file('d.md', 10)]);
+  await settle();
+  labelled(root, '刷新文件').click();
+  await settle();
+  assert.deepEqual(namesIn(sectionOf(root, '附件')), ['a.md', 'b.md', 'c.md', 'd.md']);
+  const note = p.doc.getElementById('attach-note')!;
+  const fileReads = () => p.calls.filter(c => c.method === 'GET' && c.path === '/xbot-api/bots/Ada/files').length;
+
+  // Deleted, then a 503 for an answer, with 文件 not open and an older read still out.
+  p.panel.classList.remove('open');
+  const late = deferred();
+  hold = late.promise;
+  labelled(root, '刷新文件').click();
+  hold = null;
+  lose = () => failure(503, '服务出了点问题，请稍后再试。');
+  let reads = fileReads();
+  labelled(p.doc.body, '移除附件 a.md').click();
+  await settle();
+  assert.equal(fileReads(), reads + 1, '文件 is read at once, though it is not open');
+  assert.equal(note.hidden, true, 'that read no longer lists it: no failure is said');
+  assert.deepEqual(namesIn(sectionOf(root, '附件')), ['b.md', 'c.md', 'd.md']);
+  late.resolve(undefined);
+  await settle();
+  assert.deepEqual(namesIn(sectionOf(root, '附件')), ['b.md', 'c.md', 'd.md'], 'the read from before the deletion lands nowhere');
+
+  // Not deleted, and no connection for an answer: checking first, then said not deleted.
+  p.panel.classList.add('open');
+  lands = false;
+  lose = () => new Error('连不上 clowder-bot');
+  let check = deferred();
+  hold = check.promise;
+  labelled(p.doc.body, '移除附件 b.md').click();
+  await settle();
+  assert.deepEqual([note.hidden, note.textContent], [false, '没能确认「b.md」有没有从「文件」里删掉，正在核对。']);
+  hold = null;
+  check.resolve(undefined);
+  await settle();
+  assert.deepEqual([note.hidden, note.textContent], [false, '「b.md」没能从「文件」里删掉。']);
+  assert.deepEqual(namesIn(sectionOf(root, '附件')), ['b.md', 'c.md', 'd.md'], 'never shown as deleted');
+
+  // A line the owner has been given since (another file added) is not replaced by the check.
+  check = deferred();
+  hold = check.promise;
+  labelled(p.doc.body, '移除附件 c.md').click();
+  await settle();
+  assert.equal(note.textContent, '没能确认「c.md」有没有从「文件」里删掉，正在核对。');
+  p.ws.addFiles([file('empty.md', 0)]);
+  const since = note.textContent;
+  assert.notEqual(since, '没能确认「c.md」有没有从「文件」里删掉，正在核对。');
+  hold = null;
+  check.resolve(undefined);
+  await settle();
+  assert.equal(note.textContent, since, 'the check says nothing over it');
+
+  // The read fails as well: not known, and 文件 is read again the next time it is open.
+  lands = true;
+  lose = () => failure(502, '服务出了点问题，请稍后再试。');
+  readFails = true;
+  labelled(p.doc.body, '移除附件 d.md').click();
+  await settle();
+  assert.deepEqual([note.hidden, note.textContent], [false, '没能确认「d.md」有没有从「文件」里删掉，可以到「文件」里看看。']);
+  readFails = false;
+  reads = fileReads();
+  p.ws.observe(ada, 'thread-A', false);
+  await settle();
+  assert.equal(fileReads(), reads + 1, 'read again at the next poll');
+  assert.deepEqual(namesIn(sectionOf(root, '附件')), ['b.md', 'c.md']);
+});
+
+test('a deletion refused because the attachment is another conversation\'s (409) says so and keeps it in 文件, never dropped as if gone; the conversation is read again and found moved', async () => {
+  const saved: Any[] = [];
+  let id = 0, reloads = 0, thread = 'thread-A', viewHold: Promise<unknown> | null = null;
+  const p = page((path, method) => {
+    const bare = path.split('?')[0];
+    if (bare === '/xbot-api/bots/Ada/workspace') return viewHold ?? view({ threadId: thread });
+    if (bare === '/xbot-api/bots/Ada/files' && method === 'GET') return { threadId: thread, files: saved.filter(f => f.threadId === thread) };
+    const del = /^\/xbot-api\/bots\/Ada\/files\/([^/]+)$/.exec(bare);
+    if (del && method === 'DELETE') {
+      const f = saved.find(x => x.id === decodeURIComponent(del[1]));
+      if (!f) throw failure(404, '文件记录不存在');
+      if (f.threadId !== thread) throw failure(409, '对话已变化，这个附件属于另一段对话');
+      saved.splice(saved.indexOf(f), 1);
+      return { deleted: true };
+    }
+    if (bare === '/xbot-api/bots/Ada/tasks') return { threadId: thread, tasks: [], cats };
+    throw failure(404, 'unexpected ' + method + ' ' + path);
+  }, (path) => {
+    const q = new URLSearchParams(path.split('?')[1]);
+    const made = served({ id: 'f-' + ++id, name: q.get('name'), threadId: q.get('expectedThreadId') });
+    saved.push(made);
+    return json(201, { file: made });
+  }, { reload: () => { reloads++; } });
+  p.ws.select(ada);
+  p.ws.observe(ada, 'thread-A', true);
+  const root = p.ws.filesView(ada) as El;
+  p.panel.append(root);
+  p.ws.addFiles([file('a.md', 10)]);
+  await settle();
+  labelled(root, '刷新文件').click();
+  await settle();
+  assert.deepEqual(namesIn(sectionOf(root, '附件')), ['a.md']);
+  const note = p.doc.getElementById('attach-note')!;
+
+  // The cat moved to another conversation in another tab; this page has not read it yet.
+  thread = 'thread-B';
+  const moved = deferred();
+  viewHold = moved.promise;
+  labelled(p.doc.body, '移除附件 a.md').click();
+  await settle();
+  const at = p.calls.findIndex(c => c.method === 'DELETE');
+  assert.equal(p.calls[at].path, '/xbot-api/bots/Ada/files/f-1');
+  assert.deepEqual([note.hidden, note.textContent], [false, '「a.md」没能从「文件」里删掉：对话已变化，这个附件属于另一段对话。']);
+  assert.deepEqual(namesIn(sectionOf(root, '附件')), ['a.md'], 'still there: not dropped as a 404 would be');
+  assert.equal(reloads, 1, 'the chat is read again');
+  assert.ok(p.calls.slice(at).some(c => c.method === 'GET' && c.path === '/xbot-api/bots/Ada/workspace'), 'and the workspace view');
+  viewHold = null;
+  moved.resolve(view({ threadId: 'thread-B' }));
+  await settle();
+  // The move is found: a file added now goes to the thread the cat is in.
+  p.ws.addFiles([file('b.md', 10)]);
+  await settle();
+  const up = p.fetches.filter(f => f.method === 'POST').at(-1)!;
+  assert.equal(new URLSearchParams(up.path.split('?')[1]).get('expectedThreadId'), 'thread-B');
+});
+
+test('a 文件 read asked before a deletion answered cannot bring the deleted attachment back: it is dropped, and 文件 is read again (open now, or the next time it is)', async () => {
+  const saved: Any[] = [];
+  let id = 0, hold: Promise<unknown> | null = null;
+  const p = page((path, method) => {
+    const bare = path.split('?')[0];
+    if (bare === '/xbot-api/bots/Ada/workspace') return view();
+    if (bare === '/xbot-api/bots/Ada/files' && method === 'GET') {
+      // What the server had when the read was asked.
+      const answer = { threadId: 'thread-A', files: [...saved] };
+      return hold ? hold.then(() => answer) : answer;
+    }
+    const del = /^\/xbot-api\/bots\/Ada\/files\/([^/]+)$/.exec(bare);
+    if (del && method === 'DELETE') {
+      const at = saved.findIndex(f => f.id === decodeURIComponent(del[1]));
+      if (at < 0) throw failure(404, '文件记录不存在');
+      saved.splice(at, 1);
+      return { deleted: true };
+    }
+    if (bare === '/xbot-api/bots/Ada/tasks') return { threadId: 'thread-A', tasks: [], cats };
+    throw failure(404, 'unexpected ' + method + ' ' + path);
+  }, (path) => {
+    const made = served({ id: 'f-' + ++id, name: new URLSearchParams(path.split('?')[1]).get('name') });
+    saved.push(made);
+    return json(201, { file: made });
+  });
+  p.ws.select(ada);
+  p.ws.observe(ada, 'thread-A', true);
+  const root = p.ws.filesView(ada) as El;
+  p.panel.append(root);
+  p.ws.addFiles([file('a.md', 10), file('b.md', 10)]);
+  await settle();
+  labelled(root, '刷新文件').click();
+  await settle();
+  assert.deepEqual(namesIn(sectionOf(root, '附件')), ['a.md', 'b.md']);
+  const fileReads = () => p.calls.filter(c => c.method === 'GET' && c.path === '/xbot-api/bots/Ada/files').length;
+
+  // 文件 open: a read goes out, then a.md is removed and deleted before that read answers.
+  let late = deferred();
+  hold = late.promise;
+  let reads = fileReads();
+  labelled(root, '刷新文件').click();
+  hold = null;
+  labelled(p.doc.body, '移除附件 a.md').click();
+  await settle();
+  assert.deepEqual(namesIn(sectionOf(root, '附件')), ['b.md'], '文件 drops it once the server has');
+  assert.equal(fileReads(), reads + 2, 'the held read, and a fresh one after the deletion');
+  late.resolve(undefined);
+  await settle();
+  assert.deepEqual(namesIn(sectionOf(root, '附件')), ['b.md'], 'the read from before the deletion lands nowhere');
+
+  // 文件 not on screen: nothing is read now; the next poll with it open reads it.
+  p.panel.classList.remove('open');
+  late = deferred();
+  hold = late.promise;
+  labelled(root, '刷新文件').click();
+  hold = null;
+  reads = fileReads();
+  labelled(p.doc.body, '移除附件 b.md').click();
+  await settle();
+  assert.equal(fileReads(), reads, 'not read while 文件 is not open');
+  late.resolve(undefined);
+  await settle();
+  assert.deepEqual(namesIn(sectionOf(root, '附件')), [], 'the older read does not bring it back');
+  p.panel.classList.add('open');
+  p.ws.observe(ada, 'thread-A', false);
+  await settle();
+  assert.equal(fileReads(), reads + 1, 'read once 文件 is open again');
+  assert.deepEqual(namesIn(sectionOf(root, '附件')), []);
 });
 
 // ---------------------------------------------------------------- file cards
@@ -677,6 +1129,208 @@ test('with nothing saved yet the 文件 page says so by its counts alone (item 4
   assert.equal(p.calls.filter(c => c.path.includes('/workspace-tree')).at(-1)!.path, '/xbot-api/bots/Ada/workspace-tree?path=&area=shared');
   assert.equal(textOf(all(more).find(e => e.classList.contains('here'))!), '共享目录');
   assert.match(textOf(more), /plan\.md/);
+});
+
+// One cat's 文件 page whose working directory lists `entries`; `route` answers
+// first (the preview reads). The server's thread is server.thread.
+function treePage(entries: Any[], route: Route = () => undefined, hooks: Record<string, unknown> = {}, over: Record<string, unknown> = {}) {
+  const server = { thread: 'thread-A' };
+  const p = page((path, method, body) => {
+    const answer = route(path, method, body);
+    if (answer !== undefined) return answer;
+    const bare = path.split('?')[0];
+    if (bare === '/xbot-api/bots/Ada/workspace') return view({ threadId: server.thread, ...over });
+    if (bare === '/xbot-api/bots/Ada/files') return { threadId: server.thread, files: [] };
+    if (bare === '/xbot-api/bots/Ada/workspace-tree') return { path: '', area: new URLSearchParams(path.split('?')[1]).get('area'), entries };
+    if (bare === '/xbot-api/bots/Ada/tasks') return { threadId: server.thread, tasks: [], cats };
+    throw failure(404, 'unexpected ' + method + ' ' + path);
+  }, undefined, hooks);
+  p.ws.select(ada);
+  p.ws.observe(ada, 'thread-A', true);
+  const root = p.ws.filesView(ada) as El;
+  p.panel.append(root);
+  const open = async () => { await settle(); const more = foldOf(root, 'ws-more'); await setFold(more, true); return more; };
+  return { ...p, root, server, open };
+}
+const treeRowOf = (host: El, name: string) => {
+  const r = all(host).find(e => e.classList.contains('ws-row') && e.classList.contains('file') && textOf(e.querySelector('.ws-row-name')!) === name);
+  assert.ok(r, 'no tree row ' + name);
+  return r;
+};
+const modalOf = (p: { doc: Doc }) => all(p.doc.body).find(e => e.classList.contains('ws-modal'));
+
+test('更多文件: a file the server marks as text or a picture has 预览, just before 存为交付物; a folder, an unmarked file or an older listing has none', async () => {
+  const p = treePage([
+    { name: 'drafts', path: 'drafts', type: 'directory', previewable: 'text' },
+    { name: 'notes.md', path: 'notes.md', type: 'file', size: 64, previewable: 'text' },
+    { name: 'shot.png', path: 'shot.png', type: 'file', size: 4096, previewable: 'image' },
+    { name: 'data.bin', path: 'data.bin', type: 'file', size: 10, previewable: null },
+    { name: 'old.md', path: 'old.md', type: 'file', size: 10 },
+  ]);
+  const more = await p.open();
+  const labels = (name: string) => all(treeRowOf(more, name)).filter(e => e.tagName === 'BUTTON').map(b => b.getAttribute('aria-label'));
+  assert.deepEqual(labels('notes.md'), ['预览 notes.md', '把 notes.md 存为交付物']);
+  assert.deepEqual(labels('shot.png'), ['预览 shot.png', '把 shot.png 存为交付物']);
+  assert.deepEqual(labels('data.bin'), ['把 data.bin 存为交付物'], 'download only: nothing to preview');
+  assert.deepEqual(labels('old.md'), ['把 old.md 存为交付物'], 'a listing without the mark offers nothing');
+  assert.equal(labelled(more, '预览 notes.md').dataset.tip, '预览 notes.md');
+  assert.ok(!all(more).some(e => e.getAttribute('aria-label') === '预览 drafts'), 'a folder opens; it is not previewed');
+  assert.equal(p.calls.filter(c => c.path.includes('/workspace-file/')).length, 0, 'nothing is read before it is asked for');
+});
+
+test('a text file of the working directory previews as text, never as markup, from its own encoded path; the 128 KB note; 关闭 only; refusals said in place', async () => {
+  let answer: unknown = { text: '<img src=x onerror=alert(1)>\n第二行', truncated: true };
+  const p = treePage([{ name: 'notes v2.md', path: 'drafts/notes v2.md', type: 'file', size: 64, previewable: 'text' }], (path) => {
+    if (path.split('?')[0] !== '/xbot-api/bots/Ada/workspace-file/preview') return undefined;
+    if (answer instanceof Error) throw answer;
+    return answer;
+  });
+  const more = await p.open();
+  const eye = labelled(more, '预览 notes v2.md');
+  eye.focus();
+  eye.click();
+  await settle();
+  assert.equal(p.calls.at(-1)!.path, '/xbot-api/bots/Ada/workspace-file/preview?path=drafts%2Fnotes%20v2.md&area=workspace&expectedThreadId=thread-A');
+  let d = modalOf(p)!;
+  assert.equal(textOf(d.querySelector('h2')!), 'notes v2.md');
+  const pre = d.querySelector('pre')!;
+  assert.equal(pre.textContent, '<img src=x onerror=alert(1)>\n第二行', 'shown as the text it is');
+  assert.ok(all(d).every(e => !e.html) && !all(d).some(e => e.tagName === 'IMG'), 'nothing set as markup');
+  assert.equal(pre.getAttribute('aria-label'), '文件内容');
+  assert.match(textOf(d), /文件较大，这里只显示前 128 KB。/);
+  assert.deepEqual(all(d).filter(e => e.tagName === 'BUTTON').map(textOf), ['关闭'], 'no download here: 存为交付物 makes one');
+  button(d, '关闭').click();
+  assert.equal(modalOf(p), undefined);
+  same(p.doc.activeElement, eye, 'focus returns to 预览');
+  // Whole: no note.
+  answer = { text: '短的', truncated: false };
+  eye.click();
+  await settle();
+  assert.doesNotMatch(textOf(modalOf(p)!), /128 KB/);
+  button(modalOf(p)!, '关闭').click();
+  // Refused: in place, in words for this page (415's own words offer a download this page has not).
+  for (const [error, said] of [
+    [failure(415, '此文件只支持下载'), '没能预览：这个文件不是纯文本。'],
+    [failure(403, '文件链接超出工作区'), '没能预览：文件链接超出工作区。'],
+    [failure(404, '文件或目录不存在'), '没能预览：文件或目录不存在。'],
+    [failure(413, '单个文件最多 20 MB'), '没能预览：文件超过 20 MB。'],
+  ] as const) {
+    answer = error;
+    eye.click();
+    await settle();
+    d = modalOf(p)!;
+    const bad = d.querySelector('.ws-bad')!;
+    assert.equal(textOf(bad).trim(), said);
+    assert.equal(bad.getAttribute('role'), 'alert');
+    assert.equal(d.querySelector('pre'), null);
+    button(d, '关闭').click();
+  }
+});
+
+test('a picture of the working directory opens in the shell\'s own viewer from its encoded URL; the shared directory says area=shared; a preview answered after a move is not shown', async () => {
+  const opened: Any[] = [];
+  let hold: Promise<unknown> | null = null;
+  const p = treePage([
+    { name: 'shot 1.png', path: 'imgs/shot 1.png', type: 'file', size: 4096, previewable: 'image' },
+    { name: 'plan.md', path: 'plan.md', type: 'file', size: 64, previewable: 'text' },
+  ], (path) => (path.split('?')[0] === '/xbot-api/bots/Ada/workspace-file/preview' ? (hold ?? { text: 'plan', truncated: false }) : undefined),
+  { openImage: (url: string, trigger: unknown) => { opened.push([url, trigger]); } },
+  { workspacePath: '/w/projects/old/cats/cat-a', sharedPath: '/w/projects/old/shared' });
+  const more = await p.open();
+  const eye = labelled(more, '预览 shot 1.png');
+  eye.click();
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0][0], '/xbot-api/bots/Ada/workspace-file/image?path=imgs%2Fshot%201.png&area=workspace&expectedThreadId=thread-A');
+  same(opened[0][1], eye, 'the viewer returns focus to 预览');
+  assert.equal(modalOf(p), undefined, 'no dialog of its own');
+  assert.equal(p.calls.filter(c => c.path.includes('/workspace-file/')).length, 0, 'the viewer loads the picture itself');
+  // The older project conversation's shared directory.
+  button(all(more).find(e => e.classList.contains('ws-seg'))!, '共享目录').click();
+  await settle();
+  labelled(more, '预览 plan.md').click();
+  await settle();
+  assert.equal(p.calls.filter(c => c.path.includes('/workspace-file/')).at(-1)!.path, '/xbot-api/bots/Ada/workspace-file/preview?path=plan.md&area=shared&expectedThreadId=thread-A');
+  button(modalOf(p)!, '关闭').click();
+  // Moved while it was read: the dialog closes rather than show what may be another thread's file.
+  const late = deferred<Any>();
+  hold = late.promise;
+  labelled(more, '预览 plan.md').click();
+  await settle();
+  assert.ok(modalOf(p), 'open, reading');
+  p.server.thread = 'thread-B';
+  p.ws.observe(ada, 'thread-B', true);
+  await settle();
+  late.resolve({ text: 'from before the move', truncated: false });
+  await settle();
+  assert.equal(modalOf(p), undefined);
+  assert.doesNotMatch(textOf(p.doc.body), /from before the move/);
+});
+
+test('a working-directory preview names the thread the page shows; a server that has moved on refuses (409), nothing of the other thread is shown, and the conversation is read again', async () => {
+  let reloads = 0;
+  const p = treePage([{ name: 'plan.md', path: 'plan.md', type: 'file', size: 64, previewable: 'text' }], (path) => {
+    if (path.split('?')[0] !== '/xbot-api/bots/Ada/workspace-file/preview') return undefined;
+    // As the server checks it: the thread asked of must be the one the cat is in.
+    if (new URLSearchParams(path.split('?')[1]).get('expectedThreadId') !== p.server.thread) throw failure(409, '对话已变化，请刷新后重试');
+    return { text: 'plan of ' + p.server.thread, truncated: false };
+  }, { reload: () => { reloads++; } });
+  let more = await p.open();
+  labelled(more, '预览 plan.md').click();
+  await settle();
+  assert.equal(modalOf(p)!.querySelector('pre')!.textContent, 'plan of thread-A');
+  button(modalOf(p)!, '关闭').click();
+
+  // Moved in another tab; this page still shows thread A's listing.
+  p.server.thread = 'thread-B';
+  const at = p.calls.length;
+  labelled(more, '预览 plan.md').click();
+  await settle();
+  const asked = p.calls.slice(at).find(c => c.path.includes('/workspace-file/'))!;
+  assert.equal(asked.path, '/xbot-api/bots/Ada/workspace-file/preview?path=plan.md&area=workspace&expectedThreadId=thread-A');
+  const d = modalOf(p)!;
+  assert.equal(textOf(d.querySelector('.ws-bad')!).trim(), '没能预览：对话已变化，请刷新后重试。');
+  assert.equal(d.querySelector('pre'), null);
+  assert.doesNotMatch(textOf(p.doc.body), /plan of thread-B/);
+  assert.equal(reloads, 1, 'the chat is read again');
+  assert.ok(p.calls.slice(at).some(c => c.path === '/xbot-api/bots/Ada/workspace'), 'and the workspace view, which finds the move');
+  button(d, '关闭').click();
+  // The move drops the old listing; the one drawn now previews from thread B.
+  p.panel.replaceChildren();
+  const fresh = p.ws.filesView(ada) as El;
+  p.panel.append(fresh);
+  await settle();
+  more = foldOf(fresh, 'ws-more');
+  assert.equal(more.open, true, 'still open after the move');
+  labelled(more, '预览 plan.md').click();
+  await settle();
+  assert.equal(p.calls.filter(c => c.path.includes('/workspace-file/')).at(-1)!.path, '/xbot-api/bots/Ada/workspace-file/preview?path=plan.md&area=workspace&expectedThreadId=thread-B');
+  assert.equal(modalOf(p)!.querySelector('pre')!.textContent, 'plan of thread-B');
+  assert.equal(reloads, 1);
+});
+
+test('a picture asked for before the page knows its thread waits for it, then opens naming that thread', async () => {
+  const opened: string[] = [];
+  const hold = deferred<Any>();
+  const p = page((path) => {
+    const bare = path.split('?')[0];
+    if (bare === '/xbot-api/bots/Ada/workspace') return hold.promise;
+    if (bare === '/xbot-api/bots/Ada/files') return { threadId: 'thread-A', files: [] };
+    if (bare === '/xbot-api/bots/Ada/workspace-tree') return { path: '', area: 'workspace', entries: [{ name: 'shot.png', path: 'shot.png', type: 'file', size: 4096, previewable: 'image' }] };
+    if (bare === '/xbot-api/bots/Ada/tasks') return { threadId: 'thread-A', tasks: [], cats };
+    throw failure(404, 'unexpected ' + path);
+  }, undefined, { openImage: (url: string) => { opened.push(url); } });
+  p.ws.select(ada);
+  const root = p.ws.filesView(ada) as El;
+  p.panel.append(root);
+  await settle();
+  const more = foldOf(root, 'ws-more');
+  await setFold(more, true);
+  labelled(more, '预览 shot.png').click();
+  await settle();
+  assert.deepEqual(opened, [], 'not before a read names the thread');
+  hold.resolve(view());
+  await settle();
+  assert.deepEqual(opened, ['/xbot-api/bots/Ada/workspace-file/image?path=shot.png&area=workspace&expectedThreadId=thread-A']);
 });
 
 // ---------------------------------------------------------------- 任务
@@ -1002,7 +1656,9 @@ test('project and workspace management are gone: no header chip or menu, no proj
   assert.deepEqual(plain(rules.ClowderQuickCreateRules.groupBody(['团子', '栗子'], '')), { members: ['团子', '栗子'] });
   assert.doesNotMatch(app, /projectField|workspace\.closePops|botLabel/);
   assert.doesNotMatch(src, /\/xbot-api\/projects|新建项目|换项目|projectId|"\/workspace", \{ method: "PUT"/);
-  assert.doesNotMatch(src, /method: "PATCH"|\/tasks", \{ method: "POST"/, 'the module never creates or assigns a Task');
+  assert.doesNotMatch(src, /\/tasks", \{ method: "POST"/, 'the module never creates a Task');
+  // Its one PATCH renames a saved conversation (T-05); none assigns a Task.
+  assert.deepEqual(src.match(/[^\n]*method: "PATCH"[^\n]*/g)!.map(l => /"\/conversations\/" \+ enc\(c\.id\), \{ method: "PATCH", body: \{ title \} \}/.test(l)), [true], 'the module never assigns a Task');
 });
 
 // ---------------------------------------------------------------- 历史对话
@@ -1015,6 +1671,8 @@ function historyCat(opts: { list?: Any[]; hooks?: Record<string, unknown> } = {}
     thread: 'thread-A',
     list: opts.list ?? [{ id: 'thread-A', title: 'Ada', createdAt: T0 + 2000 }, { id: 'thread-P', title: '官网改版', createdAt: T0 + 1000 }],
     busy: new Set<string>(), gate: null as Promise<unknown> | null, holdList: false, releaseList: () => {}, failList: null as unknown,
+    // Renames and deletions: held back (editGate), refused before anything changes (refuse), or done with the answer lost (lose).
+    editGate: null as Promise<unknown> | null, refuse: null as unknown, lose: null as unknown,
   };
   const route: Route = (path, method, body) => {
     if (path === '/xbot-api/bots/Ada/workspace') return view({ threadId: server.thread });
@@ -1039,6 +1697,22 @@ function historyCat(opts: { list?: Any[]; hooks?: Record<string, unknown> } = {}
       return server.gate ? server.gate.then(reply) : reply();
     }
     if (/\/bots\/(Ada|Bob)\/(tasks|files)$/.test(path)) return { threadId: path.includes('/Bob/') ? 'thread-B' : server.thread, tasks: [], files: [], cats };
+    // As the server does (server/workspaces.ts): a listed conversation is renamed; one that is not open and idle is deleted.
+    const one = /^\/xbot-api\/bots\/Ada\/conversations\/([^/]+)$/.exec(path);
+    if (one && (method === 'PATCH' || method === 'DELETE')) {
+      const target = decodeURIComponent(one[1]);
+      const made = () => {
+        const c = server.list.find(x => x.id === target);
+        if (!c) throw failure(404, '找不到这只猫的历史对话');
+        if (method === 'PATCH') { c.title = body.title; return { conversation: { id: target, title: body.title, current: target === server.thread, createdAt: c.createdAt } }; }
+        if (target === server.thread) throw failure(409, '正在聊的这段对话不能直接删除，请先开始新对话或切到别段');
+        if (server.busy.has(target)) throw failure(409, '这段对话里还有事在做，等它做完或先停止再试');
+        server.list = server.list.filter(x => x !== c);
+        return { deleted: true };
+      };
+      const reply = () => { if (server.refuse) throw server.refuse; const out = made(); if (server.lose) throw server.lose; return out; };
+      return server.editGate ? server.editGate.then(reply) : reply();
+    }
     throw failure(404, 'unexpected ' + method + ' ' + path);
   };
   let id = 0;
@@ -1051,7 +1725,8 @@ function historyCat(opts: { list?: Any[]; hooks?: Record<string, unknown> } = {}
   const count = (method: string, path: string) => p.calls.filter(c => c.method === method && c.path === path).length;
   return { ...p, server, details, draw, count };
 }
-const rowsOf = (host: El) => all(host).filter(e => e.classList.contains('ws-conv'));
+// A row's conversation itself (its switch, or the marked one open now); its 重命名 / 删除 sit beside it.
+const rowsOf = (host: El) => all(host).filter(e => e.classList.contains('ws-conv-main'));
 const rowFor = (host: El, title: string) => { const r = rowsOf(host).find(e => textOf(e.querySelector('.ws-conv-title')!) === title); assert.ok(r, 'no row ' + title); return r; };
 const convLine = (host: El) => all(host).find(e => e.classList.contains('ws-conv-line'))!;
 const openCat = async (p: ReturnType<typeof historyCat>) => {
@@ -1062,14 +1737,14 @@ const openCat = async (p: ReturnType<typeof historyCat>) => {
   return n;
 };
 
-test('历史对话 is there once the cat\'s conversations are read, even with only the one open now: folded, titled, the current one marked, and nothing else to manage', async () => {
+test('历史对话 is there once the cat\'s conversations are read, even with only the one open now: folded, titled, the current one marked; each row renames, only another than the open one deletes', async () => {
   const one = historyCat({ list: [{ id: 'thread-A', title: 'Ada', createdAt: T0 }] });
   const lone = await openCat(one);
   // Always reachable (资料 page): with one conversation it lists that one, marked and not a control.
   assert.equal(lone.hidden, false, 'one conversation: the fold is there for the next 新对话');
   assert.equal(textOf(foldOf(lone, 'ws-conv-fold').firstChild as El), '历史对话 · 1');
   assert.deepEqual(rowsOf(lone).map(r => [r.tagName, r.getAttribute('aria-current')]), [['DIV', 'true']]);
-  assert.equal(all(lone).filter(e => e.tagName === 'BUTTON').length, 0, 'nothing to switch to yet');
+  assert.deepEqual(all(lone).filter(e => e.tagName === 'BUTTON').map(b => b.getAttribute('aria-label')), ['重命名「Ada」'], 'nothing to switch to or delete yet; the open one can be renamed');
   assert.equal(one.count('GET', '/xbot-api/bots/Ada/conversations'), 1);
   one.ws.observe(ada, 'thread-A', true);
   one.draw();
@@ -1098,9 +1773,14 @@ test('历史对话 is there once the cat\'s conversations are read, even with on
   assert.ok(all(here).find(e => e.textContent === '当前对话')!.classList.contains('visually-hidden'));
   assert.equal(here.querySelector('.ws-conv-meta')?.textContent.includes('当前对话') ?? false, false);
   assert.match(rowFor(node, '官网改版').getAttribute('aria-label')!, /^切换到「官网改版」，开始于 /);
-  // Only the saved conversations: no new conversation, no project, no rename or delete.
+  // Only the saved conversations: no new conversation and no project. Each row
+  // renames itself; only the other one deletes (never the conversation open now).
   const controls = all(node).filter(e => e.tagName === 'BUTTON');
-  assert.ok(controls.length === 1 && controls[0] === rowFor(node, '官网改版'), 'the only control is the other conversation');
+  assert.deepEqual(controls.map(b => b.getAttribute('aria-label')), ['重命名「Ada」', '切换到「官网改版」，开始于 ' + textOf(rowFor(node, '官网改版').querySelector('.ws-conv-meta')!).replace(/^开始于 /, ''), '重命名「官网改版」', '删除「官网改版」']);
+  // Valid HTML: the switch and the row's icons are siblings, never a button inside a button.
+  assert.ok(controls.every(b => !all(b).some(e => e.tagName === 'BUTTON')), 'no button inside a button');
+  for (const r of rowsOf(node)) same(r.parentElement!.querySelector('.ws-conv-acts')!.parentElement, r.parentElement, 'the icons sit beside the conversation, in its row');
+  assert.equal(labelled(node, '删除「官网改版」').getAttribute('aria-haspopup'), 'dialog');
   assert.doesNotMatch(textOf(node), /新建|项目|工作区/);
   assert.equal(p.ws.threadId(), 'thread-A', 'the open conversation stays as it was');
   assert.equal(p.count('PUT', '/xbot-api/bots/Ada/conversation'), 0);
@@ -1291,6 +1971,7 @@ test('a send in progress holds the switch; while one is out no file joins the ol
   assert.equal(convLine(node).hidden, true, 'the earlier note is gone');
   assert.match(textOf(rowFor(node, '官网改版')), /正在切换…/);
   assert.ok(rowsOf(node).filter(r => r.tagName === 'BUTTON').every(r => r.disabled), 'one switch at a time');
+  assert.ok(all(node).filter(e => /^(重命名|删除)「/.test(e.getAttribute('aria-label') || '')).every(b => b.disabled), 'and no rename or deletion meanwhile');
   assert.equal(labelled(p.doc.body, '添加附件').disabled, true);
   p.ws.addFiles([file('late.md', 10)]);
   await settle();
@@ -1372,6 +2053,287 @@ test('a row keeps focus when 详情 is drawn again; after a press elsewhere a re
   p.draw();
   await settle();
   same(p.doc.activeElement, p.doc.getElementById('input'), 'focus stays where the owner moved it');
+});
+
+// ---------------------------------------------------------------- 历史对话: 重命名 and 删除
+const editorOf = (host: El) => all(host).find(e => e.classList.contains('ws-conv-input')) ?? null;
+const editErrOf = (host: El) => all(host).find(e => e.classList.contains('ws-conv-err'))!;
+const titlesOf = (host: El) => rowsOf(host).map(r => textOf(r.querySelector('.ws-conv-title')!));
+const typeInto = (input: El, text: string) => { input.value = text; input.dispatchEvent(new Ev('input')); };
+const key = (target: El, k: string) => target.dispatchEvent(new Ev('keydown', { key: k }));
+
+test('重命名 opens in place, on the open conversation too: Escape goes back without closing the drawer, an unchanged or empty title asks nothing, Enter saves one trimmed line', async () => {
+  const p = historyCat();
+  const node = await openCat(p);
+  await setFold(foldOf(node, 'ws-conv-fold'), true);
+  const heard: string[] = [];
+  // The shell closes the drawer on an Escape that reaches the document (app.js).
+  p.doc.addEventListener('keydown', (ev: Ev) => { if (ev.key === 'Escape') heard.push(ev.key); });
+  const pencil = labelled(node, '重命名「官网改版」');
+  assert.equal(pencil.dataset.tip, '重命名「官网改版」');
+  pencil.focus();
+  pencil.click();
+  let input = editorOf(node)!;
+  assert.ok(input, 'an editor in the row');
+  assert.deepEqual(titlesOf(node), ['Ada'], 'the row became its editor');
+  assert.deepEqual([input.type, input.value, input.maxLength, input.getAttribute('aria-label')], ['text', '官网改版', 120, '对话标题']);
+  assert.equal(input.closest('.ws-conv-edit')!.getAttribute('aria-label'), '重命名「官网改版」');
+  same(p.doc.activeElement, input, 'focus in the input');
+  // Escape: the editor closes, and only it.
+  key(input, 'Escape');
+  assert.equal(editorOf(node), null);
+  assert.deepEqual(heard, [], 'the drawer never hears that Escape');
+  same(p.doc.activeElement, labelled(node, '重命名「官网改版」'), 'back on the row\'s 重命名');
+  // Unchanged: closes, nothing asked.
+  labelled(node, '重命名「官网改版」').click();
+  key(editorOf(node)!, 'Enter');
+  assert.equal(editorOf(node), null);
+  // Empty: said in place, nothing asked, the editor stays.
+  labelled(node, '重命名「官网改版」').click();
+  input = editorOf(node)!;
+  typeInto(input, '  \t ');
+  button(node, '保存').click();
+  assert.equal(textOf(editErrOf(node)), '标题不能为空。');
+  assert.equal(editErrOf(node).getAttribute('role'), 'alert');
+  assert.equal(input.getAttribute('aria-invalid'), 'true');
+  same(p.doc.activeElement, input, 'focus stays in the input');
+  // Typing clears it.
+  typeInto(input, '  官网\t改版 第二期 ');
+  assert.equal(editErrOf(node).hidden, true);
+  assert.equal(p.calls.filter(c => c.method === 'PATCH').length, 0);
+  // Enter saves one line, trimmed; while it saves it is read-only and holds.
+  const gate = deferred();
+  p.server.editGate = gate.promise;
+  key(input, 'Enter');
+  await settle();
+  assert.deepEqual(p.calls.filter(c => c.method === 'PATCH').map(c => [c.path, c.body]), [['/xbot-api/bots/Ada/conversations/thread-P', { title: '官网 改版 第二期' }]]);
+  assert.equal(input.readOnly, true);
+  assert.equal(button(node, '正在保存…').disabled, true);
+  assert.equal(button(node, '取消').disabled, true);
+  assert.equal(input.closest('.ws-conv-edit')!.getAttribute('aria-busy'), 'true');
+  same(p.doc.activeElement, input, 'focus stays in the editor');
+  key(input, 'Escape');
+  same(editorOf(node), input, 'Escape does not drop a save on its way');
+  key(input, 'Enter');
+  assert.equal(labelled(node, '重命名「Ada」').disabled, true, 'one title at a time');
+  p.server.editGate = null;
+  const lists = p.count('GET', '/xbot-api/bots/Ada/conversations');
+  gate.resolve(undefined);
+  await settle();
+  assert.equal(p.calls.filter(c => c.method === 'PATCH').length, 1, 'asked once');
+  assert.deepEqual(p.toasts, ['已重命名']);
+  assert.equal(editorOf(node), null);
+  assert.deepEqual(titlesOf(node), ['Ada', '官网 改版 第二期']);
+  same(p.doc.activeElement, labelled(node, '重命名「官网 改版 第二期」'), 'focus back on the row\'s 重命名');
+  assert.equal(labelled(node, '重命名「Ada」').disabled, false);
+  assert.equal(p.count('GET', '/xbot-api/bots/Ada/conversations'), lists + 1, 'the list is read again');
+  // The open conversation renames too; it still has no 删除, and nothing moves.
+  labelled(node, '重命名「Ada」').click();
+  typeInto(editorOf(node)!, '和 Ada 聊天');
+  button(node, '保存').click();
+  await settle();
+  assert.deepEqual(p.calls.filter(c => c.method === 'PATCH').at(-1)!.body, { title: '和 Ada 聊天' });
+  assert.equal(rowFor(node, '和 Ada 聊天').getAttribute('aria-current'), 'true');
+  assert.ok(!all(node).some(e => e.getAttribute('aria-label') === '删除「和 Ada 聊天」'));
+  assert.equal(p.ws.threadId(), 'thread-A');
+  assert.equal(p.count('PUT', '/xbot-api/bots/Ada/conversation'), 0);
+  assert.deepEqual(heard, []);
+});
+
+test('a refused or lost rename keeps the editor and what was typed; one gone meanwhile leaves with the list and the fold says why; an answer after another cat opened lands nowhere', async () => {
+  const p = historyCat();
+  const node = await openCat(p);
+  await setFold(foldOf(node, 'ws-conv-fold'), true);
+  labelled(node, '重命名「官网改版」').click();
+  const input = editorOf(node)!;
+  typeInto(input, '新标题');
+  // Refused (4xx): the server's words; the editor stays as it was typed.
+  p.server.refuse = failure(400, '对话标题不能包含控制字符');
+  button(node, '保存').click();
+  await settle();
+  assert.equal(textOf(editErrOf(node)), '对话标题不能包含控制字符。');
+  assert.deepEqual([editorOf(node) === input, input.value, input.readOnly, button(node, '保存').disabled], [true, '新标题', false, false]);
+  assert.deepEqual(p.toasts, []);
+  // Lost (5xx) after the server did rename it: said as unknown, and the list is read again.
+  p.server.refuse = null;
+  p.server.lose = failure(503, '服务出了点问题，请稍后再试。');
+  const lists = p.count('GET', '/xbot-api/bots/Ada/conversations');
+  button(node, '保存').click();
+  await settle();
+  assert.equal(textOf(editErrOf(node)), '没能确认改好了没有，可以再试一次。');
+  assert.equal(p.count('GET', '/xbot-api/bots/Ada/conversations'), lists + 1);
+  assert.equal(input.value, '新标题');
+  // Trying again: the list read says it already has that title, so nothing more is asked.
+  p.server.lose = null;
+  button(node, '保存').click();
+  await settle();
+  assert.equal(p.calls.filter(c => c.method === 'PATCH').length, 2, 'not asked a third time');
+  assert.equal(editorOf(node), null);
+  assert.deepEqual(titlesOf(node), ['Ada', '新标题']);
+  // Gone meanwhile (404): the row leaves with the list; the fold says why; focus to the fold.
+  labelled(node, '重命名「新标题」').click();
+  typeInto(editorOf(node)!, '再改一次');
+  p.server.list = p.server.list.filter(c => c.id !== 'thread-P');
+  button(node, '保存').click();
+  await settle();
+  assert.equal(editorOf(node), null);
+  assert.deepEqual(titlesOf(node), ['Ada']);
+  assert.equal(textOf(convLine(node)), '找不到这只猫的历史对话。');
+  assert.equal(convLine(node).getAttribute('role'), 'alert');
+  same(p.doc.activeElement, foldOf(node, 'ws-conv-fold').firstChild, 'focus on the fold');
+
+  // Another cat opened while a rename was out: nothing of its answer lands.
+  const q = historyCat();
+  const qn = await openCat(q);
+  labelled(qn, '重命名「官网改版」').click();
+  typeInto(editorOf(qn)!, '晚到的标题');
+  const gate = deferred();
+  q.server.editGate = gate.promise;
+  button(qn, '保存').click();
+  await settle();
+  q.ws.select(bob);
+  gate.resolve(undefined);
+  await settle();
+  assert.deepEqual(q.toasts, []);
+  assert.equal(q.calls.filter(c => c.method === 'GET' && c.path === '/xbot-api/bots/Bob/conversations').length, 0, 'Bob\'s page is not touched');
+});
+
+test('the title being edited survives redraws of 资料 and new list reads: the same input, what was typed and focus stay', async () => {
+  const p = historyCat();
+  const node = await openCat(p);
+  labelled(node, '重命名「官网改版」').click();
+  const input = editorOf(node)!;
+  typeInto(input, '写到一半');
+  same(p.doc.activeElement, input, 'typing in it');
+  same(p.draw(), node, 'the same 历史对话 node');
+  same(p.doc.activeElement, p.doc.body, 'the redraw took it off the page for a moment');
+  await settle();
+  same(editorOf(node), input, 'the same node');
+  same(p.doc.activeElement, input, 'focus is back in it');
+  assert.equal(input.value, '写到一半');
+  // A conversation started elsewhere: the list changes and the rows are drawn anew around it.
+  p.server.list.push({ id: 'thread-N', title: '新的对话', createdAt: T0 + 9000 });
+  p.server.thread = 'thread-N';
+  p.ws.observe(ada, 'thread-N', true);
+  await settle();
+  same(editorOf(node), input, 'still the same input');
+  same(p.doc.activeElement, input, 'and focus in it');
+  assert.equal(input.value, '写到一半');
+  assert.deepEqual(titlesOf(node), ['新的对话', 'Ada']);
+  // Deleted elsewhere while it is open (not saving): it leaves with its row.
+  p.server.list = p.server.list.filter(c => c.id !== 'thread-P');
+  await setFold(foldOf(node, 'ws-conv-fold'), true);
+  assert.equal(editorOf(node), null);
+});
+
+const three = () => [{ id: 'thread-A', title: 'Ada', createdAt: T0 + 3000 }, { id: 'thread-P', title: '官网改版', createdAt: T0 + 2000 }, { id: 'thread-W', title: '周报', createdAt: T0 + 1000 }];
+
+test('删除 asks first and starts on 取消; while it deletes the dialog holds; done, the row leaves and focus goes to the row that took its place; the open one is never offered', async () => {
+  const p = historyCat({ list: three() });
+  const node = await openCat(p);
+  await setFold(foldOf(node, 'ws-conv-fold'), true);
+  assert.deepEqual(all(node).filter(e => /^删除「/.test(e.getAttribute('aria-label') || '')).map(b => b.getAttribute('aria-label')), ['删除「官网改版」', '删除「周报」']);
+  const trash = labelled(node, '删除「官网改版」');
+  trash.focus();
+  trash.click();
+  let d = modalOf(p)!;
+  assert.equal(textOf(d.querySelector('h2')!), '删除这段对话');
+  assert.equal(textOf(d.querySelector('.ws-dialog-body')!), '删除「官网改版」？它会从历史对话里消失，不能再切回去。');
+  assert.deepEqual(all(d).filter(e => e.tagName === 'BUTTON').map(b => [textOf(b), b.className]), [['取消', 'secondary'], ['删除', 'secondary ws-danger']]);
+  same(p.doc.activeElement, button(d, '取消'), 'it starts on 取消');
+  button(d, '取消').click();
+  assert.equal(p.count('DELETE', '/xbot-api/bots/Ada/conversations/thread-P'), 0);
+  same(p.doc.activeElement, trash, 'back on 删除');
+
+  const gate = deferred();
+  p.server.editGate = gate.promise;
+  trash.click();
+  d = modalOf(p)!;
+  button(d, '删除').click();
+  await settle();
+  assert.equal(p.count('DELETE', '/xbot-api/bots/Ada/conversations/thread-P'), 1);
+  assert.deepEqual([button(d, '删除').disabled, button(d, '取消').disabled, d.querySelector('form')!.getAttribute('aria-busy')], [true, true, 'true']);
+  key(d, 'Escape');
+  assert.ok(d.isConnected, 'Escape does not drop a deletion on its way');
+  p.server.editGate = null;
+  const lists = p.count('GET', '/xbot-api/bots/Ada/conversations');
+  gate.resolve(undefined);
+  await settle();
+  assert.equal(modalOf(p), undefined, 'closed');
+  assert.deepEqual(p.toasts, ['已删除「官网改版」']);
+  assert.deepEqual(titlesOf(node), ['Ada', '周报']);
+  assert.equal(textOf(foldOf(node, 'ws-conv-fold').firstChild as El), '历史对话 · 2');
+  same(p.doc.activeElement, rowFor(node, '周报'), 'focus on the row that took its place');
+  assert.equal(p.count('GET', '/xbot-api/bots/Ada/conversations'), lists + 1, 'the list is read again');
+  // The last row: focus goes to the one before it (here the open one).
+  labelled(node, '删除「周报」').click();
+  button(modalOf(p)!, '删除').click();
+  await settle();
+  assert.deepEqual(titlesOf(node), ['Ada']);
+  same(p.doc.activeElement, rowFor(node, 'Ada'), 'the one before it');
+  assert.ok(!p.calls.some(c => c.method === 'PUT'), 'nothing switched');
+  assert.equal(p.ws.threadId(), 'thread-A');
+});
+
+test('a refused deletion says why in the dialog and reads the list again; a lost one closes once the list no longer has it; an answer after another cat opened lands nowhere', async () => {
+  const p = historyCat({ list: three() });
+  const node = await openCat(p);
+  await setFold(foldOf(node, 'ws-conv-fold'), true);
+  const lists = () => p.count('GET', '/xbot-api/bots/Ada/conversations');
+  // Busy (409): the server's words; the dialog stays, ready to try again or to cancel.
+  p.server.busy.add('thread-P');
+  let before = lists();
+  labelled(node, '删除「官网改版」').click();
+  let d = modalOf(p)!;
+  button(d, '删除').click();
+  await settle();
+  const said = () => { const e = d.querySelector('.error')!; return e.hidden ? '' : textOf(e); };
+  assert.equal(said(), '这段对话里还有事在做，等它做完或先停止再试。');
+  assert.deepEqual([button(d, '删除').disabled, button(d, '取消').disabled], [false, false]);
+  assert.equal(lists(), before + 1, 'the list is read again');
+  assert.deepEqual(titlesOf(node), ['Ada', '官网改版', '周报'], 'nothing left the list');
+  // Gone meanwhile (404): said; the list read again drops the row behind the dialog.
+  p.server.busy.clear();
+  p.server.list = p.server.list.filter(c => c.id !== 'thread-P');
+  button(d, '删除').click();
+  await settle();
+  assert.equal(said(), '找不到这只猫的历史对话。');
+  assert.deepEqual(titlesOf(node), ['Ada', '周报']);
+  button(d, '取消').click();
+  same(p.doc.activeElement, rowFor(node, '周报'), 'its row is gone: focus on the one that took its place');
+  // Lost (5xx) and not done: said as unknown; the list still has it, so the dialog stays.
+  p.server.refuse = failure(503, '服务出了点问题，请稍后再试。');
+  before = lists();
+  labelled(node, '删除「周报」').click();
+  d = modalOf(p)!;
+  button(d, '删除').click();
+  await settle();
+  assert.equal(said(), '没能确认删掉了没有，可以再试一次。');
+  assert.equal(lists(), before + 1);
+  assert.ok(d.isConnected);
+  // Lost and done: once the list no longer has it, the dialog has nothing left to ask.
+  p.server.refuse = null;
+  p.server.lose = failure(503, '服务出了点问题，请稍后再试。');
+  button(d, '删除').click();
+  await settle();
+  assert.equal(modalOf(p), undefined);
+  assert.deepEqual(p.toasts, ['已删除「周报」']);
+  assert.deepEqual(titlesOf(node), ['Ada']);
+  same(p.doc.activeElement, rowFor(node, 'Ada'), 'focus on the row before it');
+
+  // Another cat opened while a deletion was out: the dialog goes with the old cat, its answer lands nowhere.
+  const q = historyCat();
+  const qn = await openCat(q);
+  const gate = deferred();
+  q.server.editGate = gate.promise;
+  labelled(qn, '删除「官网改版」').click();
+  button(modalOf(q)!, '删除').click();
+  await settle();
+  q.ws.select(bob);
+  assert.equal(modalOf(q), undefined);
+  gate.resolve(undefined);
+  await settle();
+  assert.deepEqual(q.toasts, []);
 });
 
 // ---------------------------------------------------------------- thread moves

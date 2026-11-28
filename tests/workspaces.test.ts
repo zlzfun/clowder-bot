@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, realpath, rm, writeFile, readFile, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, realpath, rm, writeFile, readFile, symlink, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
@@ -156,4 +156,191 @@ test('existing presentation data gains empty workspace fields without losing cha
   const path=join(dir,'presentation.json'),legacy={version:1,bots:{old:{activeThreadId:'original',folder:'My cats',pinned:true}},groupThreadIds:['group'],folders:['My cats'],messageRefs:{original:{message:1}},deviceName:'My computer'};
   await writeFile(path,JSON.stringify(legacy));const store=new ProductStore(path);assert.equal(store.bot('old').activeThreadId,'original');assert.equal(store.bot('old').pinned,true);assert.deepEqual(store.state.projects,[]);assert.deepEqual(store.state.files,{});store.save();
   const reopened=new ProductStore(path);assert.equal(reopened.messageId('original',1),'message');assert.equal(reopened.state.deviceName,'My computer');assert.deepEqual(reopened.state.groupThreadIds,['group']);
+});
+test('historical conversations can be renamed and deleted with native sync, active/schedule guards, and soft-delete filtering',async t=>{
+  const r=await setup(t),{thread:legacy}=await legacyProject(r);
+  const created=await (await r.call('/bots/Ada/new','POST',{expectedThreadId:legacy.id})).json();
+  const currentId=created.conversation_id;
+
+  // Rename non-current and current conversations, including legacy project conversation even if renamed to cat.name.
+  const badEmpty=await r.call(`/bots/Ada/conversations/${legacy.id}`,'PATCH',{title:'   '});assert.equal(badEmpty.status,400);
+  const badLong=await r.call(`/bots/Ada/conversations/${legacy.id}`,'PATCH',{title:'a'.repeat(121)});assert.equal(badLong.status,400);
+  const badCtrl=await r.call(`/bots/Ada/conversations/${legacy.id}`,'PATCH',{title:'a\nb'});assert.equal(badCtrl.status,400);
+  const renamedLegacy=await r.call(`/bots/Ada/conversations/${legacy.id}`,'PATCH',{title:'  项目复盘  '});assert.equal(renamedLegacy.status,200);
+  assert.equal((await renamedLegacy.json()).conversation.title,'项目复盘');
+  const renamedCurrent=await r.call(`/bots/Ada/conversations/${currentId}`,'PATCH',{title:'日常对话'});assert.equal(renamedCurrent.status,200);
+  let list=await (await r.call('/bots/Ada/conversations')).json();
+  assert.equal(list.conversations.find((c:any)=>c.id===legacy.id).title,'项目复盘');
+  assert.equal(list.conversations.find((c:any)=>c.id===currentId).title,'日常对话');
+  assert.equal((await r.call(`/bots/Ada/conversations/${legacy.id}`,'PATCH',{title:r.cat.name})).status,200);
+  list=await (await r.call('/bots/Ada/conversations')).json();
+  assert.equal(list.conversations.find((c:any)=>c.id===legacy.id).title,r.cat.name);
+
+  // Foreign / unknown rename rejected.
+  const bobThread=await r.bridge.direct(r.bob);
+  assert.equal((await r.call(`/bots/Ada/conversations/${bobThread.id}`,'PATCH',{title:'偷改'})).status,404);
+  r.store.bot(r.cat.id).conversationIds!.push(bobThread.id);
+  assert.equal((await r.call(`/bots/Ada/conversations/${bobThread.id}`,'PATCH',{title:'偷改'})).status,403);
+  r.store.bot(r.cat.id).conversationIds=r.store.bot(r.cat.id).conversationIds!.filter(id=>id!==bobThread.id);
+
+  // Delete guards: current conversation, busy queue, enabled schedule, foreign thread.
+  assert.equal((await r.call(`/bots/Ada/conversations/${currentId}`,'DELETE')).status,409);
+  r.native.queues.set(legacy.id,{queue:[{id:'q1'}],activeInvocations:[]});
+  assert.equal((await r.call(`/bots/Ada/conversations/${legacy.id}`,'DELETE')).status,409);
+  r.native.queues.clear();
+  r.native.schedules=[{id:'dyn-1',enabled:true,deliveryThreadId:legacy.id}];
+  assert.equal((await r.call(`/bots/Ada/conversations/${legacy.id}`,'DELETE')).status,409);
+  r.native.schedules=[{id:'dyn-1',enabled:false,deliveryThreadId:legacy.id}];
+
+  // Delete legacy conversation succeeds, soft-deletes natively, and removes store references.
+  const deleted=await r.call(`/bots/Ada/conversations/${legacy.id}`,'DELETE');assert.equal(deleted.status,200);
+  assert.deepEqual(await deleted.json(),{deleted:true});
+  assert.ok(r.native.threads.get(legacy.id)?.deletedAt);
+  const persisted=new ProductStore(join(r.dir,'presentation.json')).bot(r.cat.id);
+  assert.ok(!persisted.conversationIds?.includes(legacy.id));
+  assert.ok(!Object.values(persisted.workspaceThreads??{}).includes(legacy.id));
+  assert.equal((await r.call(`/bots/Ada/conversations/${legacy.id}`,'DELETE')).status,404);
+  assert.equal((await r.call(`/bots/Ada/conversations/${legacy.id}`,'PATCH',{title:'已删'})).status,404);
+
+  // Externally soft-deleted thread is excluded from conversations() and switchConversation().
+  r.native.threads.get(r.thread.id)!.deletedAt=Date.now();
+  list=await (await r.call('/bots/Ada/conversations')).json();
+  assert.ok(!list.conversations.some((c:any)=>c.id===r.thread.id));
+  assert.equal((await r.call('/bots/Ada/conversation','PUT',{threadId:r.thread.id,expectedThreadId:currentId})).status,404);
+});
+test('unsent attachments can be deleted cleanly while sent attachments, deliverables, and symlinks are refused',async t=>{
+  const r=await setup(t);
+  const {file:unsent}=await (await r.upload('draft.txt',Buffer.from('draft'))).json();
+  const {file:sent}=await (await r.upload('sent.txt',Buffer.from('sent'))).json();
+  await r.call('/bots/Ada/messages','POST',{text:'hi',attachments:[sent.id],expectedThreadId:r.thread.id,idempotencyKey:randomUUID()});
+  r.native.messages.set(r.thread.id,[{id:'m1',type:'user',catId:null,content:'hi',timestamp:1,contentBlocks:[{type:'context_attachment',attachment:{v:1,id:sent.id,kind:'workspace_file',path:sent.path,revision:`sha256:${sent.sha256}`}}]}]);
+
+  // Sent attachment cannot be deleted.
+  const sentDel=await r.call(`/bots/Ada/files/${sent.id}`,'DELETE');assert.equal(sentDel.status,409);
+  assert.equal(await readFile(sent.path,'utf8'),'sent');
+
+  // Deliverable cannot be deleted via attachment endpoint.
+  const root=r.thread.projectPath as string;await writeFile(join(root,'out.md'),'ok');
+  const {file:deliv}=await (await r.call('/bots/Ada/deliverables','POST',{path:'out.md',expectedThreadId:r.thread.id})).json();
+  assert.equal((await r.call(`/bots/Ada/files/${deliv.id}`,'DELETE')).status,409);
+
+  // Other cat / unknown file: wrong thread returns 409, unknown ID returns 404.
+  assert.equal((await r.call(`/bots/Bob/files/${unsent.id}`,'DELETE')).status,409);
+  assert.equal((await r.call('/bots/Ada/files/missing-id','DELETE')).status,404);
+
+  // Concurrent send() and deleteAttachment() are coordinated so an accepted message never loses its attachment.
+  const {file:raced}=await (await r.upload('race.txt',Buffer.from('important'))).json();
+  const origReq=r.native.request.bind(r.native);
+  let releaseSend!:()=>void;const sendHeld=new Promise<void>(res=>{releaseSend=res;});
+  let enteredPost!:()=>void;const postStarted=new Promise<void>(res=>{enteredPost=res;});
+  r.native.request=(async(path:string,opts?:any)=>{
+    if(path==='/api/messages'&&opts?.method==='POST'){enteredPost();await sendHeld;}
+    return origReq(path,opts);
+  }) as typeof r.native.request;
+  const sending=r.call('/bots/Ada/messages','POST',{text:'keep',attachments:[raced.id],expectedThreadId:r.thread.id,idempotencyKey:randomUUID()});
+  await postStarted;
+  const delDuringSend=await r.call(`/bots/Ada/files/${raced.id}`,'DELETE');
+  assert.equal(delDuringSend.status,409);
+  releaseSend();
+  assert.equal((await sending).status,200);
+  r.native.request=origReq;
+  assert.equal(await readFile(raced.path,'utf8'),'important');
+
+  // Ambiguous send outcome (503/timeout) holds attachment protection; definitive 4xx refusal does not.
+  const {file:uncertain}=await (await r.upload('uncertain.txt',Buffer.from('keep-me'))).json();
+  const {file:refused}=await (await r.upload('refused.txt',Buffer.from('drop-me'))).json();
+  r.native.request=(async(path:string,opts?:any)=>{
+    if(path==='/api/messages'&&opts?.method==='POST'){
+      if(opts.body.contextAttachments?.[0]?.id===uncertain.id) throw new ApiError(503,'timeout');
+      throw new ApiError(409,'refused',{code:'ROUTING_TARGET_UNAVAILABLE',unavailable:[]});
+    }
+    return origReq(path,opts);
+  }) as typeof r.native.request;
+  assert.equal((await r.call('/bots/Ada/messages','POST',{text:'hi',attachments:[uncertain.id],expectedThreadId:r.thread.id,idempotencyKey:randomUUID()})).status,503);
+  assert.equal((await r.call(`/bots/Ada/files/${uncertain.id}`,'DELETE')).status,409);
+  assert.equal((await r.call('/bots/Ada/messages','POST',{text:'hi',attachments:[refused.id],expectedThreadId:r.thread.id,idempotencyKey:randomUUID()})).status,409);
+  assert.equal((await r.call(`/bots/Ada/files/${refused.id}`,'DELETE')).status,200);
+  r.native.request=origReq;
+
+  // Unsent attachment deletes cleanly: disk file + UUID dir + store record gone.
+  const uuidDir=join(root,'.clowder-bot-files',unsent.id);
+  const res=await r.call(`/bots/Ada/files/${unsent.id}`,'DELETE');assert.equal(res.status,200);
+  assert.deepEqual(await res.json(),{deleted:true});
+  await assert.rejects(stat(unsent.path));await assert.rejects(stat(uuidDir));
+  assert.equal(new ProductStore(join(r.dir,'presentation.json')).state.files[unsent.id],undefined);
+  assert.equal((await fetch(r.base+unsent.url)).status,404);
+
+  // Group unsent attachment also deletes cleanly.
+  const group=await (await r.call('/groups','POST',{name:'Team',members:['Ada','Bob']})).json();
+  const gu=await fetch(`${r.base}/xbot-api/groups/${group.id}/files?${new URLSearchParams({name:'g.txt',expectedThreadId:group.id})}`,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:Buffer.from('g')});
+  const {file:gFile}=await gu.json();
+  assert.equal((await r.call(`/groups/${group.id}/files/${gFile.id}`,'DELETE')).status,200);
+
+  // Symlink guard refuses tampering.
+  const {file:symFile}=await (await r.upload('safe.txt',Buffer.from('ok'))).json();
+  await rm(symFile.path);await writeFile(join(r.dir,'target.txt'),'secret');await symlink(join(r.dir,'target.txt'),symFile.path);
+  assert.equal((await r.call(`/bots/Ada/files/${symFile.id}`,'DELETE')).status,403);
+  assert.equal(await readFile(join(r.dir,'target.txt'),'utf8'),'secret');
+});
+test('workspace directory files support restricted text and raster image preview without executing HTML/SVG or traversing symlinks',async t=>{
+  const r=await setup(t),{project,thread}=await legacyProject(r),root=thread.projectPath as string;
+  const png=Buffer.from([137,80,78,71,13,10,26,10,0,0,0,13]);
+  await mkdir(join(root,'sub'),{recursive:true});
+  await writeFile(join(root,'sub','long.txt'),Buffer.alloc(140000,66));
+  await writeFile(join(root,'page.html'),'<script>alert(1)</script>');
+  await writeFile(join(root,'icon.svg'),'<svg onload="alert(1)"/>');
+  await writeFile(join(root,'pic.png'),png);
+  await writeFile(join(root,'fake.png'),'<script>alert(1)</script>');
+  await writeFile(join(root,'bin.dat'),Buffer.from([0,1,2,3]));
+  await writeFile(join(project.sharedPath,'shared.md'),'# Shared');
+  await writeFile(join(r.dir,'outside.txt'),'secret');
+  await symlink(join(r.dir,'outside.txt'),join(root,'escape.txt'));
+
+  const tree=await (await r.call('/bots/Ada/workspace-tree')).json();
+  const byName=(name:string)=>tree.entries.find((e:any)=>e.name===name);
+  assert.equal(byName('page.html').previewable,'text');
+  assert.equal(byName('pic.png').previewable,'image');
+  assert.equal(byName('icon.svg').previewable,null);
+  assert.equal(byName('bin.dat').previewable,null);
+
+  const tid=encodeURIComponent(thread.id);
+  // Bounded plain-text preview for text and HTML source (CSP sandbox, JSON only).
+  const textRes=await r.call(`/bots/Ada/workspace-file/preview?path=sub%2Flong.txt&area=workspace&expectedThreadId=${tid}`);
+  assert.equal(textRes.status,200);
+  assert.match(textRes.headers.get('content-security-policy')!,/default-src 'none'; sandbox/);
+  assert.equal(textRes.headers.get('x-content-type-options'),'nosniff');
+  const textJson=await textRes.json();assert.equal(textJson.text.length,128*1024);assert.equal(textJson.truncated,true);
+
+  const htmlRes=await r.call(`/bots/Ada/workspace-file/preview?path=page.html&area=workspace&expectedThreadId=${tid}`);
+  assert.equal(htmlRes.status,200);assert.match(htmlRes.headers.get('content-type')!,/application\/json/);
+  assert.equal((await htmlRes.json()).text,'<script>alert(1)</script>');
+
+  // Shared area preview works on legacy project thread; stale expectedThreadId is rejected (409).
+  const sharedRes=await r.call(`/bots/Ada/workspace-file/preview?path=shared.md&area=shared&expectedThreadId=${tid}`);
+  assert.equal(sharedRes.status,200);assert.equal((await sharedRes.json()).text,'# Shared');
+  assert.equal((await r.call('/bots/Ada/workspace-file/preview?path=shared.md&area=shared&expectedThreadId=stale-thread')).status,409);
+  assert.equal((await r.call('/bots/Ada/workspace-file/image?path=pic.png&area=workspace&expectedThreadId=stale-thread')).status,409);
+
+  // Raster image preview works; SVG and fake PNG are rejected with 415.
+  const imgRes=await r.call(`/bots/Ada/workspace-file/image?path=pic.png&area=workspace&expectedThreadId=${tid}`);
+  assert.equal(imgRes.status,200);assert.equal(imgRes.headers.get('content-type'),'image/png');
+  assert.match(imgRes.headers.get('content-security-policy')!,/default-src 'none'; sandbox/);
+  assert.deepEqual(Buffer.from(await imgRes.arrayBuffer()),png);
+  assert.equal((await r.call(`/bots/Ada/workspace-file/image?path=icon.svg&area=workspace&expectedThreadId=${tid}`)).status,415);
+  assert.equal((await r.call(`/bots/Ada/workspace-file/preview?path=icon.svg&area=workspace&expectedThreadId=${tid}`)).status,415);
+  assert.equal((await r.call(`/bots/Ada/workspace-file/image?path=fake.png&area=workspace&expectedThreadId=${tid}`)).status,415);
+  assert.equal((await r.call(`/bots/Ada/workspace-file/preview?path=bin.dat&area=workspace&expectedThreadId=${tid}`)).status,415);
+
+  // Traversal, hidden files, symlinks, and directories are rejected.
+  for(const bad of ['../outside.txt','escape.txt','.env','sub','/etc/passwd']) {
+    assert.ok([400,403,404].includes((await r.call(`/bots/Ada/workspace-file/preview?path=${encodeURIComponent(bad)}&area=workspace&expectedThreadId=${tid}`)).status));
+    assert.ok([400,403,404].includes((await r.call(`/bots/Ada/workspace-file/image?path=${encodeURIComponent(bad)}&area=workspace&expectedThreadId=${tid}`)).status));
+  }
+
+  // Group workspace file preview works too.
+  const group=await (await r.call('/groups','POST',{name:'Team',members:['Ada','Bob']})).json();
+  const gRoot=r.native.threads.get(group.id)!.projectPath as string;
+  await writeFile(join(gRoot,'notes.txt'),'group note');
+  const gRes=await r.call(`/groups/${group.id}/workspace-file/preview?path=notes.txt&area=workspace&expectedThreadId=${encodeURIComponent(group.id)}`);
+  assert.equal(gRes.status,200);assert.equal((await gRes.json()).text,'group note');
 });

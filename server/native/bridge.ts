@@ -686,27 +686,35 @@ export class BotBridge {
   async send(thread: NativeThread, body: { text: string; reply_to?: number; idempotencyKey?: string; attachments?: string[]; expectedThreadId?: string }, directCat?: NativeCat) {
     if (body.expectedThreadId && body.expectedThreadId !== thread.id) throw new ApiError(409, '对话已变化，请核对后重试');
     if (body.attachments?.length && !body.expectedThreadId) throw new ApiError(400, '发送附件需要当前对话的标识');
-    const attachments = body.attachments?.length ? await this.workspaces.attachments(thread.id, body.attachments) : [];
-    const replyTo = body.reply_to ? this.store.messageId(thread.id, body.reply_to) : undefined;
-    if (body.reply_to && !replyTo) throw new ApiError(400, '引用的消息不存在，请刷新对话');
-    const addressed = directCat?.id ?? (replyTo ? await this.answeredCat(thread, replyTo, body.text, body.idempotencyKey) : undefined);
-    await this.manner.ready();
-    return this.native.request<any>('/api/messages', { method: 'POST', body: {
-      threadId: thread.id, content: body.text, idempotencyKey: body.idempotencyKey ?? randomUUID(),
-      // Native admission binds the exact active parent and appends without interrupting.
-      // If the carrier cannot append (or is idle), native Queue safely starts the next turn.
-      // Do not inspect a stale busy snapshot or issue a second force/steer request here.
-      messageDisposition: 'continue_current',
-      ...(attachments.length ? { contextAttachments: attachments } : {}),
-      ...(addressed ? { mentions: [addressed] } : {}), ...(replyTo ? { replyTo } : {}),
-    } }).catch(async error => {
-      // Nothing was stored: the words stay with the owner, and the chat says who cannot run, by name when the engine names it.
-      if (!targetRefused(error)) throw error;
-      const listed = (error.details as { unavailable?: unknown }).unavailable;
-      const ids = (Array.isArray(listed) ? listed : []).map(entry => (entry as { catId?: unknown } | null)?.catId).filter((id): id is string => typeof id === 'string');
-      const names = directCat ? [directCat.name] : ids.length ? (await this.cats().catch(() => [])).filter(cat => ids.includes(cat.id)).map(cat => cat.name) : [];
-      throw new ApiError(409, `${names.length ? names.join('、') : '要回答的猫猫'}现在用不了，消息没有发出`, error.details, 'target_unavailable');
-    });
+    const dispatch = async (attachments: Awaited<ReturnType<Workspaces['attachments']>>) => {
+      const replyTo = body.reply_to ? this.store.messageId(thread.id, body.reply_to) : undefined;
+      if (body.reply_to && !replyTo) throw new ApiError(400, '引用的消息不存在，请刷新对话');
+      const addressed = directCat?.id ?? (replyTo ? await this.answeredCat(thread, replyTo, body.text, body.idempotencyKey) : undefined);
+      await this.manner.ready();
+      return this.native.request<any>('/api/messages', { method: 'POST', body: {
+        threadId: thread.id, content: body.text, idempotencyKey: body.idempotencyKey ?? randomUUID(),
+        // Native admission binds the exact active parent and appends without interrupting.
+        // If the carrier cannot append (or is idle), native Queue safely starts the next turn.
+        // Do not inspect a stale busy snapshot or issue a second force/steer request here.
+        messageDisposition: 'continue_current',
+        ...(attachments.length ? { contextAttachments: attachments } : {}),
+        ...(addressed ? { mentions: [addressed] } : {}), ...(replyTo ? { replyTo } : {}),
+      } }).catch(async error => {
+        // Nothing was stored: the words stay with the owner, and the chat says who cannot run, by name when the engine names it.
+        if (!targetRefused(error)) {
+          const definitiveRefusal = error instanceof ApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429;
+          if (!definitiveRefusal && body.attachments?.length) this.workspaces.markSendUncertain(body.attachments);
+          throw error;
+        }
+        const listed = (error.details as { unavailable?: unknown }).unavailable;
+        const ids = (Array.isArray(listed) ? listed : []).map(entry => (entry as { catId?: unknown } | null)?.catId).filter((id): id is string => typeof id === 'string');
+        const names = directCat ? [directCat.name] : ids.length ? (await this.cats().catch(() => [])).filter(cat => ids.includes(cat.id)).map(cat => cat.name) : [];
+        throw new ApiError(409, `${names.length ? names.join('、') : '要回答的猫猫'}现在用不了，消息没有发出`, error.details, 'target_unavailable');
+      });
+    };
+    return body.attachments?.length
+      ? this.workspaces.withAttachments(thread.id, body.attachments, dispatch)
+      : dispatch([]);
   }
   /**
    * In a group, an answer to what one cat said goes to that cat, the way a reply does in a chat app. Native routing

@@ -75,6 +75,21 @@
     const parts = String(path || "").split("/").filter(Boolean);
     return [{ name: "", path: "" }, ...parts.map((name, i) => ({ name, path: parts.slice(0, i + 1).join("/") }))];
   }
+  // What a working-directory file offers inline: the server marks each file
+  // of a listing (previewable) by its name and size, and checks its bytes
+  // again when asked. A folder, or a file it does not mark, offers nothing.
+  function treePreview(entry) {
+    if (!entry || entry.type !== "file") return "none";
+    return entry.previewable === "text" || entry.previewable === "image" ? entry.previewable : "none";
+  }
+  // GET <chat>/workspace-file/preview|image for one file of the listing,
+  // built here from its relative path and area, never taken from the server.
+  // threadId: the thread the page has confirmed (expectedThreadId), so the
+  // server refuses (409) rather than answer from a thread the chat has left.
+  function workspaceFileUrl(sel, mode, path, area, threadId) {
+    return scope(sel) + "/workspace-file/" + (mode === "image" ? "image" : "preview") + "?path=" + enc(String(path || "")) + "&area=" + enc(area === "shared" ? "shared" : "workspace")
+      + (threadId ? "&expectedThreadId=" + enc(String(threadId)) : "");
+  }
 
   // ---- Pending attachments ----
   // Which of the picked files can join a message that already has `count`
@@ -116,6 +131,14 @@
     const back = returned.filter((r) => r && r.id && !ids.has(r.id));
     const merged = [...back, ...current];
     return { rows: merged.slice(0, LIMITS.files), dropped: merged.slice(LIMITS.files) };
+  }
+
+  // How much of an upload has gone out, 0–100, from an XMLHttpRequest
+  // progress event; null while the total is not known.
+  function progress(ev) {
+    if (!ev || !ev.lengthComputable || !(Number(ev.total) > 0)) return null;
+    const pct = Math.round((Number(ev.loaded) / Number(ev.total)) * 100);
+    return Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : null;
   }
 
   // ---- Upload and file errors ----
@@ -220,9 +243,17 @@
       .map((c) => ({ id: c.id, title: oneLine(c.title), current: c.current === true, createdAt: at(c.createdAt) }))
       .sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   }
+  // A new title as the server takes it (PATCH conversations/:id): one line,
+  // trimmed, 1–120 characters. Control characters and runs of spaces become
+  // one space, as the list shows titles, so what is saved is what shows.
+  const TITLE_MAX = 120;
+  function conversationTitle(value) {
+    const title = oneLine(value);
+    return { title, problem: !title ? "empty" : title.length > TITLE_MAX ? "long" : "" };
+  }
 
   window.ClowderWorkspaceRules = Object.freeze({
-    LIMITS, key, scope, size, badge, preview, unavailable, origin, isNative, tail, crumbs, admit, refusal, restore, fileError, clip, oneLine,
-    ordinary, revision, order, summary, catName, member, targets, handoffBlocked, history, taskError, said, KINDS, conversations,
+    LIMITS, key, scope, size, badge, preview, unavailable, origin, isNative, tail, crumbs, treePreview, workspaceFileUrl, admit, refusal, restore, progress, fileError, clip, oneLine,
+    ordinary, revision, order, summary, catName, member, targets, handoffBlocked, history, taskError, said, KINDS, conversations, conversationTitle, TITLE_MAX,
   });
 })();

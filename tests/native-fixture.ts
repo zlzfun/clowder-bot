@@ -57,6 +57,7 @@ export class NativeFixture implements NativeTransport {
   /** …or for one conversation only, by thread. */
   pageLimits = new Map<string, number>();
   queues = new Map<string, any>();
+  schedules: any[] = [];
   taskRows: any[] = [];
   approvalItems: any[] = [];
   settledApprovalItems: any[] = [];
@@ -213,7 +214,19 @@ export class NativeFixture implements NativeTransport {
       const thread = made ?? { ...body, id: randomUUID(), createdAt: Date.now() }; this.threads.set(thread.id, thread); result = thread;
     } else if (parts[2] === 'threads' && parts[3] && parts.length === 4) {
       const thread = this.threads.get(parts[3]); if (!thread) throw new ApiError(404, 'Missing thread');
-      if (method === 'PATCH') Object.assign(thread, body); result = thread;
+      if (method === 'PATCH') {
+        if (thread.deletedAt) throw new ApiError(404, 'Thread not found');
+        Object.assign(thread, body);
+      } else if (method === 'DELETE') {
+        const queue = this.queues.get(parts[3]!);
+        if (queue?.activeInvocations?.length) throw new ApiError(409, '猫猫正在工作中');
+        if (thread.deletedAt) throw new ApiError(400, 'Cannot delete this thread');
+        thread.deletedAt = Date.now();
+        result = {};
+      }
+      if (method !== 'DELETE') result = thread;
+    } else if (url.pathname === '/api/schedule/tasks' && method === 'GET') {
+      result = { tasks: this.schedules };
     } else if (parts[4] === 'queue') {
       // A cancelled turn leaves the queue only once the engine has cleaned up after it.
       const queue = this.queues.get(parts[3]!);
