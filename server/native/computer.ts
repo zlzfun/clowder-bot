@@ -105,9 +105,10 @@ export function cuaDriver(toolsDir: string, env: NodeJS.ProcessEnv = process.env
 
 /**
  * What a cat's 资料 shows about the computer. `on` is the registry's word; the rest says whether that can work right now.
- * `others`: the names of the other cats that have it on (one at a time is the rule, see enable) — who is switched off when this cat is switched on.
+ * `others`: the names of the other cats that currently have it on in the registry — switched off when this cat is switched on.
+ * `lingering`: the names of the other cats already off in the registry whose running turn is still going — stopped when this cat is switched on.
  */
-export interface ComputerView { supported: boolean; installed: boolean; on: boolean; permissions: ComputerGrants['state']; missing?: ComputerGrant[]; others?: string[] }
+export interface ComputerView { supported: boolean; installed: boolean; on: boolean; permissions: ComputerGrants['state']; missing?: ComputerGrant[]; others?: string[]; lingering?: string[] }
 interface Entry { id?: string; type?: string; source?: string; enabled?: boolean; cats?: Record<string, boolean>; blockedCats?: string[]; mcpServer?: { command?: string; args?: string[] } }
 /**
  * Ends the turns a cat is in the middle of, wherever it is working; `failed` counts those not seen to have ended.
@@ -121,6 +122,19 @@ export type NameCats = (ids: string[]) => Promise<string[]>;
 const placeholder = '/usr/bin/true';
 const anyOn = (entry: Entry | undefined) => Object.values(entry?.cats ?? {}).some(Boolean);
 const wait = (ms: number) => new Promise(done => setTimeout(done, ms));
+const trimName = (value: string) => value.trim();
+/** Which currently affected cats (`current`) were not covered by the confirmed names (`confirmed`); unnamed cats (`''`) match one-for-one. */
+function unconfirmedCats(confirmed: string[], current: string[]): string[] {
+  const said = confirmed.map(trimName);
+  const missing: string[] = [];
+  for (const raw of current) {
+    const name = trimName(raw);
+    const at = said.indexOf(name);
+    if (at < 0) missing.push(name);
+    else if (!name) said.splice(at, 1);
+  }
+  return missing;
+}
 
 export class Computer {
   private tail: Promise<unknown> = Promise.resolve();
@@ -164,12 +178,14 @@ export class Computer {
     return this.real(entry) && entry.enabled !== false ? Object.entries(entry.cats ?? {}).filter(([id, on]) => on === true && id !== cat.id).map(([id]) => id) : [];
   }
   private async called(ids: string[]): Promise<string[]> { return this.nameCats(ids).then(names => ids.map((_, index) => names[index] ?? ''), () => ids.map(() => '')); }
-  /** The cats as the owner would say them, the way the page's dialog does (profile-rules.js computerHandover): each name in 「」, those without one as 另一只猫, 另外几只猫 for more. */
-  private async who(ids: string[]): Promise<string> {
-    const called = await this.called(ids), names = [...new Set(called.filter(Boolean))].map(name => `「${name}」`), unnamed = called.filter(name => !name).length;
+  /** Format already-resolved cat names the way the dialog does: each name in 「」, those without one as 另一只猫, 另外几只猫 for more. */
+  private formatWho(called: string[]): string {
+    const names = [...new Set(called.filter(Boolean))].map(name => `「${name}」`), unnamed = called.filter(name => !name).length;
     const rest = unnamed > 1 ? '另外几只猫' : unnamed ? '另一只猫' : '';
     return names.join('') + (names.length && rest ? '和' : '') + rest;
   }
+  /** The cats as the owner would say them, the way the page's dialog does (profile-rules.js computerHandover). */
+  private async who(ids: string[]): Promise<string> { return this.formatWho(await this.called(ids)); }
   /**
    * Ends the turns a cat is in the middle of and says whether they are seen to have ended. `off`: the registry was just
    * read with this cat off. Only with both is the cat done with (see lingering): one that may still be on can start
@@ -189,24 +205,36 @@ export class Computer {
     return next;
   }
 
+  private async affected(cat: NativeCat, entry: Entry | undefined): Promise<{ rivalIds: string[]; lingeringIds: string[]; others: string[]; lingering: string[] }> {
+    const rivalIds = this.rivals(entry, cat);
+    const lingeringIds: string[] = [];
+    for (const id of [...this.lingering]) if (id !== cat.id && !rivalIds.includes(id) && await this.busy(id)) lingeringIds.push(id);
+    if (!rivalIds.length && !lingeringIds.length) return { rivalIds, lingeringIds, others: [], lingering: [] };
+    const names = await this.called([...rivalIds, ...lingeringIds]);
+    return { rivalIds, lingeringIds, others: names.slice(0, rivalIds.length), lingering: names.slice(rivalIds.length) };
+  }
+
   async view(cat: NativeCat): Promise<ComputerView> { return this.shown(cat, await this.entry()); }
   /**
    * The view from the registry as it was just read. A change answers with what it read back to confirm itself, not with
    * another read: one that failed would turn a change known to have gone through into an error.
    */
-  private async shown(cat: NativeCat, entry: Entry | undefined): Promise<ComputerView> {
+  private async shown(cat: NativeCat, entry: Entry | undefined, known?: { located?: ComputerServer; grants: ComputerGrants; others: string[]; lingering: string[] }): Promise<ComputerView> {
     // Whether the cat is on is the registry's to say, also where the driver is gone or this is not a Mac: a stale "on" must still be seen and switched off.
-    const located = this.driver.supported ? await this.driver.locate() : undefined;
-    const grants: ComputerGrants = located ? await this.driver.permissions() : { state: 'unknown' };
-    // Who gives it up when this cat is switched on: the cats that have it on, and a cat that is off with a turn still going
-    // (that turn is ended too, see handOver) — looked at now, so that one which has stopped by itself is not named.
-    const others = this.rivals(entry, cat);
-    for (const id of [...this.lingering]) if (id !== cat.id && !others.includes(id) && await this.busy(id)) others.push(id);
+    const located = known ? known.located : (this.driver.supported ? await this.driver.locate() : undefined);
+    const grants: ComputerGrants = known ? known.grants : (located ? await this.driver.permissions() : { state: 'unknown' });
+    // Who gives it up when this cat is switched on: the cats that have it on (`others`), and a cat already off with a
+    // turn still going (`lingering`, looked at now so one that stopped by itself is not named).
+    const { others, lingering } = known ?? await this.affected(cat, entry);
     return { supported: this.driver.supported, installed: !!located, on: this.isOn(entry, cat), permissions: grants.state,
-      ...(grants.state === 'needed' ? { missing: grants.missing } : {}), ...(others.length ? { others: await this.called(others) } : {}) };
+      ...(grants.state === 'needed' ? { missing: grants.missing } : {}),
+      ...(others.length ? { others } : {}),
+      ...(lingering.length ? { lingering } : {}) };
   }
 
-  set(cat: NativeCat, enabled: boolean): Promise<ComputerView> { return this.serial(() => enabled ? this.enable(cat) : this.disable(cat)); }
+  set(cat: NativeCat, enabled: boolean, confirmOff: string[] = []): Promise<ComputerView> {
+    return this.serial(() => enabled ? this.enable(cat, confirmOff) : this.disable(cat));
+  }
 
   /**
    * Turning it on. Returns the view as it is afterwards: `on: false` with
@@ -221,8 +249,32 @@ export class Computer {
    * — blocked, the block read back, the turns it is in the middle of ended, as
    * when its own switch is turned off — and only then is this cat switched on.
    * If another cat cannot be seen to be off and stopped, this one stays off.
+   * Any other cat that would be switched off or stopped must be acknowledged in
+   * `confirmOff`; otherwise the request is refused (409) before anything changes.
    */
-  private async enable(cat: NativeCat): Promise<ComputerView> {
+  private async ensureConfirmed(
+    cat: NativeCat,
+    entry: Entry | undefined,
+    confirmOff: string[],
+    located: ComputerServer,
+    grants: ComputerGrants,
+  ) {
+    const current = await this.affected(cat, entry);
+    if (unconfirmedCats(confirmOff, [...current.others, ...current.lingering]).length) {
+      const view = await this.shown(cat, entry, { located, grants, others: current.others, lingering: current.lingering });
+      const onWords = current.others.length ? this.formatWho(current.others) : '';
+      const stopWords = current.lingering.length ? this.formatWho(current.lingering) : '';
+      const message = onWords && stopWords
+        ? `现在${onWords}正用着这台电脑，${stopWords}的已经关掉且还没确认停下，请再确认一次。`
+        : onWords
+          ? `现在${onWords}正用着这台电脑，请再确认一次。`
+          : `${stopWords}的已经关掉，但还没确认已经停下；打开后会先停下，请再确认一次。`;
+      throw new ApiError(409, message, view, 'computer_confirm_changed');
+    }
+    return current;
+  }
+
+  private async enable(cat: NativeCat, confirmOff: string[]): Promise<ComputerView> {
     if (!this.driver.supported) throw new ApiError(422, '这台电脑上还用不了这项功能。', undefined, 'computer_unsupported');
     const located = await this.driver.locate(true);
     if (!located) throw new ApiError(422, '还没有装上操作电脑用的驱动。', undefined, 'computer_absent');
@@ -234,11 +286,18 @@ export class Computer {
       if (grants.state === 'unknown') throw new ApiError(503, '操作电脑用的驱动没有启动起来，请再试一次。', undefined, 'computer_not_started');
     }
     if (grants.state !== 'granted') return this.view(cat);
-    const entry = await this.entry();
-    if (!this.real(entry)) await this.register(located);
+    let entry = await this.entry();
+    let current = await this.ensureConfirmed(cat, entry, confirmOff, located, grants);
+    if (!this.real(entry)) { await this.register(located); entry = await this.entry(); }
     // The driver was moved or reinstalled: the engine keeps who is blocked when an entry is installed over.
-    else if (entry.mcpServer?.command !== located.command || JSON.stringify(entry.mcpServer?.args ?? []) !== JSON.stringify(located.args)) await this.install(located);
-    const gave = await this.handOver(cat);
+    else if (entry.mcpServer?.command !== located.command || JSON.stringify(entry.mcpServer?.args ?? []) !== JSON.stringify(located.args)) {
+      await this.install(located);
+      entry = await this.entry();
+      current = await this.ensureConfirmed(cat, entry, confirmOff, located, grants);
+    }
+    // Any lingering cat just observed to be off in `entry` AND idle is done with; restrict handover cancellation to `current.lingeringIds` so a turn started later is never cancelled unconfirmed.
+    for (const id of [...this.lingering]) if (id !== cat.id && !current.rivalIds.includes(id) && !current.lingeringIds.includes(id)) this.lingering.delete(id);
+    const gave = await this.handOver(cat, entry, current.lingeringIds);
     // Written whatever was just read: an earlier request that timed out here may still be waiting in the engine, and the last write is the one that stands.
     // Whether it is on now is the registry's to say, not the answer to the write: one whose answer was lost may have gone through.
     let failure: unknown, after: Entry | undefined, on: boolean | undefined;
@@ -261,9 +320,10 @@ export class Computer {
    * whatever became of the others, and so has a cat the computer was taken from earlier that is not done with yet
    * (lingering): asking again must not let `cat` in beside a turn that still has the tools.
    */
-  private async handOver(cat: NativeCat): Promise<string> {
-    const entry = await this.entry(), had = this.isOn(entry, cat);
-    const rivals = this.rivals(entry, cat), earlier = [...this.lingering].filter(id => id !== cat.id && !rivals.includes(id));
+  private async handOver(cat: NativeCat, current?: Entry, confirmedLingering?: string[]): Promise<string> {
+    const entry = current ?? await this.entry(), had = this.isOn(entry, cat);
+    const rivals = this.rivals(entry, cat);
+    const earlier = (confirmedLingering ?? [...this.lingering]).filter(id => id !== cat.id && !rivals.includes(id));
     if (!rivals.length && !earlier.length) return '';
     // Remembered before its block is sent: a write whose answer never comes may land after this request is over.
     for (const id of rivals) { this.lingering.add(id); try { await this.toggle({ scope: 'cat', catId: id, enabled: false }); } catch { /* read back below */ } }
