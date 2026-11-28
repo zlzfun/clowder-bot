@@ -19,7 +19,7 @@
 // another chat builds its own. Requests: PATCH /xbot-api/groups/:id
 // {name} or {add} / {remove} (what the owner means, applied by the server to
 // the roster as it is now) and DELETE /xbot-api/groups/:id (docs/xbot-api.md),
-// GET and PUT /xbot-api/bots/:name/computer {enabled} for 这台电脑; 新对话
+// GET and PUT /xbot-api/bots/:name/computer {enabled, confirmOff?} for 这台电脑; 新对话
 // opens chat-history.js's own dialog, the same one as the header's ⋯ menu. A
 // change is shown only once the server has answered; nothing here stops work,
 // routes messages or keeps a copy of the groups or of who may use the computer.
@@ -514,17 +514,18 @@
   }
 
   // ------------------------------------------------------------ 这台电脑
-  // GET /xbot-api/bots/:name/computer and PUT {enabled} (docs/xbot-api.md
-  // 「这台电脑」); the rules and the words are profile-rules.js's. What it is
-  // doing, by cat and apart from the page, as 置顶's saves:
+  // GET /xbot-api/bots/:name/computer and PUT {enabled, confirmOff?}
+  // (docs/xbot-api.md「这台电脑」); the rules and the words are
+  // profile-rules.js's. What it is doing, by cat and apart from the page, as
+  // 置顶's saves:
   //   { view, reading, again, busy: "" | "on" | "off", stale, ending, wait: {missing, told} | null,
   //     said: {text, code} | null, n, applied, timer }
   // ending: the cat was replying when off was asked (the shell's replying
   // hook: the status poll's running turns, or the open chat's live reply);
   // off ends that reply, and the busy line says so while it does.
-  // told: the cats the dialog the owner confirmed named (its `others`); the
-  // wait sends the request again by itself only while it takes the computer
-  // from no one else.
+  // told: the cats the dialog the owner confirmed named (its `others` and
+  // `lingering`), sent as the request's `confirmOff`; the wait sends the
+  // request again by itself only while it touches no one else.
   // view is the server's last answer, drawn while it is asked again, never
   // kept as the truth: a new page for the cat starts without it, and another
   // cat turned on, or a cat deleted, drops it (forget; again: read once
@@ -600,16 +601,17 @@
   }
 
   // Off asks nothing. On asks first, every time, what it means — and, while
-  // other cats have it (the last view's `others`), whose goes off.
+  // other cats have it (the last view's `others`) or are off but not yet seen
+  // to stop a reply that had it (`lingering`), what happens to them.
   function toggleComputer(P) {
     const cs = computerOf(P.key), row = R.computerRow(cs.view, cs);
     if (!row.shown || !row.can) return;
     const name = P.data.name || P.sel.id;
     if (row.on) changeComputer(P.key, name, false);
-    else askComputer(P.key, name, cs.view.others);
+    else askComputer(P.key, name, cs.view.others, cs.view.lingering);
   }
-  function askComputer(key, name, others) {
-    const words = R.computerConsent(name, others);
+  function askComputer(key, name, others, lingering) {
+    const words = R.computerConsent(name, others, lingering);
     // Focus comes back to the switch of the page showing this cat then.
     const L = dialog(words.title, () => { const p = pageOf(key); return p ? p.compSwitch : null; });
     L.body.append(node("p", "pf-lead pf-cwhy", words.text));
@@ -622,12 +624,14 @@
       ev.preventDefault();
       if (!L.alive) return;
       L.close();
-      changeComputer(key, name, true, others);
+      changeComputer(key, name, true, R.computerAffected({ others, lingering }));
     });
     cancel.focus();
   }
 
-  // told: for a turn on, the cats the dialog the owner confirmed named.
+  // told: for a turn on, the cats the dialog the owner confirmed named — the
+  // request's confirmOff: the server refuses (409 computer_confirm_changed,
+  // changing nothing) one that would switch off or stop any other cat.
   async function changeComputer(key, name, enabled, told) {
     const cs = computerOf(key);
     if (cs.busy) return;
@@ -640,7 +644,8 @@
     const n = ++cs.n;
     repaintComputer(key);
     let view = null, failed = null;
-    try { view = R.computerView(await H.api(computerPath(name), { method: "PUT", body: { enabled }, serverError: true })); }
+    const body = enabled ? { enabled: true, confirmOff: Array.isArray(told) ? told : [] } : { enabled: false };
+    try { view = R.computerView(await H.api(computerPath(name), { method: "PUT", body, serverError: true })); }
     catch (err) { failed = err; }
     cs.busy = "";
     cs.ending = false;
@@ -648,8 +653,34 @@
     // Another cat was switched on while this was on its way (forget): this answer may be from before that.
     const stale = cs.stale;
     cs.stale = false;
-    // One cat at a time: turning on may have switched the others off, also when it was refused afterwards.
+    // One cat at a time: turning on may have switched the others off, also
+    // when it was refused afterwards; refused because the cats it would touch
+    // are not the ones the owner confirmed (computer_confirm_changed), they
+    // were switched on or off, or started a reply, elsewhere since. Either
+    // way what this page heard about them may no longer hold.
     if (enabled) forgetOthers(key);
+    // Refused before anything changed (computer_confirm_changed): the refusal
+    // carries this cat's view as it is now, drawn at once (not read again: a
+    // read could only race it). With this 资料 on screen and no other dialog
+    // open the dialog asks again, naming them; else the sentence says so, and
+    // the switch asks when it is next pressed.
+    if (failed && enabled && !stale && failed.status === 409 && failed.code === "computer_confirm_changed") {
+      const fresh = R.computerView(failed.details);
+      if (fresh) {
+        endWait(cs);
+        cs.view = fresh;
+        const P = pageOf(key);
+        if (P && showing(P) && !S.layer && !asking() && !fresh.on && (fresh.others.length || fresh.lingering.length)) {
+          cs.said = null;
+          repaintComputer(key);
+          askComputer(key, name, fresh.others, fresh.lingering);
+          return;
+        }
+        cs.said = { text: R.computerError(failed, enabled), code: String(failed.code || "") };
+        repaintComputer(key);
+        return;
+      }
+    }
     if (failed || !view || stale) {
       endWait(cs);
       if (failed) cs.said = { text: R.computerError(failed, enabled), code: String(failed.code || "") };
@@ -692,17 +723,17 @@
     repaintComputer(key);
     if (!cs.wait || !view || view.permissions !== "granted") return;
     // The grants are there: the same request once more — unless it would now
-    // take the computer from a cat the confirmed dialog did not name (another
-    // was switched on meanwhile). Then nothing is sent: the wait ends, the row
-    // shows it off as it is, and with this 资料 on screen and no other dialog
-    // open the dialog asks again, naming them; else the switch does when it
-    // is next pressed.
+    // switch off or stop a cat the confirmed dialog did not name (another was
+    // switched on, or started a reply, meanwhile). Then nothing is sent: the
+    // wait ends, the row shows it off as it is, and with this 资料 on screen
+    // and no other dialog open the dialog asks again, naming them; else the
+    // switch does when it is next pressed.
     const told = cs.wait.told;
-    if (!R.computerUntold(told, view.others).length) { await changeComputer(key, name, true, told); return; }
+    if (!R.computerUntold(told, R.computerAffected(view)).length) { await changeComputer(key, name, true, told); return; }
     endWait(cs);
     repaintComputer(key);
     const P = pageOf(key);
-    if (P && showing(P) && !S.layer && !asking()) askComputer(key, name, view.others);
+    if (P && showing(P) && !S.layer && !asking()) askComputer(key, name, view.others, view.lingering);
   }
   // A dialog of the app's is open (a form, a confirmation): nothing asks over it.
   const asking = () => [...document.querySelectorAll('[aria-modal="true"]')].some((n) => n.getClientRects().length > 0);

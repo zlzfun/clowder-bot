@@ -194,6 +194,9 @@
       // The server's machine-readable reason (e.g. not_adapted: a route this
       // product has not adapted), so callers never match its wording.
       if (typeof data.code === "string") err.code = data.code;
+      // What the server says is true now, with its refusal (e.g. the computer's
+      // view with computer_confirm_changed), so the caller can show it at once.
+      if (data.details !== undefined) err.details = data.details;
       throw err;
     }
     return data;

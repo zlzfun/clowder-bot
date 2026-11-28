@@ -158,7 +158,7 @@ test('an "on" that timed out here and is still waiting in the engine does not ou
 
 test('turning it off takes only this cat off, ends the turns it is in the middle of, and with the last one ends the driver\'s process', async () => {
   const { native, driver, computer, on, ended, stopping } = setup();
-  await computer.set(a, true); await computer.set(b, true);
+  await computer.set(a, true); await computer.set(b, true, ['猫甲']);
   // Two cats on: a state from before the one-at-a-time rule, or written by another client of the registry.
   native.capabilities[0]!.blockedCats = native.capabilities[0]!.blockedCats!.filter(id => id !== 'cat-a');
   assert.deepEqual(on(), ['cat-a', 'cat-b']); driver.did.length = 0; ended.length = 0;
@@ -206,7 +206,7 @@ test('one cat at a time: switching a cat on switches the others off first and en
   const usable: string[][] = [], request = native.request.bind(native);
   native.request = (async (path: string, options: any = {}) => { const result = await request(path, options); if ((options.method ?? 'GET') !== 'GET') usable.push(on()); return result; }) as typeof native.request;
   native.calls.length = 0; driver.did.length = 0;
-  assert.deepEqual(await computer.set(b, true), { supported: true, installed: true, on: true, permissions: 'granted' });
+  assert.deepEqual(await computer.set(b, true, ['猫甲']), { supported: true, installed: true, on: true, permissions: 'granted' });
   assert.deepEqual(writes(), ['PATCH /api/capabilities:cat=cat-a:false', 'PATCH /api/capabilities:cat=cat-b:true']);
   assert.deepEqual(usable, [[], ['cat-b']]);
   assert.deepEqual(ended, ['cat-a'], 'the turn the other cat is in the middle of keeps its tools until it ends, so it is ended');
@@ -216,7 +216,7 @@ test('one cat at a time: switching a cat on switches the others off first and en
   native.capabilities[0]!.blockedCats = ['cat-b'];
   ended.length = 0;
   assert.deepEqual((await computer.view(b)).others, ['猫甲', '猫丙']);
-  assert.equal((await computer.set(b, true)).on, true);
+  assert.equal((await computer.set(b, true, ['猫甲', '猫丙'])).on, true);
   assert.deepEqual(on(), ['cat-b']); assert.deepEqual(ended.sort(), ['cat-a', 'cat-c']);
 });
 
@@ -225,48 +225,55 @@ test('one cat at a time: a cat is only switched on once the other is seen to be 
   await computer.set(a, true);
   // The other cat's block cannot be written: nothing changes, and the words name it.
   native.capabilityFailures.add('PATCH:cat');
-  assert.equal(await said(computer.set(b, true)), '502 computer_other_on 没能先把「猫甲」的关掉，所以这只猫的没有打开。请再试一次。');
+  assert.equal(await said(computer.set(b, true, ['猫甲'])), '502 computer_other_on 没能先把「猫甲」的关掉，所以这只猫的没有打开。请再试一次。');
   assert.deepEqual(on(), ['cat-a']); assert.deepEqual(ended, []);
   native.capabilityFailures.clear();
   // Its turn is not seen to end: it is off, this cat is not switched on, and the words say where to stop it.
   stopping.failed = 1;
-  assert.equal(await said(computer.set(b, true)),
+  assert.equal(await said(computer.set(b, true, ['猫甲'])),
     '502 computer_other_running 「猫甲」的已经关掉，但它正在进行的这一轮还没有停下来，停下之前它还能用这台电脑，所以这只猫的先没有打开。请在「猫甲」的对话里点停止，然后再开一次。');
   assert.deepEqual(on(), []); assert.deepEqual(ended, ['cat-a']);
-  // The page of another cat is still told of it: switching that cat on ends this turn, and the dialog has to say so.
-  assert.deepEqual((await computer.view(b)).others, ['猫甲']); assert.equal((await computer.view(a)).others, undefined);
+  // The page of another cat is told of it under `lingering` (already off, turn still going), not `others`.
+  const viewB = await computer.view(b);
+  assert.equal(viewB.others, undefined);
+  assert.deepEqual(viewB.lingering, ['猫甲']);
+  assert.equal((await computer.view(a)).others, undefined);
+  assert.equal((await computer.view(a)).lingering, undefined);
   assert.deepEqual(ended, ['cat-a'], 'looking ends nothing');
   // Asked again while that turn is still going: the registry has no cat on, and this cat is still not let in beside it.
-  assert.match(await said(computer.set(b, true)), /^502 computer_other_running 「猫甲」的已经关掉/);
-  assert.match(await said(computer.set(c, true)), /^502 computer_other_running 「猫甲」的已经关掉/);
+  assert.match(await said(computer.set(b, true, ['猫甲'])), /^502 computer_other_running 「猫甲」的已经关掉/);
+  assert.match(await said(computer.set(c, true, ['猫甲'])), /^502 computer_other_running 「猫甲」的已经关掉/);
   assert.deepEqual(on(), []); assert.deepEqual(ended, ['cat-a', 'cat-a', 'cat-a']);
   // Asked again once it has stopped: nobody is named any more; on, and that cat is not asked about again.
   stopping.failed = 0;
-  assert.equal((await computer.view(b)).others, undefined, 'it stopped by itself');
+  const calmB = await computer.view(b);
+  assert.equal(calmB.others, undefined, 'it stopped by itself');
+  assert.equal(calmB.lingering, undefined, 'it stopped by itself');
   assert.equal((await computer.set(b, true)).on, true);
-  assert.deepEqual(on(), ['cat-b']); assert.deepEqual(ended, ['cat-a', 'cat-a', 'cat-a', 'cat-a']);
+  assert.deepEqual(on(), ['cat-b']); assert.deepEqual(ended, ['cat-a', 'cat-a', 'cat-a']);
   ended.length = 0; await computer.set(b, true); assert.deepEqual(ended, []);
   // The same after a cat's own switch was turned off with its turn still going.
   stopping.failed = 1;
   await refused(computer.set(b, false), 502, 'computer_still_running');
-  assert.match(await said(computer.set(c, true)), /^502 computer_other_running 「猫乙」的已经关掉/);
+  assert.deepEqual((await computer.view(c)).lingering, ['猫乙']);
+  assert.match(await said(computer.set(c, true, ['猫乙'])), /^502 computer_other_running 「猫乙」的已经关掉/);
   // That cat switched on again: the turn is its own once more, and nobody waits for it.
   stopping.failed = 0; ended.length = 0;
   assert.equal((await computer.set(b, true)).on, true); assert.deepEqual(ended, []);
   // The block was written and its answer lost: what the registry says decides, and the other cat's turn is ended.
   ended.length = 0; native.lostAnswers.add('PATCH:cat');
-  assert.equal((await computer.set(a, true)).on, true, 'both writes went through; only their answers were lost');
+  assert.equal((await computer.set(a, true, ['猫乙'])).on, true, 'both writes went through; only their answers were lost');
   native.lostAnswers.clear();
   assert.deepEqual(on(), ['cat-a']); assert.deepEqual(ended, ['cat-b']);
   // While a macOS grant is missing nothing is switched: the cat that has it keeps it.
   driver.grants = { state: 'needed', missing: ['accessibility'] }; native.calls.length = 0; ended.length = 0;
   assert.deepEqual(await computer.set(b, true), { supported: true, installed: true, on: false, permissions: 'needed', missing: ['accessibility'], others: ['猫甲'] });
   assert.equal(native.calls.some(call => call.method !== 'GET'), false); assert.deepEqual(on(), ['cat-a']); assert.deepEqual(ended, []);
-  // A cat whose name is not known is still spoken of.
+  // A cat whose name is not known is still spoken of (here still lingering from line 260? Wait: set(a, true) above turned b off; let's make a lingering first).
   driver.grants = { state: 'granted' };
   const nameless = new Computer(native, driver, async () => ({ stopped: 0, failed: 1 }), 0);
   assert.deepEqual((await nameless.view(b)).others, ['']);
-  assert.match(await said(nameless.set(b, true)), /^502 computer_other_running 另一只猫的已经关掉/);
+  assert.match(await said(nameless.set(b, true, [''])), /^502 computer_other_running 另一只猫的已经关掉/);
   // Several others, one of which will not come off: the words say which did. Cats are said the way the page's dialog says them.
   const several = setup();
   await several.computer.set(a, true); several.native.capabilities[0]!.blockedCats = ['cat-b'];
@@ -275,18 +282,18 @@ test('one cat at a time: a cat is only switched on once the other is seen to be 
     if (options.method === 'PATCH' && options.body?.scope === 'cat' && options.body.catId === 'cat-c' && options.body.enabled === false) throw new ApiError(500, 'capability store failed');
     return write(path, options);
   }) as typeof several.native.request;
-  assert.equal(await said(several.computer.set(b, true)), '502 computer_other_on 没能先把「猫丙」的关掉，所以这只猫的没有打开。「猫甲」的已经关掉了。请再试一次。');
+  assert.equal(await said(several.computer.set(b, true, ['猫甲', '猫丙'])), '502 computer_other_on 没能先把「猫丙」的关掉，所以这只猫的没有打开。「猫甲」的已经关掉了。请再试一次。');
   assert.deepEqual(several.on(), ['cat-c'], 'only 猫甲 came off'); assert.deepEqual(several.ended, ['cat-a']);
   several.native.request = write; several.stopping.failed = 1; several.native.capabilities[0]!.blockedCats = ['cat-b'];
-  assert.match(await said(several.computer.set(b, true)), /^502 computer_other_running 「猫甲」「猫丙」的已经关掉，/);
+  assert.match(await said(several.computer.set(b, true, ['猫甲', '猫丙'])), /^502 computer_other_running 「猫甲」「猫丙」的已经关掉，/);
   // A cat that already had it (a state from before the rule, or a request sent twice): nothing is written for it, and the words do not say it is off.
   const both = setup();
   await both.computer.set(a, true); both.native.capabilities[0]!.blockedCats = ['cat-c'];
   both.native.capabilityFailures.add('PATCH:cat');
-  assert.equal(await said(both.computer.set(b, true)), '502 computer_other_on 没能先把「猫甲」的关掉，这只猫的本来就开着。请再试一次。');
+  assert.equal(await said(both.computer.set(b, true, ['猫甲'])), '502 computer_other_on 没能先把「猫甲」的关掉，这只猫的本来就开着。请再试一次。');
   assert.deepEqual(both.on(), ['cat-a', 'cat-b']); assert.deepEqual(both.ended, []);
   both.native.capabilityFailures.clear(); both.stopping.failed = 1;
-  assert.equal(await said(both.computer.set(b, true)),
+  assert.equal(await said(both.computer.set(b, true, ['猫甲'])),
     '502 computer_other_running 「猫甲」的已经关掉，但它正在进行的这一轮还没有停下来，停下之前它还能用这台电脑，这只猫的本来就开着。请在「猫甲」的对话里点停止。');
   assert.deepEqual(both.on(), ['cat-b']);
   // The entry is gone (taken out by another client) while a cat's turn is still not seen to end: its own "off" asks once more.
@@ -311,14 +318,14 @@ test('one cat at a time: what is not known is not claimed — the registry unrea
     return result;
   }) as typeof unread.native.request;
   unread.stopping.failed = 1;
-  assert.equal(await said(unread.computer.set(b, true)), '502 computer_other_on 没能确认「猫甲」的已经关掉，所以这只猫的没有打开。请再试一次。');
+  assert.equal(await said(unread.computer.set(b, true, ['猫甲'])), '502 computer_other_on 没能确认「猫甲」的已经关掉，所以这只猫的没有打开。请再试一次。');
   assert.deepEqual(unread.on(), [], 'the block had gone through'); assert.deepEqual(unread.ended, ['cat-a']);
   // Tried again: the registry now reads no cat on, and the turn that was not seen to end still keeps this cat out.
-  assert.match(await said(unread.computer.set(b, true)), /^502 computer_other_running 「猫甲」的已经关掉/);
+  assert.match(await said(unread.computer.set(b, true, ['猫甲'])), /^502 computer_other_running 「猫甲」的已经关掉/);
   assert.deepEqual(unread.on(), []);
   unread.stopping.failed = 0;
-  assert.equal((await unread.computer.set(b, true)).on, true);
-  assert.deepEqual(unread.on(), ['cat-b']); assert.deepEqual(unread.ended, ['cat-a', 'cat-a', 'cat-a']);
+  assert.equal((await unread.computer.set(b, true, ['猫甲'])).on, true);
+  assert.deepEqual(unread.on(), ['cat-b']); assert.deepEqual(unread.ended, ['cat-a', 'cat-a']);
   // The same with the turn seen to end the first time. The registry was not read then, so that cat is only done with once
   // it is read off: the next try asks once more (it may have started another turn while its block was on its way).
   const calm = setup();
@@ -332,10 +339,10 @@ test('one cat at a time: what is not known is not claimed — the registry unrea
     if (once && method === 'PATCH' && options.body?.scope === 'cat' && options.body.enabled === false) { once = false; dark = true; }
     return result;
   }) as typeof calm.native.request;
-  assert.match(await said(calm.computer.set(b, true)), /^502 computer_other_on 没能确认「猫甲」的已经关掉/);
+  assert.match(await said(calm.computer.set(b, true, ['猫甲'])), /^502 computer_other_on 没能确认「猫甲」的已经关掉/);
   assert.deepEqual(calm.ended, ['cat-a']);
-  assert.equal((await calm.computer.set(b, true)).on, true); assert.deepEqual(calm.ended, ['cat-a', 'cat-a']);
-  calm.ended.length = 0; await calm.computer.set(c, true); assert.deepEqual(calm.ended, ['cat-b'], 'and after that it is done with');
+  assert.equal((await calm.computer.set(b, true)).on, true); assert.deepEqual(calm.ended, ['cat-a']);
+  calm.ended.length = 0; await calm.computer.set(c, true, ['猫乙']); assert.deepEqual(calm.ended, ['cat-b'], 'and after that it is done with');
 
   // The other cat came off and stopped, then this cat's own switch could not be written: no cat has it now, and the words say so.
   const half = setup();
@@ -345,7 +352,7 @@ test('one cat at a time: what is not known is not claimed — the registry unrea
     if (options.method === 'PATCH' && options.body?.scope === 'cat' && options.body.enabled === true) throw new ApiError(500, 'capability store failed');
     return write(path, options);
   }) as typeof half.native.request;
-  assert.equal(await said(half.computer.set(b, true)), '502 computer_not_on 「猫甲」的已经关掉了，但这只猫的没能打开。请再试一次。');
+  assert.equal(await said(half.computer.set(b, true, ['猫甲'])), '502 computer_not_on 「猫甲」的已经关掉了，但这只猫的没能打开。请再试一次。');
   assert.deepEqual(half.on(), []); assert.deepEqual(half.ended, ['cat-a']);
   assert.deepEqual(await half.computer.view(a), { supported: true, installed: true, on: false, permissions: 'granted' });
   // With no other cat to switch off, the failure is the write's own, as before.
@@ -374,7 +381,7 @@ test('one cat at a time: this cat\'s switch written but the registry unread is s
   for (const lose of [false, true]) {
     const { computer, on, ended, arm } = dim(lose);
     await computer.set(a, true); arm();
-    assert.equal(await said(computer.set(b, true)), '502 computer_on_unknown 「猫甲」的已经关掉了，但没能确认这只猫的有没有打开。请再试一次。', `answer lost: ${lose}`);
+    assert.equal(await said(computer.set(b, true, ['猫甲'])), '502 computer_on_unknown 「猫甲」的已经关掉了，但没能确认这只猫的有没有打开。请再试一次。', `answer lost: ${lose}`);
     assert.deepEqual(on(), ['cat-b'], 'it is on, in fact'); assert.deepEqual(ended, ['cat-a']);
     // What the pages read afterwards is the registry's word.
     assert.deepEqual(await computer.view(b), { supported: true, installed: true, on: true, permissions: 'granted' });
@@ -402,7 +409,7 @@ test('a change that is confirmed answers with what it read: a registry that cann
   await computer.set(a, true);
   // 猫乙 takes it from 猫甲: on, and said as on.
   armed = { id: 'cat-b', enabled: true };
-  assert.deepEqual(await computer.set(b, true), { supported: true, installed: true, on: true, permissions: 'granted' });
+  assert.deepEqual(await computer.set(b, true, ['猫甲']), { supported: true, installed: true, on: true, permissions: 'granted' });
   assert.deepEqual(on(), ['cat-b']);
   // The same turning it off.
   reads = Infinity; armed = { id: 'cat-b', enabled: false };
@@ -412,30 +419,38 @@ test('a change that is confirmed answers with what it read: a registry that cann
   assert.equal((await computer.view(b)).on, false);
 });
 
-test('one cat at a time: a block that lands after its request gave up still has that cat\'s turn ended before another cat is let in', async () => {
-  const { native, computer, on, ended } = setup();
+test('one cat at a time: a block that lands after its request gave up still has that cat\'s active turn ended before another cat is let in', async () => {
+  const native = new NativeFixture(); native.cats = structuredClone([a, b, c]);
+  const running = new Set<string>(), ended: string[] = [];
+  const computer = new Computer(native, new Driver(), async (known, look) => {
+    if (look) return { stopped: 0, failed: running.has(known.id) ? 1 : 0 };
+    ended.push(known.id); running.delete(known.id); return { stopped: 1, failed: 0 };
+  }, 0, async ids => ids.map(id => native.cats.find(known => known.id === id)?.name ?? ''));
+  const on = () => native.capabilities.length && native.capabilities[0]!.mcpServer.command !== '/usr/bin/true' ? native.cats.filter(known => !native.capabilities[0]!.blockedCats?.includes(known.id)).map(known => known.id) : [];
   await computer.set(a, true);
   // The engine is slow: A's block is taken in, but this app's request gives up first, and the registry still reads A on.
   let release!: () => void;
   native.capabilityHold = { key: 'PATCH:cat', release: new Promise<void>(done => { release = done; }) };
-  assert.equal(await said(computer.set(b, true)), '502 computer_other_on 没能先把「猫甲」的关掉，所以这只猫的没有打开。请再试一次。');
+  assert.equal(await said(computer.set(b, true, ['猫甲'])), '502 computer_other_on 没能先把「猫甲」的关掉，所以这只猫的没有打开。请再试一次。');
   assert.deepEqual(on(), ['cat-a']); assert.deepEqual(ended, [], 'a cat seen to be still on keeps its reply');
-  // The block lands. The registry reads no cat on — and A's turn, started with the tools, was never ended.
+  // The block lands. The registry reads no cat on — and A is still in a turn started with the tools.
   release(); await settle();
+  running.add('cat-a');
   assert.deepEqual(on(), []);
-  assert.equal((await computer.set(b, true)).on, true);
+  assert.equal((await computer.set(b, true, ['猫甲'])).on, true);
   assert.deepEqual(ended, ['cat-a'], 'ended before 猫乙 was let in'); assert.deepEqual(on(), ['cat-b']);
-  // The same through a cat's own switch: its "off" gave up (its turns were ended then), it went on working, and the block landed later.
+  // The same through a cat's own switch: its "off" gave up (its turns were ended then), it started another before the block landed.
   ended.length = 0;
   native.capabilityHold = { key: 'PATCH:cat', release: new Promise<void>(done => { release = done; }) };
   await refused(computer.set(b, false), 503);
   assert.deepEqual(on(), ['cat-b']); assert.deepEqual(ended, ['cat-b']);
   release(); await settle();
+  running.add('cat-b');
   assert.deepEqual(on(), []);
-  assert.equal((await computer.set(c, true)).on, true);
+  assert.equal((await computer.set(c, true, ['猫乙'])).on, true);
   assert.deepEqual(ended, ['cat-b', 'cat-b'], 'a turn it started before the block landed is ended before 猫丙 is let in');
   // Once seen off and stopped, a cat is not asked about again.
-  ended.length = 0; await computer.set(a, true);
+  ended.length = 0; await computer.set(a, true, ['猫丙']);
   assert.deepEqual(ended, ['cat-c']);
 });
 
@@ -444,11 +459,12 @@ test('one cat at a time: nothing is written for the new cat while the other cat\
   const asked: string[] = [];
   let stopped!: () => void;
   const gate = new Promise<void>(done => { stopped = done; });
-  const computer = new Computer(native, new Driver(), async (known, look) => { if (look) return { stopped: 0, failed: 0 }; asked.push(known.id); await gate; return { stopped: 1, failed: 0 }; }, 0);
+  const computer = new Computer(native, new Driver(), async (known, look) => { if (look) return { stopped: 0, failed: 0 }; asked.push(known.id); await gate; return { stopped: 1, failed: 0 }; }, 0,
+    async ids => ids.map(id => native.cats.find(known => known.id === id)?.name ?? ''));
   const switched = (id: string, enabled: boolean) => native.calls.filter(call => call.method === 'PATCH' && call.body?.scope === 'cat' && call.body.catId === id && call.body.enabled === enabled).length;
   await computer.set(a, true);
   assert.deepEqual(asked, [], 'nobody had it before');
-  const turning = computer.set(b, true);
+  const turning = computer.set(b, true, ['猫甲']);
   for (let tries = 0; tries < 50 && !asked.length; tries++) await settle();
   assert.deepEqual(asked, ['cat-a']);
   // 猫甲 is blocked and its turn is being ended — it still has the tools it started with. 猫乙 has not been written at all.
@@ -471,14 +487,14 @@ test('one cat at a time, through the routes: the other cat\'s reply is ended by 
     assert.deepEqual(await (await call(second.name)).json(), { supported: true, installed: true, on: false, permissions: 'granted', others: [first.name] });
     native.queues.set(thread.id, { queue: [], activeInvocations: [{ catId: first.id, invocationId: 'inv-1' }] });
     native.calls.length = 0;
-    assert.deepEqual(await (await call(second.name, 'PUT', { enabled: true })).json(), { supported: true, installed: true, on: true, permissions: 'granted' });
+    assert.deepEqual(await (await call(second.name, 'PUT', { enabled: true, confirmOff: [first.name] })).json(), { supported: true, installed: true, on: true, permissions: 'granted' });
     assert.deepEqual(native.calls.filter(item => item.path.includes('/cancel/')).map(item => `${item.method} ${item.path}`), [`POST /api/threads/${thread.id}/cancel/${first.id}`]);
     assert.deepEqual(native.queues.get(thread.id)!.activeInvocations, []);
     assert.deepEqual(await (await call(first.name)).json(), { supported: true, installed: true, on: false, permissions: 'granted', others: [second.name] });
     // The other cat's turn never goes away: said with its name, and nobody has the computer.
     native.queues.set((await bridge.direct(second)).id, { queue: [], activeInvocations: [{ catId: second.id, invocationId: 'inv-2' }] });
     native.cancelEndsAfterReads = Infinity; bridge.cancelPatience = 400;
-    const refusal = await call(first.name, 'PUT', { enabled: true });
+    const refusal = await call(first.name, 'PUT', { enabled: true, confirmOff: [second.name] });
     assert.equal(refusal.status, 502);
     const told = await refusal.json();
     assert.equal(told.code, 'computer_other_running'); assert.match(told.error, new RegExp(`^「${second.name}」的已经关掉`));
@@ -498,10 +514,20 @@ test('a driver that moved is pointed at again without changing who is on', async
 
 test('two switches at once register once, and the later one has the computer', async () => {
   const { native, computer, on } = setup();
-  const [first, second] = await Promise.all([computer.set(a, true), computer.set(b, true)]);
+  const [first, second] = await Promise.all([computer.set(a, true), computer.set(b, true, ['猫甲'])]);
   assert.equal(first.on && second.on, true);
   assert.equal(native.calls.filter(call => call.body?.command === '/usr/bin/true').length, 1);
   assert.deepEqual(on(), ['cat-b']);
+  // Without confirming the earlier cat, a concurrent second switch is refused (409) before changing anything.
+  const concurrent = setup();
+  const [one, two] = await Promise.all([
+    concurrent.computer.set(a, true),
+    concurrent.computer.set(b, true).catch(error => error),
+  ]);
+  assert.equal(one.on, true);
+  assert.equal(two instanceof ApiError && two.status === 409 && two.code === 'computer_confirm_changed', true);
+  assert.deepEqual((two as ApiError).details, { supported: true, installed: true, on: false, permissions: 'granted', others: ['猫甲'] });
+  assert.deepEqual(concurrent.on(), ['cat-a']);
 });
 
 test('a new cat is blocked before it exists whenever the entry is there, also while every cat is off', async () => {
@@ -606,7 +632,7 @@ test('whether the cat already exists is asked inside the lock, after the switche
   await computer.set(a, true);
   // A switch is under way; the creation request queues behind it. By the time its turn comes the cat exists and the owner has it on.
   const made = cat('cat-new', '新来的');
-  const switching = computer.set(b, true).then(() => { native.cats.push(structuredClone(made)); });
+  const switching = computer.set(b, true, ['猫甲']).then(() => { native.cats.push(structuredClone(made)); });
   native.calls.length = 0;
   const guarded = computer.guard('cat-new', async () => native.cats.some(known => known.id === 'cat-new'), async () => ({ cat: made }));
   await switching;
@@ -623,7 +649,7 @@ test('a repeated creation request leaves the cat as the owner has it now', async
     const made = await first.bridge.createBot({ name: '团子', simple: { face: 'maine-coon' }, idempotencyKey: key });
     assert.equal((await first.bridge.computer.view(made)).on, false);
     // The owner turns it on; later the same request arrives again at a Bot that was restarted (nothing remembered).
-    await first.bridge.computer.set(made, true);
+    await first.bridge.computer.set(made, true, [first.native.cats[0]!.name]);
     const restarted = createApp({ native: first.native, dataFile: join(first.dir, 'presentation.json'), workspace: join(first.dir, 'workspace'), computer: first.driver });
     first.native.calls.length = 0;
     const again = await restarted.bridge.createBot({ name: '团子', simple: { face: 'maine-coon' }, idempotencyKey: key });
@@ -748,7 +774,9 @@ test('a cat that may be using the computer is not deleted in the middle of a tur
     assert.equal((await (await call(first.name)).json()).on, false);
     const still = await remove(first.name);
     assert.equal(still.status, 409); assert.deepEqual(await still.json(), refusal);
-    assert.deepEqual((await (await call(second.name)).json()).others, [first.name], 'another cat is told of it meanwhile');
+    const secondView = await (await call(second.name)).json();
+    assert.equal(secondView.others, undefined, 'already off in registry');
+    assert.deepEqual(secondView.lingering, [first.name], 'another cat is told of its lingering turn meanwhile');
     // The turn is over: deleted, and the next cat has the computer to itself.
     native.queues.get(thread.id)!.activeInvocations = [];
     native.calls.length = 0;
@@ -792,12 +820,12 @@ test('a cat deleted while the computer is being taken from it: the hand-over fin
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}/xbot-api`;
   try {
     const [first, second] = [native.cats[0]!, native.cats[1]!], thread = await bridge.direct(first);
-    const put = (name: string) => fetch(`${base}/bots/${encodeURIComponent(name)}/computer`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: true }) });
+    const put = (name: string, confirmOff?: string[]) => fetch(`${base}/bots/${encodeURIComponent(name)}/computer`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: true, ...(confirmOff ? { confirmOff } : {}) }) });
     assert.equal((await (await put(first.name)).json()).on, true);
     native.queues.set(thread.id, { queue: [], activeInvocations: [{ catId: first.id, invocationId: 'inv-1' }] });
     // The turn takes a few looks to leave the queue: the deletion arrives while the hand-over is waiting for it.
     native.cancelEndsAfterReads = 3; bridge.cancelPatience = 3000; native.calls.length = 0;
-    const turning = put(second.name);
+    const turning = put(second.name, [first.name]);
     for (let tries = 0; tries < 200 && !native.calls.some(item => item.path.includes('/cancel/')); tries++) await settle();
     const removing = fetch(`${base}/bots/${encodeURIComponent(first.name)}`, { method: 'DELETE' });
     assert.deepEqual(await (await turning).json(), { supported: true, installed: true, on: true, permissions: 'granted' });
@@ -841,4 +869,176 @@ test('the pinned driver: the lock names one release by checksum, and the install
     // `--from` with no file is a mistake, not a reason to download.
     for (const args of [['--from'], ['--from', '--check']]) { const bare = install(...args); assert.equal(bare.status, 1, args.join(' ')); assert.match(bare.stderr, /--from/); }
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('server-enforced confirmOff (T-22) and separated others/lingering view & copy (T-23)', async () => {
+  // 1. Another cat is switched on: omitted or empty confirmOff is refused (409) BEFORE touching registry or cancelling turns.
+  const { native, driver, computer, writes, on, ended, stopping } = setup();
+  await computer.set(a, true);
+  native.calls.length = 0; ended.length = 0;
+  for (const bad of [undefined, [] as string[], ['猫丙']]) {
+    let caught: unknown;
+    try { await computer.set(b, true, bad); } catch (err) { caught = err; }
+    assert.ok(caught instanceof ApiError && caught.status === 409 && caught.code === 'computer_confirm_changed');
+    assert.equal(caught.message, '现在「猫甲」正用着这台电脑，请再确认一次。');
+    assert.deepEqual(caught.details, { supported: true, installed: true, on: false, permissions: 'granted', others: ['猫甲'] });
+    assert.deepEqual(writes(), [], 'nothing written to registry');
+    assert.deepEqual(ended, [], 'nothing cancelled');
+    assert.deepEqual(on(), ['cat-a']);
+  }
+
+  // 2. Only a lingering cat (already off in registry, turn still going): view separates `lingering`, 409 says it truthfully without claiming its switch is on or asserting a turn is definitely running when queue reads fail.
+  stopping.failed = 1;
+  await refused(computer.set(a, false), 502, 'computer_still_running');
+  native.calls.length = 0; ended.length = 0;
+  assert.deepEqual(await computer.view(b), { supported: true, installed: true, on: false, permissions: 'granted', lingering: ['猫甲'] });
+  let lingeringRefusal: unknown;
+  try { await computer.set(b, true, []); } catch (err) { lingeringRefusal = err; }
+  assert.ok(lingeringRefusal instanceof ApiError && lingeringRefusal.status === 409 && lingeringRefusal.code === 'computer_confirm_changed');
+  assert.equal(lingeringRefusal.message, '「猫甲」的已经关掉，但还没确认已经停下；打开后会先停下，请再确认一次。');
+  assert.deepEqual(lingeringRefusal.details, { supported: true, installed: true, on: false, permissions: 'granted', lingering: ['猫甲'] });
+  assert.deepEqual(writes(), []);
+  assert.deepEqual(ended, [], 'did not cancel unconfirmed lingering turn');
+
+  // 3. Both switched-on (`others`) and already-off lingering (`lingering`) present at once.
+  stopping.failed = 0;
+  await computer.set(c, true, ['猫甲']); // clears cat-a (now idle), turns cat-c on
+  stopping.failed = 1;
+  await refused(computer.set(c, false), 502, 'computer_still_running'); // cat-c is now lingering
+  native.capabilities[0]!.blockedCats = native.capabilities[0]!.blockedCats!.filter(id => id !== 'cat-a'); // cat-a is on externally
+  const bothView = await computer.view(b);
+  assert.deepEqual(bothView, { supported: true, installed: true, on: false, permissions: 'granted', others: ['猫甲'], lingering: ['猫丙'] });
+  native.calls.length = 0; ended.length = 0;
+  let bothRefusal: unknown;
+  try { await computer.set(b, true, ['猫甲']); } catch (err) { bothRefusal = err; }
+  assert.ok(bothRefusal instanceof ApiError && bothRefusal.status === 409 && bothRefusal.code === 'computer_confirm_changed');
+  assert.equal(bothRefusal.message, '现在「猫甲」正用着这台电脑，「猫丙」的已经关掉且还没确认停下，请再确认一次。');
+  assert.deepEqual(bothRefusal.details, bothView);
+  assert.deepEqual(writes(), []);
+  assert.deepEqual(ended, []);
+  // Confirming both lets it proceed once turns end.
+  let cFailsStop = true;
+  const bothEnded: string[] = [];
+  const activeBoth = new Computer(native, driver, async (known, look) => {
+    if (look) return { stopped: 0, failed: known.id === 'cat-c' ? 1 : 0 };
+    if (cFailsStop && known.id === 'cat-c') { cFailsStop = false; return { stopped: 0, failed: 1 }; }
+    bothEnded.push(known.id); return { stopped: 1, failed: 0 };
+  }, 0, async ids => ids.map(id => native.cats.find(known => known.id === id)?.name ?? ''));
+  await refused(activeBoth.set(c, false), 502, 'computer_still_running');
+  native.capabilities[0]!.blockedCats = native.capabilities[0]!.blockedCats!.filter(id => id !== 'cat-a'); // cat-a on externally
+  assert.equal((await activeBoth.set(b, true, ['猫甲', '猫丙'])).on, true);
+  assert.deepEqual(on(), ['cat-b']);
+  assert.deepEqual(bothEnded.sort(), ['cat-a', 'cat-c']);
+  // Keep original `computer` synced for step 4.
+  stopping.failed = 0;
+  await computer.set(b, true, ['猫甲']);
+
+  // 3b. Regression (Codex Finding 1): an idle lingering cat that starts a new turn right after `affected()` saw idle must NOT be cancelled unconfirmed.
+  const raceNative = new NativeFixture(); raceNative.cats = structuredClone([a, b]);
+  let raceRunning = false, raceCannotStop = false, startAfterLook = false;
+  const raceStopped: string[] = [];
+  const raceComp = new Computer(raceNative, driver, async (known, look) => {
+    if (look) {
+      const seen = raceRunning;
+      if (startAfterLook) { startAfterLook = false; queueMicrotask(() => { raceRunning = true; }); }
+      return { stopped: 0, failed: seen ? 1 : 0 };
+    }
+    if (raceCannotStop) return { stopped: 0, failed: 1 };
+    if (raceRunning) { raceStopped.push(known.id); raceRunning = false; }
+    return { stopped: 1, failed: 0 };
+  }, 0, async ids => ids.map(id => raceNative.cats.find(known => known.id === id)?.name ?? ''));
+  await raceComp.set(a, true); raceRunning = true; raceCannotStop = true;
+  await refused(raceComp.set(a, false), 502, 'computer_still_running');
+  raceRunning = false; raceCannotStop = false;
+  assert.equal((await raceComp.view(b)).lingering, undefined);
+  startAfterLook = true;
+  assert.equal((await raceComp.set(b, true, [])).on, true);
+  assert.deepEqual(raceStopped, [], 'new turn started after affected() saw idle was NOT cancelled unconfirmed');
+
+  // 3c. Regression (Codex Round 2): driver move triggers reinstall, during which an external client enables cat-c; recheck refuses 409 without cancelling cat-a or cat-c.
+  const moveNative = new NativeFixture(); moveNative.cats = structuredClone([a, b, c]);
+  const moveDriver = new Driver();
+  const moveEnded: string[] = [];
+  const moveComp = new Computer(moveNative, moveDriver, async (known, look) => {
+    if (!look) moveEnded.push(known.id);
+    return { stopped: look ? 0 : 1, failed: 0 };
+  }, 0, async ids => ids.map(id => moveNative.cats.find(known => known.id === id)?.name ?? ''));
+  await moveComp.set(a, true);
+  moveDriver.server = { ...real, command: '/Applications/CuaDriver.app/Contents/MacOS/cua-driver' };
+  const origReq = moveNative.request.bind(moveNative);
+  let signalInstall!: () => void, finishInstall!: () => void;
+  const installSeen = new Promise<void>(done => { signalInstall = done; });
+  const installRelease = new Promise<void>(done => { finishInstall = done; });
+  moveNative.request = (async (path: string, options: any = {}) => {
+    const res = await origReq(path, options);
+    if (path === '/api/capabilities/mcp/install' && options.body?.command === moveDriver.server?.command) { signalInstall(); await installRelease; }
+    return res;
+  }) as typeof moveNative.request;
+  const moving = moveComp.set(b, true, ['猫甲']).catch(error => error);
+  await installSeen;
+  await origReq('/api/capabilities', { method: 'PATCH', body: { capabilityId: 'computer', capabilityType: 'mcp', source: 'external', scope: 'cat', catId: 'cat-c', enabled: true } });
+  finishInstall();
+  const moveRefusal = await moving;
+  assert.ok(moveRefusal instanceof ApiError && moveRefusal.status === 409 && moveRefusal.code === 'computer_confirm_changed');
+  assert.deepEqual((moveRefusal.details as { others?: string[] }).others, ['猫甲', '猫丙']);
+  assert.deepEqual(moveEnded, [], 'neither cat-a nor cat-c was cancelled');
+  assert.deepEqual(moveNative.capabilities[0]?.blockedCats, ['cat-b']);
+
+  // 4. Extra confirmed cat (already off/stopped before PUT arrives) is allowed; renamed cat is refused with the fresh name.
+  assert.equal((await computer.set(a, true, ['猫乙', '猫丙'])).on, true);
+  native.cats[0]!.name = '大猫甲';
+  let renamedRefusal: unknown;
+  try { await computer.set(b, true, ['猫甲']); } catch (err) { renamedRefusal = err; }
+  assert.ok(renamedRefusal instanceof ApiError && renamedRefusal.status === 409 && renamedRefusal.code === 'computer_confirm_changed');
+  assert.deepEqual((renamedRefusal.details as { others?: string[] }).others, ['大猫甲']);
+
+  // 5. Unnamed cats match one-for-one: confirming one unnamed cat rejects when two are present.
+  const nameless = new Computer(native, driver, async () => ({ stopped: 1, failed: 0 }), 0);
+  native.capabilities[0]!.blockedCats = ['cat-b']; // cat-a and cat-c are on
+  let twoUnnamed: unknown;
+  try { await nameless.set(b, true, ['']); } catch (err) { twoUnnamed = err; }
+  assert.ok(twoUnnamed instanceof ApiError && twoUnnamed.status === 409 && twoUnnamed.code === 'computer_confirm_changed');
+  assert.equal(twoUnnamed.message, '现在另外几只猫正用着这台电脑，请再确认一次。');
+  assert.equal((await nameless.set(b, true, ['', ''])).on, true);
+
+  // 6. No entry in registry yet, but a lingering cat is busy: 409 BEFORE registering placeholder.
+  const orphan = setup();
+  await orphan.computer.set(a, true);
+  orphan.stopping.failed = 1;
+  await refused(orphan.computer.set(a, false), 502, 'computer_still_running');
+  orphan.native.capabilities.length = 0; // removed externally
+  orphan.native.calls.length = 0; orphan.ended.length = 0;
+  let orphanRefusal: unknown;
+  try { await orphan.computer.set(b, true, []); } catch (err) { orphanRefusal = err; }
+  assert.ok(orphanRefusal instanceof ApiError && orphanRefusal.status === 409 && orphanRefusal.code === 'computer_confirm_changed');
+  assert.deepEqual(orphan.writes(), [], 'did not register entry on 409');
+  assert.equal(orphan.native.capabilities.length, 0);
+
+  // 7. HTTP route: schema validation & 409 response body carries fresh ComputerView in `details`.
+  const { native: appNative, bridge, runtime, end } = app([a, b, c]);
+  const server = runtime.app.listen(0, '127.0.0.1'); await once(server, 'listening');
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}/xbot-api`;
+  const call = (name: string, method = 'GET', body?: unknown) => fetch(`${base}/bots/${encodeURIComponent(name)}/computer`, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+  try {
+    const [first, second] = [appNative.cats[0]!, appNative.cats[1]!];
+    assert.equal((await call(first.name, 'PUT', { enabled: true, confirmOff: '猫乙' })).status, 400);
+    assert.equal((await (await call(first.name, 'PUT', { enabled: true })).json()).on, true);
+    const stalePut = await call(second.name, 'PUT', { enabled: true, confirmOff: [] });
+    assert.equal(stalePut.status, 409);
+    const body = await stalePut.json();
+    assert.equal(body.code, 'computer_confirm_changed');
+    assert.equal(body.error, `现在「${first.name}」正用着这台电脑，请再确认一次。`);
+    assert.deepEqual(body.details, { supported: true, installed: true, on: false, permissions: 'granted', others: [first.name] });
+    // Now put first into lingering via active turn, verify HTTP 409 with lingering in details.
+    const thread = await bridge.direct(first);
+    appNative.queues.set(thread.id, { queue: [], activeInvocations: [{ catId: first.id, invocationId: 'inv-1' }] });
+    appNative.cancelEndsAfterReads = Infinity; bridge.cancelPatience = 300;
+    assert.equal((await call(first.name, 'PUT', { enabled: false })).status, 502);
+    const lingeringPut = await call(second.name, 'PUT', { enabled: true });
+    assert.equal(lingeringPut.status, 409);
+    const lingeringBody = await lingeringPut.json();
+    assert.equal(lingeringBody.code, 'computer_confirm_changed');
+    assert.equal(lingeringBody.error, `「${first.name}」的已经关掉，但还没确认已经停下；打开后会先停下，请再确认一次。`);
+    assert.deepEqual(lingeringBody.details, { supported: true, installed: true, on: false, permissions: 'granted', lingering: [first.name] });
+  } finally { server.close(); await end(); }
 });

@@ -1093,7 +1093,7 @@ test('leaving the group name with Tab lets focus go on (an unchanged name, or a 
 // does: turning on while a macOS grant is missing switches nothing and answers
 // with the grants still needed; turning on with no driver is refused; turning
 // off always works. Every answer is a new object.
-type View = { supported: boolean; installed: boolean; on: boolean; permissions: string; missing?: string[]; others?: unknown };
+type View = { supported: boolean; installed: boolean; on: boolean; permissions: string; missing?: string[]; others?: unknown; lingering?: unknown };
 const READY: View = { supported: true, installed: true, on: false, permissions: 'granted' };
 const gate = () => { let open!: () => void; const p = new Promise<void>((r) => { open = r; }); return { p, open }; };
 function computerDrawer(start: Partial<View> = {}) {
@@ -1130,7 +1130,7 @@ test('这台电脑 rules: the view only in its own shape, each state\'s words, b
   const R = load(RULES).window.ClowderProfileRules;
   for (const bad of [null, 'yes', {}, { supported: true, installed: true }, { supported: 'true', installed: true, on: false }]) assert.equal(R.computerView(bad), null, JSON.stringify(bad));
   assert.deepEqual(plain(R.computerView({ supported: true, installed: true, on: false, permissions: 'needed', missing: ['screen_recording', 'microphone'] })),
-    { supported: true, installed: true, on: false, permissions: 'needed', missing: ['screen_recording'], others: [] });
+    { supported: true, installed: true, on: false, permissions: 'needed', missing: ['screen_recording'], others: [], lingering: [] });
   assert.deepEqual(plain(R.computerView({ ...READY, permissions: 'needed' })).missing, ['accessibility', 'screen_recording'], 'missing without names: both');
   assert.equal(R.computerView({ ...READY, permissions: 'maybe' }).permissions, 'unknown');
   assert.deepEqual(plain(R.computerView({ ...READY, missing: ['accessibility'] })).missing, [], 'nothing is missing unless the grants are needed');
@@ -1610,8 +1610,11 @@ test('这台电脑: a change that fails shows the server\'s sentence in full, an
   await settle();
   r = computerRow(p3);
   assert.deepEqual([r.shown, r.on, r.failed], [true, 'false', '连不上 clowder-bot']);
-  // The request carries the server's own words for a 5xx (app.js keeps them only when asked).
-  assert.match(read('client/public/profile.js'), /H\.api\(computerPath\(name\), \{ method: "PUT", body: \{ enabled \}, serverError: true \}\)/);
+  // The request carries the server's own words for a 5xx (app.js keeps them only when asked); a turn on
+  // carries the cats the owner confirmed (item 58), a turn off nothing more.
+  const profileJs = read('client/public/profile.js');
+  assert.match(profileJs, /const body = enabled \? \{ enabled: true, confirmOff: Array\.isArray\(told\) \? told : \[\] \} : \{ enabled: false \};\n\s+try \{ view = R\.computerView\(await H\.api\(computerPath\(name\), \{ method: "PUT", body, serverError: true \}\)\); \}/);
+  assert.match(profileJs, /H\.api\(computerPath\(name\), \{ method: "PUT", body: \{ enabled: false \}, serverError: true \}\)/, '不等了 asks only for off');
 });
 
 test('这台电脑 belongs to its cat, not to the page: a change on its way or a wait goes on while another cat is shown, the page shown for the cat then draws it, and an earlier read never overwrites a later answer', async () => {
@@ -1663,19 +1666,39 @@ test('这台电脑 belongs to its cat, not to the page: a change on its way or a
 
 // ---------------------------------------------------------------- one cat at a time (item 55)
 // Several cats on one fake server kept as server/native/computer.ts keeps them:
-// GET names the other cats that have it on, and those already off whose turn
-// is still going (`running`; `others`, absent when none), and answers what was
-// true when it was asked, then waits for its gate; PUT on switches every other
-// cat off first and sees their turns end, then this one on. putGate holds a PUT
-// before the server gets to it; putHold (taken when the PUT is sent) holds its
-// answer after the change is made, so a later request can overtake it; getHold
-// does the same for a GET. grants 'needed': a turn on switches nothing.
+// GET names the other cats that have it on (`others`), and those already off
+// whose turn is still going (`running`; `lingering`), each absent when none,
+// and answers what was true when it was asked, then waits for its gate; PUT on
+// refuses, changing nothing, one whose `confirmOff` does not cover every cat it
+// would touch now (409 computer_confirm_changed with the view as it is, item
+// 58), else switches every other cat off first and sees their turns end, then
+// this one on. putGate holds a PUT before the server gets to it; putHold (taken
+// when the PUT is sent) holds its answer after the change is made, so a later
+// request can overtake it; getHold does the same for a GET. grants 'needed': a
+// turn on switches nothing (and is not checked: nothing would be touched).
+// Who is not covered is worked out here as the server does (unconfirmedCats),
+// not with the page's own rule.
+function unconfirmed(confirmed: unknown, current: string[]) {
+  const said = (Array.isArray(confirmed) ? confirmed : []).map((n: string) => n.trim()), out: string[] = [];
+  for (const raw of current) {
+    const n = raw.trim(), at = said.indexOf(n);
+    if (at < 0) out.push(n);
+    else if (!n) said.splice(at, 1);
+  }
+  return out;
+}
+const CONFIRM_AGAIN = (others: string[], lingering: string[]) => {
+  const who = (list: string[]) => { const names = [...new Set(list.filter(Boolean))].map(n => '「' + n + '」'), unnamed = list.filter(n => !n).length, rest = unnamed > 1 ? '另外几只猫' : unnamed ? '另一只猫' : ''; return names.join('') + (names.length && rest ? '和' : '') + rest; };
+  if (others.length && lingering.length) return '现在' + who(others) + '正用着这台电脑，' + who(lingering) + '的已经关掉且还没确认停下，请再确认一次。';
+  return others.length ? '现在' + who(others) + '正用着这台电脑，请再确认一次。' : who(lingering) + '的已经关掉，但还没确认已经停下；打开后会先停下，请再确认一次。';
+};
 function computerHouse(on: Record<string, boolean>) {
   const srv: Any = { on: { ...on }, running: {}, grants: 'granted', getGate: null, getHold: null, putGate: null, putHold: null, getFails: null, putFails: null };
   const view = (name: string) => {
-    const others = Object.keys({ ...srv.on, ...srv.running }).filter(n => n !== name && (srv.on[n] || srv.running[n]));
+    const others = Object.keys(srv.on).filter(n => n !== name && srv.on[n]);
+    const lingering = Object.keys(srv.running).filter(n => n !== name && !srv.on[n] && srv.running[n]);
     const grants = srv.grants === 'needed' ? { permissions: 'needed', missing: ['screen_recording'] } : {};
-    return { ...READY, ...grants, on: !!srv.on[name], ...(others.length ? { others } : {}) };
+    return { ...READY, ...grants, on: !!srv.on[name], ...(others.length ? { others } : {}), ...(lingering.length ? { lingering } : {}) };
   };
   const path = (name: string) => '/xbot-api/bots/' + encodeURIComponent(name) + '/computer';
   const d = drawer({
@@ -1694,7 +1717,17 @@ function computerHouse(on: Record<string, boolean>) {
       if (srv.putGate) await srv.putGate;
       if (srv.putFails) { const e = srv.putFails; srv.putFails = null; throw e; }
       if (body.enabled && srv.grants === 'needed') { const v = view(name); if (hold) await hold; return v; }
-      if (body.enabled) { for (const n of Object.keys(srv.on)) srv.on[n] = false; srv.running = {}; }
+      if (body.enabled) {
+        const now: Any = view(name), others: string[] = now.others ?? [], lingering: string[] = now.lingering ?? [];
+        if (unconfirmed(body.confirmOff, [...others, ...lingering]).length) {
+          srv.refused = (srv.refused ?? 0) + 1;
+          const e = Object.assign(fail(409, CONFIRM_AGAIN(others, lingering)), { code: 'computer_confirm_changed', details: plain(now) });
+          if (hold) await hold;
+          throw e;
+        }
+        for (const n of Object.keys(srv.on)) srv.on[n] = false;
+        srv.running = {};
+      }
       srv.on[name] = !!body.enabled;
       const v = view(name);
       if (hold) await hold;
@@ -1707,10 +1740,13 @@ function computerHouse(on: Record<string, boolean>) {
     // A cat's 资料 as the shell draws it once its profile is read (a new profile object each time).
     cat: (name: string) => d.show(d.P.catPage({ type: 'bot', id: name }, { name, persona: 'x' })),
     gets: (name: string) => asked(name, 'GET').length, puts: (name: string) => asked(name, 'PUT').map((c: Call) => c.body.enabled),
+    bodies: (name: string) => asked(name, 'PUT').map((c: Call) => c.body),
   };
 }
 const leads = (layer: El) => named(layer, 'pf-lead').map(n => n.textContent);
 const CONSENT_TEXT = '它能看到并操作这台电脑上的应用，看到的画面会发给它用的模型。';
+// A cat already off not yet seen to stop (`lingering`, item 58): never said to be on, nor to be writing a reply for certain.
+const STOPS = (name: string) => '同一时间只有一只猫能用这台电脑：「' + name + '」的已经关掉，但还没确认它停下；打开后它要是还在回复，那条回复会停下。';
 
 test('这台电脑, one cat at a time, rules: `others` only as a non-empty list of names; who gives it up in one sentence (one cat, several, unnamed, none); the two refusals in the server\'s words, a cat\'s name never hiding them', () => {
   const R = load(RULES).window.ClowderProfileRules;
@@ -1891,6 +1927,8 @@ test('这台电脑, one cat at a time: the two refusals of turning on are said i
   // computer_other_running: 墨点 is off now, its turn not yet stopped; nobody has it, but switching on ends that turn.
   const running = '「墨点」的已经关掉，但它正在进行的这一轮还没有停下来，停下之前它还能用这台电脑，所以这只猫的先没有打开。请在「墨点」的对话里点停止，然后再开一次。';
   const handover = '同一时间只有一只猫能用这台电脑：打开后，「墨点」的会关掉；它要是正在回复，那条回复会停下。';
+  // Since item 58 a cat already off is not said to be switched off again: it is not yet seen to stop, and a reply still going is what stops.
+  const stops = STOPS('墨点');
   c.srv.putFails = Object.assign(fail(502, running), { code: 'computer_other_running' });
   c.srv.on.墨点 = false; // the block was written before its turn was given up on
   c.srv.running.墨点 = true;
@@ -1901,7 +1939,7 @@ test('这台电脑, one cat at a time: the two refusals of turning on are said i
   assert.equal(c.gets('快手'), 3, 'read again');
   assert.deepEqual([r.on, r.busy, r.locked, r.hint, r.failed], ['false', null, null, '', running]);
   r.sw.click();
-  assert.deepEqual(leads(c.layer()!), [CONSENT_TEXT, handover], 'the server still names 墨点: its turn goes on');
+  assert.deepEqual(leads(c.layer()!), [CONSENT_TEXT, stops], 'the server still names 墨点: its turn goes on');
   // Turning on again goes through (its turn is ended this time), and the sentence goes with the new request.
   button(c.layer()!, '打开').click();
   await settle();
@@ -1919,7 +1957,7 @@ test('这台电脑, one cat at a time: the two refusals of turning on are said i
   button(z.layer()!, '打开').click();
   await settle();
   computerRow(pz).sw.click();
-  assert.deepEqual(leads(z.layer()!), [CONSENT_TEXT, handover]);
+  assert.deepEqual(leads(z.layer()!), [CONSENT_TEXT, stops]);
   button(z.layer()!, '取消').click();
   z.srv.running = {};
   z.cat('快手'); // its profile read again
@@ -1943,7 +1981,7 @@ test('这台电脑, one cat at a time: the two refusals of turning on are said i
   assert.equal(x.gets('快手'), 2, 'read again (and failed)');
   assert.deepEqual([r.shown, r.on, r.locked, r.failed], [true, 'false', null, running]);
   r.sw.click();
-  assert.deepEqual(leads(x.layer()!), [CONSENT_TEXT, handover]);
+  assert.deepEqual(leads(x.layer()!), [CONSENT_TEXT, handover], 'the view kept is from when 墨点 was on');
   // A refusal also reads again the other cat's 资料 if it is the one drawn by then.
   const y = computerHouse({ 墨点: true });
   y.cat('快手');
@@ -1982,8 +2020,8 @@ test('这台电脑, one cat at a time: a turn not seen to end refuses the next t
   assert.deepEqual([r.on, r.busy, r.locked, r.hint, r.failed], ['false', null, null, '', running]);
   assert.equal(r.error.getAttribute('role'), 'alert');
   assert.equal(r.sw.getAttribute('aria-describedby'), r.error.id);
-  // Still going: the read names 墨点 now, so the dialog does; refused again in the same words.
-  const handover = '同一时间只有一只猫能用这台电脑：打开后，「墨点」的会关掉；它要是正在回复，那条回复会停下。';
+  // Still going: the read names 墨点 now (off, its reply going on), so the dialog does; refused again in the same words.
+  const handover = STOPS('墨点');
   r.sw.click();
   assert.deepEqual(leads(c.layer()!), [CONSENT_TEXT, handover]);
   c.srv.putFails = Object.assign(fail(502, running), { code: 'computer_other_running' });
@@ -2480,6 +2518,530 @@ test('这台电脑, item 57: cats the confirmed dialog named need no second aski
   y.advance(4000);
   await settle();
   assert.deepEqual(y.puts('快手'), [true], 'the wait is over');
+});
+
+// ---------------------------------------------------------------- who the owner confirmed (item 58)
+test('这台电脑, item 58, rules: `lingering` taken as `others` is; every cat a turn on touches, in the order the dialog names them; a cat already off is said to be off and not yet seen to stop, a reply it may still be writing stopping — alone, several, unnamed, beside cats that are on — in one sentence; the refusal that asks again passes whole', () => {
+  const R = load(RULES).window.ClowderProfileRules;
+  const lingering = (value: unknown) => plain(R.computerView({ ...READY, lingering: value })).lingering;
+  assert.deepEqual(lingering(['墨点']), ['墨点']);
+  assert.deepEqual(lingering(['墨点', '']), ['墨点', ''], 'a cat the server could not name stays, as unnamed');
+  assert.deepEqual(lingering([' 墨点 ']), ['墨点']);
+  for (const bad of [undefined, null, [], '墨点', { 0: '墨点' }, [1], ['墨点', 2], [null]]) assert.deepEqual(lingering(bad), [], JSON.stringify(bad));
+  assert.deepEqual(plain(R.computerView({ ...READY, others: ['墨点'], lingering: ['年糕'] })), { ...READY, missing: [], others: ['墨点'], lingering: ['年糕'] });
+  assert.deepEqual(plain(R.computerView({ ...READY, others: [1], lingering: ['年糕'] })), { ...READY, missing: [], others: [], lingering: ['年糕'] }, 'each list on its own');
+  assert.deepEqual(plain(R.computerView({ ...READY, others: ['墨点'], lingering: '年糕' })), { ...READY, missing: [], others: ['墨点'], lingering: [] });
+  assert.equal(R.computerView({ on: false, lingering: ['墨点'] }), null, 'a malformed answer is still no view');
+  // Every cat a turn on touches: those switched off, then those whose reply stops.
+  const affected = (view: unknown) => plain(R.computerAffected(view));
+  assert.deepEqual(affected(R.computerView({ ...READY, others: ['墨点'], lingering: ['年糕', ''] })), ['墨点', '年糕', '']);
+  assert.deepEqual(affected(R.computerView({ ...READY, lingering: ['年糕'] })), ['年糕']);
+  assert.deepEqual(affected(R.computerView(READY)), []);
+  for (const none of [null, undefined, {}, { others: '墨点', lingering: 3 }]) assert.deepEqual(affected(none), [], JSON.stringify(none));
+  // The confirmed list covers a cat whether it was on or still replying then.
+  assert.deepEqual(plain(R.computerUntold(['墨点'], R.computerAffected({ others: ['墨点'], lingering: ['年糕'] }))), ['年糕']);
+  assert.deepEqual(plain(R.computerUntold(['墨点', '年糕'], R.computerAffected({ others: ['年糕'], lingering: ['墨点'] }))), []);
+  // The words.
+  const said = (others: unknown, lingering: unknown) => R.computerConsent('快手', others, lingering).handover;
+  const lead = '同一时间只有一只猫能用这台电脑：';
+  const alone: Array<[unknown, string]> = [
+    [['墨点'], '「墨点」的已经关掉，但还没确认它停下；打开后它要是还在回复，那条回复会停下。'],
+    [['墨点', '年糕'], '「墨点」「年糕」的已经关掉，但还没确认它们停下；打开后它们要是还在回复，那些回复会停下。'],
+    [[''], '另一只猫的已经关掉，但还没确认它停下；打开后它要是还在回复，那条回复会停下。'],
+    [['', ''], '另外几只猫的已经关掉，但还没确认它们停下；打开后它们要是还在回复，那些回复会停下。'],
+    [['墨点', ''], '「墨点」和另一只猫的已经关掉，但还没确认它们停下；打开后它们要是还在回复，那些回复会停下。'],
+    [['墨点', '墨点'], '「墨点」的已经关掉，但还没确认它停下；打开后它要是还在回复，那条回复会停下。'],
+  ];
+  for (const [list, words] of alone) {
+    for (const others of [undefined, null, []]) assert.equal(said(others, list), lead + words, JSON.stringify([others, list]));
+    assert.doesNotMatch(said([], list), /会关掉/, 'its switch is off already: never said to go off');
+  }
+  assert.equal(said([], ['墨点']), STOPS('墨点'));
+  // Others only: word for word as before (item 55).
+  assert.equal(said(['墨点'], []), lead + '打开后，「墨点」的会关掉；它要是正在回复，那条回复会停下。');
+  assert.equal(said(['墨点', '年糕'], undefined), lead + '打开后，「墨点」「年糕」的会关掉；它们要是正在回复，那些回复会停下。');
+  assert.equal(said(['墨点'], null), R.computerHandover(['墨点']));
+  for (const none of [undefined, null, []]) assert.equal(said(none, none), '', JSON.stringify(none));
+  // Both: who goes off, then who is off already and not yet seen to stop; then the replies either may still be writing (two cats at least: 它们).
+  const both: Array<[unknown, unknown, string]> = [
+    [['墨点'], ['年糕'], '打开后，「墨点」的会关掉，「年糕」的已经关掉但还没确认停下；它们要是还在回复，那些回复会停下。'],
+    [['墨点', ''], ['年糕'], '打开后，「墨点」和另一只猫的会关掉，「年糕」的已经关掉但还没确认停下；它们要是还在回复，那些回复会停下。'],
+    [['墨点'], ['年糕', ''], '打开后，「墨点」的会关掉，「年糕」和另一只猫的已经关掉但还没确认停下；它们要是还在回复，那些回复会停下。'],
+    [['墨点', '宪宪'], ['年糕', '豆豆'], '打开后，「墨点」「宪宪」的会关掉，「年糕」「豆豆」的已经关掉但还没确认停下；它们要是还在回复，那些回复会停下。'],
+  ];
+  for (const [others, list, words] of both) assert.equal(said(others, list), lead + words, JSON.stringify([others, list]));
+  // One sentence each time, in everyday words; with a cat already off, never that a reply is being written for certain
+  // (the server counts one whose turn it could not read as still going).
+  for (const [others, list] of [...alone.map(([l]) => [[], l]), ...both.map(([o, l]) => [o, l])]) {
+    const text = said(others, list);
+    assert.equal(text.match(/[。？！]/g).length, 1, text);
+    assert.ok(text.endsWith('。'), text);
+    assert.doesNotMatch(text, /模型|Agent|Bot|session|thread|会话|线程|原生|调用|这一轮/i, text);
+    assert.doesNotMatch(text, /正在/, text);
+    assert.match(text, /还没确认.*要是还在回复/, text);
+  }
+  // The dialog's title and first sentence stay as they were.
+  assert.deepEqual(plain(R.computerConsent('快手', [], ['墨点'])), { title: '让「快手」用这台电脑？', text: CONSENT_TEXT, handover: STOPS('墨点') });
+  // The refusal that asks again (409 computer_confirm_changed), as the server says it: whole, a cat's name never hiding it.
+  const again = [
+    '现在「墨点」正用着这台电脑，请再确认一次。',
+    '现在另一只猫正用着这台电脑，请再确认一次。',
+    '「墨点」的已经关掉，但还没确认已经停下；打开后会先停下，请再确认一次。',
+    '现在「年糕」正用着这台电脑，「墨点」的已经关掉且还没确认停下，请再确认一次。',
+    '现在「Bot 一号」正用着这台电脑，请再确认一次。',
+  ];
+  for (const text of again) assert.equal(R.computerError(Object.assign(fail(409, text), { code: 'computer_confirm_changed' }), true), text, text);
+  assert.equal(CONFIRM_AGAIN(['墨点'], []), again[0]);
+  assert.equal(CONFIRM_AGAIN([], ['墨点']), again[2]);
+  assert.equal(CONFIRM_AGAIN(['年糕'], ['墨点']), again[3]);
+  // The fake server's sentences are the server's own.
+  const server = read('server/native/computer.ts');
+  for (const part of ['正用着这台电脑，请再确认一次。', '的已经关掉且还没确认停下，请再确认一次。', '的已经关掉，但还没确认已经停下；打开后会先停下，请再确认一次。']) assert.ok(server.includes(part), part);
+});
+
+test('这台电脑, item 58: a cat already off whose reply may go on is named as off — the dialog says it is not yet seen to stop and that a reply still going stops, never that its switch goes off; beside a cat that is on, both in one sentence; the request says every cat the dialog named, and goes through', async () => {
+  const c = computerHouse({ 墨点: false });
+  c.srv.running.墨点 = true;
+  const page = c.cat('快手');
+  await settle();
+  let r = computerRow(page);
+  assert.deepEqual([r.shown, r.on, r.said, r.failed], [true, 'false', '', '']);
+  assert.equal(seenText(r.row), '可以用这台电脑', 'the row says nothing about the other cat');
+  r.sw.click();
+  let layer = c.layer()!;
+  assert.deepEqual(leads(layer), [CONSENT_TEXT, STOPS('墨点')]);
+  assert.equal(visibleText(one(layer, 'pf-card')), '让「快手」用这台电脑？' + CONSENT_TEXT + STOPS('墨点') + '取消打开');
+  assert.ok(named(layer, 'pf-lead').every(n => has(n, 'pf-cwhy')));
+  assert.equal(c.doc.activeElement, button(layer, '取消'));
+  assert.deepEqual(c.puts('快手'), [], 'nothing sent while it asks');
+  button(layer, '打开').click();
+  await settle();
+  assert.deepEqual(c.bodies('快手'), [{ enabled: true, confirmOff: ['墨点'] }]);
+  assert.equal(c.srv.refused ?? 0, 0);
+  r = computerRow(page);
+  assert.deepEqual([r.on, r.busy, r.failed], ['true', null, '']);
+  assert.deepEqual([c.srv.on, c.srv.running], [{ 墨点: false, 快手: true }, {}]);
+  // A cat on and a cat off with its reply going: both in one sentence, both confirmed.
+  const both = '同一时间只有一只猫能用这台电脑：打开后，「年糕」的会关掉，「墨点」的已经关掉但还没确认停下；它们要是还在回复，那些回复会停下。';
+  const b = computerHouse({ 年糕: true, 墨点: false });
+  b.srv.running.墨点 = true;
+  const pb = b.cat('快手');
+  await settle();
+  computerRow(pb).sw.click();
+  layer = b.layer()!;
+  assert.deepEqual(leads(layer), [CONSENT_TEXT, both]);
+  assert.equal(visibleText(one(layer, 'pf-card')), '让「快手」用这台电脑？' + CONSENT_TEXT + both + '取消打开');
+  button(layer, '打开').click();
+  await settle();
+  assert.deepEqual(b.bodies('快手'), [{ enabled: true, confirmOff: ['年糕', '墨点'] }]);
+  assert.equal(computerRow(pb).on, 'true');
+  assert.deepEqual([b.srv.on, b.srv.running], [{ 年糕: false, 墨点: false, 快手: true }, {}]);
+  // Several of each, one the server could not name: said as the rules say them, and confirmed as named.
+  for (const [view, words, told] of [
+    [{ lingering: ['墨点', '年糕'] }, '同一时间只有一只猫能用这台电脑：「墨点」「年糕」的已经关掉，但还没确认它们停下；打开后它们要是还在回复，那些回复会停下。', ['墨点', '年糕']],
+    [{ lingering: [''] }, '同一时间只有一只猫能用这台电脑：另一只猫的已经关掉，但还没确认它停下；打开后它要是还在回复，那条回复会停下。', ['']],
+    [{ others: ['宪宪'], lingering: ['墨点', ''] }, '同一时间只有一只猫能用这台电脑：打开后，「宪宪」的会关掉，「墨点」和另一只猫的已经关掉但还没确认停下；它们要是还在回复，那些回复会停下。', ['宪宪', '墨点', '']],
+  ] as Array<[Partial<View>, string, string[]]>) {
+    const x = computerDrawer(view);
+    const p = x.page();
+    await settle();
+    computerRow(p).sw.click();
+    assert.deepEqual(leads(x.layer()!), [CONSENT_TEXT, words], JSON.stringify(view));
+    button(x.layer()!, '打开').click();
+    await settle();
+    assert.deepEqual(x.calls.filter((call: Call) => call.method === 'PUT').map((call: Call) => call.body), [{ enabled: true, confirmOff: told }], JSON.stringify(view));
+  }
+});
+
+test('这台电脑, item 58: a turn on says who the owner confirmed — `confirmOff` [] with nobody named; off, and 不等了, say only off; the grants wait sends the list the dialog named, and a cat that has started a reply since is not in it: nothing is sent, and the dialog asks again naming it', async () => {
+  const c = computerHouse({});
+  const page = c.cat('快手');
+  await settle();
+  computerRow(page).sw.click();
+  assert.deepEqual(leads(c.layer()!), [CONSENT_TEXT]);
+  button(c.layer()!, '打开').click();
+  await settle();
+  assert.equal(computerRow(page).on, 'true');
+  computerRow(page).sw.click();
+  await settle();
+  assert.equal(computerRow(page).on, 'false');
+  assert.deepEqual(c.bodies('快手'), [{ enabled: true, confirmOff: [] }, { enabled: false }]);
+  // The grants wait: the list the owner confirmed (a cat on and one still replying) goes with the request it sends again.
+  const w = computerHouse({ 年糕: true });
+  w.srv.running.墨点 = true;
+  w.srv.grants = 'needed';
+  const pw = w.cat('快手');
+  await settle();
+  computerRow(pw).sw.click();
+  assert.equal(leads(w.layer()!)[1], '同一时间只有一只猫能用这台电脑：打开后，「年糕」的会关掉，「墨点」的已经关掉但还没确认停下；它们要是还在回复，那些回复会停下。');
+  button(w.layer()!, '打开').click();
+  await settle();
+  assert.equal(computerRow(pw).hint, '等你在系统设置里打开…');
+  w.srv.grants = 'granted';
+  w.advance(2000);
+  await settle();
+  assert.deepEqual(w.bodies('快手'), [{ enabled: true, confirmOff: ['年糕', '墨点'] }, { enabled: true, confirmOff: ['年糕', '墨点'] }]);
+  assert.equal(w.layer(), null, 'both were named: no second asking');
+  assert.equal(computerRow(pw).on, 'true');
+  assert.deepEqual([w.srv.on, w.srv.running], [{ 年糕: false, 快手: true }, {}]);
+  // 不等了: only off.
+  const s = computerHouse({ 墨点: true });
+  s.srv.grants = 'needed';
+  const ps = s.cat('快手');
+  await settle();
+  computerRow(ps).sw.click();
+  button(s.layer()!, '打开').click();
+  await settle();
+  computerRow(ps).stop.click();
+  await settle();
+  assert.deepEqual(s.bodies('快手'), [{ enabled: true, confirmOff: ['墨点'] }, { enabled: false }]);
+  // A cat switched off elsewhere while it replies, after the owner confirmed: the wait's read names it as off with its
+  // reply going (computerUntold over both lists) — nothing is sent, and with 资料 on screen the dialog asks again.
+  const l = computerHouse({});
+  l.srv.grants = 'needed';
+  const pl = l.cat('快手');
+  await settle();
+  computerRow(pl).sw.click();
+  assert.deepEqual(leads(l.layer()!), [CONSENT_TEXT]);
+  button(l.layer()!, '打开').click();
+  await settle();
+  l.srv.grants = 'granted';
+  l.srv.running.墨点 = true;
+  l.advance(2000);
+  await settle();
+  assert.deepEqual(l.puts('快手'), [true], 'not sent by itself');
+  let r = computerRow(pl);
+  assert.deepEqual([r.on, r.busy, r.hint, r.said, r.failed], ['false', null, '', '', '']);
+  assert.deepEqual(leads(l.layer()!), [CONSENT_TEXT, STOPS('墨点')]);
+  button(l.layer()!, '打开').click();
+  await settle();
+  assert.deepEqual(l.bodies('快手'), [{ enabled: true, confirmOff: [] }, { enabled: true, confirmOff: ['墨点'] }]);
+  r = computerRow(pl);
+  assert.deepEqual([r.on, r.failed], ['true', '']);
+  assert.deepEqual(l.srv.running, {});
+});
+
+test('这台电脑, item 58: refused because the cats a turn on would touch changed after the dialog (409 computer_confirm_changed) — nothing changed on the server; the row takes the view the refusal carries at once (nothing read), the dialog asks again naming them, and confirmed, the request says them and goes through; cancelled, nothing is sent', async () => {
+  const c = computerHouse({});
+  const page = c.cat('快手');
+  await settle();
+  computerRow(page).sw.click();
+  assert.deepEqual(leads(c.layer()!), [CONSENT_TEXT]);
+  // While the owner reads the dialog, 墨点 is switched on elsewhere (another tab).
+  c.srv.on.墨点 = true;
+  button(c.layer()!, '打开').click();
+  await settle();
+  assert.equal(c.srv.refused, 1);
+  assert.deepEqual(c.srv.on, { 墨点: true }, 'nothing changed on the server');
+  assert.equal(c.gets('快手'), 1, 'not read again: the refusal says what is true');
+  let r = computerRow(page);
+  assert.deepEqual([r.shown, r.on, r.busy, r.locked, r.hint, r.said, r.failed], [true, 'false', null, null, '', '', '']);
+  let layer = c.layer()!;
+  assert.deepEqual(leads(layer), [CONSENT_TEXT, HANDS('墨点')]);
+  assert.equal(c.doc.activeElement, button(layer, '取消'));
+  button(layer, '打开').click();
+  await settle();
+  assert.deepEqual(c.bodies('快手'), [{ enabled: true, confirmOff: [] }, { enabled: true, confirmOff: ['墨点'] }]);
+  assert.deepEqual(c.srv.on, { 墨点: false, 快手: true });
+  r = computerRow(page);
+  assert.deepEqual([r.on, r.busy, r.failed], ['true', null, '']);
+  // A cat that started replying with the computer, beside the one the owner confirmed: asked again naming both.
+  const l = computerHouse({ 年糕: true });
+  const pl = l.cat('快手');
+  await settle();
+  computerRow(pl).sw.click();
+  assert.deepEqual(leads(l.layer()!), [CONSENT_TEXT, HANDS('年糕')]);
+  l.srv.running.墨点 = true;
+  button(l.layer()!, '打开').click();
+  await settle();
+  assert.deepEqual([l.srv.on, l.srv.running], [{ 年糕: true }, { 墨点: true }], 'nothing changed, no reply stopped');
+  assert.equal(l.gets('快手'), 1);
+  layer = l.layer()!;
+  assert.deepEqual(leads(layer), [CONSENT_TEXT, '同一时间只有一只猫能用这台电脑：打开后，「年糕」的会关掉，「墨点」的已经关掉但还没确认停下；它们要是还在回复，那些回复会停下。']);
+  // Cancelled: nothing sent, the switch off and usable with no line; pressed again, it names them still.
+  button(layer, '取消').click();
+  assert.equal(l.doc.activeElement, computerRow(pl).sw, 'focus back to the switch');
+  l.advance(4000);
+  await settle();
+  assert.deepEqual(l.puts('快手'), [true]);
+  r = computerRow(pl);
+  assert.deepEqual([r.on, r.busy, r.locked, r.failed], ['false', null, null, '']);
+  r.sw.click();
+  button(l.layer()!, '打开').click();
+  await settle();
+  assert.deepEqual(l.bodies('快手').map((body: Any) => body.confirmOff), [['年糕'], ['年糕', '墨点']]);
+  assert.equal(computerRow(pl).on, 'true');
+  assert.deepEqual([l.srv.on, l.srv.running], [{ 年糕: false, 快手: true }, {}]);
+  // The cat confirmed gave it up meanwhile and another took it: only the new one is named.
+  const g = computerHouse({ 墨点: true });
+  const pg = g.cat('快手');
+  await settle();
+  computerRow(pg).sw.click();
+  assert.equal(leads(g.layer()!)[1], HANDS('墨点'));
+  g.srv.on = { 墨点: false, 年糕: true };
+  button(g.layer()!, '打开').click();
+  await settle();
+  assert.deepEqual(leads(g.layer()!), [CONSENT_TEXT, HANDS('年糕')]);
+  // A cat confirmed that gave it up by itself before the request arrived is no reason to refuse.
+  const q = computerHouse({ 墨点: true });
+  const pq = q.cat('快手');
+  await settle();
+  computerRow(pq).sw.click();
+  q.srv.on.墨点 = false;
+  button(q.layer()!, '打开').click();
+  await settle();
+  assert.equal(q.srv.refused ?? 0, 0);
+  assert.deepEqual([computerRow(pq).on, q.layer()], ['true', null]);
+  // During the grants wait: what the wait read (nobody) changes before its request arrives — refused, asked again on screen.
+  const w = computerHouse({});
+  w.srv.grants = 'needed';
+  const pw = w.cat('快手');
+  await settle();
+  computerRow(pw).sw.click();
+  button(w.layer()!, '打开').click();
+  await settle();
+  w.srv.grants = 'granted';
+  const late = gate();
+  w.srv.getHold = late.p;
+  w.advance(2000);
+  await settle();
+  w.srv.getHold = null;
+  w.srv.on.墨点 = true;
+  late.open();
+  await settle();
+  assert.deepEqual(w.bodies('快手'), [{ enabled: true, confirmOff: [] }, { enabled: true, confirmOff: [] }]);
+  assert.equal(w.srv.refused, 1);
+  r = computerRow(pw);
+  assert.deepEqual([r.on, r.busy, r.hint, r.said, r.failed], ['false', null, '', '', '']);
+  assert.deepEqual(leads(w.layer()!), [CONSENT_TEXT, HANDS('墨点')]);
+  const asked = w.calls.length;
+  w.advance(6000);
+  await settle();
+  assert.equal(w.calls.length, asked, 'the wait is over: nothing more read or sent while the owner decides');
+});
+
+test('这台电脑, item 58: the same refusal with another dialog of the app open, the drawer closed or another cat shown — nothing asks over it or out of sight; the view it carries is what the row shows (this cat not read again; another cat shown is: who has the computer changed), the server\'s sentence says why, and the switch asks again naming them', async () => {
+  const again = '现在「墨点」正用着这台电脑，请再确认一次。';
+  // Another dialog of the app open when the refusal comes.
+  const c = computerHouse({});
+  const page = c.cat('快手');
+  await settle();
+  const put = gate();
+  c.srv.putGate = put.p;
+  computerRow(page).sw.click();
+  button(c.layer()!, '打开').click();
+  c.srv.on.墨点 = true;
+  const form = c.doc.createElement('form');
+  form.setAttribute('aria-modal', 'true');
+  c.doc.body.append(form);
+  put.open();
+  c.srv.putGate = null;
+  await settle();
+  assert.equal(c.srv.refused, 1);
+  assert.equal(c.layer(), null, 'nothing asks over it');
+  assert.equal(c.gets('快手'), 1, 'not read again');
+  let r = computerRow(page);
+  assert.deepEqual([r.shown, r.on, r.busy, r.locked, r.hint, r.failed], [true, 'false', null, null, '', again]);
+  assert.equal(r.error.getAttribute('role'), 'alert');
+  assert.equal(r.sw.getAttribute('aria-describedby'), r.error.id);
+  form.remove();
+  r.sw.click();
+  assert.deepEqual(leads(c.layer()!), [CONSENT_TEXT, HANDS('墨点')], 'the view the refusal carried');
+  button(c.layer()!, '打开').click();
+  assert.equal(computerRow(page).failed, '', 'cleared by the new request');
+  await settle();
+  r = computerRow(page);
+  assert.deepEqual([r.on, r.failed], ['true', '']);
+  assert.deepEqual(c.bodies('快手').map((body: Any) => body.confirmOff), [[], ['墨点']]);
+  // The drawer closed: nothing asks; open again, the row says why and the switch names the cat.
+  const y = computerHouse({});
+  const py = y.cat('快手');
+  await settle();
+  const yput = gate();
+  y.srv.putGate = yput.p;
+  computerRow(py).sw.click();
+  button(y.layer()!, '打开').click();
+  y.srv.on.墨点 = true;
+  y.s.open = false;
+  yput.open();
+  y.srv.putGate = null;
+  await settle();
+  assert.equal(y.layer(), null);
+  assert.equal(y.gets('快手'), 1);
+  y.s.open = true;
+  r = computerRow(py);
+  assert.deepEqual([r.on, r.busy, r.failed], ['false', null, again]);
+  r.sw.click();
+  assert.deepEqual(leads(y.layer()!), [CONSENT_TEXT, HANDS('墨点')]);
+  button(y.layer()!, '取消').click();
+  // Another cat shown: nothing asks; that cat's row is read again (the refusal says the cats a turn on would touch
+  // changed: what the page heard about them may no longer hold), and now names 墨点; back to 快手, its new page reads
+  // first, then the sentence and the dialog say who.
+  const z = computerHouse({});
+  z.cat('快手');
+  await settle();
+  const zput = gate();
+  z.srv.putGate = zput.p;
+  computerRow(z.panel.firstChild).sw.click();
+  button(z.layer()!, '打开').click();
+  const other = z.cat('年糕');
+  await settle();
+  z.srv.on.墨点 = true;
+  zput.open();
+  z.srv.putGate = null;
+  await settle();
+  assert.equal(z.layer(), null, 'nothing asks out of sight');
+  assert.equal(z.gets('快手'), 1);
+  assert.equal(z.gets('年糕'), 2, 'the cat shown is read again');
+  r = computerRow(other);
+  assert.deepEqual([r.shown, r.on, r.failed], [true, 'false', '']);
+  r.sw.click();
+  assert.deepEqual(leads(z.layer()!), [CONSENT_TEXT, HANDS('墨点')], 'it names the cat switched on elsewhere');
+  button(z.layer()!, '取消').click();
+  const pz = z.cat('快手');
+  await settle();
+  r = computerRow(pz);
+  assert.deepEqual([r.on, r.busy, r.failed], ['false', null, again]);
+  r.sw.click();
+  assert.deepEqual(leads(z.layer()!), [CONSENT_TEXT, HANDS('墨点')]);
+});
+
+test('这台电脑, item 58 review: a refusal naming a cat this page last saw off (computer_confirm_changed) does not leave that cat\'s row saying off — what the page heard about the other cats is dropped and read again, shown or not; the refused cat takes the view the refusal carries, not read again', async () => {
+  // 墨点's 资料 on screen showing it off while 快手's turn on is on its way; another tab turns 墨点 on; the server
+  // refuses 快手's (it would switch 墨点 off unconfirmed), naming 墨点 in the view it carries.
+  const c = computerHouse({});
+  c.cat('快手');
+  await settle();
+  const put = gate();
+  c.srv.putGate = put.p;
+  computerRow(c.panel.firstChild).sw.click();
+  button(c.layer()!, '打开').click();
+  const a = c.cat('墨点');
+  await settle();
+  let r = computerRow(a);
+  assert.deepEqual([r.shown, r.on, r.failed], [true, 'false', '']);
+  assert.equal(c.gets('墨点'), 1);
+  c.srv.on.墨点 = true;
+  const slow = gate();
+  c.srv.getGate = slow.p;
+  put.open();
+  c.srv.putGate = null;
+  await settle();
+  assert.equal(c.srv.refused, 1);
+  assert.deepEqual(c.srv.on, { 墨点: true }, 'nothing changed on the server');
+  assert.equal(c.gets('墨点'), 2, 'read again');
+  assert.equal(computerRow(a).shown, false, 'while it is read, the old off is not drawn');
+  c.srv.getGate = null;
+  slow.open();
+  await settle();
+  r = computerRow(a);
+  assert.deepEqual([r.shown, r.on, r.busy, r.failed], [true, 'true', null, '']);
+  assert.equal(c.layer(), null, 'nothing asks out of sight');
+  assert.equal(c.gets('快手'), 1, 'the refused cat is not read: the refusal says what is true');
+  // Back to 快手: the sentence, and the dialog names 墨点.
+  const b = c.cat('快手');
+  await settle();
+  r = computerRow(b);
+  assert.deepEqual([r.on, r.failed], ['false', CONFIRM_AGAIN(['墨点'], [])]);
+  r.sw.click();
+  assert.deepEqual(leads(c.layer()!), [CONSENT_TEXT, HANDS('墨点')]);
+  button(c.layer()!, '取消').click();
+  // The same with the drawer closed on 墨点's 资料 (what it last heard kept, not on screen): read again all the same,
+  // and open again it shows on.
+  const y = computerHouse({});
+  y.cat('快手');
+  await settle();
+  const yput = gate();
+  y.srv.putGate = yput.p;
+  computerRow(y.panel.firstChild).sw.click();
+  button(y.layer()!, '打开').click();
+  const ya = y.cat('墨点');
+  await settle();
+  assert.equal(computerRow(ya).on, 'false');
+  y.s.open = false;
+  y.srv.on.墨点 = true;
+  yput.open();
+  y.srv.putGate = null;
+  await settle();
+  assert.equal(y.srv.refused, 1);
+  assert.equal(y.gets('墨点'), 2, 'read again out of sight');
+  y.s.open = true;
+  assert.deepEqual([computerRow(ya).shown, computerRow(ya).on], [true, 'true']);
+});
+
+test('这台电脑, item 58: a refusal the page cannot take at its word — what it heard about the other cats no longer known meanwhile (stale: the cat it names deleted here), a view missing or malformed, or this cat on — asks nothing; stale or without a view it is read again, as after any failure', async () => {
+  const again = '现在「年糕」正用着这台电脑，请再确认一次。';
+  // Stale (forget, as when another cat is switched on from this page): 年糕, named in the refusal's view, is deleted
+  // while the refusal is on its way; the view is not believed.
+  const c = computerHouse({});
+  const page = c.cat('快手');
+  await settle();
+  computerRow(page).sw.click();
+  c.srv.on.年糕 = true;
+  const hold = gate();
+  c.srv.putHold = hold.p;
+  button(c.layer()!, '打开').click();
+  c.srv.putHold = null;
+  await settle();
+  assert.equal(c.srv.refused, 1);
+  delete c.srv.on.年糕;
+  c.P.afterDelete('年糕');
+  hold.open();
+  await settle();
+  assert.equal(c.gets('快手'), 2, 'read again');
+  assert.equal(c.layer(), null, 'nothing asks from a view that may be from before');
+  let r = computerRow(page);
+  assert.deepEqual([r.shown, r.on, r.busy, r.failed], [true, 'false', null, again]);
+  r.sw.click();
+  assert.deepEqual(leads(c.layer()!), [CONSENT_TEXT], 'what the read says: nobody to name');
+  button(c.layer()!, '取消').click();
+  // No view with it, or one not in its shape: the sentence, and a read.
+  for (const details of [undefined, null, { on: 'false' }, '墨点']) {
+    const x = computerDrawer();
+    const p = x.page();
+    await settle();
+    x.srv.putFails = Object.assign(fail(409, '现在「墨点」正用着这台电脑，请再确认一次。'), { code: 'computer_confirm_changed' }, details === undefined ? {} : { details });
+    x.srv.view.others = ['墨点'];
+    computerRow(p).sw.click();
+    button(x.layer()!, '打开').click();
+    await settle();
+    assert.equal(x.gets(), 2, 'read again: ' + JSON.stringify(details));
+    assert.equal(x.layer(), null);
+    r = computerRow(p);
+    assert.deepEqual([r.on, r.failed], ['false', '现在「墨点」正用着这台电脑，请再确认一次。']);
+    r.sw.click();
+    assert.deepEqual(leads(x.layer()!), [CONSENT_TEXT, HANDS('墨点')], 'from the read');
+  }
+  // The view says this cat is on (switched on elsewhere beside another): nothing to ask; the switch on, with the sentence.
+  const o = computerDrawer();
+  const po = o.page();
+  await settle();
+  o.srv.putFails = Object.assign(fail(409, '现在「墨点」正用着这台电脑，请再确认一次。'), { code: 'computer_confirm_changed', details: { ...READY, on: true, others: ['墨点'] } });
+  computerRow(po).sw.click();
+  button(o.layer()!, '打开').click();
+  await settle();
+  assert.equal(o.gets(), 1, 'its view is drawn as it is');
+  assert.equal(o.layer(), null);
+  r = computerRow(po);
+  assert.deepEqual([r.on, r.busy, r.locked, r.failed], ['true', null, null, '现在「墨点」正用着这台电脑，请再确认一次。']);
+  // Another 409 is no such refusal: read again, as ever.
+  const n = computerDrawer();
+  const pn = n.page();
+  await settle();
+  n.srv.putFails = Object.assign(fail(409, '没能打开，请再试一次。'), { code: 'other', details: { ...READY, others: ['墨点'] } });
+  computerRow(pn).sw.click();
+  button(n.layer()!, '打开').click();
+  await settle();
+  assert.equal(n.gets(), 2);
+  assert.equal(n.layer(), null);
+});
+
+test('item 58 wiring: app.js keeps what the server says is true with a refusal (`details`) next to its code, so 这台电脑 can draw it', () => {
+  const app = read('client/public/app.js');
+  assert.match(app, /if \(typeof data\.code === "string"\) err\.code = data\.code;\n(?:\s*\/\/[^\n]*\n)*\s*if \(data\.details !== undefined\) err\.details = data\.details;\n\s*throw err;/);
+  const profileJs = read('client/public/profile.js');
+  assert.match(profileJs, /failed\.status === 409 && failed\.code === "computer_confirm_changed"/);
+  assert.match(profileJs, /const fresh = R\.computerView\(failed\.details\);/);
 });
 
 test('item 52 wiring: the shell passes the install command\'s 复制 and whether 资料 is on screen; the row\'s styles use existing tokens and 新建\'s own command chip', () => {
