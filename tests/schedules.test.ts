@@ -23,9 +23,12 @@ class Txt {
   get nextSibling() { return sibling(this, 1); }
 }
 class Doc {
-  body: El; focused: El | null = null;
+  body: El; focused: El | null = null; listeners: Array<{ type: string; fn: Listener; capture: boolean }> = [];
   constructor() { this.body = new El('body', this); }
   createElement(tag: string) { return new El(tag, this); }
+  // As in a browser: the document hears an event of its elements first (capture) and last (bubble), as app.js listens.
+  addEventListener(type: string, fn: Listener, capture: unknown = false) { this.listeners.push({ type, fn, capture: capture === true }); }
+  removeEventListener(type: string, fn: Listener, capture: unknown = false) { this.listeners = this.listeners.filter(l => !(l.type === type && l.fn === fn && l.capture === (capture === true))); }
   // As in a browser: a removed or disabled element no longer holds focus.
   get activeElement(): El { return this.focused && this.focused.isConnected && !this.focused.disabled ? this.focused : this.body; }
 }
@@ -33,7 +36,7 @@ class El {
   childNodes: Kid[] = []; parentNode: El | null = null; attrs: Record<string, string> = {}; listeners: Record<string, Listener[]> = {};
   className = ''; id = ''; type = ''; value = ''; name = ''; checked = false; hidden = false; open = false; off = false;
   href = ''; target = ''; rel = ''; htmlFor = ''; min: unknown = ''; max: unknown = ''; step: unknown = ''; maxLength = -1; rows = 0;
-  placeholder = ''; autocomplete = ''; inputMode = '';
+  placeholder = ''; autocomplete = ''; inputMode = ''; tabIndex?: number;
   constructor(readonly tag: string, readonly doc: Doc) {}
   get tagName() { return this.tag.toUpperCase(); }
   get disabled() { return this.off; }
@@ -70,7 +73,15 @@ class El {
   dispatch(type: string, init: Record<string, unknown> = {}) {
     const ev: any = { type, target: this, shiftKey: false, ...init, defaultPrevented: false, stopped: false,
       preventDefault() { this.defaultPrevented = true; }, stopPropagation() { this.stopped = true; } };
+    const inDoc = this.isConnected;
+    const atDoc = (capture: boolean) => {
+      if (!inDoc || ev.stopped) return;
+      ev.currentTarget = this.doc;
+      for (const l of this.doc.listeners.filter(l => l.type === type && l.capture === capture)) l.fn(ev);
+    };
+    atDoc(true);
     for (let n: El | null = this; n && !ev.stopped; n = n.parentNode) { ev.currentTarget = n; for (const fn of n.listeners[type] || []) fn(ev); }
+    atDoc(false);
     return ev;
   }
   // A click on a submit button submits its form, as in a browser; a disabled control ignores it.
@@ -377,7 +388,10 @@ test('enabled, effective and registered stay separate; 已触发 is never a fini
   assert.match(visibleText(stale), /时间已过的一次任务不能恢复，需要时请新建。/);
   assert.ok(btn(expand(rowOf(t.host, 'paused')), '恢复'));
   assert.match(visibleText(expand(rowOf(t.host, 'ghost'))), /运行时目前没有登记这个任务，不会按时触发。/);
-  assert.doesNotMatch(visibleText(t.section), /立即|马上运行|编辑|cron/i, 'no edit, run-now or rule editor');
+  assert.doesNotMatch(visibleText(t.section), /立即|马上运行|编辑|cron/i, 'no run-now or rule editor');
+  // Only a repeating task's message can be changed: the once-tasks have no 改消息, the cron ones do.
+  for (const id of ['fired', 'late', 'stale']) assert.equal(buttons(rowOf(t.host, id), '改消息').length, 0, id);
+  for (const id of ['blocked', 'paused', 'broken', 'ghost']) assert.ok(btn(rowOf(t.host, id), '改消息'), id);
 });
 
 test('create sends the contract body for each rule; the server binds the cat and the chat', async () => {
@@ -845,6 +859,657 @@ test('刷新 also re-reads an open trigger record; nothing reads on a timer', as
   t.S.reopened();
   await settle();
   assert.equal(gets(t.calls), 3, 'opening the drawer again reads the list again');
+});
+
+// ---- 改消息 ----
+const editorOf = (row: El) => one(row, 'sched-edit');
+const boxOf = (row: El) => { const box = all(editorOf(row)).find(n => n.tag === 'textarea'); assert.ok(box, 'no textarea'); return box!; };
+const patches = (calls: Call[]) => calls.filter(c => c.method === 'PATCH');
+const INTERVAL = { type: 'interval', ms: 30 * 60000 };
+
+test('rules: the message rule is the one 新建 uses, and only repeating tasks can change theirs', () => {
+  const { S } = browser();
+  const R = S.rules;
+  assert.equal(R.promptIssue('   '), '请填写到时发给猫猫的消息');
+  assert.equal(R.promptIssue(undefined), '请填写到时发给猫猫的消息');
+  assert.equal(R.promptIssue('x'.repeat(16001)), '消息最多 16000 个字');
+  assert.equal(R.promptIssue('  ' + 'x'.repeat(16000) + '  '), '', 'measured after trimming, as the server does');
+  assert.equal(R.promptIssue(' 喝水 '), '');
+  assert.equal(R.editable(routine()), true);
+  assert.equal(R.editable(routine({ trigger: INTERVAL })), true);
+  assert.equal(R.editable(routine({ trigger: { type: 'once', fireAt: Date.now() + HOUR } })), false);
+  assert.equal(R.editable(routine({ trigger: null })), false);
+  assert.equal(R.editable(null), false);
+});
+
+test('改消息 is on repeating tasks only; it opens in the message\'s place on the current text, and 取消 or Escape close it without sending', async () => {
+  const t = setup(() => listing([
+    routine(),
+    routine({ id: 'dyn-i', name: '喝水', prompt: '提醒我喝水', trigger: INTERVAL }),
+    routine({ id: 'dyn-o', name: '一次', trigger: { type: 'once', fireAt: Date.now() + 2 * HOUR } }),
+  ]));
+  const drawerKeys: string[] = [];
+  t.doc.body.addEventListener('keydown', (ev: any) => drawerKeys.push(ev.key));
+  await settle();
+  assert.equal(buttons(expand(rowOf(t.host, 'dyn-o')), '改消息').length, 0, 'a once-task is made again instead');
+  assert.equal(named(rowOf(t.host, 'dyn-o'), 'sched-edit').length, 0);
+  assert.ok(btn(expand(rowOf(t.host, 'dyn-i')), '改消息'));
+
+  const row = expand(rowOf(t.host, 'dyn-a')), edit = btn(row, '改消息'), prompt = one(row, 'sched-prompt');
+  assert.equal(edit.getAttribute('aria-expanded'), 'false');
+  edit.click();
+  const editor = editorOf(row), box = boxOf(row);
+  assert.equal(t.doc.activeElement, box, 'the box has focus');
+  assert.equal(box.value, '整理今天的新闻');
+  assert.equal(box.rows, 3);
+  assert.equal(box.maxLength, 16000);
+  assert.equal(box.getAttribute('aria-label'), '消息');
+  assert.equal(prompt.hidden, true, 'the box stands where the message was');
+  assert.equal(shown(editor), true);
+  assert.equal(edit.getAttribute('aria-expanded'), 'true');
+  assert.equal(edit.getAttribute('aria-controls'), editor.id);
+  assert.equal(visibleText(editor), '取消保存', 'the layout explains: no caption, note or label beside the box');
+  assert.ok(btn(editor, '保存').className.includes('primary'));
+
+  // 取消: nothing sent, the message as it was, focus back on 改消息.
+  type(box, '半截');
+  btn(editor, '取消').click();
+  assert.equal(shown(editor), false);
+  assert.equal(prompt.hidden, false);
+  assert.equal(prompt.textContent, '整理今天的新闻');
+  assert.equal(t.doc.activeElement, edit);
+  assert.equal(edit.getAttribute('aria-expanded'), 'false');
+  edit.click();
+  assert.equal(boxOf(row).value, '整理今天的新闻', 'a dismissed draft does not come back');
+
+  // Escape closes the box, never the drawer.
+  type(boxOf(row), '另一半');
+  edit.click();
+  assert.equal(boxOf(row).value, '另一半', '改消息 again only brings focus back to the open box');
+  assert.equal(t.doc.activeElement, boxOf(row));
+  const ev = boxOf(row).dispatch('keydown', { key: 'Escape' });
+  assert.equal(ev.stopped, true);
+  assert.equal(ev.defaultPrevented, true);
+  assert.deepEqual(drawerKeys, [], 'the drawer never saw Escape');
+  assert.equal(shown(editor), false);
+  assert.equal(t.doc.activeElement, edit);
+  assert.equal(boxOf(row).dispatch('keydown', { key: 'Enter' }).stopped, false, 'other keys pass as before');
+  assert.equal(patches(t.calls).length, 0);
+});
+
+test('改消息 checks the message before sending: empty or too long is said beside the box, and typing clears it', async () => {
+  const t = setup(() => listing([routine()]));
+  await settle();
+  const row = expand(rowOf(t.host, 'dyn-a'));
+  btn(row, '改消息').click();
+  const editor = editorOf(row), box = boxOf(row), err = one(editor, 'sched-err');
+  type(box, '   ');
+  btn(editor, '保存').click();
+  assert.equal(patches(t.calls).length, 0);
+  assert.deepEqual(errorsOf(editor), ['请填写到时发给猫猫的消息']);
+  assert.equal(box.getAttribute('aria-invalid'), 'true');
+  assert.equal(box.getAttribute('aria-describedby'), err.id);
+  assert.equal(t.doc.activeElement, box);
+  type(box, '新');
+  assert.deepEqual(errorsOf(editor), [], 'typing clears it');
+  assert.equal(box.getAttribute('aria-invalid'), null);
+  assert.equal(box.getAttribute('aria-describedby'), null);
+  box.value = 'x'.repeat(16001);
+  btn(editor, '保存').click();
+  assert.deepEqual(errorsOf(editor), ['消息最多 16000 个字']);
+  assert.equal(patches(t.calls).length, 0);
+  // Closing and opening again starts clean.
+  btn(editor, '取消').click();
+  btn(row, '改消息').click();
+  assert.deepEqual(errorsOf(editor), []);
+  assert.equal(boxOf(row).getAttribute('aria-invalid'), null);
+});
+
+test('改消息 sends only the message, holds the row while it is out, then shows the saved text and reads the list again', async () => {
+  const patch = defer();
+  let state = routine();
+  const t = setup((path, method) => {
+    if (method === 'PATCH') return patch.promise;
+    if (method === 'GET' && path === BASE) return listing([state]);
+    throw fail(404);
+  });
+  const drawerKeys: string[] = [];
+  t.doc.body.addEventListener('keydown', (ev: any) => drawerKeys.push(ev.key));
+  await settle();
+  const row = expand(rowOf(t.host, 'dyn-a')), edit = btn(row, '改消息');
+  edit.click();
+  const editor = editorOf(row), box = boxOf(row), save = btn(editor, '保存');
+  type(box, '  整理新闻并发给我  ');
+  save.focus();
+  save.click();
+  assert.deepEqual(patches(t.calls), [{ path: BASE + '/dyn-a', method: 'PATCH', body: { prompt: '整理新闻并发给我' } }], 'trimmed, and nothing but the message');
+
+  // While it is out the whole row waits.
+  assert.equal(save.textContent, '正在保存…');
+  assert.equal(save.disabled, true);
+  assert.equal(btn(editor, '取消').disabled, true);
+  assert.equal(box.disabled, true);
+  assert.equal(btn(row, '暂停').disabled, true);
+  assert.equal(btn(row, '删除').disabled, true);
+  assert.equal(edit.disabled, true);
+  save.dispatch('click'); // even a click that reaches it
+  btn(row, '暂停').dispatch('click');
+  assert.equal(patches(t.calls).length, 1, 'one change at a time');
+  const ev = box.dispatch('keydown', { key: 'Escape' });
+  assert.equal(ev.stopped, true, 'Escape never reaches the drawer');
+  assert.equal(shown(editor), true, 'Escape waits while saving');
+  assert.deepEqual(drawerKeys, []);
+
+  state = routine({ prompt: '整理新闻并发给我' });
+  patch.resolve({ success: true, id: 'dyn-a', prompt: '整理新闻并发给我', changed: true });
+  await settle();
+  assert.equal(shown(editor), false, 'saved: the box closes');
+  assert.equal(one(row, 'sched-prompt').hidden, false);
+  assert.equal(one(row, 'sched-prompt').textContent, '整理新闻并发给我');
+  assert.equal(one(row, 'sched-msg').textContent, '已保存。');
+  assert.equal(gets(t.calls), 2, 'the list is read again after a change');
+  assert.equal(t.doc.activeElement, edit, 'focus comes back to 改消息');
+  assert.equal(edit.disabled, false);
+  assert.equal(btn(row, '暂停').disabled, false);
+  assert.equal(one(row, 'sched-name').textContent, '早报', 'name and rule are as before');
+  assert.equal(one(row, 'sched-rule').textContent, '每天 09:00（Asia/Shanghai）');
+  edit.click();
+  assert.equal(boxOf(row).value, '整理新闻并发给我', 'the next edit starts from the saved text');
+  assert.equal(one(row, 'sched-msg').hidden, true, 'opening the box again clears the last line');
+});
+
+test('a saved message whose list re-read fails is reported as saved, shown as the server answered, and the next good read clears the line', async () => {
+  let reads = 0;
+  const t = setup((path, method) => {
+    if (method === 'PATCH') return { success: true, id: 'dyn-a', prompt: '服务端的原文', changed: true };
+    reads++;
+    if (reads === 2) throw fail(500, '服务出现异常，请查看日志。');
+    return listing([routine(reads === 1 ? {} : { prompt: '服务端的原文' })]);
+  });
+  await settle();
+  const row = expand(rowOf(t.host, 'dyn-a'));
+  btn(row, '改消息').click();
+  type(boxOf(row), '新的消息');
+  btn(editorOf(row), '保存').click();
+  await settle();
+  assert.equal(patches(t.calls).length, 1);
+  assert.equal(shown(editorOf(row)), false, 'saved is saved: the box is not offered again');
+  assert.equal(one(row, 'sched-prompt').textContent, '服务端的原文', 'the text the server says it saved, not the list read before it');
+  const msg = one(row, 'sched-msg');
+  assert.equal(msg.textContent, '已保存，但没能刷新列表：服务出现异常，请查看日志。');
+  assert.ok(has(msg, 'bad'));
+  assert.doesNotMatch(visibleText(t.section), /没能保存|没能确认是否已保存/);
+  btn(t.section, '刷新').click();
+  await settle();
+  assert.equal(one(row, 'sched-msg').hidden, true, 'a good read clears it');
+});
+
+test('a refused or unconfirmed save keeps the draft open and says which it was; a task gone meanwhile is said by the section', async () => {
+  const replies: Array<() => unknown> = [];
+  let list = [routine()];
+  const t = setup((path, method) => {
+    if (method === 'PATCH') return replies.shift()!();
+    if (method === 'GET' && path === BASE) return listing(list);
+    throw fail(404);
+  });
+  await settle();
+  const row = expand(rowOf(t.host, 'dyn-a'));
+  btn(row, '改消息').click();
+  const editor = editorOf(row), box = boxOf(row), save = btn(editor, '保存'), failure = one(editor, 'error');
+  assert.equal(failure.getAttribute('role'), 'alert');
+  type(box, '我的草稿');
+  const attempt = async (reply: () => unknown) => {
+    replies.push(reply);
+    save.focus();
+    save.click();
+    await settle();
+    assert.equal(shown(editor), true, 'the box stays open');
+    assert.equal(box.value, '我的草稿', 'with the draft as typed');
+    assert.equal(box.disabled, false);
+    assert.equal(save.textContent, '保存');
+    assert.equal(t.doc.activeElement, save, 'focus is back on 保存, as on the 新建 form');
+    assert.equal(one(row, 'sched-prompt').textContent, '整理今天的新闻', 'nothing is shown as changed');
+    return failure.textContent;
+  };
+
+  // Refused (4xx): 没能保存, with the server's reason; 409 and 404 read the list again.
+  assert.equal(await attempt(() => { throw fail(409, '投递聊天已不可用或不再包含这只猫，请新建定时任务'); }), '没能保存：投递聊天已不可用或不再包含这只猫，请新建定时任务。已重新读取列表。');
+  assert.equal(gets(t.calls), 2);
+  assert.equal(await attempt(() => { throw fail(422, '请先给这只猫猫选一个能用的本机 Agent'); }), '没能保存：请先给这只猫猫选一个能用的本机 Agent。');
+  assert.equal(gets(t.calls), 2, 'another refusal does not re-read');
+  // Unknown (5xx or no answer): it may have been saved.
+  assert.equal(await attempt(() => { throw fail(502, '引擎没有确认定时消息已经改好，请刷新列表核对'); }), '没能确认是否已保存：引擎没有确认定时消息已经改好，请刷新列表核对。', 'the server already says to check; it is not said twice');
+  assert.equal(await attempt(() => { throw fail(undefined, '连不上 clowder-bot'); }), '没能确认是否已保存：连不上 clowder-bot。请刷新核对。');
+  assert.equal(gets(t.calls), 2);
+  assert.deepEqual(patches(t.calls).map(c => c.body), Array(4).fill({ prompt: '我的草稿' }));
+  // Typing does not hide the outcome; a new try does.
+  type(box, '我的草稿');
+  assert.equal(failure.hidden, false);
+
+  // Gone: the card and its line go, the section says what happened, focus goes to 新建.
+  list = [];
+  replies.push(() => { throw fail(404, '找不到这只猫的定时任务'); });
+  save.focus();
+  save.click();
+  await settle();
+  assert.equal(rows(t.host).length, 0);
+  assert.equal(one(t.section, 'sched-status').textContent, '没能保存：找不到这只猫的定时任务。已重新读取列表。');
+  assert.ok(has(one(t.section, 'sched-status'), 'bad'));
+  assert.equal(t.doc.activeElement, btn(t.section, '新建'));
+});
+
+test('刷新, syncs and a pause keep an open draft; a task that is gone takes its draft and says so', async () => {
+  let list = [routine()];
+  const pause = defer();
+  const t = setup((path, method) => {
+    if (method === 'PATCH') return pause.promise;
+    if (method === 'GET' && path === BASE) return listing(list);
+    throw fail(404);
+  });
+  await settle();
+  const row = expand(rowOf(t.host, 'dyn-a'));
+  btn(row, '改消息').click();
+  type(boxOf(row), '半截消息');
+
+  // A fresh list (here, changed elsewhere) repaints the card around the box, never the box.
+  list = [routine({ prompt: '别处改过的', lastRun: { outcome: 'RUN_DELIVERED', started_at: new Date().toISOString(), duration_ms: 1, error_summary: null, assigned_cat_id: null } })];
+  btn(t.section, '刷新').click();
+  await settle();
+  assert.equal(rowOf(t.host, 'dyn-a'), row);
+  assert.equal(shown(editorOf(row)), true);
+  assert.equal(boxOf(row).value, '半截消息');
+  assert.match(visibleText(row), /上次已触发/);
+  assert.equal(one(row, 'sched-prompt').hidden, true);
+  assert.equal(one(row, 'sched-prompt').textContent, '别处改过的', 'the message behind the box is the latest read');
+  for (let i = 0; i < 3; i++) t.mount();
+  t.S.reopened();
+  const rebuilt = t.doc.createElement('div');
+  t.doc.body.append(rebuilt);
+  t.host.remove();
+  t.mount(rebuilt);
+  await settle();
+  assert.equal(boxOf(row).value, '半截消息', 'syncs, reopening and a rebuilt tab keep it');
+  assert.equal(shown(editorOf(row)), true);
+
+  // A pause on the same row: the box stays as typed and only 保存 waits.
+  btn(row, '暂停').click();
+  assert.equal(btn(editorOf(row), '保存').disabled, true);
+  assert.equal(boxOf(row).disabled, false, 'typing goes on');
+  assert.equal(btn(editorOf(row), '取消').disabled, false);
+  btn(editorOf(row), '保存').dispatch('click');
+  assert.equal(patches(t.calls).length, 1, 'no save while the pause is out');
+  list = [routine({ prompt: '别处改过的', enabled: false, effectiveEnabled: false, status: 'paused' })];
+  pause.resolve({ success: true, enabled: false });
+  await settle();
+  assert.equal(boxOf(row).value, '半截消息');
+  assert.equal(btn(editorOf(row), '保存').disabled, false);
+  assert.ok(btn(row, '改消息'), 'a paused repeating task can still change its message');
+
+  // Gone from the list with the draft open: the row goes, focus to 新建, and the section says the draft was not saved.
+  boxOf(row).focus();
+  list = [];
+  btn(t.section, '刷新').click();
+  await settle();
+  assert.equal(rows(rebuilt).length, 0);
+  assert.equal(one(t.section, 'sched-status').textContent, '「早报」已经不在列表里，改的消息没有保存。');
+  assert.equal(t.doc.activeElement, btn(t.section, '新建'));
+  assert.equal(patches(t.calls).length, 1);
+});
+
+test('a save that lands after its cat was left never reaches the next cat; the same cat open again reads its list', async () => {
+  const saves = [defer(), defer()];
+  let prompt = '整理今天的新闻';
+  const t = setup((path, method) => {
+    if (method === 'PATCH') return saves[patches(t.calls).length - 1].promise;
+    if (path === BASE) return listing([routine({ prompt })]);
+    if (path === '/xbot-api/bots/bo/routines') return listing([routine({ id: 'bo-a', name: '别的猫' })]);
+    throw fail(404);
+  });
+  await settle();
+  const start = (section: El) => {
+    const row = expand(rowOf(section, 'dyn-a'));
+    btn(row, '改消息').click();
+    type(boxOf(row), '新消息');
+    btn(editorOf(row), '保存').click();
+  };
+  start(t.section);
+  t.S.teardown();
+  const bo = t.mount(t.host, 'bo');
+  await settle();
+  prompt = '新消息';
+  saves[0].resolve({ success: true, id: 'dyn-a', prompt: '新消息', changed: true });
+  await settle();
+  assert.equal(gets(t.calls), 1, 'no re-read for ada while bo is open');
+  assert.doesNotMatch(visibleText(bo), /已保存|新消息/);
+  assert.equal(named(bo, 'sched-edit').length, 0);
+
+  // Back to ada: a fresh section; a save still out when it was left makes this one read again.
+  t.S.teardown();
+  const ada = t.mount(t.host, 'ada');
+  await settle();
+  assert.equal(gets(t.calls), 2);
+  start(ada);
+  t.S.teardown();
+  const again = t.mount(t.host, 'ada');
+  await settle();
+  assert.equal(gets(t.calls), 3);
+  saves[1].resolve({ success: true, id: 'dyn-a', prompt: '新消息', changed: false });
+  await settle();
+  assert.equal(gets(t.calls), 4, 'the open section of the same cat reads its list again');
+  assert.equal(named(again, 'sched-edit').length, 0, 'the closed box does not come back');
+  assert.ok(named(again, 'sched-msg').every(n => n.hidden) && one(again, 'sched-status').hidden, 'no line of the closed section comes back');
+  assert.equal(one(expand(rowOf(again, 'dyn-a')), 'sched-prompt').textContent, '新消息');
+});
+
+test('saving hands focus from the disabled control to the editor itself, so Escape on what has focus stops there', async () => {
+  const saves = [defer(), defer()];
+  const t = setup((path, method) => {
+    if (method === 'PATCH') return saves[patches(t.calls).length - 1].promise;
+    if (method === 'GET' && path === BASE) return listing([routine()]);
+    throw fail(404);
+  });
+  const drawerKeys: string[] = [];
+  t.doc.body.addEventListener('keydown', (ev: any) => drawerKeys.push(ev.key));
+  await settle();
+  const row = expand(rowOf(t.host, 'dyn-a')), edit = btn(row, '改消息');
+  edit.click();
+  const editor = editorOf(row), save = btn(editor, '保存');
+  assert.equal(editor.tabIndex, -1, 'the box can hold focus, but Tab does not stop on it');
+  type(boxOf(row), '新消息');
+  save.focus();
+  save.click();
+  assert.equal(save.disabled, true);
+  assert.equal(t.doc.activeElement, editor, 'not the page');
+  const ev = t.doc.activeElement.dispatch('keydown', { key: 'Escape' });
+  assert.equal(ev.stopped, true);
+  assert.equal(ev.defaultPrevented, true);
+  assert.deepEqual(drawerKeys, [], 'the drawer never saw Escape');
+  assert.equal(shown(editor), true, 'Escape waits while saving');
+  saves[0].reject(fail(422, '请先给这只猫猫选一个能用的本机 Agent'));
+  await settle();
+  assert.equal(t.doc.activeElement, save, 'refused: focus goes from the box to 保存');
+
+  // A click that never focused 保存 (as in Safari) leaves focus on the page; saving takes it into the box too.
+  t.doc.focused = null;
+  save.click();
+  assert.equal(t.doc.activeElement, editor);
+  saves[1].resolve({ success: true, id: 'dyn-a', prompt: '新消息', changed: true });
+  await settle();
+  assert.equal(t.doc.activeElement, edit, 'saved: focus leaves the closed box for 改消息');
+  assert.deepEqual(drawerKeys, []);
+});
+
+test('while a message or a new task is saving, Escape from anywhere stays out of the drawer; the delete dialog still answers its own', async () => {
+  const patch = defer(), post = defer();
+  const t = setup((path, method) => {
+    if (method === 'PATCH') return patch.promise;
+    if (method === 'POST') return post.promise;
+    if (method === 'GET' && path === BASE) return listing([routine(), routine({ id: 'dyn-b', name: '晚报' })]);
+    throw fail(404);
+  });
+  // The drawer listens on the document, as app.js does.
+  const drawerKeys: string[] = [];
+  t.doc.addEventListener('keydown', (ev: any) => drawerKeys.push(ev.key));
+  await settle();
+  const press = (key = 'Escape') => t.doc.activeElement.dispatch('keydown', { key });
+  t.doc.focused = null;
+  press();
+  assert.deepEqual(drawerKeys, ['Escape'], 'with nothing on its way, Escape on the page reaches the drawer');
+  drawerKeys.length = 0;
+
+  const row = expand(rowOf(t.host, 'dyn-a'));
+  btn(row, '改消息').click();
+  type(boxOf(row), '新消息');
+  btn(editorOf(row), '保存').click();
+  // Focus wandered out of the section (here, onto the page) while the save is out.
+  t.doc.focused = null;
+  const ev = press();
+  assert.equal(ev.stopped, true);
+  assert.equal(ev.defaultPrevented, true);
+  assert.deepEqual(drawerKeys, [], 'the drawer never saw Escape');
+  assert.equal(shown(editorOf(row)), true);
+  press('Enter');
+  assert.deepEqual(drawerKeys, ['Enter'], 'other keys pass');
+  drawerKeys.length = 0;
+
+  // Another row's delete dialog still closes on Escape meanwhile, and keeps it from the drawer.
+  const other = expand(rowOf(t.host, 'dyn-b'));
+  btn(other, '删除').click();
+  const dialog = () => named(t.doc.body, 'sched-modal')[0];
+  assert.equal(t.doc.activeElement, btn(dialog(), '取消'));
+  press();
+  assert.equal(dialog(), undefined, 'the dialog answers its own Escape');
+  assert.equal(t.doc.activeElement, btn(other, '删除'));
+  assert.deepEqual(drawerKeys, []);
+
+  patch.resolve({ success: true, id: 'dyn-a', prompt: '新消息', changed: true });
+  await settle();
+  t.doc.focused = null;
+  press();
+  assert.deepEqual(drawerKeys, ['Escape'], 'saved: Escape on the page reaches the drawer again');
+  drawerKeys.length = 0;
+
+  // The same while 新建 is on its way: its disabled fieldset drops focus onto the page.
+  btn(t.section, '新建').click();
+  const form = formOf(t.section);
+  type(control(form, '名称'), '晨会');
+  type(control(form, '消息'), '准备晨会');
+  kind(form, '间隔');
+  btn(form, '创建').click();
+  assert.equal(t.calls.filter(c => c.method === 'POST').length, 1);
+  t.doc.focused = null;
+  assert.equal(press().stopped, true);
+  assert.deepEqual(drawerKeys, []);
+  assert.equal(formOf(t.section), form, 'the form waits');
+  post.resolve({ id: 'dyn-1', name: '晨会', prompt: '准备晨会', trigger: { type: 'interval', ms: 3600000 }, threadId: 'thread-now' });
+  await settle();
+  t.doc.focused = null;
+  press();
+  assert.deepEqual(drawerKeys, ['Escape']);
+
+  // The section that goes takes its listener with it.
+  assert.equal(t.doc.listeners.filter(l => l.capture).length, 1);
+  t.S.teardown();
+  assert.equal(t.doc.listeners.filter(l => l.capture).length, 0);
+});
+
+test('a refused save that reads the list again says so only once the read is back, and says when it failed', async () => {
+  const reads: Array<() => unknown> = [() => listing([routine()])];
+  const t = setup((path, method) => {
+    if (method === 'PATCH') throw fail(409, '投递聊天已不可用或不再包含这只猫，请新建定时任务');
+    if (method === 'GET' && path === BASE) return reads.shift()!();
+    throw fail(404);
+  });
+  await settle();
+  const row = expand(rowOf(t.host, 'dyn-a'));
+  btn(row, '改消息').click();
+  const editor = editorOf(row), failure = one(editor, 'error');
+  type(boxOf(row), '我的草稿');
+  const reread = defer();
+  reads.push(() => reread.promise);
+  btn(editor, '保存').click();
+  await settle();
+  assert.equal(gets(t.calls), 2, 'a 409 reads the list again');
+  assert.equal(failure.textContent, '没能保存：投递聊天已不可用或不再包含这只猫，请新建定时任务。', 'nothing about the list while it is still being read');
+
+  reread.reject(fail(503, '定时任务暂时不可用'));
+  await settle();
+  assert.equal(failure.textContent, '没能保存：投递聊天已不可用或不再包含这只猫，请新建定时任务。没能重新读取列表：定时任务暂时不可用。');
+  assert.doesNotMatch(visibleText(t.section), /已重新读取列表/);
+  assert.equal(one(t.section, 'sched-status').textContent, '没能刷新：定时任务暂时不可用。下面是上次读取的结果。');
+  assert.equal(shown(editor), true);
+  assert.equal(boxOf(row).value, '我的草稿');
+
+  // The next good read takes back what it said about the list, and only that.
+  reads.push(() => listing([routine()]));
+  btn(t.section, '刷新').click();
+  await settle();
+  assert.equal(failure.textContent, '没能保存：投递聊天已不可用或不再包含这只猫，请新建定时任务。');
+  assert.equal(one(t.section, 'sched-status').hidden, true);
+  assert.equal(boxOf(row).value, '我的草稿');
+});
+
+// A refused try whose re-read is still out, then something newer on the same box.
+function refusedThenSlow() {
+  const reads: Array<() => unknown> = [() => listing([routine()])];
+  const saves: Array<() => unknown> = [];
+  const t = setup((path, method) => {
+    if (method === 'PATCH') return saves.shift()!();
+    if (method === 'GET' && path === BASE) return reads.shift()!();
+    throw fail(404);
+  });
+  const refuse = async (row: El) => {
+    const slow = defer();
+    saves.push(() => { throw fail(409, '投递聊天已不可用或不再包含这只猫，请新建定时任务'); });
+    reads.push(() => slow.promise);
+    btn(editorOf(row), '保存').click();
+    await settle();
+    assert.equal(one(editorOf(row), 'error').textContent, '没能保存：投递聊天已不可用或不再包含这只猫，请新建定时任务。', 'the re-read is still out');
+    return slow;
+  };
+  return { t, reads, saves, refuse };
+}
+
+test('a refused save whose re-read comes back after a newer save went through says nothing: the line stays 已保存', async () => {
+  const { t, reads, saves, refuse } = refusedThenSlow();
+  await settle();
+  const row = expand(rowOf(t.host, 'dyn-a'));
+  btn(row, '改消息').click();
+  type(boxOf(row), '我的草稿');
+  const slow = await refuse(row);
+  assert.equal(gets(t.calls), 2);
+
+  // Save B, meanwhile: saved, the box closes.
+  saves.push(() => ({ success: true, id: 'dyn-a', prompt: '我的草稿', changed: true }));
+  reads.push(() => listing([routine({ prompt: '我的草稿' })]));
+  btn(editorOf(row), '保存').click();
+  await settle();
+  assert.equal(gets(t.calls), 3);
+  assert.equal(shown(editorOf(row)), false);
+  assert.equal(one(row, 'sched-msg').textContent, '已保存。');
+
+  // Save A's read lands last.
+  slow.resolve(listing([routine()]));
+  await settle();
+  assert.equal(one(t.section, 'sched-status').hidden, true, 'the section does not report the earlier refusal');
+  assert.doesNotMatch(visibleText(t.section), /没能保存|已重新读取列表/);
+  const msg = one(row, 'sched-msg');
+  assert.equal(msg.textContent, '已保存。');
+  assert.equal(has(msg, 'bad'), false);
+  assert.equal(one(row, 'sched-prompt').textContent, '我的草稿', 'the older read paints nothing');
+});
+
+test('a refused save whose re-read comes back after 取消 says nothing more', async () => {
+  const { t, refuse } = refusedThenSlow();
+  await settle();
+  const row = expand(rowOf(t.host, 'dyn-a'));
+  btn(row, '改消息').click();
+  type(boxOf(row), '我的草稿');
+  const slow = await refuse(row);
+  btn(editorOf(row), '取消').click();
+  assert.equal(shown(editorOf(row)), false);
+  slow.resolve(listing([routine()]));
+  await settle();
+  assert.equal(one(t.section, 'sched-status').hidden, true);
+  assert.doesNotMatch(visibleText(t.section), /没能保存|已重新读取列表/);
+
+  // Reopened meanwhile: the new box starts clean and stays so.
+  btn(row, '改消息').click();
+  type(boxOf(row), '我的草稿');
+  const again = await refuse(row);
+  btn(editorOf(row), '取消').click();
+  btn(row, '改消息').click();
+  again.reject(fail(503, '定时任务暂时不可用'));
+  await settle();
+  assert.equal(one(editorOf(row), 'error').hidden, true, 'the reopened box does not take the old refusal');
+  assert.equal(one(t.section, 'sched-status').textContent, '没能刷新：定时任务暂时不可用。下面是上次读取的结果。', 'only the read itself is reported');
+});
+
+test('a saved message whose re-read fails late leaves a reopened box and a newer pause their own lines', async () => {
+  const reads: Array<() => unknown> = [() => listing([routine()])];
+  const answers: Array<() => unknown> = [];
+  const t = setup((path, method) => {
+    if (method === 'PATCH') return answers.shift()!();
+    if (method === 'GET' && path === BASE) return reads.shift()!();
+    throw fail(404);
+  });
+  await settle();
+  const row = expand(rowOf(t.host, 'dyn-a'));
+  const save = async (text: string) => {
+    btn(row, '改消息').click();
+    type(boxOf(row), text);
+    const slow = defer();
+    answers.push(() => ({ success: true, id: 'dyn-a', prompt: text, changed: true }));
+    reads.push(() => slow.promise);
+    btn(editorOf(row), '保存').click();
+    await settle();
+    assert.equal(one(row, 'sched-msg').textContent, '已保存。');
+    return slow;
+  };
+
+  // Reopened while the read is out: the box is the owner's, not the old save's.
+  const first = await save('第一版');
+  btn(row, '改消息').click();
+  first.reject(fail(503, '定时任务暂时不可用'));
+  await settle();
+  assert.equal(one(row, 'sched-msg').hidden, true, 'no 已保存，但… under the open box');
+  assert.equal(one(t.section, 'sched-status').textContent, '没能刷新：定时任务暂时不可用。下面是上次读取的结果。');
+  btn(editorOf(row), '取消').click();
+
+  // A pause that finished meanwhile keeps its own line.
+  reads.push(() => listing([routine({ prompt: '第一版' })]));
+  btn(t.section, '刷新').click();
+  await settle();
+  const second = await save('第二版');
+  const pause = defer();
+  answers.push(() => pause.promise);
+  btn(row, '暂停').click();
+  reads.push(() => { throw fail(503, '定时任务暂时不可用'); });
+  pause.resolve({ success: true, enabled: false });
+  await settle();
+  assert.equal(one(row, 'sched-msg').textContent, '已暂停，但没能刷新列表：定时任务暂时不可用。');
+  second.resolve(listing([routine({ prompt: '第二版' })]));
+  await settle();
+  assert.equal(one(row, 'sched-msg').textContent, '已暂停，但没能刷新列表：定时任务暂时不可用。', 'the save does not write over the pause');
+});
+
+test('取消 or Escape while a pause or resume is out puts focus on the row, since 改消息 waits too', async () => {
+  const toggles = [defer(), defer()];
+  let list = [routine()];
+  const t = setup((path, method) => {
+    if (method === 'PATCH') return toggles[patches(t.calls).length - 1].promise;
+    if (method === 'GET' && path === BASE) return listing(list);
+    throw fail(404);
+  });
+  await settle();
+  const row = expand(rowOf(t.host, 'dyn-a')), head = one(row, 'sched-row'), edit = btn(row, '改消息');
+  edit.click();
+  btn(row, '暂停').click();
+  assert.equal(edit.disabled, true);
+  const cancel = btn(editorOf(row), '取消');
+  cancel.focus();
+  cancel.click();
+  assert.equal(shown(editorOf(row)), false);
+  assert.equal(t.doc.activeElement, head, 'not the page, nor the closed box');
+  list = [routine({ enabled: false, effectiveEnabled: false, status: 'paused' })];
+  toggles[0].resolve({ success: true, enabled: false });
+  await settle();
+
+  edit.click();
+  btn(row, '恢复').click();
+  assert.equal(edit.disabled, true);
+  boxOf(row).dispatch('keydown', { key: 'Escape' });
+  assert.equal(shown(editorOf(row)), false);
+  assert.equal(t.doc.activeElement, head);
+  list = [routine()];
+  toggles[1].resolve({ success: true, enabled: true });
+  await settle();
+
+  // Nothing out: 取消 goes back to 改消息 as before.
+  edit.click();
+  btn(editorOf(row), '取消').click();
+  assert.equal(t.doc.activeElement, edit);
+  assert.equal(patches(t.calls).length, 2);
 });
 
 // ---- wiring ----
