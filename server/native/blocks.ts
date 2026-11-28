@@ -1,6 +1,7 @@
 import type { NativeMessage } from './types.js';
 import { clip, plainLine } from './text.js';
 import { changeWords, triggerWords } from './trigger-words.js';
+import { runtimeCardBinding } from './runtime-interactions.js';
 
 /**
  * What a cat attached to a message besides words and files, as the chat can
@@ -17,12 +18,18 @@ export type ChatBlock =
        * is settled (`title` has no subject: "想设一个定时"); `state` once the engine's receipt on the
        * same page says how it was answered.
        */
-      approval?: { id: string; kind: RequestKind; title: string; body?: string; state?: 'approved' | 'rejected' | 'closed' } }
+      approval?: { id: string; kind: RequestKind; title: string; body?: string; state?: 'approved' | 'rejected' | 'closed'; selected?: string[] } }
   | { id: string; kind: 'checklist'; title?: string; items: Array<{ id: string; text: string; checked: boolean }> }
   | { id: string; kind: 'choices'; mode: 'single' | 'multiple' | 'confirm'; title?: string; description?: string;
       options: Array<{ id: string; label: string; emoji?: string; description?: string; custom?: true }>;
       max?: number; template?: string; answered: boolean; selected: string[] }
   | { id: string; kind: 'diff'; file: string; diff: string };
+
+export interface RuntimeBlockState {
+  state?: 'approved' | 'rejected' | 'closed';
+  selected?: string[];
+  body?: string;
+}
 
 export type RequestKind = 'preference' | 'profile' | 'person' | 'schedule' | 'question' | 'other';
 const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -77,6 +84,17 @@ export interface ApprovalDecision { proposalId: string; producerId: string; stat
  */
 const answers = (receipt: ApprovalDecision, proposal: string, producerId: unknown, messageId: string) =>
   receipt.proposalId === proposal && receipt.producerId === producerId && (receipt.cardMessageId === undefined || receipt.cardMessageId === messageId);
+function runtimeCardApproval(message: NativeMessage, block: Record<string, unknown>, id: string): { proposal: string; producerId: string; kind?: string } | null {
+  const meta = record(block.meta);
+  if (block.kind === 'card' && meta.kind === 'runtime_interaction' && text(meta.interactionId, 200)) {
+    return { proposal: text(meta.interactionId, 200)!, producerId: 'F306', ...(text(meta.interactionKind, 40) ? { kind: text(meta.interactionKind, 40)! } : {}) };
+  }
+  const binding = runtimeCardBinding(message);
+  if (block.kind === 'interactive' && binding && binding.blockId === id && binding.requestKind === 'conversation_decision') {
+    return { proposal: binding.interactionId, producerId: 'F306', kind: 'conversation_decision' };
+  }
+  return null;
+}
 /**
  * The receipts, among `decided`, that this message's request cards take their state from (the same rule and the same
  * cards as messageBlocks). Such a card says how it was answered, so the receipt need not be said again as a line.
@@ -84,15 +102,26 @@ const answers = (receipt: ApprovalDecision, proposal: string, producerId: unknow
 export function cardReceipts(message: NativeMessage, decided: ApprovalDecision[]): ApprovalDecision[] {
   const raw = record(message.extra?.rich).blocks, used: ApprovalDecision[] = [];
   for (const entry of Array.isArray(raw) ? raw.slice(0, 50) : []) {
-    const block = record(entry);
-    if (!text(block.id, 200) || block.kind !== 'card' || !text(block.title, 300)) continue;
+    const block = record(entry), id = text(block.id, 200);
+    if (!id) continue;
+    const rt = runtimeCardApproval(message, block, id);
+    if (rt) {
+      const receipt = decided.find(item => answers(item, rt.proposal, rt.producerId, message.id));
+      if (receipt) used.push(receipt);
+      continue;
+    }
+    if (block.kind !== 'card' || !text(block.title, 300)) continue;
     const approval = record(record(block.meta).approval), proposal = text(approval.canonicalProposalId, 200);
     const receipt = proposal ? decided.find(item => answers(item, proposal, approval.producerId, message.id)) : undefined;
     if (receipt) used.push(receipt);
   }
   return used;
 }
-export function messageBlocks(message: NativeMessage, decided: ApprovalDecision[] = []): { blocks: ChatBlock[]; hidden: number } {
+export function messageBlocks(
+  message: NativeMessage,
+  decided: ApprovalDecision[] = [],
+  runtimeStates: ReadonlyMap<string, RuntimeBlockState> = new Map(),
+): { blocks: ChatBlock[]; hidden: number } {
   const raw = record(message.extra?.rich).blocks, blocks: ChatBlock[] = [];
   let hidden = 0;
   for (const entry of Array.isArray(raw) ? raw.slice(0, 50) : []) {
@@ -101,15 +130,49 @@ export function messageBlocks(message: NativeMessage, decided: ApprovalDecision[
     if (block.kind === 'file') continue;
     // The summary card of one remember call only refers to other cards and receipts; the line it becomes is said by engineNote.
     if (block.kind === 'card' && record(block.meta).kind === 'memory_group') continue;
+    const rt = runtimeCardApproval(message, block, id);
+    if (rt && rt.kind === 'conversation_decision' && block.kind === 'interactive') {
+      const receiptState = decided.find(receipt => answers(receipt, rt.proposal, rt.producerId, message.id))?.state;
+      const rtState = runtimeStates.get(rt.proposal);
+      const selectedIds = Array.isArray(block.selectedIds) ? block.selectedIds.filter((v): v is string => typeof v === 'string') : [];
+      const optionLabels = (Array.isArray(block.options) ? block.options : []).map(record)
+        .filter(o => typeof o.id === 'string' && selectedIds.includes(o.id) && typeof o.label === 'string')
+        .map(o => clip(o.label as string, 200));
+      const state = receiptState ?? rtState?.state ?? (block.disabled === true ? 'approved' : undefined);
+      const selected = rtState?.selected?.length ? rtState.selected : optionLabels;
+      const body = rtState?.body ?? (text(block.title, 300) || text(block.description, 1000) || text(message.content, 300));
+      blocks.push({
+        id, kind: 'card', title: text(block.title, 300) ?? '有件事要问你',
+        ...(text(block.description, 1000) ? { body: text(block.description, 1000)! } : {}),
+        approval: {
+          id: rt.proposal, kind: 'question', title: '有件事要问你',
+          ...(body ? { body } : {}),
+          ...(state ? { state } : {}),
+          ...(selected.length ? { selected } : {}),
+        },
+      });
+      continue;
+    }
     if (block.kind === 'card' && text(block.title, 300)) {
-      const approval = record(record(block.meta).approval), proposal = text(approval.canonicalProposalId, 200);
-      const state = proposal ? decided.find(receipt => answers(receipt, proposal, approval.producerId, message.id))?.state : undefined;
+      const approval = record(record(block.meta).approval);
+      const proposal = rt ? rt.proposal : text(approval.canonicalProposalId, 200);
+      const producerId = rt ? rt.producerId : approval.producerId;
+      const receiptState = proposal ? decided.find(receipt => answers(receipt, proposal, producerId, message.id))?.state : undefined;
+      const rtState = rt ? runtimeStates.get(rt.proposal) : undefined;
+      const state = receiptState ?? rtState?.state;
+      const selected = rtState?.selected;
       const fields = (Array.isArray(block.fields) ? block.fields : []).map(record)
         .filter(field => typeof field.label === 'string' && typeof field.value === 'string').slice(0, 20)
         .map(field => ({ label: clip(field.label as string, 80), value: clip(field.value as string, 400) }));
+      const approvalWords = rt ? (() => {
+        const reqKind: RequestKind = rt.kind === 'question' ? 'question' : 'other';
+        const title = rt.kind === 'question' ? '有件事要问你' : rt.kind === 'elicitation' ? '需要你补充信息' : '有件事等你确认';
+        const body = rtState?.body ?? (text(block.title, 300) || plainLine((typeof block.bodyMarkdown === 'string' ? block.bodyMarkdown : '').trim().split(/\n\s*\n/)[0] ?? ''));
+        return { kind: reqKind, title, ...(body ? { body: clip(body, 400) } : {}) };
+      })() : requestWords(approval.producerId, block);
       blocks.push({ id, kind: 'card', title: text(block.title, 300)!, ...(text(block.bodyMarkdown, 8000) ? { body: text(block.bodyMarkdown, 8000)! } : {}),
         ...(tones.includes(block.tone as never) ? { tone: block.tone as typeof tones[number] } : {}), ...(fields.length ? { fields } : {}),
-        ...(proposal ? { approval: { id: proposal, ...requestWords(approval.producerId, block), ...(state ? { state } : {}) } } : {}) });
+        ...(proposal ? { approval: { id: proposal, ...approvalWords, ...(state ? { state } : {}), ...(selected?.length ? { selected } : {}) } } : {}) });
     } else if (block.kind === 'checklist' && Array.isArray(block.items)) {
       const items = block.items.map(record).filter(item => typeof item.id === 'string' && typeof item.text === 'string').slice(0, 100)
         .map(item => ({ id: item.id as string, text: clip(item.text as string, 500), checked: item.checked === true }));

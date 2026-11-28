@@ -397,6 +397,7 @@
     return list;
   }
 
+  let confirming = 0;
   function itemRow(item) {
     const li = node("div", "cx-item");
     li.dataset.kind = item.kind;
@@ -408,13 +409,34 @@
     li.append(t);
     const acts = node("span", "cx-acts");
     // A request with its card in the history (chat-cards.js): 去确认 goes to
-    // that card, which answers it in place; only a card that is not drawn
-    // falls back to the runtime panel (the link's own target).
+    // that card, which answers it in place. A card further back than the
+    // history drawn is looked for on earlier pages (a promise); when it is
+    // not found there either, the line says so and offers the runtime panel.
+    // Only a request with no message to look for opens the runtime panel
+    // straight away (the link's own target).
     if (item.kind === "approval" && H.confirm) {
       const go = runtimeLink("去确认");
       go.dataset.cxFocus = "confirm:" + item.id;
       go.setAttribute("aria-label", "去确认：" + text);
-      go.addEventListener("click", (ev) => { if (H.confirm(item)) ev.preventDefault(); });
+      go.addEventListener("click", (ev) => {
+        // Only the latest 去确认 in this conversation speaks (a newer one ends a lookup before it quietly).
+        const gen = S.gen, turn = ++confirming;
+        const res = H.confirm(item);
+        // Found at once: an earlier 去确认's 没有找到 goes, as when a lookup finds it.
+        if (res === true) {
+          ev.preventDefault();
+          if (S.said) { S.said = null; paint(); }
+          return;
+        }
+        if (!res || typeof res.then !== "function") return;
+        ev.preventDefault();
+        // undefined: the lookup gave way (another card was found, a search or a quote's jump took over), so there is nothing to say.
+        Promise.resolve(res).then((found) => found, () => false).then((found) => {
+          if (gen !== S.gen || turn !== confirming || found === undefined) return;
+          if (found !== true) say("当前显示的对话里没有找到这条确认的消息。可以在运行面板确认。", true);
+          else if (S.said) { S.said = null; paint(); }
+        });
+      });
       acts.append(go);
       li.append(acts);
       return li;

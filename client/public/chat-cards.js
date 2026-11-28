@@ -10,7 +10,14 @@
 //   blocks()   to add a reply's cards, checklists, choices and diffs under its words;
 //   ending()   to add how an unfinished reply ended (详情, 再发一次);
 //   notice()   for a receipt or refusal line (a row with notice: true);
-//   rendered() right after the history was committed (ClowderLive.commit).
+//   rendered() right after the history was committed (ClowderLive.commit);
+//   find()     (去确认) the request's card when it is drawn: true / false;
+//   locate()   the same when it may be on an earlier page: a promise.
+//
+// An F306 request (a question, an approval with the engine's own choices, a
+// link to open or a form to fill, a cat's own choice) is answered in its
+// card; what the owner picked or typed is a draft that every read and redraw
+// keeps until the server took the answer.
 //
 // Request cards and choices are drawn into a stable empty frame (.ck-live)
 // that is part of the row's markup; what they show (the open list, the
@@ -80,6 +87,12 @@
     focus: null,
     // A request to find once it is drawn (a notification was clicked).
     locate: null,
+    // How requests ended by evidence other than their own row, for this
+    // conversation's thread: the engine's receipts on any page held here
+    // (by request), and the list's settled read (?ids=) or an answer's own
+    // verified reply. The cards on the page still without an outcome of
+    // their own ({id, mid}), from the latest read.
+    receipts: new Map(), settled: new Map(), cards: [],
   };
   // Requests as this page last listed them (their words once settled), and
   // the owner's answers from this page: kept for the page's life, by request.
@@ -87,39 +100,84 @@
   const decisions = new Map();
   // Picks in progress, by conversation, message and block.
   const picks = new Map();
+  // What the owner has picked, typed or skipped in an F306 request's card,
+  // by conversation and request: kept across every read and redraw until the
+  // answer is in (a redraw draws from it; typing never redraws).
+  const drafts = new Map();
+  // Reads of the conversation seen (observe), counted for the page's life.
+  let observed = 0;
+  // Each card found and each lookup begun (find, locate): a lookup reading
+  // earlier pages gave way when this moved on before it ended.
+  let seeking = 0;
 
   function select(sel) {
     S.gen++;
     Object.assign(S, {
       sel: sel && sel.id ? { type: sel.type === "group" ? "group" : "bot", id: String(sel.id) } : null,
       threadId: "", list: new Map(), listState: "idle", listAt: 0, listSig: "", listDone: 0, listLoading: false, listAgain: false, focus: null,
+      receipts: new Map(), settled: new Map(), cards: [],
     });
     S.key = keyOf(S.sel);
     S.facts.clear();
     if (S.locate && S.locate.key !== S.key) S.locate = null;
   }
 
-  // After each read of the open conversation: its thread, and the request
-  // cards on the page. The open list is read when the set of unanswered cards
-  // or the count of waiting requests changed, and again now and then while
-  // any is waiting.
+  // How a request ended when its own row does not say: a receipt on another
+  // page held here (one that names another message is not this card's), the
+  // list's settled read, or the answer's own verified reply. null: unknown.
+  function resolvedOf(id, mid) {
+    const r = S.receipts.get(id);
+    if (r && (!r.card || !mid || r.card === mid)) return r;
+    const d = decisions.get(id);
+    return S.settled.get(id) || (d && d.resolved) || null;
+  }
+  // The requests to ask the server about by ID (?ids=): cards without an
+  // outcome on an earlier page than the newest (their receipt may be on no
+  // page held, or never sent: an F306 request that ended by itself), and the
+  // ones answered from here. The newest page's open requests are listed anyway.
+  // All of them: a read takes at most ASK_MAX (the server's limit), so
+  // loadList asks for more in several reads.
+  const ASK_MAX = 50;
+  function asked() {
+    const latest = H && typeof H.latest === "function" ? H.latest() : null;
+    const out = [];
+    for (const c of S.cards) {
+      if (out.includes(c.id) || resolvedOf(c.id, c.mid)) continue;
+      const d = decisions.get(c.id);
+      if ((latest && c.mid && !latest.has(c.mid)) || (d && d.phase === "sent")) out.push(c.id);
+    }
+    return out;
+  }
+
+  // After each read of the open conversation: its thread, the engine's
+  // receipts on every page held, and the request cards still without an
+  // outcome. The open list is read when the set of those cards, the IDs to
+  // ask about or the count of waiting requests changed, and again now and
+  // then while any is waiting.
   function observe(sel, threadId, messages) {
     if (!S.sel || keyOf(sel) !== S.key) return;
     const id = threadId ? String(threadId) : "";
-    if (id && id !== S.threadId) Object.assign(S, { threadId: id, list: new Map(), listState: "idle", listAt: 0, listSig: "", listDone: 0 });
-    const open = [];
+    if (id && id !== S.threadId) Object.assign(S, { threadId: id, list: new Map(), listState: "idle", listAt: 0, listSig: "", listDone: 0, receipts: new Map(), settled: new Map(), cards: [] });
+    observed++;
+    const cards = [];
     for (const m of messages || []) {
+      const r = R.receiptOf(m);
+      if (r) S.receipts.set(r.id, r);
+      const mid = String((m && (m.native_message_id || m.id)) || "");
       for (const b of m && Array.isArray(m.blocks) ? m.blocks : []) {
-        if (b && b.kind === "card" && b.approval && typeof b.approval.id === "string" && !b.approval.state) open.push(b.approval.id);
+        if (b && b.kind === "card" && b.approval && typeof b.approval.id === "string" && b.approval.id && !b.approval.state) cards.push({ id: b.approval.id, mid });
       }
     }
-    if (!open.length || !S.threadId) return;
-    const X = window.ClowderExperience;
-    const a = X && typeof X.activity === "function" ? X.activity() : null;
-    const waiting = a && a.threadId === S.threadId ? a.counts.approval : -1;
-    const sig = JSON.stringify([S.threadId, open, waiting]);
-    if (sig !== S.listSig || Date.now() - S.listAt > 15000) { S.listSig = sig; loadList(); }
-    // A frame whose view changed with the time (a request close to running out).
+    S.cards = cards;
+    const open = cards.filter((c) => !resolvedOf(c.id, c.mid)).map((c) => c.id);
+    if (open.length && S.threadId) {
+      const X = window.ClowderExperience;
+      const a = X && typeof X.activity === "function" ? X.activity() : null;
+      const waiting = a && a.threadId === S.threadId ? a.counts.approval : -1;
+      const sig = JSON.stringify([S.threadId, open, waiting, asked()]);
+      if (sig !== S.listSig || Date.now() - S.listAt > 15000) { S.listSig = sig; loadList(); }
+    }
+    // A frame whose view changed with the time (a request close to running out) or with a receipt.
     repaint();
   }
 
@@ -130,13 +188,28 @@
     S.listLoading = true;
     if (S.listState === "idle") S.listState = "loading";
     try {
-      const got = R.approvals(await H.api(scopeOf(S.sel) + "/approvals"));
-      if (gen !== S.gen || req !== S.listReq || threadId !== S.threadId) return;
-      if (!got) throw Object.assign(new Error("bad answer"), { status: 0 });
-      // Another thread's requests never show here; the next read asks again.
-      if (got.threadId && got.threadId !== S.threadId) { S.listSig = ""; return; }
-      S.list = new Map(got.list.map((i) => [i.id, i]));
-      for (const i of got.list) seen.set(i.id, i);
+      // The IDs to ask about, ASK_MAX a read, one read after another (one
+      // read when there are none); nothing is taken until every read came back.
+      const ids = asked(), scope = scopeOf(S.sel), parts = [];
+      for (let k = 0; k < ids.length; k += ASK_MAX) parts.push(ids.slice(k, k + ASK_MAX));
+      if (!parts.length) parts.push([]);
+      const list = new Map(), settled = [];
+      for (let k = 0; k < parts.length; k++) {
+        const part = parts[k];
+        const got = R.approvals(await H.api(scope + "/approvals" + (part.length ? "?ids=" + part.map(enc).join(",") : "")));
+        if (gen !== S.gen || req !== S.listReq || threadId !== S.threadId) return;
+        if (!got) throw Object.assign(new Error("bad answer"), { status: 0 });
+        // Another thread's requests never show here; the next read asks again.
+        if (got.threadId && got.threadId !== S.threadId) { S.listSig = ""; return; }
+        // The open list as the last read gives it; a request asked about by ID as the read that asked about it.
+        const last = k === parts.length - 1;
+        for (const i of got.list) if (last || part.includes(i.id)) list.set(i.id, i);
+        settled.push(...got.settled);
+      }
+      S.list = list;
+      for (const i of list.values()) seen.set(i.id, i);
+      // How the requests asked about by ID ended, as the engine records them.
+      for (const s of settled) S.settled.set(s.id, { state: s.state, selected: s.selected });
       S.listState = "ready";
       S.listAt = askedAt;
       S.listDone = req;
@@ -352,9 +425,20 @@
     if (host._ckSig === sig) return;
     const a = document.activeElement;
     const part = a && host.contains(a) ? (a.dataset && a.dataset.ckFocus) || "card" : "";
+    // A field being typed in keeps its caret when its card is drawn again (what was typed is in the draft).
+    let caret = null;
+    try { if (part && a && typeof a.selectionStart === "number") caret = [a.selectionStart, a.selectionEnd]; } catch (e) { caret = null; }
+    // A card just found (去确认) and drawn again keeps its flash (its list read can land right after).
+    const hit = !!host.querySelector(".ck-hit");
     host._ckSig = sig;
     host.replaceChildren(kind === "approval" ? approvalCard(key, fact, view) : choiceCard(key, fact, view));
     if (part) refocus(host, part);
+    const again = hit ? host.querySelector(".approval, .approval-line") : null;
+    if (again) { again.classList.add("ck-hit"); setTimeout(() => again.classList.remove("ck-hit"), 1500); }
+    const now = document.activeElement;
+    if (caret && now && now !== a && host.contains(now) && typeof now.setSelectionRange === "function") {
+      try { now.setSelectionRange(caret[0], caret[1]); } catch (e) { /* a field without a caret (a number) */ }
+    }
   }
   function refocus(host, part) {
     const all = [host, ...host.querySelectorAll("[data-ck-focus]")];
@@ -369,6 +453,9 @@
       fact: fact.block, item: S.list.get(id) || null, list: S.listState, seen: seen.get(id) || null,
       // fresh: a list read asked for after the answer came back.
       local, fresh: !!local && S.listDone > (local.after || 0), catName: fact.catName, now: Date.now(),
+      resolved: resolvedOf(id, fact.mid),
+      // reloaded: the conversation's read asked for after the answer came back too (and was seen).
+      reloaded: !!local && local.phase === "sent" && local.reread === true && observed > (local.obs || 0),
     });
   }
   const KIND_ICON = { preference: "book-open", profile: "person", person: "users-plus", schedule: "alarm-clock", question: "message-circle-question", other: "info" };
@@ -403,6 +490,18 @@
     }
     head.append(ico, main);
     card.append(head);
+    // An F306 request is answered in the card: its questions, form or link,
+    // drawn from the draft; a check that fails says why just above the actions.
+    if (v.prompt) {
+      const d = draftOf(id);
+      const said = node("p", "ck-note ck-bad ck-invalid", d.invalid);
+      said.setAttribute("role", "alert");
+      said.hidden = !d.invalid;
+      const clear = () => { if (!d.invalid) return; d.invalid = ""; said.textContent = ""; said.hidden = true; };
+      const box = promptBox(id, v, d, clear);
+      if (box) card.append(box);
+      card.append(said);
+    }
     const actions = node("div", "approval-actions");
     if (v.waiting || v.expiry) {
       const t = node("span", "approval-timer ck-when");
@@ -412,7 +511,8 @@
     }
     for (const a of v.actions) {
       const busy = v.busy === a.decision;
-      const b = button(a.decision === "approve" ? "primary" : "secondary", null, () => decide(id, a.decision), "act:" + a.decision);
+      const b = button(a.primary || a.decision === "approve" ? "primary" : "secondary", null, () => decide(id, a.decision), "act:" + a.decision);
+      if (a.description) b.title = a.description;
       if (busy) {
         const spin = icon("spinner", "approval-spinner");
         b.append(spin, document.createTextNode("正在提交…"));
@@ -436,6 +536,299 @@
     }
     return card;
   }
+  // ------------------------------------------------ answering in the card
+  // An F306 request's own controls. Each is drawn once from the draft; a
+  // pick, a keystroke or a skip changes the draft and the controls in place
+  // (sync), never the card's view, so nothing is redrawn while the owner
+  // types and focus stays where it is. A redraw (the list read again, an
+  // answer in flight) draws them again from the same draft.
+  const draftKey = (id) => S.key + "|" + id;
+  function draftOf(id) {
+    const k = draftKey(id);
+    let d = drafts.get(k);
+    if (!d) { d = { answers: {}, fields: {}, picks: [], custom: "", text: "", invalid: "", op: "", opFor: "", opRev: 0 }; drafts.set(k, d); }
+    return d;
+  }
+  function promptBox(id, v, d, clear) {
+    const p = v.prompt, busy = !!v.busy;
+    const box = node("div", "ck-rt");
+    if (p.kind === "question") for (const q of p.questions) box.append(questionPart(id, q, v, d, clear, p.questions.length > 1));
+    else if (p.kind === "elicitation" && p.mode === "url") box.append(webLink(p.url));
+    else if (p.kind === "elicitation" && p.mode === "form") for (const f of p.fields) box.append(formField(f, d, busy, clear));
+    else if (p.kind === "conversation" && p.mode !== "confirm") conversationPart(box, id, p, v, d, clear);
+    return box.childNodes.length ? box : null;
+  }
+  // An option the owner picks (XBot's .ask-opt): its letter, or a tick once picked.
+  function optionButton(text, description, i, focus, onClick) {
+    const b = button("ask-opt", null, onClick, focus);
+    const badge = node("span", "opt-badge");
+    const t = node("span", "opt-t");
+    t.append(node("span", "ck-opt-label", text));
+    if (description) t.append(node("span", "ck-opt-desc", description));
+    b.append(badge, t);
+    b._ckMark = (on, off) => {
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-pressed", String(on));
+      badge.classList.toggle("on", on);
+      badge.replaceChildren(on ? icon("check") : String.fromCharCode(65 + (i % 26)));
+      if (off) b.setAttribute("aria-disabled", "true"); else b.removeAttribute("aria-disabled");
+    };
+    return b;
+  }
+  // Up and down move between a list's options.
+  function arrows(list) {
+    list.addEventListener("keydown", (ev) => {
+      if (ev.key !== "ArrowDown" && ev.key !== "ArrowUp") return;
+      const items = [...list.querySelectorAll("button.ask-opt")];
+      const at = items.indexOf(document.activeElement);
+      if (at < 0) return;
+      ev.preventDefault();
+      items[(at + (ev.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus();
+    });
+  }
+  function field(cls, focus, type) {
+    const f = document.createElement("input");
+    f.className = cls;
+    f.type = type || "text";
+    f.dataset.ckFocus = focus;
+    return f;
+  }
+  // Enter in a field answers, as a pick's own field does.
+  function enterAnswers(f, id) {
+    f.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter" || ev.isComposing || ev.keyCode === 229) return;
+      ev.preventDefault();
+      decide(id, "submit");
+    });
+  }
+
+  // One question: its words (one question's own words are the card's), its
+  // options, the owner's own answer (其他, or the only way to answer), and
+  // 跳过 where it may be left unanswered. A secret answer is typed hidden and
+  // never said back.
+  function questionPart(id, q, v, d, clear, many) {
+    const busy = !!v.busy, k = "q:" + q.id;
+    const s = d.answers[q.id] || (d.answers[q.id] = { picks: [], text: "", skip: false });
+    const g = node("div", "ck-q");
+    g.setAttribute("role", "group");
+    const said = R.oneLine(q.question);
+    g.setAttribute("aria-label", said || q.header);
+    if (many) {
+      if (q.header && !said.includes(q.header)) g.append(node("div", "ck-q-head", q.header));
+      g.append(node("div", "ck-q-text", q.question));
+    } else if (said !== R.oneLine(v.body)) g.append(node("div", "ck-q-text", q.question));
+    const btns = [];
+    let list = null, own = null, other = null, skip = null;
+    const sync = () => {
+      btns.forEach((b, i) => b._ckMark(s.picks.includes(q.options[i].label), busy || s.skip));
+      if (own) {
+        own.disabled = s.skip;
+        own.readOnly = busy;
+        if (own.value !== s.text) own.value = s.text;
+      }
+      if (other) other.classList.toggle("typing", !!s.text.trim());
+      if (skip) { skip.setAttribute("aria-pressed", String(s.skip)); skip.classList.toggle("on", s.skip); }
+      g.classList.toggle("ck-skipped", s.skip);
+    };
+    if (q.options) {
+      list = node("div", "ask-opts");
+      list.setAttribute("role", "group");
+      q.options.forEach((o, i) => {
+        const b = optionButton(o.label, o.description, i, k + ":" + i, () => {
+          if (busy || s.skip) return;
+          if (q.multiSelect) {
+            const at = s.picks.indexOf(o.label);
+            if (at >= 0) s.picks.splice(at, 1); else s.picks.push(o.label);
+          } else {
+            // One answer: the pick takes the place of the owner's own words.
+            s.picks = [o.label];
+            s.text = "";
+          }
+          clear();
+          sync();
+        });
+        btns.push(b);
+        list.append(b);
+      });
+    }
+    if (!q.options || q.isOther) {
+      own = field(q.options ? "ck-other" : "ck-input", k + ":text", q.isSecret ? "password" : "text");
+      own.setAttribute("autocomplete", q.isSecret ? "new-password" : "off");
+      own.maxLength = 10000;
+      own.placeholder = q.options ? "其他…" : "写下你的回答…";
+      own.setAttribute("aria-label", q.options ? "其他：" + (said || q.header) : said || q.header);
+      own.value = s.text;
+      own.addEventListener("input", () => {
+        s.text = own.value;
+        // In a single choice the owner's own words take the place of a pick.
+        if (q.options && !q.multiSelect && s.text.trim() && s.picks.length) s.picks = [];
+        clear();
+        sync();
+      });
+      enterAnswers(own, id);
+      if (list) {
+        other = node("div", "ask-opt other");
+        const badge = node("span", "opt-badge ghost");
+        badge.append(icon("pencil"));
+        other.append(badge, own);
+        list.append(other);
+      }
+    }
+    if (list) { arrows(list); g.append(list); } else if (own) g.append(own);
+    if (q.allowUnanswered) {
+      skip = button("text-btn ck-link ck-skip", many ? "跳过这题" : "暂不回答", () => {
+        if (busy) return;
+        s.skip = !s.skip;
+        // What is shown is what is sent: a skipped question keeps nothing.
+        if (s.skip) { s.picks = []; s.text = ""; }
+        clear();
+        sync();
+      }, k + ":skip");
+      g.append(skip);
+    }
+    sync();
+    return g;
+  }
+
+  // The page the cat asks the owner to open: only http(s), in a new tab,
+  // with where it goes in sight.
+  function webLink(url) {
+    const row = node("div", "ck-weblink");
+    const a = node("a", "ws-link ck-runtime", "打开链接");
+    a.href = url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.title = url;
+    a.dataset.ckFocus = "url";
+    row.append(a);
+    const host = (/^https?:\/\/(?:[^@/?#]*@)?([^/?#]+)/i.exec(url) || [])[1] || "";
+    if (host) {
+      row.append(node("span", "ck-host", host));
+      a.setAttribute("aria-label", "打开链接：" + host);
+    }
+    return row;
+  }
+
+  // One field of a form: a checkbox, a list, a number or words, from the
+  // draft or else the field's default.
+  function formField(f, d, busy, clear) {
+    const name = f.title || f.id, k = "f:" + f.id;
+    const value = Object.prototype.hasOwnProperty.call(d.fields, f.id) ? d.fields[f.id] : R.fieldDefault(f);
+    const desc = f.description ? node("span", "ck-field-desc", f.description) : null;
+    if (f.type === "boolean" && !f.enum) {
+      const row = node("label", "ck-bool");
+      const box = field("ck-check", k, "checkbox");
+      box.checked = value === true;
+      box.disabled = busy;
+      box.addEventListener("change", () => { d.fields[f.id] = box.checked === true; clear(); });
+      const t = node("span", "ck-bool-t");
+      t.append(node("span", "ck-field-name", name));
+      if (desc) t.append(desc);
+      row.append(box, t);
+      return row;
+    }
+    const wrap = node("label", "field ck-field");
+    wrap.append(node("span", "ck-field-name", name));
+    let control;
+    if (f.enum) {
+      control = document.createElement("select");
+      control.dataset.ckFocus = k;
+      if (!f.required || value === "") {
+        const none = node("option", "", f.required ? "请选择" : "不填");
+        none.value = "";
+        control.append(none);
+      }
+      f.enum.forEach((x, i) => { const o = node("option", "", String(x)); o.value = String(i); control.append(o); });
+      control.disabled = busy;
+    } else {
+      control = field("", k, f.type === "string" ? "text" : "number");
+      if (f.type !== "string") {
+        control.setAttribute("step", f.type === "integer" ? "1" : "any");
+        if (f.minimum != null) control.setAttribute("min", String(f.minimum));
+        if (f.maximum != null) control.setAttribute("max", String(f.maximum));
+      } else if (f.maxLength) control.maxLength = f.maxLength;
+      control.readOnly = busy;
+    }
+    control.value = String(value == null ? "" : value);
+    const save = () => { d.fields[f.id] = control.value; clear(); };
+    control.addEventListener("input", save);
+    control.addEventListener("change", save);
+    wrap.append(control);
+    if (desc) wrap.append(desc);
+    return wrap;
+  }
+
+  // A cat's own choice, answered here: its options (one, or up to max), the
+  // 自定义 option's words once it is picked, and the owner's own reply in
+  // place of a pick where the cat allows it.
+  function conversationPart(box, id, p, v, d, clear) {
+    const busy = !!v.busy, multiple = p.mode === "multiple";
+    const list = node("div", "ask-opts");
+    list.setAttribute("role", "group");
+    const btns = [];
+    let custom = null, own = null, limit = null;
+    const picked = (o) => d.picks.includes(o.id);
+    const sync = () => {
+      const full = multiple && p.max > 0 && d.picks.length >= p.max;
+      btns.forEach((b, i) => b._ckMark(picked(p.options[i]), busy || (full && !picked(p.options[i]))));
+      const c = p.options.find((o) => o.custom && picked(o));
+      if (custom) {
+        custom.hidden = !c;
+        custom.readOnly = busy;
+        if (c) { custom.placeholder = c.label + "…"; custom.setAttribute("aria-label", c.label); }
+        if (custom.value !== d.custom) custom.value = d.custom;
+      }
+      if (own) { own.readOnly = busy; if (own.value !== d.text) own.value = d.text; }
+      if (limit) limit.classList.toggle("visually-hidden", !full);
+    };
+    p.options.forEach((o, i) => {
+      const b = optionButton(R.optionText(o), o.description, i, "co:" + o.id, () => {
+        if (busy) return;
+        const at = d.picks.indexOf(o.id);
+        if (!multiple) d.picks = [o.id];
+        else if (at >= 0) d.picks.splice(at, 1);
+        else if (!p.max || d.picks.length < p.max) d.picks.push(o.id);
+        else return;
+        // A pick is the answer: the owner's own reply in its place goes.
+        d.text = "";
+        clear();
+        sync();
+        if (o.custom && picked(o) && custom) custom.focus();
+      });
+      btns.push(b);
+      list.append(b);
+    });
+    arrows(list);
+    box.append(list);
+    if (p.options.some((o) => o.custom)) {
+      custom = field("ck-input", "co:custom");
+      custom.maxLength = 2000;
+      custom.value = d.custom;
+      custom.addEventListener("input", () => { d.custom = custom.value; clear(); });
+      enterAnswers(custom, id);
+      box.append(custom);
+    }
+    if (p.allowText) {
+      own = field("ck-input", "co:text");
+      own.maxLength = 10000;
+      own.placeholder = "写下你的回答…";
+      own.setAttribute("aria-label", "你的回答");
+      own.value = d.text;
+      own.addEventListener("input", () => {
+        d.text = own.value;
+        // The owner's own reply is the answer in place of the options.
+        if (d.text.trim() && d.picks.length) d.picks = [];
+        clear();
+        sync();
+      });
+      enterAnswers(own, id);
+      box.append(own);
+    }
+    // Said once the limit is reached and the other options turn unavailable (as a choice block says it).
+    if (multiple && p.max) { limit = node("p", "ck-note ck-limit", "最多选 " + p.max + " 项"); box.append(limit); }
+    sync();
+  }
+
   // 详情 at the end of a line: the engine's own words (verbatim), shown only
   // when asked for. Returns the box, which goes after the line.
   let reveals = 0;
@@ -453,11 +846,37 @@
     return box;
   }
 
+  // One submission's own ID: the same answer sent again (its reply was lost,
+  // or the server could not finish it) is the same operation for the engine,
+  // sent with the revision it first went with, since the engine may have
+  // taken it and moved the request's revision on; a changed answer, or one
+  // the server refused as it stands, is a new one.
+  function operation() {
+    const c = window.crypto;
+    if (c && typeof c.randomUUID === "function") return c.randomUUID();
+    return "op-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 12);
+  }
+
   // The owner's answer: sent to the server, and shown as what it said back.
+  // An F306 request's answer is built from its card (the draft) and checked
+  // first; one that does not pass says why in the card and is not sent.
   async function decide(id, decision) {
     const sel = S.sel, threadId = S.threadId;
     const cur = decisions.get(id);
     if (!sel || !threadId || (cur && cur.phase === "sending")) return;
+    const item = S.list.get(id) || null;
+    const prompt = item && item.runtime && item.approve ? item.runtime : null;
+    const draft = prompt ? draftOf(id) : null, key = draftKey(id);
+    let body = { decision, expectedThreadId: threadId };
+    if (prompt && decision !== "reject") {
+      const built = R.runtimeResponse(prompt, decision, draft);
+      if (!built.response) { invalid(id, built.invalid || "请检查你的回答"); return; }
+      // Keyed on the answer alone: a newer revision read meanwhile does not make the same answer another operation.
+      const sig = JSON.stringify(built.response);
+      if (!draft.op || draft.opFor !== sig) Object.assign(draft, { op: operation(), opFor: sig, opRev: prompt.revision });
+      body = { expectedThreadId: threadId, expectedRevision: draft.opRev || prompt.revision, operationId: draft.op, response: built.response };
+    }
+    if (draft) draft.invalid = "";
     const at = Date.now();
     decisions.set(id, { phase: "sending", decision, at });
     repaint();
@@ -465,11 +884,12 @@
     try {
       res = await H.apiFetch(scopeOf(sel) + "/approvals/" + enc(id), {
         method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decision, expectedThreadId: threadId }),
+        body: JSON.stringify(body),
       }, true);
       const text = await res.text();
       try { data = text ? JSON.parse(text) : {}; } catch (e) { data = {}; }
     } catch (e) {
+      // Unknown whether it arrived: the same answer sent again keeps its operation ID.
       decisions.set(id, { phase: "error", decision, at, error: { text: "连不上 clowder-bot，不确定刚才的回答有没有送到；可以再点一次", detail: "" } });
       announce("没能提交");
       repaint();
@@ -477,26 +897,54 @@
     }
     if (res.ok) {
       const settled = data.settled === true ? true : data.settled === false ? false : null;
-      // after: reads numbered above this one were asked for after the answer.
-      decisions.set(id, { phase: "sent", decision, at, settled, after: S.listReq });
-      announce(settled === true ? "已提交" : settled === false ? "已提交，还在处理" : "已提交，没能确认结果");
+      // The engine's own terminal state, read back after the answer (F306): the outcome, not a guess.
+      const resolved = settled === true && R.STATES.includes(data.state) ? { state: data.state, selected: R.labels(data.selected) } : null;
+      // after: reads numbered above this one were asked for after the answer;
+      // obs / reread: the conversation's reads seen by then, and whether the read asked for now came back.
+      const entry = { phase: "sent", decision, at, settled, after: S.listReq, obs: observed, reread: false, ...(resolved ? { resolved } : {}) };
+      decisions.set(id, entry);
+      if (resolved && sel === S.sel) S.settled.set(id, resolved);
+      // The answer is in: what was typed (a secret too) is not kept.
+      if (draft) drafts.delete(key);
+      const fact = S.facts.get("approval:" + id);
+      const kind = (item && item.kind) || (fact && fact.block && fact.block.approval && fact.block.approval.kind) || "other";
+      announce(resolved ? R.outcome(kind, resolved.state, item ? item.title : "") : settled === true ? "已提交" : settled === false ? "已提交，还在处理" : "已提交，没能确认结果");
       // The receipt and the request's new state come with the next reads.
       S.listSig = "";
       loadList();
-      if (H.reload) H.reload();
+      const back = H.reload ? H.reload() : null;
+      Promise.resolve(back).then(() => {
+        entry.reread = true;
+        if (decisions.get(id) === entry) repaint();
+      }, () => {});
     } else {
-      const err = R.failure(data, decision === "approve" ? "没能提交，还没有生效" : "没能提交，这件事仍在等你确认");
+      const err = R.failure(data, decision === "reject" ? "没能提交，这件事仍在等你确认" : "没能提交，还没有生效");
       decisions.set(id, { phase: "error", decision, at, error: err });
+      // Refused as it stands (not valid, not allowed, not open here): another
+      // attempt is a new operation. Any other failure (it changed meanwhile,
+      // the engine could not finish) may follow the engine taking it: the
+      // same answer again keeps its operation ID and revision.
+      if (draft && (res.status === 400 || res.status === 403 || res.status === 404)) Object.assign(draft, { op: "", opFor: "", opRev: 0 });
       announce(err.text);
-      // Already answered or not here: the list says so; another conversation: read again.
-      if (res.status === 404) { S.listSig = ""; loadList(); }
+      // Already answered, not here, or changed since it was read: the list says so (a request's new revision too); another conversation: read again.
+      if (res.status === 404 || res.status === 409) { S.listSig = ""; loadList(); }
       if (res.status === 409 && H.reload) H.reload();
     }
     repaint();
   }
+  // A check of the answer that did not pass: said in the card, in place.
+  function invalid(id, text) {
+    const d = draftOf(id);
+    d.invalid = text;
+    const host = frameOf("approval", id);
+    const said = host && host.querySelector(".ck-invalid");
+    if (said) { said.textContent = text; said.hidden = !text; }
+  }
 
   // The status line's 去确认 and a clicked notification: the card in the
   // history, scrolled to, flashed and focused. false: not in what is drawn.
+  // Found, it ends any lookup still reading earlier pages (H.cancelLocate),
+  // so that one never takes the scroll, the focus or the note afterwards.
   function find(item) {
     if (!item) return false;
     let host = item.proposalId ? frameOf("approval", String(item.proposalId)) : null;
@@ -506,12 +954,34 @@
     }
     const card = host && (host.querySelector(".approval, .approval-line") || host);
     if (!card) return false;
+    seeking++;
+    if (H && typeof H.cancelLocate === "function") H.cancelLocate();
     card.scrollIntoView({ block: "center", behavior: reduced() ? "auto" : "smooth" });
     card.classList.remove("ck-hit");
     void card.offsetWidth;
     card.classList.add("ck-hit");
     setTimeout(() => card.classList.remove("ck-hit"), 1500);
     card.focus({ preventScroll: true });
+    return true;
+  }
+  // The same when the card may be further back than the history drawn: its
+  // message is looked for on earlier pages (H.locate: chat-locate.js, a
+  // bounded number of pages, each waited for until drawn, with its own quiet
+  // note), and once found the card itself is scrolled to, flashed and
+  // focused. Resolves to true, or to false / null when it is not found
+  // (null: the search said why) or cannot be looked for, or to undefined when
+  // it gave way before it ended (a card found where it is drawn, a newer
+  // 去确认, or anything that ended the search itself: a search of the
+  // palette, a quote's jump, another chat): then there is nothing to say about it.
+  async function locate(item) {
+    if (find(item)) return true;
+    if (!item || !item.messageId || !H || typeof H.locate !== "function") return false;
+    const key = S.key, op = ++seeking;
+    let got = null, cancelled = false;
+    try { got = await H.locate(item, () => { cancelled = true; }); } catch (e) { got = null; }
+    if (cancelled || op !== seeking) return undefined;
+    if (got !== true) return got === false ? false : null;
+    if (key === S.key) { repaint(); find(item); }
     return true;
   }
   // The same once the chat that holds it has drawn (a notification opened it).
@@ -581,14 +1051,7 @@
         if (v.busy || (multiple && v.full && !on)) btn.setAttribute("aria-disabled", "true");
         list.append(btn);
       });
-      list.addEventListener("keydown", (ev) => {
-        if (ev.key !== "ArrowDown" && ev.key !== "ArrowUp") return;
-        const items = [...list.querySelectorAll("button.ask-opt")];
-        const at = items.indexOf(document.activeElement);
-        if (at < 0) return;
-        ev.preventDefault();
-        items[(at + (ev.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus();
-      });
+      arrows(list);
       card.append(list);
       if (multiple) {
         const row = node("div", "approval-actions ck-confirm");
@@ -725,7 +1188,12 @@
   //   icon(name, extra)   the shell's icons;
   //   render(el, text)    Markdown as a reply's words are drawn;
   //   send(text, sent)    the normal send path (sent() once the server took it);
-  //   reload()            read the open conversation again;
+  //   reload()            read the open conversation again (a promise of that read);
+  //   locate(item, onCancel)  find a message on earlier pages (chat-locate.js
+  //                       find: true, null when not found and said why, false;
+  //                       onCancel() when that search ended quietly);
+  //   cancelLocate()      end such a lookup under way (chat-locate.js cancel);
+  //   latest()            the native message IDs of the newest page (chat-history.js);
   //   thread              the history's scroll box (#thread).
   function init(hooks) {
     H = hooks;
@@ -743,8 +1211,11 @@
   }
 
   window.ClowderCards = Object.freeze({
-    init, select, observe, words, blocks, ending, notice, rendered, find, locateSoon,
-    // For tests and diagnostics only: what this page holds, never a record.
-    peek: () => ({ list: [...S.list.keys()], listState: S.listState, decisions: [...decisions].map(([id, d]) => ({ id, ...d })) }),
+    init, select, observe, words, blocks, ending, notice, rendered, find, locate, locateSoon,
+    // For tests and diagnostics only: what this page holds, never a record (drafts are not shown).
+    peek: () => ({
+      list: [...S.list.keys()], listState: S.listState, decisions: [...decisions].map(([id, d]) => ({ id, ...d })),
+      receipts: [...S.receipts.keys()], settled: [...S.settled].map(([id, s]) => ({ id, ...s })),
+    }),
   });
 })();

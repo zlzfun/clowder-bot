@@ -3,7 +3,7 @@
    Builds on XBot's own chat cards in app.css: the request card and its
    one-line outcome (.approval, .approval-line), the option card (.ask,
    .ask-opt, .opt-badge, .ask-chosen), .sysline, .text-btn, .primary /
-   .secondary, the settings rows and switch (.setrow, .g7-switch); and on
+   .secondary, the form .field, the settings rows and switch (.setrow, .g7-switch); and on
    chat-live.css's .lv-ended. Only existing --x-* tokens and app.css aliases;
    no new colours or fonts; the one motion is app.css's quote-flash, which the
    global prefers-reduced-motion rule stills. Loaded before chat-live.css. */
@@ -40,6 +40,38 @@ html[data-theme="dark"] .ck-blocks { --cardx: var(--x-bot-bubble); }
 .ck-err { line-height: 1.5; }
 .ck-err .ck-link { margin-left: var(--x-s1); }
 
+/* An F306 request answered in its card: its questions on XBot's own option
+   rows (.ask-opt, set flush with the card's words), fields on XBot's .field,
+   a link with where it goes. A check that fails is one quiet line above the actions. */
+.ck-rt { display: grid; gap: var(--x-s6); margin-top: var(--x-s5); min-width: 0; }
+.ck-rt [hidden] { display: none; }
+.ck-rt .ask-opts { margin: 0 calc(-1 * var(--x-s4)); }
+.ck-q { display: grid; gap: var(--x-s2); min-width: 0; }
+.ck-q-head { font-size: var(--x-fs-sm); line-height: 1.45; color: var(--x-muted); }
+.ck-q-text { font-size: 14px; font-weight: 500; line-height: 1.55; color: var(--x-text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ck-rt .ck-input {
+  width: 100%; min-height: 40px; padding: var(--x-s3) var(--x-s5); border: 0; border-radius: var(--x-r-sm);
+  background: var(--fill); color: var(--x-text); font: inherit; font-size: 14px; outline: none;
+}
+.ck-rt .ck-input::placeholder { color: var(--x-faint); }
+.ck-rt .ck-input:focus { background: var(--hover); }
+.ck-rt .ck-input:focus-visible, .ck-rt .ck-field :is(input, select):focus-visible { box-shadow: 0 0 0 2px var(--ring); }
+.ck-rt .ck-input:disabled { opacity: .55; }
+.ck-q .ck-skip { justify-self: start; min-height: 26px; margin-left: calc(-1 * var(--x-s2)); padding: 0 var(--x-s3); font-size: var(--x-fs-sm); color: var(--x-muted); }
+.ck-q .ck-skip.on { background: var(--x-fill-2); color: var(--x-text); }
+.ck-rt .field.ck-field { margin: 0; gap: var(--x-s2); font-size: var(--x-fs-sm); }
+.ck-field-name { color: var(--x-text-2); }
+.ck-field-desc { font-size: 12px; line-height: 1.45; color: var(--x-muted); }
+.ck-bool { display: flex; align-items: flex-start; gap: var(--x-s4); font-size: 14px; line-height: 1.5; cursor: pointer; }
+.ck-bool .ck-check { flex: none; width: 16px; height: 16px; margin: 3px 0 0; accent-color: var(--accent); }
+.ck-bool-t { display: grid; gap: 1px; min-width: 0; }
+.ck-weblink { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--x-s3); min-width: 0; }
+/* The link is what the request asks for: the size of the card's words, not a footnote. */
+.ck-weblink a.ws-link { padding: var(--x-s1) var(--x-s2); margin-left: calc(-1 * var(--x-s2)); font-size: 14px; font-weight: 500; }
+.ck-host { min-width: 0; font: 12px/1.5 var(--x-mono); color: var(--x-muted); overflow-wrap: anywhere; }
+.ck-rt > .ck-note { margin: calc(-1 * var(--x-s3)) 0 0; }
+.approval.ck-ask > .ck-invalid { margin-top: var(--x-s4); }
+
 /* Settled, submitted or unknown: XBot's one line; neutral ones say nothing about the outcome. */
 .approval-line.ck-line { width: 100%; padding: 9px 14px; font-size: 13.5px; color: var(--x-text); }
 .approval-line.ck-neutral .st { color: var(--x-muted); }
@@ -64,18 +96,18 @@ html[data-theme="dark"] .ck-blocks { --cardx: var(--x-bot-bubble); }
 .ask.ck-ask-choice { padding: 14px 8px 8px; }
 .ask.ck-ask-choice > .ask-q { margin: 0 10px 8px; font-size: 14.5px; color: var(--x-text); font-weight: 600; }
 .ck-ask-desc { margin: -2px 10px 10px; font-size: var(--x-fs-sm); line-height: 1.5; color: var(--x-muted); }
-.ck-ask-choice .ask-opts { display: grid; gap: 2px; }
-.ck-ask-choice button.ask-opt { width: 100%; border: 0; background: transparent; color: var(--x-text); font: inherit; font-size: 14.5px; text-align: left; }
-.ck-ask-choice .ask-opt[aria-disabled="true"] { opacity: .55; }
-.ck-ask-choice .ask-opt[aria-disabled="true"]:hover { background: transparent; }
-.ck-ask-choice .ask-opt[aria-disabled="true"]:hover .opt-badge { background: var(--badge-bg); color: var(--badge-ink); }
-.ck-ask-choice .ask-opt.on { background: var(--x-fill-2); }
-.ck-ask-choice .ask-opt.on .opt-badge { background: var(--x-primary); color: var(--primary-text); }
-.ck-ask-choice .opt-badge .icon { width: 14px; height: 14px; stroke-width: 2.4; }
-.ck-ask-choice .opt-t { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+:is(.ck-ask-choice, .ck-rt) .ask-opts { display: grid; gap: 2px; }
+:is(.ck-ask-choice, .ck-rt) button.ask-opt { width: 100%; border: 0; background: transparent; color: var(--x-text); font: inherit; font-size: 14.5px; text-align: left; }
+:is(.ck-ask-choice, .ck-rt) .ask-opt[aria-disabled="true"] { opacity: .55; }
+:is(.ck-ask-choice, .ck-rt) .ask-opt[aria-disabled="true"]:hover { background: transparent; }
+:is(.ck-ask-choice, .ck-rt) .ask-opt[aria-disabled="true"]:hover .opt-badge { background: var(--badge-bg); color: var(--badge-ink); }
+:is(.ck-ask-choice, .ck-rt) .ask-opt.on { background: var(--x-fill-2); }
+.ck-ask-choice .ask-opt.on .opt-badge, .ck-rt .ask-opt.on .opt-badge { background: var(--x-primary); color: var(--primary-text); }
+:is(.ck-ask-choice, .ck-rt) .opt-badge .icon { width: 14px; height: 14px; stroke-width: 2.4; }
+:is(.ck-ask-choice, .ck-rt) .opt-t { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .ck-opt-label { overflow-wrap: anywhere; }
 .ck-opt-desc { font-size: var(--x-fs-sm); line-height: 1.45; color: var(--x-muted); }
-.ck-ask-choice .ask-opt.other { cursor: text; }
+:is(.ck-ask-choice, .ck-rt) .ask-opt.other { cursor: text; }
 .ck-ask-choice .ask-send .icon { width: 14px; height: 14px; }
 .ck-ask-choice .ask-send[aria-disabled="true"] { opacity: .35; }
 .ck-ask-choice .approval-actions.ck-confirm { flex-wrap: wrap; margin: var(--x-s2) 0 0; padding: 0 var(--x-s2) var(--x-s1); }

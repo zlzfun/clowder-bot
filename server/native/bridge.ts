@@ -6,7 +6,8 @@ import { defaultRuntime, faceOfTool, faceTool, faceTools, memberCliArgs, runtime
 import { approvalReceipt, approvalReceiptText, engineNote, messageDisplayText, messagePresentation, replyEnding, replyInProgress, rosterRefusals, scheduledReminder } from './message-presentation.js';
 import { avatarBreed, type CatConfig, type SourceTemplate } from './cat-templates.js';
 import { clip } from './text.js';
-import { cardReceipts, messageBlocks, type ApprovalDecision } from './blocks.js';
+import { cardReceipts, messageBlocks, type ApprovalDecision, type RuntimeBlockState } from './blocks.js';
+import { readRuntimeInteractions, runtimeCardBinding, runtimeSummary, runtimeTerminalState } from './runtime-interactions.js';
 import { Workspaces } from '../workspaces.js';
 import { NativeFiles } from './files.js';
 import { Activity } from './activity.js';
@@ -190,7 +191,8 @@ export class BotBridge {
     const drawn = new Map<string, Record<string, unknown>>();
     // A cat that was addressed but does not belong to this conversation: said once by name (see rosterRefusals).
     const refusals = rosterRefusals(page.messages, id => cats.find(cat => cat.id === id)?.name, false);
-    const decided = this.decisions(page.messages), onCards = this.receiptsOnCards(page.messages);
+    const { decided, runtimeStates, onPageDecided } = await this.pageDecisions(thread.id, page.messages, !!before);
+    const onCards = this.receiptsOnCards(page.messages, onPageDecided);
     for (const { message, ...presentation } of this.presentMessages(page.messages, cats)) {
       if (message.type === 'user' && message.id === source) continue;
       if (refusals.get(message.id) === null) continue;
@@ -204,7 +206,7 @@ export class BotBridge {
       if (note === null) continue;
       const refusal = refusals.get(message.id) ?? (receipt ? approvalReceiptText(receipt) : reminder ? `提醒：${reminder}` : note);
       const text = refusal ?? messageDisplayText(message, thread.id, presentation.speaker?.name), inProgress = replyInProgress(message);
-      const rich = message.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(message, decided), ending = replyEnding(message);
+      const rich = message.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(message, decided, runtimeStates), ending = replyEnding(message);
       const attachments = this.workspaces.messageFiles(thread.id, message), time = new Date(message.timestamp).toISOString();
       // The owner's or a cat's own words and nothing else: what a reaction is made of, and what one can be drawn on.
       const said = !refusal && presentation.presentation_kind === 'message' && (message.type === 'user' || (message.type === 'assistant' && !!message.catId));
@@ -216,6 +218,7 @@ export class BotBridge {
         reply_to: quoted ? this.store.state.messageRefs[thread.id]?.[quoted] ?? 0 : 0,
         status: message.lifecycle?.status ?? (message.isDraft ? 'processing' : 'complete'), ...(inProgress ? { in_progress: true } : {}),
         ...(ending ? { ended: ending } : {}), ...(refusal ? { notice: true } : {}), ...(reminder ? { reminder: true } : {}),
+        ...(receipt ? { receipt: { proposalId: receipt.proposalId, producerId: receipt.producerId, state: receipt.state, ...(receipt.cardMessageId ? { cardMessageId: receipt.cardMessageId } : {}) } } : {}),
         attachments,
         // Cards, checklists and choices the cat attached; `blocks_hidden` counts what the chat cannot draw yet.
         ...(rich.blocks.length ? { blocks: rich.blocks } : {}), ...(rich.hidden ? { blocks_hidden: rich.hidden } : {}), native: message };
@@ -254,13 +257,14 @@ export class BotBridge {
     // A row's number, as in a cat's own chat: what a reply names when it quotes one.
     for (const message of page.messages) this.store.sequence(thread.id, message.id);
     // A cat that was addressed but is not in this group: said once by name instead of the engine's raw refusal lines.
-    const refusals = rosterRefusals(page.messages, id => cats.find(cat => cat.id === id)?.name, true), decided = this.decisions(page.messages);
+    const refusals = rosterRefusals(page.messages, id => cats.find(cat => cat.id === id)?.name, true);
+    const { decided, runtimeStates, onPageDecided } = await this.pageDecisions(thread.id, page.messages, !!before);
     // A receipt whose request card on this page already says how it was answered is not drawn as a line as well.
-    const onCards = this.receiptsOnCards(page.messages);
+    const onCards = this.receiptsOnCards(page.messages, onPageDecided);
     const reading = new PageReading({ hasMore: page.hasMore, reactions: view.reactions }), rows: Record<string, unknown>[] = [];
     const drawn = new Map<string, Record<string, unknown>>();
     for (const { message: m, name, ...presentation } of this.presentMessages(page.messages.filter(m => refusals.get(m.id) !== null && !onCards.has(m.id)), cats)) {
-      const rich = m.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(m, decided), receipt = approvalReceipt(m);
+      const rich = m.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(m, decided, runtimeStates), receipt = approvalReceipt(m);
       const reminder = scheduledReminder(m), note = engineNote(m);
       if (note === null) continue;
       const refusal = refusals.get(m.id) ?? (receipt ? approvalReceiptText(receipt) : reminder ? `提醒：${reminder}` : note);
@@ -276,6 +280,7 @@ export class BotBridge {
       const row: Record<string, unknown> = { seq, id: m.id, time, sender: m.type === 'user' ? 'local' : name,
         kind: m.type === 'user' ? 'person' : 'bot', text, ...(refusal ? { notice: true } : {}),
         ...(reminder ? { reminder: true } : {}),
+        ...(receipt ? { receipt: { proposalId: receipt.proposalId, producerId: receipt.producerId, state: receipt.state, ...(receipt.cardMessageId ? { cardMessageId: receipt.cardMessageId } : {}) } } : {}),
         reply_to: quoted ? this.store.state.messageRefs[thread.id]?.[quoted] ?? 0 : 0,
         status: m.lifecycle?.status ?? (m.isDraft ? 'processing' : 'complete'), ...(inProgress ? { in_progress: true } : {}),
         ...(ending ? { ended: ending } : {}),
@@ -376,20 +381,55 @@ export class BotBridge {
     return messages.map(approvalReceipt).filter((receipt): receipt is ApprovalDecision => !!receipt);
   }
   /**
+   * Resolves receipt states and F306 runtime interaction details for a page of messages.
+   * For older pages (`olderPage = true`), also consults `/api/approval-hub/settled` best-effort
+   * when an approval card has no receipt on the same page.
+   */
+  private async pageDecisions(threadId: string, messages: NativeMessage[], olderPage: boolean) {
+    const onPageDecided = this.decisions(messages);
+    const decided = [...onPageDecided];
+    const rtIds = messages.map(runtimeCardBinding).filter((b): b is NonNullable<typeof b> => !!b).map(b => b.interactionId);
+    const runtimeStates = new Map<string, RuntimeBlockState>();
+    if (rtIds.length) {
+      const interactions = await readRuntimeInteractions(this.native, rtIds);
+      for (const [id, rec] of interactions) {
+        const terminal = runtimeTerminalState(rec), body = runtimeSummary(rec);
+        runtimeStates.set(id, {
+          ...(terminal ? { state: terminal.state, ...(terminal.selected ? { selected: terminal.selected } : {}) } : {}),
+          ...(body ? { body } : {}),
+        });
+      }
+    }
+    if (olderPage) {
+      const unresolved = messages.some(m => m.type !== 'user' && messageBlocks(m, decided, runtimeStates).blocks.some(b => b.kind === 'card' && b.approval && !b.approval.state));
+      if (unresolved) {
+        const hubSettled = await this.native.request<{ items?: unknown }>('/api/approval-hub/settled?limit=200').catch(() => null);
+        for (const raw of Array.isArray(hubSettled?.items) ? hubSettled.items : []) {
+          const item = raw && typeof raw === 'object' ? raw as Record<string, any> : {};
+          const card = item.navigation?.approvalCardRef;
+          if (typeof item.proposalId !== 'string' || typeof item.sourceFeatureId !== 'string' || card?.threadId !== threadId) continue;
+          const state: ApprovalDecision['state'] = item.status === 'approved' ? 'approved' : item.status === 'rejected' ? 'rejected' : 'closed';
+          decided.push({ proposalId: item.proposalId, producerId: item.sourceFeatureId, state, ...(typeof card.messageId === 'string' ? { cardMessageId: card.messageId } : {}) });
+        }
+      }
+    }
+    return { decided, runtimeStates, onPageDecided };
+  }
+  /**
    * The receipts on this page whose request card is on it too and takes its state from them. That card says how it was
    * answered (已记住这个偏好 · …), so the receipt is not drawn under it as a line saying the same once more. A receipt
    * whose card is on another page, or sits inside a folded execution record, keeps its line: there it is the only word
    * of the outcome. Display only: the native record of the receipt is untouched.
    */
-  receiptsOnCards(messages: NativeMessage[]): Set<string> {
+  receiptsOnCards(messages: NativeMessage[], decided: ApprovalDecision[] = this.decisions(messages)): Set<string> {
     const receipts = new Map<ApprovalDecision, string>(), said = new Set<string>();
     for (const message of messages) { const receipt = approvalReceipt(message); if (receipt) receipts.set(receipt, message.id); }
     if (!receipts.size) return said;
     // In page order, as decisions() gives them: a card takes the first receipt that answers it.
-    const decided = [...receipts.keys()], kinds = messagePresentation(messages);
+    const onPage = [...receipts.keys()], kinds = messagePresentation(messages);
     for (const message of messages) {
       if (message.type === 'user' || kinds.get(message.id) !== 'message') continue;
-      for (const receipt of cardReceipts(message, decided)) said.add(receipts.get(receipt)!);
+      for (const receipt of cardReceipts(message, onPage)) said.add(receipts.get(receipt)!);
     }
     return said;
   }

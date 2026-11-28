@@ -274,6 +274,8 @@ const DRAWS: Record<string, 'fill' | 'mark' | 'tint' | 'pressed' | 'swatch'> = {
   'chat-reactions.css|html[data-theme="dark"] .rx-chip.rx-mine|background': 'mark', 'chat-reactions.css|html[data-theme="dark"] .rx-emo.rx-given|background': 'mark',
   // Item 51: the pencil that comes up on a cat's portrait (编辑资料), a badge on the primary.
   'profile.css|.pf-edit-mark|background': 'fill',
+  // Item 59: an option picked in a request card (its tick on the primary, as a chosen answer's letter), and a ticked box in its form.
+  'chat-cards.css|.ck-rt .ask-opt.on .opt-badge|background': 'fill', 'chat-cards.css|.ck-bool .ck-check|accent-color': 'mark',
 };
 const FAMILY = /var\(--(?:x-primary|x-primary-hover|primary|primary-hover|accent|accent-ink|accent-soft|send|ring|provider-accent)\)/;
 const ACCENT = /var\(--(?:accent|accent-ink|ring|provider-accent)\)/;
@@ -294,6 +296,8 @@ const SITES: Array<[string, string, string, string[], number]> = [
   ['the letter of a chosen answer', 'chat-cards.css|.ck-ask-choice .ask-opt.on .opt-badge|color', '--x-on-primary', ['--x-primary'], 4.5],
   ['the unread count', 'chat-list.css|.cl-count|color', '--x-on-primary', ['--x-primary'], 4.5],
   ['the pencil on a cat\'s portrait (编辑资料)', 'profile.css|.pf-edit-mark|color', '--x-on-primary', ['--x-primary'], 3],
+  ['the tick of an option picked in a request card', 'chat-cards.css|.ck-rt .ask-opt.on .opt-badge|color', '--x-on-primary', ['--x-primary'], 3],
+  ['a ticked box in a request card\'s form (the card is the panel, in dark the reply bubble)', 'chat-cards.css|.ck-bool .ck-check|accent-color', '--accent', ['--x-panel', '--x-bot-bubble'], 3],
 ];
 test('every shape drawn in the primary colour stays visible in every 配色 and mode: alone on a surface it is the accent at 3:1, on a primary fill its ink is --x-on-primary, and 拿铁 looks as before', () => {
   const all = styles.flatMap(href => declarations(read('client/public' + href)).map(d => ({ file: href.slice(1), ...d })));

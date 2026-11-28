@@ -110,16 +110,16 @@
 ```ts
 type ChatBlock =
   | {id; kind:'card'; title; body?; tone?:'info'|'success'|'warning'|'danger'; fields?:{label,value}[];
-     approval?:{id; kind:'preference'|'profile'|'person'|'schedule'|'question'|'other'; title; body?; state?:'approved'|'rejected'|'closed'}}
+     approval?:{id; kind:'preference'|'profile'|'person'|'schedule'|'question'|'other'; title; body?; state?:'approved'|'rejected'|'closed'; selected?:string[]}}
   | {id; kind:'checklist'; title?; items:{id,text,checked}[]}
   | {id; kind:'choices'; mode:'single'|'multiple'|'confirm'; title?; description?; options:{id,label,emoji?,description?,custom?}[];
      max?; template?; answered:boolean; selected:string[]}
   | {id; kind:'diff'; file; diff};
 ```
 
-- `card.approval.state` 只认同一个提议、同一个来源（`producerId`）的回执；回执写明了卡片所在消息时，还要是这条消息。对不上的回执不改变任何卡片。
+- `card.approval.state` 只认同一个提议、同一个来源（`producerId`）的回执；回执写明了卡片所在消息时，还要是这条消息。对不上的回执不改变任何卡片。F306 运行交互（`runtime_interaction` 与 `conversation_decision`）同时从原生 `GET /api/runtime-interactions/:id` 读取状态与公开选中的选项（`selected`），即使在 `cancelled`/`expired` 等不发回执消息的终态下也能准确收口；用 `?before=` 翻看更早一页且页内没有回执时，同时查 `/api/approval-hub/settled` 补齐状态。
 - `card.approval` 自带这件事的日常说法：`kind`、`title`（不带主语，如「想设一个定时」，前面接说话的猫名）和 `body`（如「每周五写周报 · 每周五 17:00（Asia/Singapore）」）。它从原生卡片本身读出（来源 `producerId`、标题冒号后的名字、`Trigger` 字段里的 JSON），所以请求答完、不再出现在下一节的列表里之后，卡片仍然说得出当时问的是什么。带这种卡片的消息，原生自己的正文（「请求批准创建定时任务「…」」「提议捕捉品味信号：…」）是写给原生网页的：会话列表的预览 `activity.last.text` 和搜索摘要改用「`title`：`body`」这一行。
-- `card.approval.id` 是原生提议的 ID：这张卡是一条「等你确认的事」，与下一节 `approvals[].id` 对应，前端在这里画确认卡而不是原生卡片的原文。用户回答之后，原生会往会话里发一条回执（来自 approval hub 的 connector 消息，原话是「审批结果：品味提案 proposal_… 已批准。」）：回执和卡片在同一页时，`card.approval.state` 是 `approved`／`rejected`／`closed`；这时卡片自己写着结果（「已记住这个偏好 · …」），回执这一行不再出现在返回的消息里（2026-11-13 起：同一件事不说两遍）。卡片不在这一页（在更早的一页），或卡片在折叠的执行过程里时，回执是结果唯一的说法，这一行照旧返回，文字是聊天里的说法（「已记住这个偏好。」「定时没有改动。」等，带 `notice: true`）。两种情况原生记录都不变。没有 `state` 的卡片是否还在等待，以下一节的列表为准。
+- `card.approval.id` 是原生提议的 ID：这张卡是一条「等你确认的事」，与下一节 `approvals[].id` 对应，前端在这里画确认卡而不是原生卡片的原文。用户回答之后，原生会往会话里发一条回执（来自 approval hub 的 connector 消息，原话是「审批结果：品味提案 proposal_… 已批准。」）：回执和卡片在同一页时，`card.approval.state` 是 `approved`／`rejected`／`closed`；这时卡片自己写着结果（「已记住这个偏好 · …」），回执这一行不再出现在返回的消息里（2026-11-13 起：同一件事不说两遍）。卡片不在这一页（在更早的一页），或卡片在折叠的执行过程里时，回执是结果唯一的说法，这一行照旧返回，文字是聊天里的说法（「已记住这个偏好。」「定时没有改动。」等，带 `notice: true`，并附 `receipt: {proposalId, producerId, state, cardMessageId?}` 供前端核对所属卡片并更新已保留在内存里的早先页卡片）。两种情况原生记录都不变。没有 `state` 的卡片是否还在等待，以下一节的列表为准。
 - `choices` 对应原生的 interactive 块。作答沿用原生网页的做法：把选择写成一句普通的聊天消息发出去（措辞规则见上游 `InteractiveBlock.tsx` 的 `buildSelectionMessage`：有 `template` 时把 `{selection}` 换成所选项，否则「我选了：…」，confirm 是「确认／取消」），再用 `POST <scope>/messages/:messageId/blocks/:blockId/answer {selectedIds, expectedThreadId}` 记到原生块上（转发 `PATCH /api/messages/:id/block-state`，`disabled: true`）。两步各自成败：消息已发出但记录失败时，选项仍可再点，不把它显示成已作答。
   - 措辞的细节（与上游一致）：所选项写成「emoji 标签」（有 emoji 时），多个用「, 」连接；选了自定义输入并填了字时是「所选项：填的字」或只有填的字，有标题时后面加「（标题）」；confirm 是「确认」或「取消」，有标题时加「 — 标题」。
   - `confirm` 的 `options` 固定是两个，顺序为确认、取消，取法与原生网页相同：有 `__confirm__` 用它，否则第一个选项是确认；另一个选项是取消，没有声明时是 `{id:'__cancel__', label:'取消'}`。
@@ -132,11 +132,11 @@ type ChatBlock =
 
 猫提出需要用户点头的事（记住一个偏好、设一个定时……）时，原生会在会话里发一条带确认卡片的消息，并把它登记在 Approval Hub。此前聊天里只有「等你确认」一行，「去确认」要打开运行面板。适配层现在把它读成聊天里能直接回答的卡片；请求本身、它的生命周期和生效过程仍然全在原生。
 
-`GET /xbot-api/<bots|groups>/:chat/approvals` → `{threadId, approvals[]}`，只含原生 `resolution: open` 且卡片锚定在这个会话里的请求，按创建时间排列：
+`GET /xbot-api/<bots|groups>/:chat/approvals[?ids=id1,id2]` → `{threadId, approvals[], settled?[]}`，只含原生 `resolution: open`（以及当前对话消息中待回答的 F306 运行交互：`question`、`approval`、`elicitation`、`conversation_decision`）且卡片锚定在这个会话里的请求，按创建时间排列；传入 `?ids=` 时，对其中已在原生结束的请求额外返回 `settled: [{id, state, selected?}]`，让跨页保留的卡片不因回执不在同页而停在「已提交」：
 
 ```ts
 {
-  id: string;            // 原生 proposalId
+  id: string;            // 原生 proposalId / interactionId
   kind: 'preference'|'profile'|'person'|'schedule'|'question'|'other';
   title: string;         // 「快手想记住你的一个偏好」
   body: string;          // 要记住的内容 / 「喝水提醒 · 每天 09:00（Asia/Shanghai）」
@@ -148,12 +148,18 @@ type ChatBlock =
   approve: {label: string} | null;   // null：不能在聊天里同意
   reject: {label: string} | null;
   note?: string;         // 不能在这里处理时说明去哪里
+  runtime?:              // F306 可直接在聊天里回答的交互详情
+    | {kind:'question'; revision:number; canReject:true; questions:{id,header,question,options?:{label,description?}[],multiSelect?,isOther?,isSecret?,allowUnanswered?}[]}
+    | {kind:'approval'; revision:number; decisions:{id,label,description?,outcome:'accept'|'decline'|'cancel'}[]}
+    | {kind:'elicitation'; revision:number; mode:'url'; message:string; url:string; decisions:{id,label,description?,outcome:'accept'|'decline'|'cancel'}[]}
+    | {kind:'elicitation'; revision:number; mode:'form'; message:string; fields:{id,type,title?,description?,default?,enum?,minimum?,maximum?,minLength?,maxLength?,required}[]; decisions:{id,label,description?,outcome:'accept'|'decline'|'cancel'}[]}
+    | {kind:'conversation'; revision:number; mode:'single'|'multiple'|'confirm'; options:{id,label,emoji?,description?,custom?}[]; max?; allowText:boolean}; // confirm 可含 1 或 2 个原生选项
 }
 ```
 
-- 措辞按原生登记的来源生成：F221 偏好、F231 资料、F276 人物、F139 定时（触发时间由原生 trigger 读成「每天 09:00」「每周一、周三 18:30」「每 2 小时」；认不出的 cron 原样给出），其余用通用说法。原生摘要里的英文前缀（`Taste […]:`、`Create schedule:`）不出现在正文里。
-- 能否在这里同意取决于原生：`inlineApprovable` 且 `decisionMode: 'approve-reject'`，并且 Hub manifest 给出的 `decisionEndpointBase` 属于 Bot 允许到达的那组提议决定接口。资料更新（F231）原生要求先核对差异，这里只能「不用」；提问类（F306）仍在运行面板回答。
-- `POST …/approvals/:id {decision: 'approve'|'reject', expectedThreadId}` 先重新读取 Hub，确认这件事仍然开着、属于这个会话，再把用户的回答发给 manifest 指定的原生接口。返回 `{id, decision, settled}`：`settled` 是事后重读 Hub 的结果，`true` 表示原生已不再把它列为待确认，`false` 表示已受理但原生还在处理，`null` 表示没能确认。不属于这个会话或已经处理过的 404，不能在这里同意的 409。
+- 措辞按原生登记的来源生成：F221 偏好、F231 资料、F276 人物、F139 定时（触发时间由原生 trigger 读成「每天 09:00」「每周一、周三 18:30」「每 2 小时」；认不出的 cron 原样给出）、F306 运行交互，其余用通用说法。原生摘要里的英文前缀（`Taste […]:`、`Create schedule:`）不出现在正文里。
+- 能否在这里同意取决于原生：`inlineApprovable` 且 `decisionMode: 'approve-reject'`，并且 Hub manifest 给出的 `decisionEndpointBase` 属于 Bot 允许到达的那组提议决定接口；F306 运行交互（`question`、`approval`、`elicitation`、`conversation_decision`）则由适配层从原生 `/api/runtime-interactions/:id` 读取完整规格并校验，极少数不能安全内联渲染的子类型仍保持 `approve: null, reject: null, note: '这一项要在运行面板里回答'`。资料更新（F231）原生要求先核对差异，这里只能「不用」。
+- `POST …/approvals/:id {decision?: 'approve'|'reject', response?, expectedRevision?, operationId?, expectedThreadId}` 先重新读取 Hub 或 `/api/runtime-interactions/:id`，确认这件事仍然开着、属于这个会话，再把用户的回答发给原生接口（F306 携带服务端读出的真实 `cardRef`、`expectedRevision` 与 `operationId`）。返回 `{id, decision, settled, state?, selected?, summary?}`：`settled` 是事后重读原生状态的结果，`true` 表示原生已确认终态，`false` 表示已受理但原生还在处理，`null` 表示没能确认。不属于这个会话或已经处理过的 404，版本冲突或不能在这里处理 409，F306 回答不合法 400。
 - 原生没能落实时返回原状态码和「这一步没有成功，还没有生效」，原生给出的原因保留在 `native` 里；这件事继续显示为等待确认。读取不会触发任何决定，没有自动同意。
 
 偏好提议（F221）能否落实取决于部署：原生把偏好存在「构建所在 Git 仓库里检出了 `main` 的工作树」中。2026-11-11 起 `runtime:prepare` 按这个要求建构建目录（见 [维护说明](upstream-maintenance.md)「偏好仓库」），在隔离运行时上实测同意后 `settled: true`、`/xbot-api/memory/taste` 读到该条。还没按新布局重建的实例上，同意会失败并返回 `Vignette write failed`，聊天里如实显示「没有成功」；公开（非敏感）偏好需要 `origin`，没有配置时同样如实失败。

@@ -5,8 +5,9 @@
 // Everything here reads what the server projected (docs/chat-experience-api.md
 // 「卡片、清单与选项」「等你确认的事」, docs/chat-live-api.md). A request card
 // says only what the server has confirmed: an answer the owner gave is 已提交
-// until the engine's receipt names the outcome, and a request that is no
-// longer listed as open, with no receipt on the page, is only 已处理.
+// until the engine's receipt (on any page held), the list's settled read or
+// the answer's own verified reply names the outcome, and a request that is no
+// longer listed as open, with nothing that says how, is only 已处理.
 (() => {
   "use strict";
   const str = (v) => (typeof v === "string" ? v : "");
@@ -18,8 +19,103 @@
 
   // ---- 等你确认的事 ----
   const KINDS = ["preference", "profile", "person", "schedule", "question", "other"];
+  const STATES = ["approved", "rejected", "closed"];
+  const OUTCOMES = ["accept", "decline", "cancel"];
+  const filled = (v) => (typeof v === "string" && v.trim() ? v : "");
+  const finite = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  // Public labels the server says were chosen (never a typed or secret answer: the server leaves those out).
+  const labels = (v) => (Array.isArray(v) ? [...new Set(v.map(oneLine).filter(Boolean))].slice(0, 20) : []);
 
-  // GET <scope>/approvals, checked: the open requests of one conversation.
+  // An F306 question, approval, elicitation or conversation decision as the
+  // chat can answer it (docs/chat-experience-api.md 「等你确认的事」, runtime).
+  // Labels stay exactly as the server gave them: an answer is the label itself.
+  // null when any part is not what the contract says; such a request is then
+  // answered in the runtime panel, never half drawn.
+  function decisionsOf(list) {
+    if (!Array.isArray(list) || !list.length) return null;
+    const out = [], ids = new Set();
+    for (const d of list) {
+      if (!d || typeof d !== "object" || typeof d.id !== "string" || !d.id || ids.has(d.id) || !filled(d.label) || !OUTCOMES.includes(d.outcome)) return null;
+      ids.add(d.id);
+      out.push({ id: d.id, label: d.label.trim(), description: oneLine(d.description), outcome: d.outcome });
+    }
+    return out;
+  }
+  const FIELD_TYPES = ["string", "number", "integer", "boolean"];
+  const primitive = (v) => typeof v === "string" || typeof v === "boolean" || finite(v) !== null;
+  function runtimePrompt(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const revision = Number.isSafeInteger(raw.revision) && raw.revision > 0 ? raw.revision : 0;
+    if (!revision) return null;
+    if (raw.kind === "question") {
+      if (!Array.isArray(raw.questions) || !raw.questions.length) return null;
+      const questions = [], ids = new Set();
+      for (const q of raw.questions) {
+        if (!q || typeof q !== "object" || typeof q.id !== "string" || !q.id || ids.has(q.id)) return null;
+        const question = filled(q.question).trim(), header = oneLine(q.header);
+        if (!question && !header) return null;
+        ids.add(q.id);
+        let options = null;
+        if (q.options != null) {
+          if (!Array.isArray(q.options) || !q.options.length) return null;
+          options = [];
+          for (const o of q.options) {
+            if (!o || typeof o !== "object" || !filled(o.label)) return null;
+            if (!options.some((x) => x.label === o.label)) options.push({ label: o.label, description: oneLine(o.description) });
+          }
+        }
+        questions.push({ id: q.id, header, question: question || header, options,
+          multiSelect: q.multiSelect === true, isOther: q.isOther === true, isSecret: q.isSecret === true, allowUnanswered: q.allowUnanswered === true });
+      }
+      return { kind: "question", revision, questions };
+    }
+    if (raw.kind === "approval") {
+      const decisions = decisionsOf(raw.decisions);
+      return decisions ? { kind: "approval", revision, decisions } : null;
+    }
+    if (raw.kind === "elicitation") {
+      const decisions = decisionsOf(raw.decisions), message = str(raw.message).trim();
+      if (!decisions) return null;
+      if (raw.mode === "url") {
+        // Only a web address opens from the chat: never javascript:, data: or file:.
+        const url = str(raw.url).trim();
+        return /^https?:\/\/[^\s/?#]+/i.test(url) && !/\s/.test(url) ? { kind: "elicitation", revision, mode: "url", message, url, decisions } : null;
+      }
+      if (raw.mode !== "form" || !Array.isArray(raw.fields)) return null;
+      const fields = [], ids = new Set();
+      for (const f of raw.fields) {
+        if (!f || typeof f !== "object" || typeof f.id !== "string" || !f.id.trim() || ids.has(f.id) || !FIELD_TYPES.includes(f.type)) return null;
+        if (f.enum != null && (!Array.isArray(f.enum) || !f.enum.length || !f.enum.every(primitive))) return null;
+        ids.add(f.id);
+        fields.push({
+          id: f.id, type: f.type, title: oneLine(f.title), description: oneLine(f.description),
+          default: primitive(f.default) ? f.default : null, enum: f.enum ? f.enum.slice() : null,
+          minimum: finite(f.minimum), maximum: finite(f.maximum),
+          minLength: Number.isSafeInteger(f.minLength) && f.minLength >= 0 ? f.minLength : null,
+          maxLength: Number.isSafeInteger(f.maxLength) && f.maxLength > 0 ? f.maxLength : null,
+          required: f.required === true,
+        });
+      }
+      return { kind: "elicitation", revision, mode: "form", message, fields, decisions };
+    }
+    if (raw.kind === "conversation") {
+      if (!["single", "multiple", "confirm"].includes(raw.mode) || !Array.isArray(raw.options) || !raw.options.length) return null;
+      const options = [], ids = new Set();
+      for (const o of raw.options) {
+        if (!o || typeof o !== "object" || typeof o.id !== "string" || !o.id || ids.has(o.id) || !filled(o.label)) return null;
+        ids.add(o.id);
+        options.push({ id: o.id, label: o.label.trim(), emoji: oneLine(o.emoji), description: oneLine(o.description), custom: o.custom === true });
+      }
+      // A confirmation is its "yes", and its "no" when it has one.
+      if (raw.mode === "confirm" && options.length > 2) return null;
+      return { kind: "conversation", revision, mode: raw.mode, options,
+        max: raw.mode === "multiple" && Number.isSafeInteger(raw.max) && raw.max > 0 ? raw.max : 0, allowText: raw.allowText === true };
+    }
+    return null;
+  }
+
+  // GET <scope>/approvals, checked: the open requests of one conversation,
+  // and (asked for with ?ids=) how requests that are no longer open ended.
   // null when the answer is not such a list at all.
   function approvals(data) {
     if (!data || typeof data !== "object" || !Array.isArray(data.approvals)) return null;
@@ -28,15 +124,44 @@
     for (const raw of data.approvals) {
       if (!raw || typeof raw !== "object" || typeof raw.id !== "string" || !raw.id || typeof raw.messageId !== "string") continue;
       if (raw.state != null && raw.state !== "open") continue;
-      list.push({
+      const item = {
         id: raw.id, kind: KINDS.includes(raw.kind) ? raw.kind : "other",
         title: oneLine(raw.title), body: str(raw.body).replace(/\r\n?/g, "\n").trim(), quote: oneLine(raw.quote),
         catId: str(raw.catId), catName: oneLine(raw.catName), messageId: raw.messageId,
         createdAt: time(raw.createdAt), expiresAt: time(raw.expiresAt),
         approve: action(raw.approve), reject: action(raw.reject), note: oneLine(raw.note),
-      });
+      };
+      if (raw.runtime != null) {
+        // Answered here only as the server described it; a description this page cannot read goes to the runtime panel.
+        const prompt = runtimePrompt(raw.runtime);
+        if (prompt && item.approve) item.runtime = prompt;
+        else Object.assign(item, { approve: null, reject: null, note: item.note || "这一项要在运行面板里回答" });
+      }
+      list.push(item);
     }
-    return { threadId: str(data.threadId), list };
+    const settled = [];
+    for (const s of Array.isArray(data.settled) ? data.settled : []) {
+      if (!s || typeof s !== "object" || typeof s.id !== "string" || !s.id || !STATES.includes(s.state)) continue;
+      settled.push({ id: s.id, state: s.state, selected: labels(s.selected) });
+    }
+    return { threadId: str(data.threadId), list, settled };
+  }
+
+  // The engine's receipt on a row: {id, state, card?} (the row's receipt, or
+  // the native message it carries), else null. Any page held may have it.
+  // card: the message of the request card it answers, when the receipt names
+  // one (a receipt for another message never settles this card).
+  function receiptOf(m) {
+    if (!m || typeof m !== "object") return null;
+    const r = m.receipt;
+    if (r && typeof r === "object" && typeof r.proposalId === "string" && r.proposalId && STATES.includes(r.state)) {
+      return { id: r.proposalId, state: r.state, ...(typeof r.cardMessageId === "string" && r.cardMessageId ? { card: r.cardMessageId } : {}) };
+    }
+    const src = m.native && typeof m.native === "object" ? m.native.source : null;
+    const d = src && src.meta && typeof src.meta === "object" ? src.meta.approvalDecisionReceipt : null;
+    if (!src || src.connector !== "approval-hub" || !d || d.kind !== "approval_decision_receipt" || typeof d.canonicalProposalId !== "string" || !d.canonicalProposalId) return null;
+    const card = d.approvalCardRef && typeof d.approvalCardRef.messageId === "string" ? d.approvalCardRef.messageId : "";
+    return { id: d.canonicalProposalId, state: d.resolution === "accepted" ? "approved" : d.resolution === "rejected" ? "rejected" : "closed", ...(card ? { card } : {}) };
   }
 
   // How an answered request turned out, from the engine's receipt (state),
@@ -50,6 +175,7 @@
     schedule: ["已设好这个定时", "没有设这个定时"],
     reschedule: ["已改好这个定时", "没有改这个定时"],
     unschedule: ["已取消这个定时", "这个定时还留着"],
+    question: ["已回答", "已拒绝"],
     other: ["已同意", "已拒绝"],
   };
   const timer = (title) => (/想取消一个定时/.test(title) ? "unschedule" : /想改一个定时/.test(title) ? "reschedule" : "schedule");
@@ -83,8 +209,26 @@
     return day + " " + pad(d.getHours()) + ":" + pad(d.getMinutes()) + " 前有效";
   }
 
+  // The actions of a request the chat answers itself (an F306 prompt): one
+  // per native decision (the first that accepts is the primary, last),
+  // 提交回答 for questions and choices (with 拒绝 for a question), or the
+  // answers of a confirmation (its "no" when it has one, then its "yes").
+  function runtimeActions(p, item) {
+    if (p.kind === "question") {
+      return [...(item.reject ? [{ decision: "reject", label: item.reject.label }] : []), { decision: "submit", label: item.approve.label, primary: true }];
+    }
+    if (p.kind === "conversation") {
+      if (p.mode !== "confirm") return [{ decision: "submit", label: item.approve.label, primary: true }];
+      const [yes, no] = p.options;
+      return [...(no ? [{ decision: "opt:" + no.id, label: optionText(no) }] : []), { decision: "opt:" + yes.id, label: optionText(yes), primary: true }];
+    }
+    const first = p.decisions.find((d) => d.outcome === "accept");
+    const act = (d, primary) => ({ decision: "pick:" + d.id, label: d.label, ...(d.description ? { description: d.description } : {}), ...(primary ? { primary: true } : {}) });
+    return [...p.decisions.filter((d) => d !== first).map((d) => act(d, false)), ...(first ? [act(first, true)] : [])];
+  }
+
   // What a request card shows.
-  //   fact:  the transcript's card block ({approval: {id, kind, title, body?, state?}});
+  //   fact:  the transcript's card block ({approval: {id, kind, title, body?, state?, selected?}});
   //   item:  the open request with that ID, or null when it is not listed;
   //   list:  how this conversation's open list stands: "idle" (not read yet),
   //          "loading", "ready", "error" or "missing" (no such route);
@@ -92,23 +236,36 @@
   //   local: the owner's answer from this page: {phase: "sending"|"sent"|"error",
   //          decision, settled (true|false|null), error: {text, detail}};
   //   fresh: the list was asked for after that answer;
+  //   resolved: how it ended by evidence other than this row ({state, selected?}):
+  //          the engine's receipt on another page held here, the list's
+  //          settled read (?ids=), or the answer's own verified reply;
+  //   reloaded: after that answer, both a list read and a read of the
+  //          conversation came back (the receipt had its chance to arrive);
   //   catName: who asked (the message's cat), now: the time.
   // mode "ask" is the card (its actions only ever from the open list; busy:
-  // the answer being sent; waiting / note: why there are none); mode "line"
-  // is one settled or neutral line.
-  function card({ fact, item = null, list = "idle", seen = null, local = null, fresh = false, catName = "", now = 0 }) {
+  // the answer being sent; waiting / note: why there are none; prompt: what
+  // an F306 request asks, answered in the card); mode "line" is one settled
+  // or neutral line.
+  function card({ fact, item = null, list = "idle", seen = null, local = null, fresh = false, catName = "", now = 0, resolved = null, reloaded = false }) {
     const approval = fact && fact.approval ? fact.approval : {};
-    const state = approval.state || "";
+    const known = STATES.includes(approval.state) ? approval.state : "";
+    const later = !known && resolved && STATES.includes(resolved.state) ? resolved : null;
+    const state = known || (later ? later.state : "");
     const w = wording(approval, item, seen, catName);
     const line = (tone, text, icon, more = {}) => ({ mode: "line", kind: w.kind, tone, icon, text, what: w.body, runtime: false, ...more });
-    if (state === "approved" || state === "rejected" || state === "closed") {
-      return line(state === "approved" ? "ok" : state === "rejected" ? "no" : "exp", outcome(w.kind, state, w.title), state === "approved" ? "check" : state === "rejected" ? "x" : "clock");
+    if (state) {
+      // The public choices it ended with, after the outcome, unless the outcome already says them (已拒绝 · 拒绝).
+      const said = outcome(w.kind, state, w.title);
+      const picked = labels(later ? later.selected : approval.selected).filter((s) => !said.includes(s));
+      return line(state === "approved" ? "ok" : state === "rejected" ? "no" : "exp", said + (picked.length ? "：" + picked.join("、") : ""), state === "approved" ? "check" : state === "rejected" ? "x" : "clock");
     }
     const phase = local ? local.phase : "";
     if (phase === "sent") {
       // What the answer's own reply said, until a read made after it says more.
       if (fresh && list === "ready") {
         if (item) return line("neutral", "已提交，还在处理", "hourglass");
+        // Read again since, and nothing anywhere says how: no longer waiting, never stuck on 已提交.
+        if (reloaded === true) return line("neutral", "已处理", "circle-check");
         return local.settled === true ? line("neutral", "已提交", "check") : line("neutral", "已处理", "circle-check");
       }
       if (local.settled === true) return line("neutral", "已提交", "check");
@@ -117,18 +274,22 @@
     }
     // No longer open, and nothing on this page says how: neutral.
     if (list === "ready" && !item && phase !== "sending") return line("neutral", "已处理", "circle-check");
-    const base = { mode: "ask", kind: w.kind, title: w.title, body: w.body, quote: w.quote, actions: [], busy: "", waiting: "", note: "", runtime: false, expiry: "", error: null };
+    const base = { mode: "ask", kind: w.kind, title: w.title, body: w.body, quote: w.quote, actions: [], busy: "", waiting: "", note: "", runtime: false, expiry: "", error: null, prompt: null };
     if (!item) {
       // Drawn from the row alone, without actions: only the open list gives them.
       if (list === "error") return { ...base, note: "暂时读不到这件事现在的状态，先不能在这里回答", runtime: true };
       if (list === "missing") return { ...base, note: "这件事要在运行面板里处理", runtime: true };
       return { ...base, waiting: "正在读取…" };
     }
+    const prompt = item.runtime && item.approve ? item.runtime : null;
     const actions = [];
-    if (item.reject) actions.push({ decision: "reject", label: item.reject.label });
-    if (item.approve) actions.push({ decision: "approve", label: item.approve.label });
+    if (prompt) actions.push(...runtimeActions(prompt, item));
+    else {
+      if (item.reject) actions.push({ decision: "reject", label: item.reject.label });
+      if (item.approve) actions.push({ decision: "approve", label: item.approve.label });
+    }
     return {
-      ...base, actions, busy: phase === "sending" ? local.decision : "",
+      ...base, actions, prompt, busy: phase === "sending" ? local.decision : "",
       // Agreeing is not possible here: where it is, instead of a dead button.
       note: item.approve ? "" : item.note || "这一项要在运行面板里处理", runtime: !item.approve,
       expiry: expiry(item.expiresAt, now),
@@ -146,6 +307,116 @@
       : n && typeof n === "object" ? [n.error, n.detail, n.message, n.reason].filter((x) => typeof x === "string" && x.trim()).map(oneLine).join(" · ") : "";
     if (!detail && said && !han(said)) detail = said;
     return { text, detail: detail === text ? "" : detail };
+  }
+
+  // ---- Answering an F306 request in its card ----
+  // The answer sent is built from what the card shows (the draft: picks,
+  // typed words, skipped questions, form values), checked here first in the
+  // server's own words; the server and the engine check it again.
+  //   draft: {answers: {[questionId]: {picks: [label], text, skip}},
+  //           fields: {[fieldId]: value as the control holds it},
+  //           picks: [optionId], custom, text} (a conversation decision).
+  // Each returns {response} or {invalid, at?} (at: the question or field).
+  const has = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k);
+  // A question's answer: its picked options in their order, the owner's own
+  // words for a question without options or with 其他 (in place of the pick of
+  // a single choice, after the picks of a multiple one); none when skipped.
+  function answerOf(q, s) {
+    s = s && typeof s === "object" ? s : {};
+    if (q.allowUnanswered && s.skip) return [];
+    const own = !q.options || q.isOther ? str(s.text).trim() : "";
+    if (!q.options) return own ? [own] : [];
+    const picks = Array.isArray(s.picks) ? q.options.map((o) => o.label).filter((l) => s.picks.includes(l)) : [];
+    if (!q.multiSelect) return own ? [own] : picks.slice(0, 1);
+    return own && !picks.includes(own) ? [...picks, own] : picks;
+  }
+  function questionResponse(p, draft) {
+    const answers = {}, many = p.questions.length > 1;
+    for (const q of p.questions) {
+      const s = draft && draft.answers ? draft.answers[q.id] : null;
+      const values = answerOf(q, s);
+      if (!values.length && !(q.allowUnanswered && s && s.skip)) {
+        const need = q.options ? (q.isOther ? "选一项或写下回答" : q.multiSelect ? "至少选一项" : "选一项") : "写下回答";
+        return { invalid: many ? "请回答：" + oneLine(q.header || q.question).slice(0, 60) : "请先" + need, at: q.id };
+      }
+      answers[q.id] = values;
+    }
+    return { response: { kind: "answers", answers } };
+  }
+  // A form field's value before the owner touched it, as its control holds
+  // it: the field's default (an enum by its position), else empty / unchecked.
+  function fieldDefault(f) {
+    if (f.enum) { const i = f.default == null ? -1 : f.enum.indexOf(f.default); return i >= 0 ? String(i) : ""; }
+    if (f.type === "boolean") return f.default === true;
+    return f.default == null ? "" : String(f.default);
+  }
+  function formResponse(p, values) {
+    const content = {};
+    for (const f of p.fields) {
+      const name = f.title || f.id, bad = (invalid) => ({ invalid, at: f.id });
+      const raw = has(values, f.id) ? values[f.id] : fieldDefault(f);
+      // A checkbox always says something: what it shows is what is sent.
+      if (f.type === "boolean" && !f.enum) { content[f.id] = raw === true; continue; }
+      if (f.enum) {
+        const i = raw === "" || raw == null ? -1 : Number(raw);
+        if (Number.isInteger(i) && i >= 0 && i < f.enum.length) content[f.id] = f.enum[i];
+        else if (f.required) return bad("请填写：" + name);
+        continue;
+      }
+      const said = String(raw == null ? "" : raw).trim();
+      if (!said) { if (f.required) return bad("请填写：" + name); continue; }
+      if (f.type === "number" || f.type === "integer") {
+        const n = Number(said);
+        if (!Number.isFinite(n) || (f.type === "integer" && !Number.isInteger(n))) return bad(name + "需要填写" + (f.type === "integer" ? "整数" : "数字"));
+        if (f.minimum != null && n < f.minimum) return bad(name + "不能小于 " + f.minimum);
+        if (f.maximum != null && n > f.maximum) return bad(name + "不能大于 " + f.maximum);
+        content[f.id] = n;
+      } else {
+        if (f.minLength != null && said.length < f.minLength) return bad(name + "至少需要 " + f.minLength + " 个字");
+        if (f.maxLength != null && said.length > f.maxLength) return bad(name + "最多 " + f.maxLength + " 个字");
+        content[f.id] = said;
+      }
+    }
+    return { content };
+  }
+  // A conversation decision: the options picked (with the picked 自定义
+  // option's words), or, where the cat allows it, the owner's own reply instead.
+  function conversationResponse(p, draft) {
+    const d = draft && typeof draft === "object" ? draft : {};
+    const own = p.allowText ? str(d.text).trim() : "";
+    const ids = (Array.isArray(d.picks) ? d.picks : []).filter((id, i, a) => a.indexOf(id) === i && p.options.some((o) => o.id === id));
+    if (!ids.length) {
+      if (own) return { response: { kind: "text", text: own } };
+      return { invalid: p.allowText ? "请选一项，或写下你的回答" : p.mode === "multiple" ? "请至少选一项" : "请选一项" };
+    }
+    if (p.mode !== "multiple" && ids.length !== 1) return { invalid: "这里只能选一项" };
+    if (p.max && ids.length > p.max) return { invalid: "最多选 " + p.max + " 项" };
+    const custom = p.options.find((o) => o.custom && ids.includes(o.id));
+    const words = custom ? str(d.custom).trim() : "";
+    if (custom && !words) return { invalid: "请填写：" + custom.label, at: custom.id };
+    return { response: { kind: "selection", selectedIds: ids, ...(words ? { customInput: words } : {}) } };
+  }
+  // The answer for one of the card's actions (runtimeActions): submit, a
+  // native decision (an accepted form sends its content, any other none), or
+  // one answer of a confirmation.
+  function runtimeResponse(p, decision, draft) {
+    const d = draft && typeof draft === "object" ? draft : {};
+    if (p.kind === "question" && decision === "submit") return questionResponse(p, d);
+    if (p.kind === "conversation") {
+      if (p.mode !== "confirm") return decision === "submit" ? conversationResponse(p, d) : { invalid: "请选一项" };
+      const id = String(decision).replace(/^opt:/, "");
+      return p.options.some((o) => o.id === id) ? { response: { kind: "selection", selectedIds: [id] } } : { invalid: "请选一项" };
+    }
+    if (p.kind === "approval" || p.kind === "elicitation") {
+      const choice = p.decisions.find((x) => "pick:" + x.id === decision);
+      if (!choice) return { invalid: "请选择一项处理方式" };
+      if (p.kind === "elicitation" && p.mode === "form" && choice.outcome === "accept") {
+        const got = formResponse(p, d.fields);
+        return got.content ? { response: { kind: "decision", decisionId: choice.id, content: got.content } } : got;
+      }
+      return { response: { kind: "decision", decisionId: choice.id } };
+    }
+    return { invalid: "这一项要在运行面板里回答" };
   }
 
   // ---- 卡片、清单与选项 ----
@@ -295,7 +566,8 @@
   }
 
   window.ClowderCardsRules = Object.freeze({
-    KINDS, approvals, outcome, wording, expiry, card, failure,
+    KINDS, STATES, approvals, runtimePrompt, receiptOf, labels, outcome, wording, expiry, card, failure,
+    runtimeActions, answerOf, questionResponse, fieldDefault, formResponse, conversationResponse, runtimeResponse,
     buildSelectionMessage, choiceMessage, canPick, optionText, choice,
     diffLines, hiddenText, ending, request, words, resend, count, oneLine,
   });

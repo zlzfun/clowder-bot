@@ -588,6 +588,123 @@ test('with request cards in the chat, 去确认 goes to the card, and only falls
   assert.deepEqual(p.posts(), [], 'the line itself answers nothing');
 });
 
+// Item 59: a card further back than the history drawn is looked for on earlier pages (chat-cards.js locate, a promise).
+test('去确认 for a card that is not drawn looks further back: found, nothing more is said; not found, the line says so and offers the runtime panel; a lookup superseded, given way or left behind says nothing', async () => {
+  let pending: Array<ReturnType<typeof deferred<Any>>> = [];
+  const p = page(path => (path.endsWith('/activity') ? busy() : {}), {
+    confirm: (item: Any) => {
+      if (item.proposalId === 'p1') return true;
+      const d = deferred<Any>();
+      pending.push(d);
+      return d.promise;
+    },
+  });
+  p.cx.select(ada);
+  p.cx.observe(ada, 'thread-A', true);
+  await settle();
+  p.strip().querySelector('.cx-row')!.click();
+  const go = () => all(p.strip().querySelectorAll('.cx-item')[1]).find(e => e.tagName === 'A')!;
+  const said = () => p.strip().querySelector('.cx-said');
+  const looking = new Ev('click');
+  go().dispatchEvent(looking);
+  assert.equal(looking.defaultPrevented, true, 'looked for further back: no new tab');
+  assert.equal(said(), null, 'nothing said while it looks (its own note says it is looking)');
+  pending[0].resolve(null);
+  await settle();
+  assert.equal(said()!.textContent, '当前显示的对话里没有找到这条确认的消息。可以在运行面板确认。 打开运行面板');
+  assert.equal(said()!.getAttribute('role'), 'status');
+  assert.deepEqual(all(said()!).filter(e => e.tagName === 'A').map(a => [a.textContent, a.href, a.target]), [['打开运行面板', '/runtime.html', '_blank']]);
+  // Found the next time: what was said goes.
+  go().dispatchEvent(new Ev('click'));
+  pending[1].resolve(true);
+  await settle();
+  assert.equal(said(), null);
+  // A failed lookup is not found either.
+  go().dispatchEvent(new Ev('click'));
+  pending[2].reject(new Error('lost'));
+  await settle();
+  assert.match(said()!.textContent, /没有找到这条确认的消息/);
+  // A newer 去确认 ends the one before quietly: only the newest speaks.
+  pending = [];
+  go().dispatchEvent(new Ev('click'));
+  pending[0].resolve(true);
+  await settle();
+  assert.equal(said(), null);
+  pending = [];
+  go().dispatchEvent(new Ev('click'));
+  go().dispatchEvent(new Ev('click'));
+  pending[0].resolve(null);
+  await settle();
+  assert.equal(said(), null, 'the superseded lookup says nothing');
+  pending[1].resolve(null);
+  await settle();
+  assert.match(said()!.textContent, /没有找到这条确认的消息/, 'the newest one does');
+  pending = [];
+  go().dispatchEvent(new Ev('click'));
+  pending[0].resolve(true);
+  await settle();
+  assert.equal(said(), null);
+  // The card found in the history at once supersedes a lookup still on its way.
+  pending = [];
+  go().dispatchEvent(new Ev('click'));
+  const inHistory = new Ev('click');
+  all(p.strip().querySelectorAll('.cx-item')[0]).find(e => e.tagName === 'A')!.dispatchEvent(inHistory);
+  assert.equal(inHistory.defaultPrevented, true);
+  pending[0].resolve(null);
+  await settle();
+  assert.equal(said(), null);
+  // A lookup that gave way to a card found elsewhere (a notification's) resolves undefined: nothing is said.
+  pending = [];
+  go().dispatchEvent(new Ev('click'));
+  pending[0].resolve(undefined);
+  await settle();
+  assert.equal(said(), null);
+  // Another conversation by the time it ends: nothing is said there.
+  pending = [];
+  go().dispatchEvent(new Ev('click'));
+  p.cx.select(bob);
+  p.cx.observe(bob, 'thread-A', true);
+  await settle();
+  pending[0].resolve(null);
+  await settle();
+  assert.doesNotMatch(textOf(p.strip()), /没有找到/);
+  assert.deepEqual(p.posts(), [], 'the line itself answers nothing');
+});
+
+test('去确认 whose card is drawn and found at once takes down what an earlier 去确认 said it could not find', async () => {
+  const pending: Array<ReturnType<typeof deferred<Any>>> = [];
+  const p = page(path => (path.endsWith('/activity') ? busy() : {}), {
+    confirm: (item: Any) => {
+      if (item.proposalId === 'p1') return true;
+      const d = deferred<Any>();
+      pending.push(d);
+      return d.promise;
+    },
+  });
+  p.cx.select(ada);
+  p.cx.observe(ada, 'thread-A', true);
+  await settle();
+  p.strip().querySelector('.cx-row')!.click();
+  const go = (k: number) => all(p.strip().querySelectorAll('.cx-item')[k]).find(e => e.tagName === 'A')!;
+  const said = () => p.strip().querySelector('.cx-said');
+  // The card of the second request is not found on any page: said, with the runtime panel.
+  go(1).dispatchEvent(new Ev('click'));
+  pending[0].resolve(null);
+  await settle();
+  assert.match(said()!.textContent, /没有找到这条确认的消息/);
+  // The first request's card is drawn: found at once, and that sentence goes with it.
+  const open = p.strip().querySelectorAll('.cx-item').length;
+  const inHistory = new Ev('click');
+  go(0).dispatchEvent(inHistory);
+  assert.equal(inHistory.defaultPrevented, true);
+  assert.equal(said(), null);
+  assert.equal(p.strip().querySelectorAll('.cx-item').length, open, 'the list stays open');
+  // Nothing said before: found at once changes nothing else.
+  go(0).dispatchEvent(new Ev('click'));
+  assert.equal(said(), null);
+  assert.deepEqual(p.posts(), [], 'the line itself answers nothing');
+});
+
 test('the last successful activity read is handed on with when it was asked for, for this conversation only; after a failed read there is none (chat-live.js ends a missed reply only on a fresh read)', async () => {
   let mode = 'ok';
   const p = page(path => {
