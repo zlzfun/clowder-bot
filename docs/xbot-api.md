@@ -75,7 +75,7 @@ UI 保留 Bot 名称和文件夹概念，实际成员、执行和历史以 Clowd
 - 猫的回复按显示出来的文字匹配和摘录：标题、列表、引用、表格、粗体、行内代码、链接地址这些 Markdown 记号不出现在 `snippet` 里（`server/native/text.ts` 的 `plainLine`），`match` 指向去掉记号后的位置；只在带记号的原文里才匹配得上的词（例如搜 `` `npm ci` ``）按原文摘录。用户自己打的字不改。会话列表的预览行 `activity.last.text` 用同一规则。
 - `GET /xbot-api/bots/:name/search?q=` 与 `GET /xbot-api/groups/:id/search?q=` 是同一个搜索，只看这一个聊天当前的对话，返回形状相同；用于「在这个聊天里找」，不会被别的聊天的结果挤掉。
 - `more` 表示还有没返回的匹配，或有会话存在更早、这次没看的消息；`failed` 是没能读取的会话数，前端要如实说明，不当作「没有结果」。
-- 固定上游自带的消息检索（`/api/evidence/search?resultUnit=message`）依赖证据索引，2026-11-11 在隔离运行时和现有实例上实测都返回空（`passages_count: 0`，未配置嵌入模型），所以这里没有用它；索引可用后可以改为调用原生检索，接口形状不变。
+- 固定上游自带的消息检索（`/api/evidence/search?resultUnit=message`）依赖证据索引。2026-11-28 在固定提交 `fe632f8f` 的隔离运行时上重测：未配置嵌入模型时词法模式本身已能工作（支持单字/双字中文、反引号代码、不区分大小写英文），但上游 `IndexBuilder` 的会话枚举把用户写死为 `'default-user'`（`packages/api/src/index.ts`），未读取 `CAT_CAFE_USER_ID`（`clowder-bot-owner`），导致所有 Bot 会话即使执行全量重建也完全不进索引；此外原生接口单次上限 20 条、`messageSort=time` 按从旧到新截断而丢掉最新匹配，且新消息有 30 秒异步刷盘延迟。因此继续保持当场读取最新页的暂代方案，上游需求记为 [特性与上游的关系](features.md) 的 `U-28`；待上游修复后改为调用原生检索，接口形状不变。
 
 问候复用固定版本 `42017e0c` 的 `POST /api/messages`。原生身份上下文包含猫名、角色说明与性格（`assets/prompt-templates/s1-identity.md`）。适配层指定单个成员、`next_work` 与同一猫和会话的稳定幂等键。首次请求先检查原生历史和队列，已有对话返回 `exists`。检查与准入是两个操作，并发到达的用户消息由原生队列决定顺序。创建猫和读取历史各自独立，生成失败时猫仍可正常聊天。
 
