@@ -6,9 +6,11 @@ Clowder AI 保存和执行定时任务，Bot 只做输入校验、成员范围�
 
 - `GET /xbot-api/bots/:name/routines` → `{ routines, currentThreadId, timezone }`
 - `POST /xbot-api/bots/:name/routines` → 201 `{ id, name, prompt, trigger, threadId }`
-- `PATCH /xbot-api/bots/:name/routines/:id`，body `{ enabled: boolean }` → `{ success: true, enabled }`
+- `PATCH /xbot-api/bots/:name/routines/:id`，body `{ enabled: boolean }` → `{ success: true, enabled }`；或 `{ prompt: string }`（1–16000 字符，去首尾空白）→ `{ success: true, id, prompt, changed }`
 - `DELETE /xbot-api/bots/:name/routines/:id` → `{ success: true }`
 - `GET /xbot-api/bots/:name/routines/:id/runs` → `{ runs }`（最近 50 条）
+
+修改提醒内容（`{ prompt }`）仅适用于 `cron` 与 `interval` 周期定时任务（一次任务返回 409），不改任务名称、时间规则与投递聊天。已启用的任务修改前会校验投递聊天与本机 Agent 可用性；已暂停的任务仍可直接修改消息，待恢复时再校验。服务端校验调度器就绪后调用原生 `POST /api/schedule/tasks/:id/parameters` `{ paramsPatch: { message: prompt } }`，仅在原生确认 `{ success: true, proposed: false }` 时返回成功。
 
 创建 body 严格限定为 `{ name, prompt, schedule, idempotencyKey }`。name 为 1–80 字符，prompt 为 1–16000 字符，idempotencyKey 为 UUID；同一份表单的重试复用该值，改动内容后用新值。
 
@@ -46,7 +48,7 @@ enabled 与 effectiveEnabled 分开：用户启用但被全局暂停/治理规�
 - 删除用现有确认交互；处理跨猫切换、关闭抽屉、重绘和异步响应失效，不能修改另一只猫的界面。
 - 列表标明「当前聊天」或「创建时的聊天」。旧聊天结果可通过带 thread 参数的原生运行面板查看，不能声称会发送到新聊天。
 - 表单说明运行时及电脑需要在线；离线错过的一次任务不会补跑。不会后台通知或发手机推送。
-- 不增加未实现的编辑、立即执行、任意 cron、高级治理或群聊任务控件。
+- 可修改已有周期定时任务的消息正文（名称、规则与投递聊天不变；一次任务不支持编辑）；仍不提供立即执行、任意 cron、高级治理或群聊任务控件。
 
 ## 原生边界
 

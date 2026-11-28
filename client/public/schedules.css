@@ -1,8 +1,9 @@
 /* 定时任务（schedules.js）：信息抽屉「任务」末尾的一节。Rows follow the task
-   tab's compact rows and panel cards; the form uses the original .field, .choice
-   and .modal-actions; delete confirms on the original .modal/.modal-card; the IDs
-   fold is the existing .task-details. Only existing tokens: no new colors, fonts
-   or motion, and the original CSS stays byte-for-byte. */
+   tab's compact rows and panel cards; the form, and 改消息 inside a card, use
+   the original .field, .choice and .modal-actions; delete confirms on the
+   original .modal/.modal-card; the IDs fold is the existing .task-details.
+   Only existing tokens: no new colors, fonts or motion, and the original CSS
+   stays byte-for-byte. */
 .sched{--sched-fill:var(--x-fill-1)}
 html[data-theme="dark"] .sched{--sched-fill:var(--x-popover-hover)}
 .sched-head{display:flex;align-items:center;gap:var(--x-s3);margin:0 0 6px}
@@ -46,6 +47,19 @@ html[data-theme="dark"] .sched{--sched-fill:var(--x-popover-hover)}
 .sched-actions .secondary{display:inline-flex;align-items:center;min-height:28px;padding:4px 8px;font-size:12px;background:var(--sched-fill)}
 .sched-actions .secondary:disabled{color:var(--x-faint);cursor:default}
 .sched-msg{margin:var(--x-s3) 0 0;font-size:12px;line-height:1.55;color:var(--x-muted);overflow-wrap:anywhere}
+
+/* 改消息: the message's place in the card holds the original .field textarea,
+   with 取消 and 保存 on the original .modal-actions, sized like the card's buttons. */
+.sched-edit{margin:0 0 var(--x-s3)}
+.sched-edit:focus{outline:none}
+.sched-edit .field{margin:0;gap:6px}
+.sched-edit .field textarea{min-height:64px}
+.sched-edit .field textarea:disabled{color:var(--x-muted);cursor:default}
+.sched-edit .error{margin:var(--x-s3) 0 0;font-size:12px;line-height:1.55;overflow-wrap:anywhere}
+.sched-edit .modal-actions{margin-top:var(--x-s3);gap:6px}
+.sched-edit .modal-actions>button{min-height:28px;padding:4px 10px;font-size:12px}
+.sched-edit .secondary{background:var(--sched-fill)}
+.sched-edit .secondary:disabled{color:var(--x-faint);cursor:default}
 
 /* Recent native trigger records, inside the card. */
 .sched-runs-box{margin-top:var(--x-s4);padding-top:var(--x-s3);border-top:1px solid var(--x-fill-2)}

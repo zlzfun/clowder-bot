@@ -1,5 +1,5 @@
 // 定时任务：信息抽屉「任务」里每只猫自己的一节。新建一次、每天、每周、间隔任务；
-// 查看规则、消息、状态和投递聊天；暂停与恢复；确认后删除；查看最近的原生触发记录。
+// 查看规则、消息、状态和投递聊天；改周期任务的消息；暂停与恢复；确认后删除；查看最近的原生触发记录。
 // Clowder AI 保存并执行任务，结果发到创建时绑定的单聊。这里只读写
 // /xbot-api/bots/:name/routines（及 /:id、/:id/runs），不计时、不轮询、不排程：
 // 列表只在挂载、改动之后和点「刷新」时读取。约定见 docs/schedules-api.md。
@@ -144,13 +144,23 @@
   // The next whole hour at least ten minutes away.
   function defaultOnce(now = Date.now()) { const d = new Date(now + 10 * 60000); d.setMinutes(0, 0, 0); d.setHours(d.getHours() + 1); return wallValue(d); }
 
+  // The message rule shared by 新建 and 改消息: trimmed, 1–16000 characters, as the server checks it.
+  function promptIssue(value) {
+    const prompt = String(value == null ? "" : value).trim();
+    if (!prompt) return "请填写到时发给猫猫的消息";
+    if (prompt.length > PROMPT_MAX) return "消息最多 " + PROMPT_MAX + " 个字";
+    return "";
+  }
+  // Only a repeating task's message can be changed (a once-task is made again instead).
+  const editable = (r) => !!(r && r.trigger && (r.trigger.type === "cron" || r.trigger.type === "interval"));
+
   // Form values → { body: {name, prompt, schedule} } or { issues }. Target and chat are bound by the server.
   function createBody(input, now = Date.now()) {
     const issues = [], name = String(input.name || "").trim(), prompt = String(input.prompt || "").trim();
     if (!name) issues.push({ field: "name", text: "请填写名称" });
     else if (name.length > NAME_MAX) issues.push({ field: "name", text: "名称最多 " + NAME_MAX + " 个字" });
-    if (!prompt) issues.push({ field: "prompt", text: "请填写到时发给猫猫的消息" });
-    else if (prompt.length > PROMPT_MAX) issues.push({ field: "prompt", text: "消息最多 " + PROMPT_MAX + " 个字" });
+    const promptWhy = promptIssue(prompt);
+    if (promptWhy) issues.push({ field: "prompt", text: promptWhy });
     let schedule = null;
     const kind = input.kind;
     if (kind === "once") {
@@ -257,6 +267,17 @@
       v.staleStatus = !!(text && stale);
     }
 
+    // While a create or a changed message is on its way, Escape stops here, wherever focus is:
+    // the drawer behind it stays open. The delete dialog still answers its own Escape.
+    const savingNow = () => !!(v.form && v.form.saving) || [...v.rows.values()].some((row) => row.busy === "edit");
+    function holdEscape(ev) {
+      if (ev.key !== "Escape" || !v.alive || !savingNow()) return;
+      if (v.layer && within(v.layer.shade, ev.target)) return;
+      ev.preventDefault(); ev.stopPropagation();
+    }
+    const guarded = typeof document.addEventListener === "function";
+    if (guarded) document.addEventListener("keydown", holdEscape, true);
+
     // ---- the list ----
     function load() {
       if (!v.alive) return Promise.resolve({ ok: false });
@@ -281,7 +302,10 @@
         }
         if (!error) {
           if (v.staleStatus) say("");
-          for (const row of v.rows.values()) if (row.noteStale) { row.note = ""; row.noteBad = row.noteStale = false; }
+          for (const row of v.rows.values()) {
+            if (row.noteStale) { row.note = ""; row.noteBad = row.noteStale = false; }
+            if (row.editStale) { if (row.edit && row.edit.fail.textContent === row.editStale.told) row.edit.failed(row.editStale.text); row.editStale = null; }
+          }
         }
         paint();
         if (error && v.list) say("没能刷新" + tail(error) + "。下面是上次读取的结果。", true, true);
@@ -319,6 +343,10 @@
       for (const [id, row] of v.rows) {
         if (keep.has(id)) continue;
         const had = owns(row.el);
+        // The task is gone with a changed message still open (and not on its way): say it was not saved.
+        if (row.editing && row.busy !== "edit" && row.edit && row.r && row.edit.input.value.trim() !== String(row.r.prompt || "").trim()) {
+          say("「" + nameOf(row.r) + "」已经不在列表里，改的消息没有保存。", true);
+        }
         row.histSeq++;
         row.el.remove();
         v.rows.delete(id);
@@ -328,7 +356,7 @@
 
     // ---- one task ----
     function makeRow(id) {
-      const row = { id, r: null, open: false, busy: "", note: "", noteBad: false, histOpen: false, histSeq: 0, hist: null, sig: "" };
+      const row = { id, r: null, open: false, busy: "", note: "", noteBad: false, histOpen: false, histSeq: 0, hist: null, sig: "", editing: false, edit: null, editStale: null, editSeq: 0 };
       const el = node("div", "sched-item");
       el.setAttribute("data-schedule", id);
       const bodyId = uid("body"), histId = uid("runs");
@@ -349,12 +377,15 @@
       body.id = bodyId; body.hidden = true;
       const prompt = node("p", "sched-prompt"), facts = node("dl", "sched-facts"), hint = node("p", "sched-hint");
       const actions = node("div", "sched-actions");
+      const editBtn = button("secondary sched-edit-btn", "改消息", () => openEdit(row));
+      editBtn.setAttribute("aria-expanded", "false");
+      editBtn.hidden = true;
       const toggleBtn = button("secondary sched-toggle", "", () => toggle(row));
       const histBtn = button("secondary sched-runs-btn", "触发记录", () => setHist(row, !row.histOpen));
       histBtn.setAttribute("aria-expanded", "false");
       histBtn.setAttribute("aria-controls", histId);
       const delBtn = button("secondary sched-danger", "删除", () => askDelete(row));
-      actions.append(toggleBtn, histBtn, delBtn);
+      actions.append(editBtn, toggleBtn, histBtn, delBtn);
       const msg = node("p", "sched-msg");
       msg.setAttribute("role", "status");
       const hist = node("div", "sched-runs-box");
@@ -365,13 +396,14 @@
       more.append(summary, ids);
       body.append(prompt, facts, hint, actions, msg, hist, more);
       el.append(headBtn, body);
-      return Object.assign(row, { el, headBtn, nameEl, flag, ruleEl, chatEl, body, prompt, facts, hint, toggleBtn, histBtn, delBtn, msg, hist, ids });
+      return Object.assign(row, { el, headBtn, nameEl, flag, ruleEl, chatEl, body, prompt, facts, hint, editBtn, toggleBtn, histBtn, delBtn, msg, hist, ids });
     }
     const chatOf = (r) => r.currentThread === true || (r.currentThread !== false && !!r.threadId && r.threadId === v.current);
+    const nameOf = (r) => typeof r.name === "string" && r.name.trim() ? r.name : "定时任务";
     function setText(target, text) { if (target.textContent !== text) target.textContent = text; }
     function paintRow(row) {
       const r = row.r, now = Date.now(), key = stateOf(r, now), past = isPast(r, now), zone = shownZone(v.zone);
-      const name = typeof r.name === "string" && r.name.trim() ? r.name : "定时任务";
+      const name = nameOf(r);
       const rule = ruleText(r.trigger, zone, now), current = chatOf(r);
       setText(row.nameEl, name);
       setText(row.flag, stateText(key));
@@ -414,9 +446,25 @@
         row.hint.hidden = !hints.length;
         row.ids.replaceChildren(node("dt", "", "任务 ID"), idValue(r.id), node("dt", "", "聊天 ID"), idValue(r.threadId));
       }
+      // 改消息: a repeating task's message, edited where it is shown. An open draft is the
+      // owner's typing; nothing painted from a fresh list touches it.
+      if (row.editing && !editable(r) && row.busy !== "edit") row.editing = false;
+      const saving = row.busy === "edit";
+      row.editBtn.hidden = !editable(r);
+      row.editBtn.disabled = !!row.busy;
+      row.editBtn.setAttribute("aria-expanded", String(row.editing));
+      row.prompt.hidden = row.editing;
+      if (row.edit) {
+        const e = row.edit;
+        e.box.hidden = !row.editing;
+        // Saving holds the whole editor; another change on the row holds only 保存.
+        e.input.disabled = e.cancel.disabled = saving;
+        e.save.disabled = !!row.busy;
+        e.save.textContent = saving ? "正在保存…" : "保存";
+      }
       // Pause only what may still fire; a once-time that has passed cannot be resumed.
       const canPause = r.enabled === true && !FIRED.includes(key), canResume = r.enabled === false && !past;
-      row.toggleBtn.hidden = !(canPause || canResume) && !row.busy;
+      row.toggleBtn.hidden = !(canPause || canResume) && row.busy !== "pause" && row.busy !== "resume";
       row.toggleBtn.textContent = row.busy === "pause" ? "正在暂停…" : row.busy === "resume" ? "正在恢复…" : canPause ? "暂停" : "恢复";
       row.toggleBtn.disabled = !!row.busy;
       row.delBtn.textContent = row.busy === "delete" ? "正在删除…" : "删除";
@@ -463,6 +511,134 @@
       const after = await load();
       if (!v.alive || !after) return;
       if (!after.ok) { note(row, done + "，但没能刷新列表" + tail(after.error) + "。", true); row.noteStale = true; }
+    }
+
+    // ---- 改消息：a repeating task's message, in place of the text it changes ----
+    // Only the message goes: name, rule and chat stay as created (PATCH { prompt }).
+    function buildEdit(row) {
+      const box = node("div", "sched-edit");
+      box.id = uid("edit");
+      // Saving disables every control in it; the box itself then holds focus, so Escape still lands here.
+      box.tabIndex = -1;
+      const field = node("div", "field sched-field"), input = node("textarea"), err = node("p", "sched-err");
+      input.id = uid("edit-text");
+      input.rows = 3; input.maxLength = PROMPT_MAX;
+      input.setAttribute("aria-label", "消息");
+      err.id = uid("edit-err"); err.hidden = true;
+      field.append(input, err);
+      const fail = node("p", "error sched-error");
+      fail.setAttribute("role", "alert"); fail.hidden = true;
+      const bar = node("div", "modal-actions");
+      const cancel = button("secondary", "取消", () => { if (row.busy !== "edit") closeEdit(row, true); });
+      const save = button("primary", "保存", () => saveEdit(row));
+      bar.append(cancel, save);
+      box.append(field, fail, bar);
+      const e = { box, input, err, fail, cancel, save };
+      const clear = () => { if (err.hidden) return; err.textContent = ""; err.hidden = true; input.removeAttribute("aria-invalid"); input.removeAttribute("aria-describedby"); };
+      input.addEventListener("input", clear);
+      input.addEventListener("change", clear);
+      // Escape closes the editor, not the drawer; it waits while a save is on its way.
+      box.addEventListener("keydown", (ev) => {
+        if (ev.key !== "Escape") return;
+        ev.preventDefault(); ev.stopPropagation();
+        if (row.busy !== "edit") closeEdit(row, true);
+      });
+      e.clear = clear;
+      e.issue = (text) => {
+        err.textContent = text; err.hidden = false;
+        input.setAttribute("aria-invalid", "true");
+        input.setAttribute("aria-describedby", err.id);
+      };
+      e.failed = (text) => { fail.textContent = text || ""; fail.hidden = !text; };
+      row.body.insertBefore(box, row.facts);
+      row.editBtn.setAttribute("aria-controls", box.id);
+      return e;
+    }
+    function openEdit(row) {
+      if (!v.alive || row.busy || !editable(row.r) || v.rows.get(row.id) !== row) return;
+      if (!row.editing) {
+        if (!row.edit) row.edit = buildEdit(row);
+        const e = row.edit;
+        e.input.value = typeof row.r.prompt === "string" ? row.r.prompt : "";
+        e.clear(); e.failed("");
+        row.editSeq++;
+        row.editing = true; row.note = ""; row.noteBad = row.noteStale = false;
+        paintRow(row);
+      }
+      const input = row.edit.input;
+      focusOn(input);
+      if (typeof input.setSelectionRange === "function") { const end = input.value.length; try { input.setSelectionRange(end, end); } catch { /* not a text control */ } }
+    }
+    // 改消息 waits while a pause or resume is out; focus then goes to the row's head.
+    const editHome = (row) => (row.open && !row.editBtn.hidden && !row.editBtn.disabled ? row.editBtn : row.headBtn);
+    function closeEdit(row, refocus) {
+      if (!row.editing) return;
+      row.editSeq++;
+      row.editing = false;
+      if (row.edit) { row.edit.clear(); row.edit.failed(""); }
+      if (v.rows.get(row.id) === row) paintRow(row);
+      if (refocus) focusOn(editHome(row));
+    }
+    // Each open, close and try takes a new number: what an older try learns later stays unsaid.
+    async function saveEdit(row) {
+      const e = row.edit;
+      if (!v.alive || !e || !row.editing || row.busy || v.rows.get(row.id) !== row) return;
+      const mine = ++row.editSeq;
+      e.clear(); e.failed("");
+      const why = promptIssue(e.input.value);
+      if (why) { e.issue(why); focusOn(e.input); return; }
+      const prompt = e.input.value.trim(), hadFocus = owns(e.box) || focusLost();
+      row.busy = "edit"; row.note = ""; row.noteBad = row.noteStale = false;
+      paintRow(row);
+      // The control that had focus is disabled now (a browser may let go of it only later).
+      if (hadFocus && (focusLost() || owns(e.box))) focusOn(e.box);
+      let res = null, error = null;
+      try { res = await api(base + "/" + enc(row.id), { method: "PATCH", body: { prompt } }); }
+      catch (err) { error = err || new Error("failed"); }
+      if (!v.alive) { settledElsewhere(bot); return; }
+      row.busy = "";
+      if (v.rows.get(row.id) !== row) return;
+      // Nothing opens, closes or saves the box while this is out; were it to, the list says what happened.
+      if (mine !== row.editSeq) { paintRow(row); load(); return; }
+      if (error) {
+        // The draft stays open as typed; only the outcome is said.
+        const reread = !unsure(error) && (error.status === 404 || error.status === 409);
+        const text = unsure(error)
+          ? "没能确认是否已保存" + tail(error) + "。" + (/刷新/.test(reason(error)) ? "" : "请刷新核对。")
+          : "没能保存" + tail(error) + "。";
+        paintRow(row);
+        e.failed(text);
+        if (hadFocus && (focusLost() || owns(e.box))) focusOn(row.open ? e.save : row.headBtn);
+        if (!reread) return;
+        // 404 and 409 read the list again; the line says so only once that read is back.
+        const after = await load();
+        // Cancelled, reopened or tried again meanwhile: that owns the lines now.
+        if (!v.alive || !after || mine !== row.editSeq) return;
+        const told = text + (after.ok ? "已重新读取列表。" : "没能重新读取列表" + tail(after.error) + "。");
+        // Still open: the box says it. A task gone (or a box the list closed) leaves it to the section.
+        if (v.rows.get(row.id) === row && row.editing) {
+          if (e.fail.textContent !== text) return;
+          e.failed(told);
+          // A failed re-read is reported until the next good read, which puts back the refusal alone.
+          if (!after.ok) row.editStale = { told, text };
+        } else say(told, true, !after.ok);
+        return;
+      }
+      // Saved: the last list read carries the saved text too, so a failed re-read cannot paint the old one back.
+      const saved = res && typeof res.prompt === "string" ? res.prompt : prompt;
+      row.r = { ...row.r, prompt: saved };
+      if (v.list) v.list = v.list.map((x) => (x.id === row.id ? { ...x, prompt: saved } : x));
+      row.editing = false;
+      e.clear(); e.failed("");
+      note(row, "已保存。");
+      // Focus left in the box that just closed goes back to 改消息.
+      if (hadFocus && (focusLost() || owns(e.box))) focusOn(editHome(row));
+      const after = await load();
+      if (!v.alive || !after || after.ok) return;
+      // Only onto its own line: a reopened box, a newer change or its answer keeps theirs.
+      if (mine === row.editSeq && !row.busy && v.rows.get(row.id) === row && row.note === "已保存。") {
+        note(row, "已保存，但没能刷新列表" + tail(after.error) + "。", true); row.noteStale = true;
+      }
     }
 
     // ---- 触发记录 ----
@@ -525,7 +701,7 @@
     function askDelete(row) {
       if (!v.alive || row.busy || !row.r) return;
       if (v.layer) v.layer.close(false);
-      const name = typeof row.r.name === "string" && row.r.name.trim() ? row.r.name : "定时任务";
+      const name = nameOf(row.r);
       const opener = row.delBtn, shade = node("div", "modal sched-modal"), card = node("div", "modal-card sched-card");
       const h = node("h2", "", "删除「" + name + "」？"), text = node("p", "note", "删除后不会再触发。已经开始或排队的执行不会因此取消。");
       h.id = uid("dialog"); text.id = uid("dialog-text");
@@ -540,7 +716,7 @@
       card.append(h, text, err, bar);
       shade.append(card);
       const L = {
-        busy: false, closed: false, card, go,
+        busy: false, closed: false, shade, card, go,
         fail: (message) => { err.textContent = message || ""; err.hidden = !message; },
         setBusy: (on) => { L.busy = on; cancel.disabled = on; go.disabled = on; go.textContent = on ? "正在删除…" : "删除"; },
         close: (refocus) => {
@@ -810,6 +986,7 @@
       v.seq++;
       for (const row of v.rows.values()) row.histSeq++;
       if (v.layer) v.layer.close(false);
+      if (guarded && typeof document.removeEventListener === "function") document.removeEventListener("keydown", holdEscape, true);
       root.remove();
     };
     v.root = root;
@@ -839,6 +1016,6 @@
 
   window.ClowderSchedules = Object.freeze({
     mount, teardown, reopened,
-    rules: Object.freeze({ zoneOk, localZone, zoneChoices, instantText, cronParts, ruleText, stateOf, stateText, outcomeText, statsText, localInstant, defaultOnce, createBody, fingerprint, requestKey, reason, unsure }),
+    rules: Object.freeze({ zoneOk, localZone, zoneChoices, instantText, cronParts, ruleText, stateOf, stateText, outcomeText, statsText, localInstant, defaultOnce, createBody, promptIssue, editable, fingerprint, requestKey, reason, unsure }),
   });
 })();

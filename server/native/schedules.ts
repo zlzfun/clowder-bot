@@ -19,8 +19,9 @@ const time = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/, '时间需要为 HH
 const timezone = z.string().min(1).max(80).refine(value => {
   try { new Intl.DateTimeFormat('en', { timeZone: value }); return true; } catch { return false; }
 }, '时区无效');
+export const schedulePromptSchema = z.string().trim().min(1).max(16000);
 export const scheduleCreateSchema = z.object({
-  name: z.string().trim().min(1).max(80), prompt: z.string().trim().min(1).max(16000), idempotencyKey: z.string().uuid(),
+  name: z.string().trim().min(1).max(80), prompt: schedulePromptSchema, idempotencyKey: z.string().uuid(),
   schedule: z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('once'), at: z.iso.datetime({ offset: true }) }).strict(),
     z.object({ kind: z.literal('daily'), time, timezone }).strict(),
@@ -111,6 +112,23 @@ export class BotSchedules {
       await this.canDeliver(cat, task.deliveryThreadId!);
     }
     return this.bridge.native.request(`/api/schedule/tasks/${encode(id)}`, { method: 'PATCH', body: { enabled } });
+  }
+  async updatePrompt(cat: NativeCat, id: string, rawPrompt: string) {
+    const prompt = schedulePromptSchema.parse(rawPrompt);
+    const task = await this.find(cat, id, true);
+    if (task.trigger.type !== 'cron' && task.trigger.type !== 'interval') {
+      throw new ApiError(409, '只有周期定时任务支持修改消息，需要时请新建');
+    }
+    if (task.enabled) await this.canDeliver(cat, task.deliveryThreadId!);
+    const targetId = task.dynamicTaskId ?? task.id;
+    const result = await this.bridge.native.request<{ success: boolean; proposed?: boolean; taskId?: string; changed?: boolean }>(
+      `/api/schedule/tasks/${encode(targetId)}/parameters`,
+      { method: 'POST', body: { paramsPatch: { message: prompt } } },
+    );
+    if (!result.success || result.proposed) {
+      throw new ApiError(502, '引擎没有确认定时消息已经改好，请刷新列表核对');
+    }
+    return { success: true, id: task.id, prompt, changed: result.changed ?? (task.prompt !== prompt) };
   }
   async remove(cat: NativeCat, id: string) {
     await this.find(cat, id);

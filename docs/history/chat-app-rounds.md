@@ -254,6 +254,15 @@
 
 **前端**：已完成并合入（第 62 项，`6f71f4d7`）：由本机 Claude Code（`claude-opus-5-5`，xhigh）实现。`chat-experience*` 新增默认折叠的「事项」及按版本展开的「记录 · N」，支持目录与记录各自的「加载更多」、原话改动提示（「原话已改动」）及当前对话内消息定位（「在对话里查看」）。经过 Codex（`gpt-6-astra`，xhigh）两轮只读检视，4 条问题全部修正（重读目录清掉缓存记录以反映原话改动、单调递增请求号防止迟到记录覆盖、透传详情页 `sources_changed`、末页无新增条目时无障碍焦点回退）。全量测试通过。
 
+<a id="round-24"></a>
+### 第 24 轮 · 原位修改周期提醒内容（2026-11-28）
+
+**内容**：完成待办 `T-16`（修改已有周期定时的提醒消息；立即触发、任意 cron、高级治理与群聊定时仍按 `schedules-api.md` 边界不做），并核实 `T-17` 已随 `9085c01f`（`server/native/trigger-words.ts` 的 `changeWords` 接入 `approvals.ts` 与 `blocks.ts`，展示「『喝水』改为『喝温水』」）落地、一并销项。
+
+**后端（适配层）**：已完成并合入（`1d3cc2e1`）：扩展 `PATCH /xbot-api/bots/:name/routines/:id` 支持 `{ prompt }`（与 `{ enabled }` 严格二选一，1–16000 字符）；校验调度器就绪与周期触发器类型（`cron`／`interval`，一次性任务返回 409），对启用中的定时校验投递聊天与本机 Agent 可用性（已暂停的定时允许先改消息、恢复时再核验），调用原生 `POST /api/schedule/tasks/:id/parameters` `{ paramsPatch: { message: prompt } }`，仅在原生确认 `{ success: true, proposed: false }` 时返回成功。详见 [定时](../schedules-api.md)。
+
+**前端**：已完成并合入（第 61 项，`f38f217d`）：由本机 Claude Code（`claude-opus-5-5`，xhigh）实现。`schedules.js`／`schedules.css` 在周期定时展开卡片内新增「改消息」原位编辑框（一次性任务不显示），在自动刷新与启停切换期间保留草稿、保存途中锁住行级操作并保持焦点。经过 Codex（`gpt-6-astra`，xhigh）两轮只读检视，4 条问题全部修正（保存途中捕获 Esc 防止关闭抽屉、404/409 后等待列表重读完成再如实提示、暂停途中取消编辑的焦点回退、按行 `editSeq` 防止迟到的重读状态串写）。全量 902 项测试（898 通过，4 项按原因跳过）通过。
+
 ## 部署记录
 
 部署的做法在 [验证环境与部署](../operations.md)。第 17、18 轮的部署、2026-11-26 日常实例换引擎和 2026-11-27 部署「同一时间只有一只猫」只写在上面各轮自己的记录里，换引擎的经过另见 [上游维护记录](upstream-records.md)。
