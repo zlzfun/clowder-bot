@@ -7,7 +7,8 @@
 //              requests (GET <scope>/approvals) are read alongside;
 //   words()    for the words a reply shows (a request's message and an ended
 //              reply's stand-in words are not shown as words);
-//   blocks()   to add a reply's cards, checklists, choices and diffs under its words;
+//   blocks()   to add a reply's cards, checklists, choices, diffs, pictures and
+//              voice messages under its words;
 //   ending()   to add how an unfinished reply ended (详情, 再发一次);
 //   notice()   for a receipt or refusal line (a row with notice: true);
 //   rendered() right after the history was committed (ClowderLive.commit);
@@ -27,8 +28,10 @@
 //
 // Nothing here is a record or a runtime: requests, their lifecycle and their
 // effect stay native; a pick is an ordinary chat message sent through the
-// normal send path, then recorded on the native block. Every outcome shown is
-// the server's own: an answer in flight is never shown as done.
+// normal send path, then recorded on the native block, except an option that
+// does what it says (F155 option.action), which the server carries out and
+// records itself. Every outcome shown is the server's own: an answer in
+// flight is never shown as done.
 (() => {
   "use strict";
   const R = window.ClowderCardsRules;
@@ -256,6 +259,8 @@
     if (b.kind === "card" && typeof b.title === "string") return cardBlock(b);
     if (b.kind === "checklist" && Array.isArray(b.items)) return checklist(b);
     if (b.kind === "diff" && typeof b.diff === "string") return diffBlock(b);
+    if (b.kind === "gallery") return galleryBlock(b);
+    if (b.kind === "audio") return audioBlock(b);
     return null;
   }
   const catOf = (m) => String((m && ((m.speaker && m.speaker.name) || m.sender || m.name)) || "");
@@ -324,18 +329,85 @@
     card.append(head, pre);
     return card;
   }
+  // Pictures the cat attached: one in its own proportions, two or more two
+  // to a row, each with its caption under it; a press opens the shell's own
+  // viewer on that picture, with the rest of the gallery (H.openImages). A
+  // picture that does not load says so in its place. null when the block is
+  // not what the contract says (counted as one that cannot be shown).
+  function galleryBlock(b) {
+    const items = R.galleryItems(b);
+    if (!items) return null;
+    const card = node("div", "ck-card ck-gallery");
+    if (b.title) card.append(node("div", "ck-card-title", b.title));
+    const grid = node("div", "ck-gallery-grid" + (items.length === 1 ? " ck-gallery-one" : ""));
+    const urls = items.map((it) => it.url);
+    items.forEach((it, i) => {
+      const btn = button("ck-gallery-btn", null, () => { if (H && typeof H.openImages === "function") H.openImages(urls, i, btn); });
+      const said = it.alt || it.caption;
+      btn.setAttribute("aria-label", "查看图片" + (said ? "：" + said : items.length > 1 ? "：第 " + (i + 1) + " 张" : ""));
+      const img = document.createElement("img");
+      img.className = "ck-gallery-img";
+      img.setAttribute("alt", said || "图片");
+      img.setAttribute("loading", "lazy");
+      img.addEventListener("error", () => {
+        img.replaceWith(node("span", "ck-gallery-broken", "图片暂时无法显示"));
+        btn.classList.add("broken");
+        btn.setAttribute("aria-disabled", "true");
+        btn.setAttribute("aria-label", "图片暂时无法显示" + (said ? "：" + said : ""));
+      });
+      img.src = it.url;
+      btn.append(img);
+      if (it.caption) btn.append(node("span", "ck-gallery-cap", it.caption));
+      grid.append(btn);
+    });
+    card.append(grid);
+    return card;
+  }
+  // A voice message: its title and length, the browser's own player, and
+  // what it says (the words, when the cat gave them). An address that is not
+  // one the server projected is not played (the block cannot be shown).
+  function audioBlock(b) {
+    const url = R.mediaUrl(b.url), said = typeof b.text === "string" ? b.text.trim() : "";
+    if (typeof b.url === "string" && b.url.trim() && !url) return null;
+    if (!url && !said) return null;
+    const card = node("div", "ck-card ck-audio");
+    const title = R.oneLine(b.title), length = R.duration(b.durationSec);
+    if (title || length) {
+      const head = node("div", "ck-card-head");
+      if (title) head.append(node("div", "ck-card-title", title));
+      if (length) head.append(node("span", "ck-audio-dur", length));
+      card.append(head);
+    }
+    if (url) {
+      const player = document.createElement("audio");
+      player.className = "ck-audio-player";
+      player.setAttribute("controls", "");
+      player.setAttribute("preload", "metadata");
+      player.setAttribute("aria-label", title || "语音播放");
+      player.src = url;
+      card.append(player);
+    }
+    if (said) card.append(node("p", "ck-audio-text", said));
+    return card;
+  }
 
   // A receipt of the engine reworded, or a refusal said once by name: a quiet
   // centred line, not a bubble from a "系统" speaker. A reminder that came due
   // (reminder: true, 「提醒：…」) is a little more present: the alarm clock of
   // a schedule card before its words, on a soft pill; the cat's reply follows.
+  // Work picked up again after a restart or after the computer slept
+  // (continuation: "restart" | "sleep", 「刚才中断了，接着做。」) sits on the
+  // same soft pill, with a turning arrow or a moon before its words.
   function notice(m, text) {
     const row = node("div", "sysline ck-notice" + (m.reminder ? " ck-reminder" : ""));
+    const resumed = m.continuation === "restart" || m.continuation === "sleep" ? m.continuation : "";
+    if (resumed && !m.reminder) { row.classList.add("ck-continuation"); row.dataset.continuation = resumed; }
     if (m.seq) row.dataset.seq = String(m.seq);
     const id = m.native_message_id || m.id;
     if (id) row.dataset.mid = String(id);
     if (m.time) row.dataset.time = String(m.time);
     if (m.reminder) row.append(icon("alarm-clock"));
+    else if (resumed) row.append(icon(resumed === "sleep" ? "moon" : "refresh-cw"));
     const label = node("span", "label", String(text || ""));
     label.title = String(text || "");
     row.append(label);
@@ -575,16 +647,33 @@
     };
     return b;
   }
-  // Up and down move between a list's options.
-  function arrows(list) {
+  // Up and down move between a list's options. In a grid of options, left
+  // and right move to the one before or after (round the ends), up and down
+  // to the one above or below in the same column (at the top or bottom row
+  // focus stays); the columns are read from where the options are laid out.
+  function arrows(list, grid) {
     list.addEventListener("keydown", (ev) => {
-      if (ev.key !== "ArrowDown" && ev.key !== "ArrowUp") return;
+      const across = ev.key === "ArrowLeft" || ev.key === "ArrowRight";
+      if (ev.key !== "ArrowDown" && ev.key !== "ArrowUp" && !(grid && across)) return;
       const items = [...list.querySelectorAll("button.ask-opt")];
       const at = items.indexOf(document.activeElement);
       if (at < 0) return;
       ev.preventDefault();
-      items[(at + (ev.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus();
+      const n = items.length;
+      let to;
+      if (!grid) to = (at + (ev.key === "ArrowDown" ? 1 : n - 1)) % n;
+      else if (across) to = (at + (ev.key === "ArrowRight" ? 1 : n - 1)) % n;
+      else to = at + (ev.key === "ArrowDown" ? 1 : -1) * columns(items);
+      if (to >= 0 && to < n) items[to].focus();
     });
+  }
+  // How many options a grid's first row holds (those level with the first).
+  function columns(items) {
+    const top = (b) => b.getBoundingClientRect().top;
+    const first = top(items[0]);
+    let n = 1;
+    while (n < items.length && Math.abs(top(items[n]) - first) < 1) n++;
+    return n;
   }
   function field(cls, focus, type) {
     const f = document.createElement("input");
@@ -994,7 +1083,7 @@
   function pickOf(key) {
     const k = S.key + "|" + key;
     let p = picks.get(k);
-    if (!p) { p = { phase: "idle", picks: [], custom: "", ids: [], text: "", selected: [], error: null }; picks.set(k, p); }
+    if (!p) { p = { phase: "idle", via: "", picks: [], custom: "", ids: [], text: "", selected: [], error: null }; picks.set(k, p); }
     return p;
   }
   function choiceView(key, fact) {
@@ -1016,28 +1105,37 @@
       return card;
     }
     const p = pickOf(key);
+    // An option that does what it says goes to the action route (act); any other is a chat message (choose).
+    const pick = (o, custom) => (R.isCallbackOption(o) ? act(key, fact, o, custom) : choose(key, fact, [o.id], custom));
+    const working = v.acting ? "正在提交…" : "正在发送…";
     if (b.mode === "confirm") {
-      const row = node("div", "approval-actions ck-confirm");
       const [yes, no] = b.options;
+      // An answer that does what it says and takes the owner's words (F155:
+      // a note to go with it) has an optional field above the answers; its
+      // words go with that answer only, and an empty field is fine.
+      const noted = [yes, no].find((o) => o && o.custom && R.isCallbackOption(o)) || null;
+      if (noted) card.append(confirmNote(noted, v, p, () => pick(noted, p.custom.trim())));
+      const row = node("div", "approval-actions ck-confirm");
       for (const o of [no, yes]) {
         if (!o) continue;
-        const btn = button(o === yes ? "primary" : "secondary", null, () => choose(key, fact, [o.id]), "opt:" + o.id);
-        if (v.sending.includes(o.id)) { btn.append(icon("spinner", "approval-spinner"), document.createTextNode("正在发送…")); btn.setAttribute("aria-busy", "true"); }
+        const btn = button(o === yes ? "primary" : "secondary", null, () => pick(o, o === noted ? p.custom.trim() : ""), "opt:" + o.id);
+        if (v.sending.includes(o.id)) { btn.append(icon("spinner", "approval-spinner"), document.createTextNode(working)); btn.setAttribute("aria-busy", "true"); }
         else btn.textContent = R.optionText(o);
         if (v.busy) btn.setAttribute("aria-disabled", "true");
         row.append(btn);
       }
       card.append(row);
     } else {
-      const multiple = b.mode === "multiple";
-      const list = node("div", "ask-opts");
+      const multiple = b.mode === "multiple", grid = b.layout === "grid";
+      // card-grid: the same options as cards side by side.
+      const list = node("div", "ask-opts" + (grid ? " ck-opts-grid" : ""));
       list.setAttribute("role", "group");
       b.options.forEach((o, i) => {
         if (o.custom && !multiple) { list.append(customRow(key, fact, o, v, p)); return; }
         const on = multiple && v.picks.includes(o.id);
         const btn = button("ask-opt" + (on ? " on" : ""), null, () => {
           if (multiple) toggle(key, o.id);
-          else choose(key, fact, [o.id]);
+          else pick(o);
         }, "opt:" + o.id);
         if (multiple) btn.setAttribute("aria-pressed", String(on));
         const badge = node("span", "opt-badge" + (on ? " on" : ""));
@@ -1051,7 +1149,7 @@
         if (v.busy || (multiple && v.full && !on)) btn.setAttribute("aria-disabled", "true");
         list.append(btn);
       });
-      arrows(list);
+      arrows(list, grid);
       card.append(list);
       if (multiple) {
         const row = node("div", "approval-actions ck-confirm");
@@ -1084,25 +1182,30 @@
     return row;
   }
   // The option that takes the owner's own words: a field and a send button.
+  // One that does what it says takes the words as a note that may be left
+  // empty, so its button is always ready.
   function customRow(key, fact, o, v, p) {
-    const row = node("div", "ask-opt other" + (p.custom.trim() ? " typing" : ""));
+    const acts = R.isCallbackOption(o);
+    const row = node("div", "ask-opt other" + (acts ? " ck-acts" : "") + (p.custom.trim() ? " typing" : ""));
     const badge = node("span", "opt-badge ghost");
     badge.append(icon("pencil"));
     const field = document.createElement("input");
     field.className = "ck-custom";
     field.dataset.ckFocus = "custom:" + o.id;
-    field.placeholder = o.label + "…";
+    field.placeholder = o.customPlaceholder || o.label + "…";
     field.setAttribute("aria-label", o.label);
     field.maxLength = 2000;
     field.value = p.custom;
     if (v.busy) field.readOnly = true;
     const send = button("ask-send", null, () => submit(), "send:" + o.id);
-    send.setAttribute("aria-label", "发送：" + o.label);
+    send.setAttribute("aria-label", (acts ? "提交：" : "发送：") + o.label);
     send.append(icon(v.sending.includes(o.id) ? "spinner" : "send"));
     if (v.busy) send.setAttribute("aria-disabled", "true");
     const submit = () => {
       const text = field.value.trim();
-      if (!text || v.busy) return;
+      if (v.busy) return;
+      if (acts) { act(key, fact, o, text); return; }
+      if (!text) return;
       choose(key, fact, [o.id], text);
     };
     field.addEventListener("input", () => { p.custom = field.value; row.classList.toggle("typing", !!field.value.trim()); });
@@ -1114,8 +1217,30 @@
     row.append(badge, field, send);
     return row;
   }
-  // A pick in flight, or one the server says was already answered: nothing more is taken.
-  const closed = (p) => p.phase === "sending" || p.phase === "recording" || p.phase === "conflict";
+  // The optional note that goes with a confirmation's answer that does what
+  // it says (its placeholder is the cat's own, else 补充说明（可选）). What is
+  // typed is kept with the pick across redraws; Enter gives that answer.
+  function confirmNote(o, v, p, submit) {
+    const f = document.createElement("input");
+    f.className = "ck-input ck-confirm-note";
+    f.type = "text";
+    f.dataset.ckFocus = "note:" + o.id;
+    f.placeholder = o.customPlaceholder || "补充说明（可选）";
+    f.setAttribute("aria-label", f.placeholder);
+    f.maxLength = 2000;
+    f.value = p.custom;
+    if (v.busy) f.readOnly = true;
+    f.addEventListener("input", () => { p.custom = f.value; });
+    f.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter" || ev.isComposing || ev.keyCode === 229) return;
+      ev.preventDefault();
+      if (!v.busy) submit();
+    });
+    return f;
+  }
+  // A pick in flight, one the server says was already answered, or one whose
+  // action took effect without being recorded: nothing more is taken.
+  const closed = (p) => p.phase === "sending" || p.phase === "recording" || p.phase === "conflict" || p.phase === "applied";
   function toggle(key, id) {
     const p = pickOf(key);
     if (closed(p)) return;
@@ -1135,7 +1260,7 @@
     const b = fact.block, p = pickOf(key);
     if (!R.canPick(b, ids) || closed(p)) return;
     const text = R.choiceMessage(b, ids, custom);
-    Object.assign(p, { phase: "sending", ids: ids.slice(), text, error: null });
+    Object.assign(p, { phase: "sending", via: "", ids: ids.slice(), text, error: null });
     repaint();
     // The conversation the block belongs to, as it was when the pick was made.
     const where = { sel: S.sel, threadId: S.threadId, pick: p };
@@ -1165,19 +1290,70 @@
     if (res.ok && data && data.answered === true) {
       Object.assign(p, { phase: "recorded", selected: Array.isArray(data.selected) ? data.selected.map(String) : ids.slice(), error: null });
       announce("已记下这次选择");
-    } else if (res.status === 409 && !/会话|对话/.test(String(data && data.error || ""))) {
-      // Already answered: nothing is offered again on this page (another
-      // pick would only send another message). The conversation is read
-      // again; the block shows its record once a read of its message has it
-      // (a block on an earlier page keeps saying it was answered).
+    } else if (res.status === 409 && data && data.code === "already_answered") {
+      // Already answered (the server's own code, not its sentence): nothing
+      // is offered again on this page (another pick would only send another
+      // message). The conversation is read again; the block shows its record
+      // once a read of its message has it (a block on an earlier page keeps
+      // saying it was answered).
       Object.assign(p, { phase: "conflict", error: R.failure(data, "这个选项已经回答过了") });
       if (H.reload) H.reload();
     } else if (res.status === 409 || res.status === 400) {
-      // Not a valid pick, or the conversation moved: the server's own sentence; the pick stays open.
+      // Not a valid pick, the conversation moved, or any other 409: the server's own sentence; the pick stays open.
       Object.assign(p, { phase: "refused", error: R.failure(data, "这次选择没有被接受") });
       if (res.status === 409 && H.reload) H.reload();
     } else {
       Object.assign(p, { phase: "unrecorded", error: R.failure(data, "暂时没能记下") });
+    }
+    if (gen === S.gen) repaint();
+  }
+  // An option that does what it says (upstream F155 option.action, which the
+  // server allows only for a short list of the engine's own actions): no chat
+  // message goes out. The server reads the action from the cat's own message,
+  // carries it out and records the pick on the block (POST …/blocks/:id/action
+  // {optionId, customInput?, expectedThreadId}). Only its answer says how it
+  // went: done and recorded; already answered (409 code already_answered:
+  // nothing offered again; any other 409 is the engine's own refusal);
+  // done but not recorded (502 callbackApplied: not offered again either,
+  // since another press would do it twice); or not done, in its own words,
+  // and it can be tried again.
+  async function act(key, fact, o, custom) {
+    const b = fact.block, p = pickOf(key);
+    if (!R.canPick(b, [o.id]) || closed(p)) return;
+    const sel = S.sel, threadId = S.threadId, gen = S.gen;
+    if (!sel || !threadId) { Object.assign(p, { phase: "refused", via: "action", ids: [o.id], text: "", error: { text: "对话还没读到", detail: "" } }); repaint(); return; }
+    Object.assign(p, { phase: "sending", via: "action", ids: [o.id], text: "", error: null });
+    repaint();
+    let res = null, data = {};
+    try {
+      res = await H.apiFetch(scopeOf(sel) + "/messages/" + enc(fact.mid) + "/blocks/" + enc(b.id) + "/action", {
+        method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ optionId: o.id, ...(custom ? { customInput: custom } : {}), expectedThreadId: threadId }),
+      }, true);
+      const body = await res.text();
+      try { data = body ? JSON.parse(body) : {}; } catch (e) { data = {}; }
+    } catch (e) {
+      // Not known whether it took effect: the conversation is read again, so its record shows if it did.
+      Object.assign(p, { phase: "refused", error: { text: "连不上 clowder-bot，不确定刚才的操作有没有生效", detail: "" } });
+      if (H.reload) H.reload();
+      if (gen === S.gen) repaint();
+      return;
+    }
+    if (res.ok && data && data.answered === true) {
+      Object.assign(p, { phase: "recorded", selected: Array.isArray(data.selected) ? data.selected.map(String) : [o.id], error: null });
+      announce("已处理");
+    } else if (res.status === 502 && data && data.callbackApplied === true) {
+      Object.assign(p, { phase: "applied", error: R.failure(data, "已经生效，但没能记下这次选择") });
+      if (H.reload) H.reload();
+    } else if (res.status === 409 && data && data.code === "already_answered") {
+      Object.assign(p, { phase: "conflict", error: R.failure(data, "这个选项已经回答过了") });
+      if (H.reload) H.reload();
+    } else {
+      // Not done as it stands (400), the conversation moved (409 thread_changed),
+      // the engine refused it as things stand (any other 409, e.g. a preview
+      // that expired), or the engine could not do it: the server's own sentence.
+      Object.assign(p, { phase: "refused", error: R.failure(data, "操作没有成功，可以再试一次") });
+      if (res.status === 409 && H.reload) H.reload();
     }
     if (gen === S.gen) repaint();
   }
@@ -1194,6 +1370,7 @@
   //                       onCancel() when that search ended quietly);
   //   cancelLocate()      end such a lookup under way (chat-locate.js cancel);
   //   latest()            the native message IDs of the newest page (chat-history.js);
+  //   openImages(urls, index, trigger)  the shell's picture viewer (a gallery's pictures);
   //   thread              the history's scroll box (#thread).
   function init(hooks) {
     H = hooks;

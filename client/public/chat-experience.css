@@ -22,6 +22,10 @@
 .cx-row .cx-said-fail > .cx-what { max-width: none; overflow: visible; }
 .cx-row[data-kind="failure"] .cx-label { flex: 1 1 0; }
 .cx-row[aria-expanded="true"] > .cx-chev { transform: rotate(90deg); }
+/* Gone cold since the last reply (F338): the line's own size and place, quieter, and not a control. */
+.cx-warmth { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; height: 28px; padding: 0 10px 0 6px; margin: 0 0 6px; font-size: var(--x-fs-sm); color: var(--x-muted); white-space: nowrap; }
+.cx-warmth > .icon { width: 14px; height: 14px; flex: none; color: var(--x-faint); }
+.cx-warmth-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 /* In place under the line: a short list, each row pointing at its message or
    Task; 查看其余 N 项 / 收起 opens the rest in the same list. */

@@ -13,6 +13,8 @@
 //   first few, 查看其余 N 项 shows every listed item in place, and stays open
 //   across refreshes until the owner folds it or the conversation changes.
 //   A partial or failed read says it cannot tell; it never reads as idle.
+//   With nothing to say and the chat gone cold since its last reply (F338
+//   warmth "expired"), one quiet hint takes the line's place: not a control.
 // - Read position: GET never marks anything read. POST <scope>/read confirms
 //   the newest visible cat reply only while the page is visible, the chat is
 //   not covered, that reply is on screen (for a moment) and the open
@@ -318,12 +320,21 @@
     // A cat already drawn writing in the history is not said again here (H.writing: chat-live.js).
     const writing = H.writing ? H.writing() : null;
     const view = on ? X.line(S.act, { failed: S.state === "error", showUnread: fresh, writing }) : null;
-    if (!view) S.open = false;
+    // The quiet warmth hint opens onto nothing.
+    if (!view || view.kind === "warmth") S.open = false;
     box.hidden = !view;
     const sig = JSON.stringify([view, S.open, S.open && S.act, S.open && S.more, S.state, S.error, S.said, fresh]);
     if (sig === S.sig) return;
     S.sig = sig;
     if (!view) { box.replaceChildren(); return; }
+    // Gone cold since the last reply (F338): one quiet line, not a control.
+    if (view.kind === "warmth") {
+      const hint = node("div", "cx-warmth");
+      hint.setAttribute("role", "status");
+      hint.append(H.icon("clock"), node("span", "cx-warmth-text", view.lead));
+      box.replaceChildren(hint);
+      return;
+    }
     const keep = box.contains(document.activeElement) ? document.activeElement.dataset.cxFocus || "" : "";
     const row = button("wrow cx-row", null, () => { S.open = !S.open; S.said = null; paint(); });
     row.dataset.kind = view.kind;
