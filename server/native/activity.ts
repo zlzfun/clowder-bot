@@ -18,6 +18,8 @@ export interface ActivityView {
   last: { messageId: string; time: string; from: 'owner'|'cat'; catId?: string; catName?: string; text: string; files: number }|null;
   errors: Array<{ source: string; message: string }>;
   active: QueueView['activeInvocations']; queued: QueueView['queue'];
+  /** F338 cache warmth of the direct chat's active session when confirmed warm or expired. */
+  warmth?: 'warm'|'expired';
 }
 const record = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
 const orderTime = (message: NativeMessage) => message.timelineOrderAt ?? message.timestamp;
@@ -45,11 +47,14 @@ export class Activity {
     return { threadId, readStatus: 'unavailable', items: [], counts: { approval: 0, failure: 0, running: 0, queued: 0, task: 0 },
       unread: null, unreadHasMore: false, latestMessageId: null, last: null, active: [], queued: [], errors: [{source:'thread',message:'暂时无法确认进度'}] };
   }
-  async read(threadId: string, cats?: NativeCat[], pending?: Promise<{items: unknown[]}>): Promise<ActivityView> {
+  async read(threadId: string, cats?: NativeCat[], pending?: Promise<{items: unknown[]}>, catId?: string): Promise<ActivityView> {
     await this.bridge.thread(threadId);
     const names = cats ?? await this.bridge.cats();
     const view = this.unavailable(threadId); view.errors = [];
     const annotate = (catId: unknown) => typeof catId === 'string' ? {catId, catName: names.find(cat => cat.id === catId)?.name ?? catId} : {};
+    const sessionsRead = catId
+      ? this.bridge.native.request<{ sessions?: Array<Record<string, any>> }>(`/api/threads/${encodeURIComponent(threadId)}/sessions?catId=${encodeURIComponent(catId)}`).catch(() => null)
+      : Promise.resolve(null);
     const inputs = await Promise.allSettled([
       this.bridge.queue(threadId),
       this.bridge.native.request<{tasks: unknown[]}>(`/api/tasks?threadId=${encodeURIComponent(threadId)}`),
@@ -169,6 +174,13 @@ export class Activity {
     view.items = [...new Map(view.items.map(item => [item.id,item])).values()].sort((a,b)=>rank[a.kind]-rank[b.kind]);
     for (const item of view.items) view.counts[item.kind]++;
     view.readStatus = ready === inputs.length && !runtimeFailed ? 'ready' : ready ? 'partial' : 'unavailable';
+    if (catId && view.readStatus === 'ready' && !view.active.length && !view.queued.length) {
+      const sessionData = await sessionsRead;
+      const sessions = Array.isArray(sessionData?.sessions) ? sessionData.sessions.map(record) : [];
+      const active = sessions.filter(s => s.status === 'active').at(-1);
+      const status = record(active?.cacheWarmth).status;
+      if (status === 'warm' || status === 'expired') view.warmth = status;
+    }
     return view;
   }
   async acknowledge(threadId: string, messageId: string, stillCurrent: () => boolean) {

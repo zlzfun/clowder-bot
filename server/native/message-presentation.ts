@@ -102,6 +102,14 @@ export function engineNote(message: NativeMessage): string | null | undefined {
   return said ? `${said}。` : null;
 }
 
+/** Whether a connector notice is a restart or sleep auto-continuation line, so the chat can draw it clearly. */
+export function continuationKind(message: NativeMessage): 'restart' | 'sleep' | undefined {
+  if (message.type !== 'connector') return undefined;
+  const source = record(message.source);
+  if (source.connector !== 'restart-recovery') return undefined;
+  return source.label === '睡眠接续' ? 'sleep' : 'restart';
+}
+
 /** A reply the engine is still producing: an unpublished draft or a response that has not settled. */
 export function replyInProgress(message: NativeMessage): boolean {
   return message.type === 'assistant'

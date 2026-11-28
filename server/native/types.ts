@@ -23,6 +23,8 @@ export interface NativeTransport {
   request<T = Record<string, unknown>>(path: string, options?: { method?: string; body?: unknown; headers?: Record<string, string> }): Promise<T>;
   /** Authorized source messages must be checked by the caller before reading native upload bytes. */
   readFile?(path: string, maxBytes: number): Promise<Buffer>;
+  /** Authorized audio messages must be checked by the caller before reading native TTS audio bytes. */
+  readTtsAudio?(path: string, maxBytes: number): Promise<Buffer>;
   subscribe(threadId: string, listener: (event: NativeEvent) => void): Promise<() => void>;
   close(): Promise<void>;
 }

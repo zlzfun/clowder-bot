@@ -7804,6 +7804,7 @@
     // A card's own words: the composer's draft and quote are left alone.
     send: (text, sent) => sendText(text, null, null, null, { sent }),
     reload: () => { state.sig = ""; return loadThread().catch(() => {}); },
+    openImages: (urls, index, trigger) => openShots(urls, index, trigger),
     // A request's card further back than the history drawn (去确认): its message on earlier pages (chat-locate.js);
     // onCancel: that search ended quietly (a search, a quote's jump or another chat took over).
     locate: (item, onCancel) => locate.find({ sel: state.sel, messageId: item.messageId, onCancel }),

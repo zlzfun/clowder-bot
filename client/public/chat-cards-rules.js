@@ -461,14 +461,22 @@
   }
   // An option as the chat shows it: its emoji before its words.
   const optionText = (o) => (o.emoji ? o.emoji + " " + o.label : o.label);
+  // An option that does what it says itself (upstream F155 option.action,
+  // allowlisted by the server): picked, the server carries it out and records
+  // the pick (POST …/blocks/:id/action); no chat message is sent for it.
+  const isCallbackOption = (o) => !!(o && o.action && o.action.kind === "callback");
 
   // What a choice block shows. local: this page's pick in progress:
-  //   {phase: "idle"|"sending"|"recording"|"recorded"|"unsent"|"unrecorded"|"refused"|"conflict",
+  //   {phase: "idle"|"sending"|"recording"|"recorded"|"unsent"|"unrecorded"|"refused"|"conflict"|"applied",
+  //    via ("action": an option that does what it says, sent to the action route),
   //    picks (multiple), ids, text (the message sent), selected (the server's record), error}.
   // It shows answered only from the record: the transcript's (answered,
   // selected) or the answer route's own reply. "conflict" is the server
   // saying it was already answered (409): nothing is offered again on this
   // page; a read of the message that shows its record shows it answered.
+  // "applied" is the server saying the option's action took effect but the
+  // pick was not recorded (502, callbackApplied): it is not offered again
+  // either, since another press would do it a second time.
   function choice(block, local = null) {
     const phase = local ? local.phase : "idle";
     const recorded = block.answered ? block.selected || [] : phase === "recorded" ? local.selected || [] : null;
@@ -477,9 +485,11 @@
       return { mode: "answered", picked: picked.map((o) => ({ id: o.id, text: optionText(o) })) };
     }
     const working = phase === "sending" || phase === "recording";
-    const busy = working || phase === "conflict";
+    const busy = working || phase === "conflict" || phase === "applied";
+    const acting = !!local && local.via === "action";
     let note = "", tone = "";
-    if (phase === "sending") note = "正在发送…";
+    if (phase === "sending") note = acting ? "正在提交…" : "正在发送…";
+    else if (phase === "applied") note = "已经生效，但没能记下这次选择，这里不再提供选择。";
     else if (phase === "recording") note = "已发出，正在记下这次选择…";
     else if (phase === "unsent") { note = "没发出去，可以再选一次。"; tone = "bad"; }
     else if (phase === "unrecorded") { note = "已经发出「" + oneLine(local.text) + "」，但没能记下这次选择" + (local.error && local.error.text ? "：" + local.error.text : "") + "。可以再选一次。"; tone = "bad"; }
@@ -487,13 +497,44 @@
     else if (phase === "conflict") note = ((local.error && local.error.text) || "这个选项已经回答过了") + "，这里不再提供选择。";
     const picks = block.mode === "multiple" && local && Array.isArray(local.picks) ? local.picks : [];
     return {
-      mode: "ask", busy, note, tone, picks,
+      mode: "ask", busy, note, tone, picks, acting: working && acting,
       // The option being sent, for its busy look.
       sending: working && local && Array.isArray(local.ids) ? local.ids : [],
       full: block.mode === "multiple" && !!block.max && picks.length >= block.max,
       ready: block.mode === "multiple" && canPick(block, picks),
       retry: phase === "unrecorded",
     };
+  }
+
+  // ---- Pictures and voice a cat attached ----
+  // Only an address the server projected can be shown: https, or a path of
+  // this site (its /xbot-api/media/… locator). Never javascript:, data:,
+  // file:, http: or another host by a path that starts with //.
+  function mediaUrl(v) {
+    const url = str(v).trim();
+    if (!url || url.length > 4096 || /[\s\u0000-\u001f\u007f\\]/.test(url)) return "";
+    return /^https:\/\/[^/?#]+/i.test(url) || /^\/(?!\/)/.test(url) ? url : "";
+  }
+  // A gallery's pictures, as the contract describes them (each with its
+  // address, the words read aloud and the caption shown), or null when any
+  // part is not: such a block is counted as one that cannot be shown, never
+  // half drawn.
+  function galleryItems(b) {
+    if (!b || !Array.isArray(b.items) || !b.items.length) return null;
+    const out = [];
+    for (const it of b.items) {
+      const url = it && typeof it === "object" ? mediaUrl(it.url) : "";
+      if (!url) return null;
+      out.push({ url, alt: oneLine(it.alt), caption: oneLine(it.caption) });
+    }
+    return out;
+  }
+  // How long a voice message is: m:ss, h:mm:ss past an hour; "" when unknown.
+  function duration(sec) {
+    if (typeof sec !== "number" || !Number.isFinite(sec) || sec <= 0) return "";
+    const s = Math.max(1, Math.round(sec));
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+    return (h ? h + ":" + pad(m) : String(m)) + ":" + pad(r);
   }
 
   // A diff's lines, each with its kind, and how many were added and removed.
@@ -568,7 +609,8 @@
   window.ClowderCardsRules = Object.freeze({
     KINDS, STATES, approvals, runtimePrompt, receiptOf, labels, outcome, wording, expiry, card, failure,
     runtimeActions, answerOf, questionResponse, fieldDefault, formResponse, conversationResponse, runtimeResponse,
-    buildSelectionMessage, choiceMessage, canPick, optionText, choice,
+    buildSelectionMessage, choiceMessage, canPick, optionText, isCallbackOption, choice,
+    mediaUrl, galleryItems, duration,
     diffLines, hiddenText, ending, request, words, resend, count, oneLine,
   });
 })();

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
 import { createApp } from '../server/app.js';
+import { ApiError } from '../server/errors.js';
 import { NativeFixture } from './native-fixture.js';
 import { blockLine, messageBlocks, requestLine } from '../server/native/blocks.js';
 import type { NativeMessage } from '../server/native/types.js';
@@ -209,4 +210,272 @@ test('the engine’s receipt for an answered request marks the request card, and
   r.native.messages.set(group.id, [receipt('r1', 'p1', 'F221', 'accepted')]);
   const lone = await (await r.call(`/groups/${group.id}`)).json();
   assert.deepEqual(lone.messages.map((m: any) => [m.id, m.notice ? m.text : null]), [['r1', '已记住这个偏好。']]);
+});
+
+test('media_gallery, audio, card-grid and allowlisted option.action are projected safely and served via /xbot-api/media', async t => {
+  const r = await setup(t);
+  const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13]);
+  const wav = Buffer.from('RIFF\x24\x00\x00\x00WAVEfmt ');
+  r.native.uploads.set('/uploads/cat.png', png);
+  r.native.uploads.set('/uploads/voice.wav', wav);
+  r.native.uploads.set('/uploads/bad.png', Buffer.from('<svg><script>alert(1)</script></svg>'));
+  r.native.uploads.set('/uploads/evil.html', Buffer.from('<script>alert(1)</script>'));
+  r.native.messages.set(r.thread.id, [{
+    id: 'rich-m1',
+    type: 'assistant',
+    catId: r.cat.id,
+    timestamp: 2000,
+    content: '',
+    extra: {
+      rich: {
+        v: 1,
+        blocks: [
+          {
+            id: 'gal',
+            kind: 'media_gallery',
+            v: 1,
+            title: '猫咪相册',
+            items: [
+              { url: '/uploads/cat.png', alt: '橘猫', caption: '晒太阳' },
+              { url: 'https://cdn.example.com/pic.jpg', alt: '外链' },
+              { url: 'javascript:alert(1)', alt: 'xss' },
+              { url: 'data:text/html,<script>1</script>', alt: 'data' },
+              { url: 'file:///etc/passwd', alt: 'file' },
+              { url: '/uploads/../secret.png', alt: 'traversal' },
+              { url: '/uploads/evil.svg', alt: 'svg' },
+            ],
+          },
+          {
+            id: 'aud',
+            kind: 'audio',
+            v: 1,
+            url: '/uploads/voice.wav',
+            title: '晚安语音',
+            text: '早点休息喵',
+            durationSec: 4.2,
+            speaker: r.cat.id,
+          },
+          {
+            id: 'aud-xss',
+            kind: 'audio',
+            v: 1,
+            url: 'javascript:alert(1)',
+            text: 'bad',
+          },
+          {
+            id: 'aud-html',
+            kind: 'audio',
+            v: 1,
+            url: '/uploads/evil.html',
+          },
+          {
+            id: 'grid',
+            kind: 'interactive',
+            v: 1,
+            interactiveType: 'card-grid',
+            title: '选风格',
+            options: [
+              { id: 'warm', label: '暖色', emoji: '☕', description: '焦糖拿铁' },
+              { id: 'cool', label: '冷色', description: '海盐薄荷' },
+            ],
+          },
+          {
+            id: 'frust',
+            kind: 'interactive',
+            v: 1,
+            interactiveType: 'confirm',
+            title: '要记录这个问题吗？',
+            options: [
+              {
+                id: 'confirm',
+                label: '确认记录',
+                customInput: true,
+                customInputPlaceholder: '补充描述（可选）',
+                action: { type: 'callback', endpoint: '/api/frustration-issues/issue-1/confirm', payload: { issueId: 'issue-1' } },
+              },
+              {
+                id: 'skip',
+                label: '跳过',
+                action: { type: 'callback', endpoint: '/api/frustration-issues/issue-1/skip', payload: { issueId: 'issue-1' } },
+              },
+            ],
+          },
+          {
+            id: 'bad-action',
+            kind: 'interactive',
+            v: 1,
+            interactiveType: 'select',
+            options: [{ id: 'x', label: '坏按钮', action: { type: 'callback', endpoint: 'https://evil.test/hook' } }],
+          },
+        ],
+      },
+    },
+  }]);
+
+  const transcript = await (await r.call('/bots/Ada/transcript')).json();
+  const row = transcript.messages.find((m: any) => m.id === 'rich-m1');
+  assert.ok(row);
+  assert.equal(row.blocks_hidden, 3, 'aud-xss, aud-html and bad-action are hidden');
+  assert.equal(row.blocks.length, 4);
+
+  const gal = row.blocks[0];
+  assert.equal(gal.kind, 'gallery');
+  assert.equal(gal.title, '猫咪相册');
+  assert.equal(gal.items.length, 2);
+  assert.match(gal.items[0].url, /^\/xbot-api\/media\/nm\./);
+  assert.equal(gal.items[1].url, 'https://cdn.example.com/pic.jpg');
+
+  const imgRes = await fetch(gal.items[0].url.replace('/xbot-api', `http://127.0.0.1:${new URL((await r.call('/session')).url).port}/xbot-api`));
+  assert.equal(imgRes.status, 200);
+  assert.equal(imgRes.headers.get('content-type'), 'image/png');
+  assert.equal(imgRes.headers.get('x-content-type-options'), 'nosniff');
+  assert.match(imgRes.headers.get('content-security-policy')!, /sandbox/);
+  assert.deepEqual(Buffer.from(await imgRes.arrayBuffer()), png);
+
+  const aud = row.blocks[1];
+  assert.equal(aud.kind, 'audio');
+  assert.match(aud.url, /^\/xbot-api\/media\/nm\./);
+  assert.equal(aud.text, '早点休息喵');
+  assert.equal(aud.durationSec, 4.2);
+
+  const audRes = await fetch(aud.url.replace('/xbot-api', `http://127.0.0.1:${new URL((await r.call('/session')).url).port}/xbot-api`));
+  assert.equal(audRes.status, 200);
+  assert.equal(audRes.headers.get('content-type'), 'audio/wav');
+  assert.equal(audRes.headers.get('x-content-type-options'), 'nosniff');
+  assert.match(audRes.headers.get('content-security-policy')!, /sandbox/);
+  assert.deepEqual(Buffer.from(await audRes.arrayBuffer()), wav);
+
+  // Magic byte mismatch on image upload returns 415
+  const fakeMsg: NativeMessage = {
+    id: 'fake-img-msg',
+    type: 'assistant',
+    catId: r.cat.id,
+    timestamp: 3000,
+    content: '',
+    extra: { rich: { v: 1, blocks: [{ id: 'g', kind: 'media_gallery', v: 1, items: [{ url: '/uploads/bad.png' }] }] } },
+  };
+  r.native.messages.set(r.thread.id, [...r.native.messages.get(r.thread.id)!, fakeMsg]);
+  const t2 = await (await r.call('/bots/Ada/transcript')).json();
+  const badGalleryUrl = t2.messages.find((m: any) => m.id === 'fake-img-msg').blocks[0].items[0].url;
+  assert.equal((await r.call(badGalleryUrl.replace('/xbot-api', ''))).status, 415);
+
+  const grid = row.blocks[2];
+  assert.equal(grid.kind, 'choices');
+  assert.equal(grid.mode, 'single');
+  assert.equal(grid.layout, 'grid');
+
+  const frust = row.blocks[3];
+  assert.equal(frust.kind, 'choices');
+  assert.deepEqual(frust.options[0].action, { kind: 'callback' });
+  assert.equal(frust.options[0].customPlaceholder, '补充描述（可选）');
+  assert.equal('endpoint' in frust.options[0].action, false);
+
+  // /answer refuses callback options; /action executes from authoritative native record
+  assert.equal((await r.call('/bots/Ada/messages/rich-m1/blocks/frust/answer', 'POST', { selectedIds: ['confirm'], expectedThreadId: r.thread.id })).status, 400);
+
+  const nativeCalls: Array<{ path: string; method: string; body: any }> = [];
+  const origReq = r.native.request.bind(r.native);
+  r.native.request = (async (path: string, options?: any) => {
+    if (path.startsWith('/api/frustration-issues/') || path.endsWith('/block-state')) {
+      nativeCalls.push({ path, method: options?.method ?? 'GET', body: options?.body });
+      return { ok: true };
+    }
+    return origReq(path, options);
+  }) as typeof r.native.request;
+
+  const actRes = await r.call('/bots/Ada/messages/rich-m1/blocks/frust/action', 'POST', {
+    optionId: 'confirm',
+    customInput: '点按钮没反应',
+    expectedThreadId: r.thread.id,
+  });
+  assert.equal(actRes.status, 200);
+  const actBody = await actRes.json();
+  assert.deepEqual(actBody, { messageId: 'rich-m1', blockId: 'frust', selected: ['confirm'], answered: true, native: { ok: true } });
+  assert.deepEqual(nativeCalls, [
+    { path: '/api/frustration-issues/issue-1/confirm', method: 'POST', body: { userDescription: '点按钮没反应' } },
+    { path: '/api/messages/rich-m1/block-state', method: 'PATCH', body: { userId: 'clowder-bot-owner', blockId: 'frust', disabled: true, selectedIds: ['confirm'] } },
+  ]);
+
+  // TTS audio (/api/tts/audio/<64-hex>.(wav|mp3)), multi-select callback rejection, 502 callbackApplied top-level flag, and 409 already_answered vs PREVIEW_EXPIRED
+  const ttsPath = `/api/tts/audio/${'a'.repeat(64)}.mp3`;
+  const mp3 = Buffer.from([0x49, 0x44, 0x33, 0x03, 0, 0, 0, 0, 0, 0]);
+  r.native.uploads.set(ttsPath, mp3);
+  r.native.messages.set(r.thread.id, [{
+    id: 'tts-and-more',
+    type: 'assistant',
+    catId: r.cat.id,
+    timestamp: 4000,
+    content: '',
+    extra: {
+      rich: {
+        v: 1,
+        blocks: [
+          { id: 'tts1', kind: 'audio', v: 1, url: ttsPath, text: '语音合成成功' },
+          {
+            id: 'multi-cb',
+            kind: 'interactive',
+            v: 1,
+            interactiveType: 'multi-select',
+            options: [{ id: 'a', label: 'A', action: { type: 'callback', endpoint: '/api/guide-actions/cancel', payload: { threadId: r.thread.id, guideId: 'g1' } } }],
+          },
+          {
+            id: 'life',
+            kind: 'interactive',
+            v: 1,
+            interactiveType: 'select',
+            options: [{ id: 'ok', label: '启用', action: { type: 'callback', endpoint: '/api/auto-dream/life-settings/decision', payload: { previewId: 'lifepreview_1', decision: 'confirm' } } }],
+          },
+          {
+            id: 'life-done',
+            kind: 'interactive',
+            v: 1,
+            interactiveType: 'select',
+            disabled: true,
+            selectedIds: ['ok'],
+            options: [{ id: 'ok', label: '启用', action: { type: 'callback', endpoint: '/api/auto-dream/life-settings/decision', payload: { previewId: 'lifepreview_2', decision: 'confirm' } } }],
+          },
+        ],
+      },
+    },
+  }]);
+  const t3 = await (await r.call('/bots/Ada/transcript')).json();
+  const m3 = t3.messages.find((m: any) => m.id === 'tts-and-more');
+  assert.equal(m3.blocks_hidden, 1, 'multi-select with callback option stays hidden');
+  const ttsBlock = m3.blocks.find((b: any) => b.id === 'tts1');
+  assert.match(ttsBlock.url, /^\/xbot-api\/media\/nm\./);
+  const ttsRes = await r.call(ttsBlock.url.replace('/xbot-api', ''));
+  assert.equal(ttsRes.status, 200);
+  assert.equal(ttsRes.headers.get('content-type'), 'audio/mpeg');
+  assert.deepEqual(Buffer.from(await ttsRes.arrayBuffer()), mp3);
+
+  // Already answered returns code: 'already_answered'; native 409 (PREVIEW_EXPIRED) does not
+  const alreadyRes = await r.call('/bots/Ada/messages/tts-and-more/blocks/life-done/action', 'POST', { optionId: 'ok', expectedThreadId: r.thread.id });
+  assert.equal(alreadyRes.status, 409);
+  assert.equal((await alreadyRes.json()).code, 'already_answered');
+
+  r.native.request = (async (path: string, options?: any) => {
+    if (path === '/api/auto-dream/life-settings/decision') {
+      throw new ApiError(409, '预览已过期，请重新生成', { code: 'PREVIEW_EXPIRED', error: '预览已过期，请重新生成' });
+    }
+    if (path.endsWith('/block-state')) throw new ApiError(500, 'store failed');
+    return origReq(path, options);
+  }) as typeof r.native.request;
+  const expiredRes = await r.call('/bots/Ada/messages/tts-and-more/blocks/life/action', 'POST', { optionId: 'ok', expectedThreadId: r.thread.id });
+  assert.equal(expiredRes.status, 409);
+  const expiredJson = await expiredRes.json();
+  assert.notEqual(expiredJson.code, 'already_answered');
+  assert.equal(expiredJson.native.code, 'PREVIEW_EXPIRED');
+
+  // Callback succeeded, block-state failed => 502 with top-level callbackApplied: true
+  r.native.request = (async (path: string, options?: any) => {
+    if (path === '/api/auto-dream/life-settings/decision') return { ok: true };
+    if (path.endsWith('/block-state')) throw new ApiError(500, 'block-state failed');
+    return origReq(path, options);
+  }) as typeof r.native.request;
+  const partialRes = await r.call('/bots/Ada/messages/tts-and-more/blocks/life/action', 'POST', { optionId: 'ok', expectedThreadId: r.thread.id });
+  assert.equal(partialRes.status, 502);
+  const partialJson = await partialRes.json();
+  assert.equal(partialJson.callbackApplied, true);
+  assert.equal(partialJson.answered, false);
+  assert.equal(partialJson.code, 'callback_applied_state_failed');
 });

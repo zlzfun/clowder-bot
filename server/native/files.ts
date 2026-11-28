@@ -4,14 +4,55 @@ import { z } from 'zod';
 import { ApiError } from '../errors.js';
 import { MAX_FILE_BYTES, mimeFor } from '../workspaces.js';
 import type { BotBridge } from './bridge.js';
-import { nativeUploadPath } from './file-path.js';
+import { nativeUploadPath, ttsAudioPath } from './file-path.js';
 import type { NativeMessage } from './types.js';
 
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const record = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
 const identity = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_:.\-]{0,199}$/);
 const locatorSchema = z.tuple([identity, identity, z.enum(['content', 'rich']), z.number().int().min(0).max(10000), z.string().regex(/^[a-f0-9]{64}$/)]);
+const mediaLocatorSchema = z.tuple([identity, identity, z.enum(['gallery', 'audio']), z.number().int().min(0).max(49), z.number().int().min(0).max(49), z.string().regex(/^[a-f0-9]{64}$/)]);
 type Locator = z.infer<typeof locatorSchema>;
+type MediaLocator = z.infer<typeof mediaLocatorSchema>;
+export const AUDIO_MEDIA_MIMES: Record<string, string> = {
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.ogg': 'audio/ogg',
+  '.m4a': 'audio/mp4',
+  '.webm': 'audio/webm',
+  '.aac': 'audio/aac',
+};
+const IMAGE_MEDIA_MIMES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+const BLOCKED_GALLERY_EXTS = new Set(['.svg', '.html', '.htm', '.xhtml', '.xml', '.js', '.mjs', '.cjs']);
+
+export function mediaToken(threadId: string, messageId: string, kind: 'gallery' | 'audio', blockIndex: number, itemIndex: number, url: string): string | null {
+  if (!identity.safeParse(threadId).success || !identity.safeParse(messageId).success) return null;
+  const locator: MediaLocator = [threadId, messageId, kind, blockIndex, itemIndex, hash({ kind, url })];
+  return 'nm.' + Buffer.from(JSON.stringify(locator)).toString('base64url');
+}
+
+export function isAllowedGalleryUploadExt(url: string): boolean {
+  const ext = extname(url).toLowerCase();
+  return !BLOCKED_GALLERY_EXTS.has(ext) && (ext === '' || ['.png', '.jpg', '.jpeg', '.gif', '.webp'].includes(ext));
+}
+
+export function isAllowedAudioUploadExt(url: string): boolean {
+  return Object.hasOwn(AUDIO_MEDIA_MIMES, extname(url).toLowerCase());
+}
+
+function richMediaSource(message: NativeMessage, kind: 'gallery' | 'audio', blockIndex: number, itemIndex: number): string | null {
+  const rich = record(message.extra?.rich).blocks;
+  if (!Array.isArray(rich)) return null;
+  const block = record(rich.slice(0, 50)[blockIndex]);
+  if (kind === 'gallery') {
+    if (block.kind !== 'media_gallery' || !Array.isArray(block.items)) return null;
+    const item = record(block.items.slice(0, 50)[itemIndex]);
+    return typeof item.url === 'string' ? item.url : null;
+  }
+  if (block.kind !== 'audio' || itemIndex !== 0) return null;
+  return typeof block.url === 'string' ? block.url : null;
+}
+
 interface SourceFile { source: 'content'|'rich'; index: number; name: string; url: string; mime: string; size: number|null }
 export interface NativeFileView {
   id: string; threadId: string; name: string; kind: 'attachment'|'deliverable'; mime: string; size: number|null;
@@ -98,5 +139,44 @@ export class NativeFiles {
     const currentSource = current && !current.isDraft ? sourceFiles(current).find(item => item.source === kind && item.index === index) : undefined;
     if (!currentSource || hash(currentSource) !== revision) throw new ApiError(409, '来源文件记录已变化，请刷新后重试');
     return { name: source.name, mime: mimeFor(source.name, bytes), bytes };
+  }
+  async readMedia(id: string): Promise<{ mime: string; bytes: Buffer }> {
+    if (!/^nm\.[A-Za-z0-9_-]{1,1800}$/.test(id)) throw new ApiError(404, '媒体来源不存在');
+    let locator: MediaLocator;
+    try { locator = mediaLocatorSchema.parse(JSON.parse(Buffer.from(id.slice(3), 'base64url').toString('utf8'))); }
+    catch { throw new ApiError(404, '媒体来源不存在'); }
+    const [threadId, messageId, kind, blockIndex, itemIndex, revision] = locator;
+    await this.bridge.thread(threadId);
+    const message = (await this.bridge.allMessages(threadId)).find(item => item.id === messageId);
+    if (!message || message.isDraft || message.type !== 'assistant') throw new ApiError(404, '来源消息已不可读取');
+    const url = richMediaSource(message, kind, blockIndex, itemIndex);
+    if (!url || hash({ kind, url }) !== revision) throw new ApiError(409, '来源媒体记录已变化，请刷新后重试');
+    const ttsPath = kind === 'audio' ? ttsAudioPath(url) : null;
+    const uploadPath = ttsPath ? null : nativeUploadPath(url);
+    if (ttsPath) {
+      if (!this.bridge.native.readTtsAudio) throw new ApiError(422, '这份媒体暂时不能读取');
+    } else if (!uploadPath || !this.bridge.native.readFile) {
+      throw new ApiError(422, '这份媒体暂时不能读取');
+    }
+    const targetPath = ttsPath ?? uploadPath!;
+    if (kind === 'gallery' && !isAllowedGalleryUploadExt(targetPath)) throw new ApiError(415, '此图片格式暂不支持预览');
+    const audioMime = kind === 'audio' ? AUDIO_MEDIA_MIMES[extname(targetPath).toLowerCase()] : undefined;
+    if (kind === 'audio' && !audioMime) throw new ApiError(415, '此音频格式暂不支持播放');
+    const bytes = ttsPath
+      ? await this.bridge.native.readTtsAudio!(ttsPath, MAX_FILE_BYTES)
+      : await this.bridge.native.readFile!(uploadPath!, MAX_FILE_BYTES);
+    const current = (await this.bridge.allMessages(threadId)).find(item => item.id === messageId);
+    const currentUrl = current && !current.isDraft && current.type === 'assistant' ? richMediaSource(current, kind, blockIndex, itemIndex) : null;
+    if (!currentUrl || hash({ kind, url: currentUrl }) !== revision) throw new ApiError(409, '来源媒体记录已变化，请刷新后重试');
+    if (kind === 'gallery') {
+      const mime = mimeFor(targetPath, bytes);
+      if (!IMAGE_MEDIA_MIMES.has(mime)) throw new ApiError(415, '此文件不支持图片预览');
+      return { mime, bytes };
+    }
+    const head = bytes.subarray(0, 256).toString('utf8').trimStart().toLowerCase();
+    if (head.startsWith('<!doctype') || head.startsWith('<html') || head.startsWith('<svg') || head.startsWith('<script')) {
+      throw new ApiError(415, '此文件不支持音频播放');
+    }
+    return { mime: audioMime!, bytes };
   }
 }

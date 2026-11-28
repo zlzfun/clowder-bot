@@ -54,6 +54,10 @@
       latestMessageId: str(data.latestMessageId) || null,
       errors: (Array.isArray(data.errors) ? data.errors : []).filter((e) => e && typeof e === "object")
         .map((e) => ({ source: oneLine(e.source), message: oneLine(e.message) })).filter((e) => e.source || e.message),
+      // F338: whether the chat's earlier context is still at hand (a single
+      // chat, read ready, nothing running or waiting in line); "" when the
+      // server did not say.
+      warmth: data.warmth === "warm" || data.warmth === "expired" ? data.warmth : "",
     };
   }
 
@@ -97,7 +101,13 @@
     return { ...a, items: a.items.filter((i) => !drop.includes(i)), counts: { ...a.counts, running: Math.max(0, a.counts.running - drop.length) } };
   }
 
+  // Nothing waits, runs, failed or is unread, and the server says the chat's
+  // earlier context has gone cold (F338 warmth "expired"): one quiet hint
+  // that the next reply may take a little longer. It never stands in for
+  // anything more urgent, never while a cat is drawn writing, and opens onto
+  // nothing.
   function line(a, opts = {}) {
+    const writing = !!(opts.writing && opts.writing.size);
     a = withoutShown(a, opts.writing);
     if (!a) return opts.failed ? { kind: "unknown", lead: "暂时无法确认状态", label: "", rest: [], partial: false, catId: "", catName: "" } : null;
     const top = KINDS.find((k) => a.counts[k] > 0) || "";
@@ -107,6 +117,7 @@
     if (!top) {
       if (fresh) return { kind: "reply", lead: fresh + " 条新回复", label: "", rest: [], partial, catId: "", catName: "" };
       if (partial) return { kind: "unknown", lead: "暂时无法确认状态", label: "", rest: [], partial: false, catId: "", catName: "" };
+      if (a.warmth === "expired" && !writing && !(a.unread > 0) && !a.unreadHasMore) return { kind: "warmth", lead: "隔了一阵，下一句可能慢一点", label: "", rest: [], partial: false, catId: "", catName: "", expandable: false };
       return null;
     }
     if (fresh) rest.push(SHORT.reply + " " + fresh);

@@ -58,6 +58,7 @@ export class NativeFixture implements NativeTransport {
   pageLimits = new Map<string, number>();
   queues = new Map<string, any>();
   schedules: any[] = [];
+  sessions = new Map<string, any[]>();
   taskRows: any[] = [];
   approvalItems: any[] = [];
   settledApprovalItems: any[] = [];
@@ -240,7 +241,7 @@ export class NativeFixture implements NativeTransport {
       result = queue ?? { queue: [], activeInvocations: [] };
     }
     else if (parts[4] === 'artifacts') result = {threadId:parts[3],artifacts:this.artifactRows.get(parts[3]!) ?? []};
-    else if (parts[4] === 'sessions') result = { sessions: [] };
+    else if (parts[4] === 'sessions') result = { sessions: this.sessions.get(parts[3]!) ?? [] };
     else if (parts[4] === 'cancel') {
       if (this.cancelAnswer.cancelled !== false) this.ending.set(`${parts[3]}|${parts[5]}`, this.cancelEndsAfterReads);
       result = this.cancelAnswer;
@@ -349,6 +350,12 @@ export class NativeFixture implements NativeTransport {
   async readFile(path:string,maxBytes:number) {
     this.calls.push({path,method:'BYTES'});
     const bytes=this.uploads.get(path);if(!bytes)throw new ApiError(404,'文件已不存在');
+    if(bytes.length>maxBytes)throw new ApiError(413,'单个文件最多 20 MB');
+    return Buffer.from(bytes);
+  }
+  async readTtsAudio(path:string,maxBytes:number) {
+    this.calls.push({path,method:'TTS_BYTES'});
+    const bytes=this.uploads.get(path);if(!bytes)throw new ApiError(404,'音频已不存在');
     if(bytes.length>maxBytes)throw new ApiError(413,'单个文件最多 20 MB');
     return Buffer.from(bytes);
   }

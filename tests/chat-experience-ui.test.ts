@@ -846,6 +846,95 @@ test('a late activity answer for the previous conversation or another thread nev
   assert.equal(p.calls.filter(c => c.path === '/xbot-api/groups/g-1/activity').length >= 1, true);
 });
 
+test('F338: a chat gone cold since its last reply shows one quiet hint, not a control (no row button, no chevron, no list), only when nothing else is to be said; warm or not said shows nothing; anything more urgent keeps the line', async () => {
+  const X = rules();
+  // The server's word, checked: only warm or expired; anything else is not said.
+  assert.equal(X.activity(activity({ warmth: 'expired' })).warmth, 'expired');
+  assert.equal(X.activity(activity({ warmth: 'warm' })).warmth, 'warm');
+  for (const other of ['unknown', 'cold', 1, null]) assert.equal(X.activity(activity({ warmth: other })).warmth, '', String(other));
+  assert.equal(X.activity(activity()).warmth, '');
+  const cold = (over: Record<string, unknown> = {}) => X.activity(activity({ warmth: 'expired', ...over }));
+  assert.deepEqual(plain(X.line(cold())), { kind: 'warmth', lead: '隔了一阵，下一句可能慢一点', label: '', rest: [], partial: false, catId: '', catName: '', expandable: false });
+  assert.equal(X.line(X.activity(activity({ warmth: 'warm' }))), null, 'warm: nothing to say');
+  assert.equal(X.line(X.activity(activity())), null, 'not said: nothing to say');
+  // Never in place of anything more urgent or less certain.
+  assert.equal(X.line(X.activity({ ...busy(), warmth: 'expired' })).kind, 'approval');
+  assert.equal(X.line(cold({ items: [{ id: 'f', kind: 'failure', label: '执行失败' }], counts: { failure: 1 } })).kind, 'failure');
+  assert.equal(X.line(cold({ items: [{ id: 'r', kind: 'running', label: '宪宪正在处理', catId: 'cat-a' }] })).kind, 'running');
+  assert.equal(X.line(cold({ items: [{ id: 'q', kind: 'queued', label: '你的消息在排队' }] })).kind, 'queued');
+  assert.equal(X.line(cold({ items: [{ id: 't', kind: 'task', label: '写周报' }] })).kind, 'task');
+  assert.equal(X.line(cold({ unread: 2, latestMessageId: 'm9' }), { showUnread: true }).kind, 'reply');
+  assert.equal(X.line(cold({ unread: 2, latestMessageId: 'm9' })), null, 'an unread reply in sight: nothing yet');
+  assert.equal(X.line(cold({ unread: 0, unreadHasMore: true })), null);
+  assert.equal(X.line(cold({ readStatus: 'partial' })).kind, 'unknown');
+  assert.equal(X.line(cold(), { failed: true }).kind, 'unknown');
+  assert.equal(X.line(cold(), { writing: new Set(['cat-a']) }), null, 'a cat drawn writing: not said');
+  assert.equal(X.line(cold({ items: [{ id: 'r', kind: 'running', label: '宪宪正在处理', catId: 'cat-a' }] }), { writing: new Set(['cat-a']) }), null, 'the run in view hides its line, and the hint with it');
+
+  // On the page: in the line's place, quiet, and nothing to press or open.
+  let answer: Any = activity({ warmth: 'expired' });
+  const p = page(path => { if (!path.endsWith('/activity')) return {}; if (answer instanceof Error) throw answer; return answer; });
+  p.cx.select(ada);
+  p.cx.observe(ada, 'thread-A', true);
+  await settle();
+  const strip = p.strip();
+  assert.equal(strip.hidden, false);
+  assert.ok(p.dock.classList.contains('cx-on'));
+  const hint = strip.querySelector('.cx-warmth')!;
+  assert.ok(hint, 'the hint is drawn');
+  assert.deepEqual([hint.tagName, hint.getAttribute('role'), textOf(hint), hint.querySelector('svg')!.dataset.icon], ['DIV', 'status', '隔了一阵，下一句可能慢一点', 'clock']);
+  assert.equal(all(strip).filter(e => e.tagName === 'BUTTON').length, 0, 'not a control');
+  for (const sel of ['.cx-row', '.cx-chev', '.cx-list', '[aria-expanded]', '[aria-controls]']) assert.equal(strip.querySelector(sel), null, sel);
+  // Escape has nothing to fold.
+  strip.dispatchEvent(new Ev('keydown', { key: 'Escape' }));
+  assert.equal(strip.querySelector('.cx-list'), null);
+  assert.deepEqual(p.posts(), [], 'nothing is sent');
+  // Something waits for the owner: the line takes its place, and opens as before.
+  answer = { ...busy(), warmth: 'expired' };
+  p.cx.observe(ada, 'thread-A', true);
+  await settle();
+  assert.equal(p.strip().querySelector('.cx-warmth'), null);
+  const row = p.strip().querySelector('.cx-row')!;
+  assert.match(textOf(row), /^2 项等你确认/);
+  row.click();
+  assert.ok(p.strip().querySelector('.cx-list'));
+  // Nothing again, gone cold: the hint, and the list the owner opened does not stay open behind it.
+  answer = activity({ warmth: 'expired' });
+  p.cx.observe(ada, 'thread-A', true);
+  await settle();
+  assert.ok(p.strip().querySelector('.cx-warmth'));
+  assert.equal(p.strip().querySelector('.cx-list'), null);
+  answer = busy();
+  p.cx.observe(ada, 'thread-A', true);
+  await settle();
+  assert.equal(p.strip().querySelector('.cx-row')!.getAttribute('aria-expanded'), 'false', 'the hint opened nothing that comes back');
+  // Warm, or not said: nothing.
+  answer = activity({ warmth: 'warm' });
+  p.cx.observe(ada, 'thread-A', true);
+  await settle();
+  assert.equal(p.strip().hidden, true);
+  answer = activity();
+  p.cx.observe(ada, 'thread-A', true);
+  await settle();
+  assert.equal(p.strip().hidden, true);
+  // A refresh that fails after a cold read cannot tell: not the hint, which was the last read's.
+  answer = activity({ warmth: 'expired' });
+  p.cx.observe(ada, 'thread-A', true);
+  await settle();
+  assert.ok(p.strip().querySelector('.cx-warmth'));
+  answer = failure(0, '连不上 clowder-bot');
+  p.cx.observe(ada, 'thread-A', true);
+  await settle();
+  assert.equal(p.strip().querySelector('.cx-warmth'), null);
+  assert.match(textOf(p.strip().querySelector('.cx-row')!), /^暂时无法确认状态/);
+  // Another conversation: what this one said is not carried over.
+  answer = activity({ threadId: 'thread-B' });
+  p.cx.select(bob);
+  p.cx.observe(bob, 'thread-B', true);
+  await settle();
+  assert.equal(p.strip().hidden, true);
+});
+
 // ---------------------------------------------------------------- read position
 function reading(over: Record<string, unknown> = {}, readReply: (body: Any) => unknown = body => ({ threadId: body.expectedThreadId, readMessageId: body.messageId })) {
   const p = page((path, method, body) => {

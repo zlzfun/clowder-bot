@@ -272,6 +272,15 @@
 
 **前端**：已完成并合入（第 63 项，`5e222f46`）：由本机 Claude Code（`claude-opus-5-5`，xhigh）实现。`workspace*` 支持历史对话原位改名与非当前对话确认删除、输入框附件芯片移除时同步清理服务端未发送文件、基于 `XMLHttpRequest` 的「正在上传 N%…」进度显示，以及「更多文件」目录内文本与位图受限预览。经过 Codex（`gpt-6-astra`，xhigh）两轮只读检视，7 条问题全部修正。全量 921 项测试（917 通过，4 项按原因跳过）通过。
 
+<a id="round-26"></a>
+### 第 26 轮 · 图集、音频、选项动作与缓存冷热提示（2026-11-28）
+
+**内容**：完成待办 `T-09` 及 `T-03` 中除 `html_widget`（受不执行 HTML/脚本边界约束，留待使用者决定）与引导面板专属回调外的全部富内容适配（图集 `media_gallery`、音频 `audio`、网格选项 `card-grid`、白名单 F155 `option.action` 直接回调）。
+
+**后端（适配层）**：已完成并合入（`33b3c65f`）：`blocks.ts` 投影 `gallery`、`audio`、`choices (layout: 'grid')` 与白名单自包含回调 `action: { kind: 'callback' }`（覆盖挫折确认/跳过、生活设置预览决定、引导取消，不向前端暴露原始端点与载荷）；新增 `GET /xbot-api/media/:id` 受控提供 `/uploads/…` 位图/音频及 `/api/tts/audio/…` 语音文件（校验会话归属、消息归属、魔数与严格沙箱 CSP）；`POST .../blocks/:block/action` 从原消息取权威回调执行并同步 `block-state`（回调成功但状态写入失败时返回顶层 `callbackApplied: true`）；`GET /xbot-api/bots/:name/activity` 接入原生 F338 会话 `cacheWarmth` 投影 `warmth: 'warm' | 'expired'`；重启与睡眠恢复通知补齐 `continuation: 'restart' | 'sleep'`。详见 [聊天体验适配契约](../chat-experience-api.md)。
+
+**前端**：已完成并合入（第 64 项，`da5f4ffd`）：由本机 Claude Code（`claude-opus-5-5`，xhigh）实现。`chat-cards*` 支持自适应图集与看图器焦点归位、音频播放器与转写正文、多列网格卡片及方向键导航、不发聊天消息的直接动作回调与原位附言、重启/睡眠接续胶囊；`chat-experience*` 在单聊空闲且缓存过期时安静提示「隔了一阵，下一句可能慢一点」。经过 Codex（`gpt-6-astra`，xhigh）两轮只读检视，4 条问题全部修正。全量测试通过。
+
 ## 部署记录
 
 部署的做法在 [验证环境与部署](../operations.md)。第 17、18 轮的部署、2026-11-26 日常实例换引擎和 2026-11-27 部署「同一时间只有一只猫」只写在上面各轮自己的记录里，换引擎的经过另见 [上游维护记录](upstream-records.md)。

@@ -32,10 +32,12 @@
   // 这个会话里最新说出的一句，供会话列表显示与按时间排序；没有或读不到时为 null
   last: {messageId:string; time:string; from:'owner'|'cat'; catId?:string; catName?:string; text:string; files:number} | null;
   errors: Array<{source:string;message:string}>;
+  warmth?: 'warm' | 'expired'; // 单聊在 readStatus='ready' 且当前无运行／排队任务时，由原生活跃会话的 cacheWarmth.status 投影；unknown 或读取失败时省略
 }
 ```
 
 - items 是原生事实投影，按待确认、失败、运行、排队、未完成任务排序。没有证据不造状态；`readStatus` 非 ready 时不能推断空闲／全部完成。
+- 单聊会顺带只读查询原生 `GET /api/threads/:threadId/sessions?catId=…` 的活跃会话 `cacheWarmth.status`（F338）：仅当 `readStatus === 'ready'` 且无正在运行或排队的任务时投影 `warmth: 'warm' | 'expired'`；查询失败或原生返回 `unknown` 时静默省略，不计入 `errors` 也不影响 `readStatus`。前端只在状态为 `expired` 且当前对话空闲（无待处理项、未读或局部失败）时显示轻声提示（「隔了一阵，下一句可能慢一点」），不出现缓存、会话、模型或计费术语。
 - `last` 取当前返回页里最新的一条：用户消息（应用代发的开场邀请除外，回执未到时按该会话里的邀请原文识别）或可见的猫回复（与未读同一口径：草稿、处理中、已停止、被显式发言取代的执行记录都不算；显示文字为空且没有文件的也不算，例如带署名的 `SILENT` 或只有署名的一行）。`text` 是去掉署名、压成一行、最多 140 字的显示文字；只交付文件的回复 `text` 为空、`files` 为文件数，由前端措辞。它只是同一次原生消息读取的另一种投影，不另存。
 - 审批只投影原生 `resolution:open` 且有当前会话的真实卡片坐标；`messageId` 用于定位。一个 Task 的 doing／blocked 与 invocation running 分开，不凭 Task 推断执行。
 - 现有 `GET /xbot-api/bots/status`（另支持 `/xbot-api/status`）的 bot 项保留旧字段，增加 `thread_id`、`activity`；同时返回 `groups:[{id,thread_id,activity}]`。有当前待审批时 state 为 awaiting；读取不全且没有已证实执行时为 unknown；其他保持 running／queued／idle。仅新消息影响 unread，审批数量独立保留。
@@ -112,21 +114,25 @@ type ChatBlock =
   | {id; kind:'card'; title; body?; tone?:'info'|'success'|'warning'|'danger'; fields?:{label,value}[];
      approval?:{id; kind:'preference'|'profile'|'person'|'schedule'|'question'|'other'; title; body?; state?:'approved'|'rejected'|'closed'; selected?:string[]}}
   | {id; kind:'checklist'; title?; items:{id,text,checked}[]}
-  | {id; kind:'choices'; mode:'single'|'multiple'|'confirm'; title?; description?; options:{id,label,emoji?,description?,custom?}[];
+  | {id; kind:'choices'; mode:'single'|'multiple'|'confirm'; layout?:'grid'; title?; description?; options:{id,label,emoji?,description?,custom?:true,customPlaceholder?:string,action?:{kind:'callback'}}[];
      max?; template?; answered:boolean; selected:string[]}
-  | {id; kind:'diff'; file; diff};
+  | {id; kind:'diff'; file; diff}
+  | {id; kind:'gallery'; title?; items:{url,alt?,caption?}[]}
+  | {id; kind:'audio'; url?; title?; text?; durationSec?; speaker?};
 ```
 
 - `card.approval.state` 只认同一个提议、同一个来源（`producerId`）的回执；回执写明了卡片所在消息时，还要是这条消息。对不上的回执不改变任何卡片。F306 运行交互（`runtime_interaction` 与 `conversation_decision`）同时从原生 `GET /api/runtime-interactions/:id` 读取状态与公开选中的选项（`selected`），即使在 `cancelled`/`expired` 等不发回执消息的终态下也能准确收口；用 `?before=` 翻看更早一页且页内没有回执时，同时查 `/api/approval-hub/settled` 补齐状态。
 - `card.approval` 自带这件事的日常说法：`kind`、`title`（不带主语，如「想设一个定时」，前面接说话的猫名）和 `body`（如「每周五写周报 · 每周五 17:00（Asia/Singapore）」）。它从原生卡片本身读出（来源 `producerId`、标题冒号后的名字、`Trigger` 字段里的 JSON），所以请求答完、不再出现在下一节的列表里之后，卡片仍然说得出当时问的是什么。带这种卡片的消息，原生自己的正文（「请求批准创建定时任务「…」」「提议捕捉品味信号：…」）是写给原生网页的：会话列表的预览 `activity.last.text` 和搜索摘要改用「`title`：`body`」这一行。
 - `card.approval.id` 是原生提议的 ID：这张卡是一条「等你确认的事」，与下一节 `approvals[].id` 对应，前端在这里画确认卡而不是原生卡片的原文。用户回答之后，原生会往会话里发一条回执（来自 approval hub 的 connector 消息，原话是「审批结果：品味提案 proposal_… 已批准。」）：回执和卡片在同一页时，`card.approval.state` 是 `approved`／`rejected`／`closed`；这时卡片自己写着结果（「已记住这个偏好 · …」），回执这一行不再出现在返回的消息里（2026-11-13 起：同一件事不说两遍）。卡片不在这一页（在更早的一页），或卡片在折叠的执行过程里时，回执是结果唯一的说法，这一行照旧返回，文字是聊天里的说法（「已记住这个偏好。」「定时没有改动。」等，带 `notice: true`，并附 `receipt: {proposalId, producerId, state, cardMessageId?}` 供前端核对所属卡片并更新已保留在内存里的早先页卡片）。两种情况原生记录都不变。没有 `state` 的卡片是否还在等待，以下一节的列表为准。
-- `choices` 对应原生的 interactive 块。作答沿用原生网页的做法：把选择写成一句普通的聊天消息发出去（措辞规则见上游 `InteractiveBlock.tsx` 的 `buildSelectionMessage`：有 `template` 时把 `{selection}` 换成所选项，否则「我选了：…」，confirm 是「确认／取消」），再用 `POST <scope>/messages/:messageId/blocks/:blockId/answer {selectedIds, expectedThreadId}` 记到原生块上（转发 `PATCH /api/messages/:id/block-state`，`disabled: true`）。两步各自成败：消息已发出但记录失败时，选项仍可再点，不把它显示成已作答。
+- `choices` 对应原生的 interactive 块。`interactiveType === 'card-grid'` 投影为 `mode: 'single', layout: 'grid'`。普通选项沿用原生网页的做法：把选择写成一句普通的聊天消息发出去（措辞规则见上游 `InteractiveBlock.tsx` 的 `buildSelectionMessage`：有 `template` 时把 `{selection}` 换成所选项，否则「我选了：…」，confirm 是「确认／取消」），再用 `POST <scope>/messages/:messageId/blocks/:blockId/answer {selectedIds, expectedThreadId}` 记到原生块上（转发 `PATCH /api/messages/:id/block-state`，`disabled: true`）。两步各自成败：消息已发出但记录失败时，选项仍可再点，不把它显示成已作答。
   - 措辞的细节（与上游一致）：所选项写成「emoji 标签」（有 emoji 时），多个用「, 」连接；选了自定义输入并填了字时是「所选项：填的字」或只有填的字，有标题时后面加「（标题）」；confirm 是「确认」或「取消」，有标题时加「 — 标题」。
   - `confirm` 的 `options` 固定是两个，顺序为确认、取消，取法与原生网页相同：有 `__confirm__` 用它，否则第一个选项是确认；另一个选项是取消，没有声明时是 `{id:'__cancel__', label:'取消'}`。
   - 记录前检查选择是否合法，因为原生的 block-state 接口照单全收并且一写就永久关闭这个块：单选和 confirm 恰好一项，多选一到 `max` 项，不能重复，必须是这个块里的选项（400）；已经作答过的块返回 409。
-  - 带直接动作的选项（上游 F155：`option.action`，点击后调用引导、反馈等原生接口而不是发消息）没有适配，这样的块不作为普通选项给出，计入 `blocks_hidden`。
-- `diff` 只给文件名和差异正文。音频、图集、HTML 小组件暂时不画，只计入 `blocks_hidden`，前端要说明「还有 N 项暂时无法显示」，不能当作没有。文件块仍走原有的文件投影。
-- 只有块、没有文字的回复现在也是一行，计入未读和 `last`（`last.text` 取第一块的标题）。
+  - 带直接动作的选项（上游 F155：`option.action`，`type: 'callback'`）：仅当单选或确认块内所有带 `action` 的选项均属于安全白名单（`/api/frustration-issues/:issueId/confirm`、`/api/frustration-issues/:issueId/skip`、`/api/auto-dream/life-settings/decision`、`/api/guide-actions/cancel`）时才投影 `action: { kind: 'callback' }`（不向客户端暴露原始 `endpoint`/`payload`）；任一选项不在白名单内（如 `/api/guide-actions/start` 或外部 URL）或出现在 `multi-select` 中时整块继续计入 `blocks_hidden`。点击后调用 `POST <scope>/messages/:messageId/blocks/:blockId/action {optionId, customInput?, expectedThreadId}`，由服务端从原生消息记录读取真实 `endpoint` 与 `payload` 转发原生后再写 `block-state`（`disabled: true, selectedIds: [optionId]`）；已回答的块返回 409（`code: 'already_answered'`），若回调已生效但写 `block-state` 失败，返回顶层 `{error, code: 'callback_applied_state_failed', callbackApplied: true, answered: false}`（502）而不伪装成已完成。
+- `gallery` 对应原生 `media_gallery` 块，`audio` 对应原生 `audio` 块。仅放行 `https://`、经过校验的原生 `/uploads/...` 路径，或音频块中上游 TTS 合成的 `/api/tts/audio/<64位hex>.(wav|mp3)` 路径，拒绝 `javascript:`、`data:`、`file:`、`http://`、路径穿越及 `.svg`/`.html` 等可执行类型；本地 `/uploads/...` 媒体与 `/api/tts/audio/...` 音频在对话读取时统一投影为 `/xbot-api/media/:id`（携带重新核对线程权限与来源消息的 locator token），由 `GET /xbot-api/media/:id` 读取原生字节并附带 `Content-Security-Policy: "default-src 'none'; sandbox"` 与 `X-Content-Type-Options: nosniff` 返回（图集仅接受经魔数核验的 PNG/JPEG/GIF/WebP，音频仅接受 `.mp3`/`.wav`/`.ogg`/`.m4a`/`.webm`/`.aac`）。
+- `diff` 只给文件名和差异正文。`html_widget` 与未知块仍不执行不渲染，继续计入 `blocks_hidden`，前端要说明「还有 N 项暂时无法显示」，不能当作没有。文件块仍走原有的文件投影。
+- 重启／睡眠接续的系统提示（`source.connector === 'restart-recovery'`）在保留既有 `notice: true` 与文案（「刚才中断了，接着做。」「电脑睡着时中断了，接着做。」）的同时附带 `continuation: 'restart' | 'sleep'`，供聊天行以轻图标与软底区分展示。
+- 只有块、没有文字的回复现在也是一行，计入未读和 `last`（`last.text` 取第一块的标题或媒体摘要）。
 
 ## 等你确认的事
 

@@ -3,7 +3,7 @@ import { ApiError } from '../errors.js';
 import { ProductStore } from '../product-store.js';
 import type { NativeCat, NativeMessage, NativeThread, NativeTransport } from './types.js';
 import { defaultRuntime, faceOfTool, faceTool, faceTools, memberCliArgs, runtimeUnavailable, supportsRuntime, faceTemplates, type Face, type FaceTemplate } from './agents.js';
-import { approvalReceipt, approvalReceiptText, engineNote, messageDisplayText, messagePresentation, replyEnding, replyInProgress, rosterRefusals, scheduledReminder } from './message-presentation.js';
+import { approvalReceipt, approvalReceiptText, continuationKind, engineNote, messageDisplayText, messagePresentation, replyEnding, replyInProgress, rosterRefusals, scheduledReminder } from './message-presentation.js';
 import { avatarBreed, type CatConfig, type SourceTemplate } from './cat-templates.js';
 import { clip } from './text.js';
 import { cardReceipts, messageBlocks, type ApprovalDecision, type RuntimeBlockState } from './blocks.js';
@@ -205,8 +205,9 @@ export class BotBridge {
       const note = engineNote(message);
       if (note === null) continue;
       const refusal = refusals.get(message.id) ?? (receipt ? approvalReceiptText(receipt) : reminder ? `提醒：${reminder}` : note);
+      const continuation = continuationKind(message);
       const text = refusal ?? messageDisplayText(message, thread.id, presentation.speaker?.name), inProgress = replyInProgress(message);
-      const rich = message.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(message, decided, runtimeStates), ending = replyEnding(message);
+      const rich = message.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(message, decided, runtimeStates, { threadId: thread.id }), ending = replyEnding(message);
       const attachments = this.workspaces.messageFiles(thread.id, message), time = new Date(message.timestamp).toISOString();
       // The owner's or a cat's own words and nothing else: what a reaction is made of, and what one can be drawn on.
       const said = !refusal && presentation.presentation_kind === 'message' && (message.type === 'user' || (message.type === 'assistant' && !!message.catId));
@@ -217,7 +218,7 @@ export class BotBridge {
         content: text, ...presentation, time,
         reply_to: quoted ? this.store.state.messageRefs[thread.id]?.[quoted] ?? 0 : 0,
         status: message.lifecycle?.status ?? (message.isDraft ? 'processing' : 'complete'), ...(inProgress ? { in_progress: true } : {}),
-        ...(ending ? { ended: ending } : {}), ...(refusal ? { notice: true } : {}), ...(reminder ? { reminder: true } : {}),
+        ...(ending ? { ended: ending } : {}), ...(refusal ? { notice: true } : {}), ...(reminder ? { reminder: true } : {}), ...(continuation ? { continuation } : {}),
         ...(receipt ? { receipt: { proposalId: receipt.proposalId, producerId: receipt.producerId, state: receipt.state, ...(receipt.cardMessageId ? { cardMessageId: receipt.cardMessageId } : {}) } } : {}),
         attachments,
         // Cards, checklists and choices the cat attached; `blocks_hidden` counts what the chat cannot draw yet.
@@ -264,8 +265,8 @@ export class BotBridge {
     const reading = new PageReading({ hasMore: page.hasMore, reactions: view.reactions }), rows: Record<string, unknown>[] = [];
     const drawn = new Map<string, Record<string, unknown>>();
     for (const { message: m, name, ...presentation } of this.presentMessages(page.messages.filter(m => refusals.get(m.id) !== null && !onCards.has(m.id)), cats)) {
-      const rich = m.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(m, decided, runtimeStates), receipt = approvalReceipt(m);
-      const reminder = scheduledReminder(m), note = engineNote(m);
+      const rich = m.type === 'user' ? { blocks: [], hidden: 0 } : messageBlocks(m, decided, runtimeStates, { threadId: thread.id }), receipt = approvalReceipt(m);
+      const reminder = scheduledReminder(m), note = engineNote(m), continuation = continuationKind(m);
       if (note === null) continue;
       const refusal = refusals.get(m.id) ?? (receipt ? approvalReceiptText(receipt) : reminder ? `提醒：${reminder}` : note);
       const text = refusal ?? messageDisplayText(m, thread.id, presentation.speaker?.name), inProgress = replyInProgress(m), ending = replyEnding(m);
@@ -279,7 +280,7 @@ export class BotBridge {
       if (m.type === 'assistant' && !text.trim() && !attachments.length && presentation.presentation_kind !== 'activity' && !inProgress && !rich.blocks.length && !rich.hidden) continue;
       const row: Record<string, unknown> = { seq, id: m.id, time, sender: m.type === 'user' ? 'local' : name,
         kind: m.type === 'user' ? 'person' : 'bot', text, ...(refusal ? { notice: true } : {}),
-        ...(reminder ? { reminder: true } : {}),
+        ...(reminder ? { reminder: true } : {}), ...(continuation ? { continuation } : {}),
         ...(receipt ? { receipt: { proposalId: receipt.proposalId, producerId: receipt.producerId, state: receipt.state, ...(receipt.cardMessageId ? { cardMessageId: receipt.cardMessageId } : {}) } } : {}),
         reply_to: quoted ? this.store.state.messageRefs[thread.id]?.[quoted] ?? 0 : 0,
         status: m.lifecycle?.status ?? (m.isDraft ? 'processing' : 'complete'), ...(inProgress ? { in_progress: true } : {}),

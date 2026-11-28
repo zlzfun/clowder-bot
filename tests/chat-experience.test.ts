@@ -312,3 +312,35 @@ test('matter detail projects summaries, verified quotes, source coordinates and 
   r.native.request=async(path,options)=>{if(path.startsWith('/api/memory/matters/'))throw new ApiError(400,'invalid_cursor',{error:'invalid_cursor'});return request(path,options);};
   assert.equal((await r.call('/memory/matters/matter_1?cursor=stale')).status,400);
 });
+
+test('direct chat activity exposes F338 cache warmth when ready and idle, degrading silently on error or unknown', async t => {
+  const r = await setup(t);
+  r.native.sessions.set(r.thread.id, [{ id: 's1', catId: r.cat.id, threadId: r.thread.id, status: 'active', cacheWarmth: { status: 'expired', estimated: true, source: 'usage_ttl' } }]);
+  const expired = await (await r.call('/bots/Ada/activity')).json();
+  assert.equal(expired.warmth, 'expired');
+
+  r.native.sessions.set(r.thread.id, [{ id: 's1', catId: r.cat.id, threadId: r.thread.id, status: 'active', cacheWarmth: { status: 'warm', estimated: true, source: 'usage_ttl' } }]);
+  const warm = await (await r.call('/bots/Ada/activity')).json();
+  assert.equal(warm.warmth, 'warm');
+
+  r.native.sessions.set(r.thread.id, [{ id: 's1', catId: r.cat.id, threadId: r.thread.id, status: 'active', cacheWarmth: { status: 'unknown', estimated: true, source: 'unavailable' } }]);
+  const unknown = await (await r.call('/bots/Ada/activity')).json();
+  assert.equal('warmth' in unknown, false);
+
+  // When running or queued, warmth is omitted
+  r.native.sessions.set(r.thread.id, [{ id: 's1', catId: r.cat.id, threadId: r.thread.id, status: 'active', cacheWarmth: { status: 'expired', estimated: true, source: 'usage_ttl' } }]);
+  r.native.queues.set(r.thread.id, { queue: [], activeInvocations: [{ catId: r.cat.id, invocationId: 'inv-1' }] });
+  const running = await (await r.call('/bots/Ada/activity')).json();
+  assert.equal('warmth' in running, false);
+  r.native.queues.set(r.thread.id, { queue: [], activeInvocations: [] });
+
+  // Session read failure degrades silently without breaking activity readStatus
+  const orig = r.native.request.bind(r.native);
+  r.native.request = async (path, options) => {
+    if (path.includes('/sessions?')) throw new ApiError(503, 'sessions down');
+    return orig(path, options);
+  };
+  const degraded = await (await r.call('/bots/Ada/activity')).json();
+  assert.equal(degraded.readStatus, 'ready');
+  assert.equal('warmth' in degraded, false);
+});

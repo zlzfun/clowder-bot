@@ -621,7 +621,7 @@ const button = (root: El, text: string) => { const b = buttons(root, text)[0]; a
 
 // ---------------------------------------------------------------- the page
 type Reply = { status: number; body: Any } | Error;
-function page(opts: { approvals?: (path: string) => Any; latest?: () => Set<string>; locate?: (item: Any, onCancel?: () => void) => unknown; cancelLocate?: () => unknown; reload?: () => unknown } = {}) {
+function page(opts: { approvals?: (path: string) => Any; latest?: () => Set<string>; locate?: (item: Any, onCancel?: () => void) => unknown; cancelLocate?: () => unknown; reload?: () => unknown; openImages?: (urls: string[], index: number, trigger: Any) => unknown } = {}) {
   const doc = new Doc();
   const h = (tag: string, cls = '') => { const e = doc.createElement(tag); if (cls) e.className = cls; return e; };
   const chat = h('div', 'chat'), thread = h('div', 'thread'), dock = h('div', 'dock');
@@ -653,6 +653,7 @@ function page(opts: { approvals?: (path: string) => Any; latest?: () => Set<stri
     ...(opts.latest ? { latest: opts.latest } : {}),
     ...(opts.locate ? { locate: opts.locate } : {}),
     ...(opts.cancelLocate ? { cancelLocate: opts.cancelLocate } : {}),
+    ...(opts.openImages ? { openImages: opts.openImages } : {}),
   });
   const sel = { type: 'bot', id: '团子' };
   live.select('bot:团子');
@@ -1429,7 +1430,7 @@ test('a pick that did not go out, or went out but was not recorded, stays answer
   button(box(), '再记一次').click();
   assert.equal(p.sends.length, 2, '再记一次 sends nothing again');
   assert.deepEqual(p.posts[1].body, { selectedIds: ['home'], expectedThreadId: 't1' });
-  p.posts[1].answer({ status: 409, body: { error: '这个选项已经回答过了' } });
+  p.posts[1].answer({ status: 409, body: { error: '这个选项已经回答过了', code: 'already_answered' } });
   await settle();
   assert.match(box().textContent, /这个选项已经回答过了，这里不再提供选择。/);
   assert.equal(p.reloads(), 1, 'the conversation is read again so the block shows its recorded answer');
@@ -1454,6 +1455,17 @@ test('a pick that did not go out, or went out but was not recorded, stays answer
   moved.posts[0].answer({ status: 409, body: { error: '对话已变化，请刷新后重试' } });
   await settle();
   assert.ok(moved.row('m-pick').querySelectorAll('button.ask-opt').every(b => b.getAttribute('aria-disabled') !== 'true'));
+  // Only the code already_answered closes it, whatever a 409's words say.
+  const other = page();
+  other.draw([choiceMessage(weekend)]);
+  other.row('m-pick').querySelectorAll('button.ask-opt')[0].click();
+  other.sends[0].sent();
+  other.posts[0].answer({ status: 409, body: { error: '这次没能处理' } });
+  await settle();
+  assert.match(other.row('m-pick').textContent, /这次没能处理/);
+  assert.doesNotMatch(other.row('m-pick').textContent, /这里不再提供选择/);
+  assert.ok(other.row('m-pick').querySelectorAll('button.ask-opt').every(b => b.getAttribute('aria-disabled') !== 'true'));
+  assert.equal(other.reloads(), 1);
   // The typed option: its own words, Enter sends them.
   const q = page();
   q.draw([choiceMessage(weekend)]);
@@ -1508,6 +1520,380 @@ test('a card, a checklist and a diff are drawn from the record as they are; what
   assert.equal(row.querySelectorAll('li.on').length, 1);
   assert.equal(row.querySelector('li.on')!.getAttribute('aria-label'), '已完成：给猫添水');
   assert.deepEqual(row.querySelectorAll('.ck-dl').map(l => l.className), ['ck-dl ck-dl-hunk', 'ck-dl ck-dl-del', 'ck-dl ck-dl-add']);
+});
+
+// ---------------------------------------------------------------- pictures, voice, grids, actions (item 64)
+test('rules for pictures, voice and options that do what they say: only an address the server projected, a gallery whole or not at all, a length as m:ss, an action in flight is 正在提交…, one that took effect unrecorded is not offered again', () => {
+  const R = rules();
+  for (const ok of ['/xbot-api/media/nm.abc', 'https://cdn.example.com/a.jpg', ' https://cdn.example.com/a.jpg ']) assert.ok(R.mediaUrl(ok), ok);
+  for (const bad of ['', 'javascript:alert(1)', 'data:image/png;base64,xx', 'file:///etc/passwd', 'http://cdn.example.com/a.jpg', '//evil.test/a.png', 'https://', 'a.png', '/a b.png', '/a\\b.png', 42, null]) assert.equal(R.mediaUrl(bad), '', String(bad));
+  assert.deepEqual(plain(R.galleryItems({ items: [{ url: '/xbot-api/media/nm.a', alt: ' 橘\n猫 ', caption: '晒太阳' }, { url: 'https://x.test/b.jpg' }] })),
+    [{ url: '/xbot-api/media/nm.a', alt: '橘 猫', caption: '晒太阳' }, { url: 'https://x.test/b.jpg', alt: '', caption: '' }]);
+  for (const bad of [{}, { items: [] }, { items: 'x' }, { items: [null] }, { items: [{ url: '/ok.png' }, { alt: 'no address' }] }, { items: [{ url: 'javascript:1' }] }]) assert.equal(R.galleryItems(bad), null, JSON.stringify(bad));
+  assert.deepEqual([4.2, 64.4, 0.3, 59.6, 600, 3725].map(R.duration), ['0:04', '1:04', '0:01', '1:00', '10:00', '1:02:05']);
+  for (const none of [0, -1, NaN, Infinity, '5', null, undefined]) assert.equal(R.duration(none), '', String(none));
+  assert.equal(R.isCallbackOption({ id: 'a', label: 'A', action: { kind: 'callback' } }), true);
+  for (const no of [{ id: 'a', label: 'A' }, { action: {} }, { action: { kind: 'link' } }, { action: { type: 'callback' } }, null]) assert.equal(R.isCallbackOption(no), false);
+  const block = { mode: 'single', options: [{ id: 'go', label: '继续', action: { kind: 'callback' } }], answered: false, selected: [] };
+  const acting = R.choice(block, { phase: 'sending', via: 'action', ids: ['go'] });
+  assert.deepEqual([acting.mode, acting.busy, acting.note, acting.acting, plain(acting.sending)], ['ask', true, '正在提交…', true, ['go']]);
+  assert.equal(R.choice(block, { phase: 'sending', via: '', ids: ['go'] }).note, '正在发送…', 'a chat message is still 正在发送…');
+  const applied = R.choice(block, { phase: 'applied', via: 'action', ids: ['go'], error: { text: '操作已执行，但没能记下选择状态，请刷新后查看' } });
+  assert.deepEqual([applied.mode, applied.busy, applied.note, applied.tone, applied.acting], ['ask', true, '已经生效，但没能记下这次选择，这里不再提供选择。', '', false]);
+  const refused = R.choice(block, { phase: 'refused', via: 'action', ids: ['go'], error: { text: '回调参数不完整' } });
+  assert.deepEqual([refused.busy, refused.note, refused.tone], [false, '回调参数不完整', 'bad']);
+  assert.deepEqual(plain(R.choice(block, { phase: 'recorded', via: 'action', selected: ['go'] }).picked), [{ id: 'go', text: '继续' }]);
+});
+
+test('a gallery: one picture across the card or two to a row, captions under them; a press opens the shell\'s viewer on that picture with the rest; a picture that does not load says so in its place; a malformed gallery is counted as one that cannot be shown', () => {
+  const opened: Any[] = [];
+  const p = page({ openImages: (urls, index, trigger) => { opened.push({ urls, index, trigger }); } });
+  p.draw([{ id: 'm-g', role: 'assistant', content: '拍到了：', blocks: [
+    { id: 'g1', kind: 'gallery', title: '猫咪相册', items: [{ url: '/xbot-api/media/nm.a', alt: '橘猫', caption: '晒太阳' }, { url: 'https://cdn.example.com/b.jpg' }] },
+    { id: 'g2', kind: 'gallery', items: [{ url: '/xbot-api/media/nm.c', caption: '一张' }] },
+    { id: 'g3', kind: 'gallery', items: [] },
+    { id: 'g4', kind: 'gallery', items: [{ url: 'javascript:alert(1)' }] },
+    { id: 'g5', kind: 'gallery', items: [{ url: '/xbot-api/media/nm.d' }, { alt: '没有地址' }] },
+    { id: 'g6', kind: 'gallery', items: 'nope' },
+  ] }]);
+  const row = p.row('m-g');
+  const cards = row.querySelectorAll('.ck-card.ck-gallery');
+  assert.equal(cards.length, 2);
+  assert.equal(row.querySelector('.ck-hidden')!.textContent, '还有 4 项内容暂时无法显示', 'never half drawn, never dropped');
+  const [two, one] = cards;
+  assert.equal(two.querySelector('.ck-card-title')!.textContent, '猫咪相册');
+  assert.equal(one.querySelector('.ck-card-title'), null, 'no title: none drawn');
+  assert.equal(two.querySelector('.ck-gallery-grid')!.className, 'ck-gallery-grid');
+  assert.equal(one.querySelector('.ck-gallery-grid')!.className, 'ck-gallery-grid ck-gallery-one');
+  const imgs = two.querySelectorAll('img');
+  assert.deepEqual(imgs.map(i => [i.src, i.getAttribute('alt'), i.getAttribute('loading')]), [['/xbot-api/media/nm.a', '橘猫', 'lazy'], ['https://cdn.example.com/b.jpg', '图片', 'lazy']]);
+  assert.deepEqual(two.querySelectorAll('.ck-gallery-cap').map(c => c.textContent), ['晒太阳'], 'a caption only where there is one');
+  assert.equal(one.querySelector('img')!.getAttribute('alt'), '一张', 'the caption is read aloud when there are no other words');
+  const btns = two.querySelectorAll('button.ck-gallery-btn');
+  assert.deepEqual(btns.map(b => [b.type, b.getAttribute('aria-label')]), [['button', '查看图片：橘猫'], ['button', '查看图片：第 2 张']]);
+  assert.equal(one.querySelector('button')!.getAttribute('aria-label'), '查看图片：一张');
+  btns[1].click();
+  assert.equal(opened.length, 1);
+  assert.deepEqual(plain(opened[0].urls), ['/xbot-api/media/nm.a', 'https://cdn.example.com/b.jpg'], 'the whole gallery, in its order');
+  assert.equal(opened[0].index, 1);
+  assert.ok(opened[0].trigger === btns[1], 'focus goes back to the picture pressed');
+  one.querySelector('button')!.click();
+  assert.deepEqual([plain(opened[1].urls), opened[1].index], [['/xbot-api/media/nm.c'], 0], 'each gallery is its own');
+  // A picture that does not load: said in its place, its caption stays, nothing to open.
+  imgs[0].dispatchEvent(new Ev('error'));
+  assert.equal(btns[0].querySelector('img'), null);
+  assert.equal(btns[0].querySelector('.ck-gallery-broken')!.textContent, '图片暂时无法显示');
+  assert.equal(btns[0].querySelector('.ck-gallery-cap')!.textContent, '晒太阳');
+  assert.deepEqual([btns[0].getAttribute('aria-disabled'), btns[0].getAttribute('aria-label')], ['true', '图片暂时无法显示：橘猫']);
+  btns[0].click();
+  assert.equal(opened.length, 2, 'a picture that did not load opens nothing');
+  assert.equal(btns[1].querySelector('img')!.src, 'https://cdn.example.com/b.jpg', 'the others are untouched');
+  // A redraw of the same message keeps the row as it is.
+  const before = p.row('m-g');
+  p.draw([{ id: 'm-g', role: 'assistant', content: '拍到了：', blocks: [{ id: 'g1', kind: 'gallery', title: '猫咪相册', items: [{ url: '/xbot-api/media/nm.a', alt: '橘猫', caption: '晒太阳' }, { url: 'https://cdn.example.com/b.jpg' }] },
+    { id: 'g2', kind: 'gallery', items: [{ url: '/xbot-api/media/nm.c', caption: '一张' }] }, { id: 'g3', kind: 'gallery', items: [] }, { id: 'g4', kind: 'gallery', items: [{ url: 'javascript:alert(1)' }] },
+    { id: 'g5', kind: 'gallery', items: [{ url: '/xbot-api/media/nm.d' }, { alt: '没有地址' }] }, { id: 'g6', kind: 'gallery', items: 'nope' }] }]);
+  assert.ok(p.row('m-g') === before, 'unchanged: the same element');
+  // An older shell without the viewer: a press does nothing and never throws.
+  const q = page();
+  q.draw([{ id: 'm-g', role: 'assistant', content: '', blocks: [{ id: 'g1', kind: 'gallery', items: [{ url: 'https://cdn.example.com/b.jpg' }] }] }]);
+  q.row('m-g').querySelector('button.ck-gallery-btn')!.click();
+});
+
+test('a voice message: its title and length (m:ss), the browser\'s own player named for a screen reader, and what it says; its words alone without a player; nothing to play or read, or an address the server did not project, is counted as one that cannot be shown', () => {
+  const p = page();
+  p.draw([{ id: 'm-a', role: 'assistant', content: '', blocks: [
+    { id: 'a1', kind: 'audio', url: '/xbot-api/media/nm.v', title: '晚安语音', text: '早点休息喵\n明天见', durationSec: 64.4, speaker: 'cat-1' },
+    { id: 'a2', kind: 'audio', text: '只有字' },
+    { id: 'a3', kind: 'audio', url: 'https://cdn.example.com/v.mp3', durationSec: 4.2 },
+    { id: 'a4', kind: 'audio' },
+    { id: 'a5', kind: 'audio', url: 'javascript:alert(1)', text: '有字也不行' },
+    { id: 'a6', kind: 'audio', text: '   ' },
+  ] }]);
+  const row = p.row('m-a');
+  const cards = row.querySelectorAll('.ck-card.ck-audio');
+  assert.equal(cards.length, 3);
+  assert.equal(row.querySelector('.ck-hidden')!.textContent, '还有 3 项内容暂时无法显示');
+  const [full, words, bare] = cards;
+  assert.equal(full.querySelector('.ck-card-head .ck-card-title')!.textContent, '晚安语音');
+  assert.equal(full.querySelector('.ck-card-head .ck-audio-dur')!.textContent, '1:04');
+  const player = full.querySelector('audio')!;
+  assert.deepEqual([player.className, player.src, player.hasAttribute('controls'), player.getAttribute('preload'), player.getAttribute('aria-label')],
+    ['ck-audio-player', '/xbot-api/media/nm.v', true, 'metadata', '晚安语音']);
+  assert.equal(full.querySelector('p.ck-audio-text')!.textContent, '早点休息喵\n明天见', 'its words as said, lines kept');
+  assert.doesNotMatch(full.textContent, /cat-1/, 'the speaker\'s ID is never shown');
+  assert.equal(words.querySelector('audio'), null, 'words alone: no player');
+  assert.equal(words.querySelector('.ck-card-head'), null, 'no title and no length: no head');
+  assert.equal(words.querySelector('.ck-audio-text')!.textContent, '只有字');
+  assert.equal(bare.querySelector('.ck-card-title'), null);
+  assert.equal(bare.querySelector('.ck-audio-dur')!.textContent, '0:04');
+  assert.equal(bare.querySelector('audio')!.getAttribute('aria-label'), '语音播放', 'no title: named for what it is');
+  assert.equal(bare.querySelector('.ck-audio-text'), null);
+});
+
+test('a card grid draws its options as cards side by side: left and right move across (round the ends), up and down between rows by the columns laid out, staying at the top and bottom; a pick goes out as an ordinary message', async () => {
+  const p = page();
+  const grid = { id: 'grid', kind: 'choices', mode: 'single', layout: 'grid', title: '选风格', answered: false, selected: [], options: [
+    { id: 'warm', label: '暖色', emoji: '☕', description: '焦糖拿铁' }, { id: 'cool', label: '冷色', description: '海盐薄荷' },
+    { id: 'mono', label: '黑白' }, { id: 'pop', label: '撞色' }, { id: 'soft', label: '柔和' }] };
+  p.draw([choiceMessage(grid)]);
+  const box = () => p.row('m-pick').querySelector('.ask')!;
+  assert.equal(box().querySelector('.ask-opts')!.className, 'ask-opts ck-opts-grid');
+  const opts = box().querySelectorAll('button.ask-opt');
+  assert.deepEqual(opts.map(b => b.textContent), ['A☕ 暖色焦糖拿铁', 'B冷色海盐薄荷', 'C黑白', 'D撞色', 'E柔和']);
+  // Laid out two to a row.
+  opts.forEach((b, i) => { b.getBoundingClientRect = () => ({ top: Math.floor(i / 2) * 60, bottom: Math.floor(i / 2) * 60 + 50, left: (i % 2) * 180, right: (i % 2) * 180 + 170, width: 170, height: 50 }); });
+  const press = (key: string) => { const ev = new Ev('keydown', { key }); p.doc.activeElement.dispatchEvent(ev); return ev.defaultPrevented; };
+  const at = () => opts.indexOf(p.doc.activeElement);
+  opts[0].focus();
+  const path: number[] = [];
+  for (const k of ['ArrowRight', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowDown', 'ArrowUp', 'ArrowUp', 'ArrowUp', 'ArrowLeft', 'ArrowRight']) { assert.ok(press(k), k + ' is taken'); path.push(at()); }
+  assert.deepEqual(path, [1, 3, 3, 2, 4, 2, 0, 0, 4, 0]);
+  // One row only (as laid out before measuring): up and down stay.
+  const flat = page();
+  flat.draw([choiceMessage(grid)]);
+  const fopts = flat.row('m-pick').querySelectorAll('button.ask-opt');
+  fopts[2].focus();
+  const ev = new Ev('keydown', { key: 'ArrowDown' });
+  fopts[2].dispatchEvent(ev);
+  assert.ok(flat.doc.activeElement === fopts[2]);
+  // A list that is not a grid takes no left and right.
+  const list = page();
+  list.draw([choiceMessage(weekend)]);
+  const lopts = list.row('m-pick').querySelectorAll('button.ask-opt');
+  assert.equal(list.row('m-pick').querySelector('.ask-opts')!.className, 'ask-opts');
+  lopts[0].focus();
+  const right = new Ev('keydown', { key: 'ArrowRight' });
+  lopts[0].dispatchEvent(right);
+  assert.deepEqual([right.defaultPrevented, list.doc.activeElement === lopts[0]], [false, true]);
+  // A confirmation is never a grid.
+  const c = page();
+  c.draw([choiceMessage({ id: 'ok', kind: 'choices', mode: 'confirm', layout: 'grid', title: '开始', answered: false, selected: [], options: [{ id: '__confirm__', label: '开始' }, { id: '__cancel__', label: '先不用' }] })]);
+  assert.equal(c.row('m-pick').querySelector('.ck-opts-grid'), null);
+  // A pick: the ordinary message, then its record.
+  opts[1].click();
+  assert.equal(p.sends[0].text, '我选了：冷色（选风格）');
+  p.sends[0].sent();
+  assert.match(p.posts[0].path, /\/messages\/m-pick\/blocks\/grid\/answer$/);
+  p.posts[0].answer({ status: 200, body: { messageId: 'm-pick', blockId: 'grid', selected: ['cool'], answered: true } });
+  await settle();
+  assert.ok(box().classList.contains('done'));
+  assert.match(box().textContent, /冷色/);
+});
+
+// An F155 block as the server projects it (tests/blocks.test.ts): the engine's own actions, allowlisted, without their endpoints.
+const frustration = { id: 'frust', kind: 'choices', mode: 'confirm', title: '要记录这个问题吗？', answered: false, selected: [], options: [
+  { id: 'confirm', label: '确认记录', custom: true, customPlaceholder: '补充描述（可选）', action: { kind: 'callback' } },
+  { id: 'skip', label: '跳过', action: { kind: 'callback' } }] };
+const actionPath = /\/xbot-api\/bots\/%E5%9B%A2%E5%AD%90\/messages\/m-pick\/blocks\/frust\/action$/;
+
+test('an option that does what it says goes to the action route and never as a chat message: a confirmation\'s optional note goes with its answer only, and the card shows answered only from the server\'s record', async () => {
+  const p = page();
+  p.draw([choiceMessage(frustration)]);
+  const box = () => p.row('m-pick').querySelector('.ask')!;
+  const note = () => box().querySelector('input.ck-confirm-note')!;
+  assert.deepEqual([note().placeholder, note().getAttribute('aria-label'), note().value], ['补充描述（可选）', '补充描述（可选）', '']);
+  const order = box().children.map(c => c.className);
+  assert.ok(order.indexOf('ck-input ck-confirm-note') >= 0 && order.indexOf('ck-input ck-confirm-note') < order.indexOf('approval-actions ck-confirm'), 'the note sits above the answers');
+  assert.deepEqual(all(box()).filter(e => e.tagName === 'BUTTON').map(b => b.textContent), ['跳过', '确认记录']);
+  // Typed, then confirmed: the note goes with it; nothing is sent as a message.
+  typeIn(note(), '  点按钮没反应 ');
+  button(box(), '确认记录').click();
+  assert.equal(p.sends.length, 0, 'no chat message for an option that does what it says');
+  assert.equal(p.posts.length, 1);
+  assert.match(p.posts[0].path, actionPath);
+  assert.deepEqual(p.posts[0].body, { optionId: 'confirm', customInput: '点按钮没反应', expectedThreadId: 't1' });
+  assert.match(box().textContent, /正在提交…/);
+  assert.equal(box().classList.contains('done'), false, 'not answered while in flight');
+  assert.ok(all(box()).filter(e => e.tagName === 'BUTTON').every(b => b.getAttribute('aria-disabled') === 'true'));
+  assert.equal(note().readOnly, true);
+  button(box(), '跳过').click();
+  assert.equal(p.posts.length, 1, 'nothing more while one is in flight');
+  p.posts[0].answer({ status: 200, body: { messageId: 'm-pick', blockId: 'frust', selected: ['confirm'], answered: true, native: { ok: true } } });
+  await settle();
+  assert.ok(box().classList.contains('done'));
+  assert.equal(box().querySelector('.ask-chosen')!.textContent, '确认记录');
+  assert.equal(all(box()).filter(e => e.tagName === 'BUTTON' || e.tagName === 'INPUT').length, 0, 'nothing more to press');
+  assert.equal(p.doc.body.querySelector('.visually-hidden')!.textContent, '已处理');
+  assert.equal(p.reloads(), 0);
+  // The note is optional: an empty one sends none; the other answer never takes it.
+  const q = page();
+  q.draw([choiceMessage(frustration)]);
+  button(q.row('m-pick'), '确认记录').click();
+  assert.deepEqual(q.posts[0].body, { optionId: 'confirm', expectedThreadId: 't1' });
+  const r = page();
+  r.draw([choiceMessage(frustration)]);
+  typeIn(r.row('m-pick').querySelector('input.ck-confirm-note')!, '不用了');
+  button(r.row('m-pick'), '跳过').click();
+  assert.deepEqual(r.posts[0].body, { optionId: 'skip', expectedThreadId: 't1' });
+  // Enter in the note gives its answer (not while composing).
+  const e = page();
+  e.draw([choiceMessage(frustration)]);
+  const f = e.row('m-pick').querySelector('input.ck-confirm-note')!;
+  typeIn(f, '卡住了');
+  f.dispatchEvent(new Ev('keydown', { key: 'Enter', isComposing: true }));
+  assert.equal(e.posts.length, 0);
+  f.dispatchEvent(new Ev('keydown', { key: 'Enter' }));
+  assert.deepEqual(e.posts[0].body, { optionId: 'confirm', customInput: '卡住了', expectedThreadId: 't1' });
+  // A confirmation whose answers only send messages has no note.
+  const plainConfirm = page();
+  plainConfirm.draw([choiceMessage({ ...frustration, options: [{ id: 'confirm', label: '确认', custom: true }, { id: 'skip', label: '跳过' }] })]);
+  assert.equal(plainConfirm.row('m-pick').querySelector('input'), null);
+});
+
+test('an option that does what it says, refused or failed, says so in the server\'s words and stays answerable with the note kept; already answered (409) or done without its record (502 callbackApplied) offers nothing again and reads the conversation', async () => {
+  const p = page();
+  p.draw([choiceMessage(frustration)]);
+  const box = () => p.row('m-pick').querySelector('.ask')!;
+  const note = () => box().querySelector('input.ck-confirm-note')!;
+  const bad = () => box().querySelector('.ck-note')!;
+  typeIn(note(), '点按钮没反应');
+  // Refused as it stands (400): the server's sentence; answerable again, the note kept across the redraw.
+  button(box(), '确认记录').click();
+  p.posts[0].answer({ status: 400, body: { error: '回调参数不完整' } });
+  await settle();
+  assert.deepEqual([bad().textContent, bad().getAttribute('role'), bad().classList.contains('ck-bad')], ['回调参数不完整', 'alert', true]);
+  assert.equal(note().value, '点按钮没反应', 'what was typed stays');
+  assert.ok(all(box()).filter(e => e.tagName === 'BUTTON').every(b => b.getAttribute('aria-disabled') !== 'true'));
+  assert.equal(p.reloads(), 0);
+  // The engine could not do it (500, no words): the fallback; again.
+  button(box(), '确认记录').click();
+  assert.deepEqual(p.posts[1].body, { optionId: 'confirm', customInput: '点按钮没反应', expectedThreadId: 't1' });
+  p.posts[1].answer({ status: 500, body: {} });
+  await settle();
+  assert.equal(bad().textContent, '操作没有成功，可以再试一次');
+  // The conversation moved (409 with 对话): the server's words, read again, still answerable.
+  button(box(), '跳过').click();
+  p.posts[2].answer({ status: 409, body: { error: '对话已变化，请刷新后重试', code: 'thread_changed' } });
+  await settle();
+  assert.equal(bad().textContent, '对话已变化，请刷新后重试');
+  assert.equal(p.reloads(), 1);
+  assert.ok(all(box()).filter(e => e.tagName === 'BUTTON').every(b => b.getAttribute('aria-disabled') !== 'true'));
+  // Not known whether it arrived: said so; the conversation is read again (its record shows if it did).
+  button(box(), '跳过').click();
+  p.posts[3].answer(new Error('offline'));
+  await settle();
+  assert.equal(bad().textContent, '连不上 clowder-bot，不确定刚才的操作有没有生效');
+  assert.equal(p.reloads(), 2);
+  // Done, but not recorded (502 callbackApplied): said truthfully, never offered again (another press would do it twice).
+  button(box(), '确认记录').click();
+  p.posts[4].answer({ status: 502, body: { error: '操作已执行，但没能记下选择状态，请刷新后查看', callbackApplied: true, answered: false } });
+  await settle();
+  assert.equal(bad().textContent, '已经生效，但没能记下这次选择，这里不再提供选择。');
+  assert.equal(bad().getAttribute('role'), 'status', 'it took effect: not an alarm');
+  assert.equal(p.reloads(), 3);
+  assert.ok(all(box()).filter(e => e.tagName === 'BUTTON').every(b => b.getAttribute('aria-disabled') === 'true'));
+  button(box(), '确认记录').click();
+  button(box(), '跳过').click();
+  assert.equal(p.posts.length, 5, 'nothing more goes out');
+  assert.equal(box().classList.contains('done'), false, 'not shown as recorded either');
+  // A read that brings the record shows it answered.
+  p.draw([choiceMessage({ ...frustration, answered: true, selected: ['confirm'] })]);
+  assert.ok(box().classList.contains('done'));
+  // Already answered elsewhere (409): nothing offered again on this page; read again.
+  const q = page();
+  q.draw([choiceMessage(frustration)]);
+  button(q.row('m-pick'), '跳过').click();
+  q.posts[0].answer({ status: 409, body: { error: '这个选项已经回答过了', code: 'already_answered' } });
+  await settle();
+  assert.match(q.row('m-pick').textContent, /这个选项已经回答过了，这里不再提供选择。/);
+  assert.equal(q.reloads(), 1);
+  button(q.row('m-pick'), '确认记录').click();
+  assert.equal(q.posts.length, 1);
+  assert.equal(q.sends.length + p.sends.length, 0, 'never a chat message');
+});
+
+test('an option that does what it says, refused by the engine with its own 409 (no already_answered code), says so in the engine\'s words, reads the conversation and stays answerable', async () => {
+  // Codex review 2026-11-28, finding 4: only code already_answered means the block was answered elsewhere;
+  // a 409 the engine gives for its own reasons (a life-settings preview that expired, an issue already confirmed) is not that.
+  const p = page();
+  p.draw([choiceMessage(frustration)]);
+  const box = () => p.row('m-pick').querySelector('.ask')!;
+  const bad = () => box().querySelector('.ck-note')!;
+  button(box(), '确认记录').click();
+  p.posts[0].answer({ status: 409, body: { error: '预览已过期，请重新生成', native: { code: 'PREVIEW_EXPIRED' } } });
+  await settle();
+  assert.equal(bad().textContent, '预览已过期，请重新生成');
+  assert.doesNotMatch(box().textContent, /这个选项已经回答过了/);
+  assert.deepEqual([bad().getAttribute('role'), bad().classList.contains('ck-bad')], ['alert', true]);
+  assert.equal(p.reloads(), 1, 'the conversation is read again');
+  assert.equal(box().classList.contains('done'), false, 'not shown as answered');
+  assert.ok(all(box()).filter(e => e.tagName === 'BUTTON').every(b => b.getAttribute('aria-disabled') !== 'true'), 'still answerable');
+  // Tried again: it goes out again.
+  button(box(), '确认记录').click();
+  assert.equal(p.posts.length, 2);
+  assert.deepEqual(p.posts[1].body, { optionId: 'confirm', expectedThreadId: 't1' });
+  // A 409 whose words happen to say it was answered, without the code, is still the engine's refusal.
+  p.posts[1].answer({ status: 409, body: { error: '这个问题已经确认过了' } });
+  await settle();
+  assert.equal(bad().textContent, '这个问题已经确认过了');
+  assert.ok(all(box()).filter(e => e.tagName === 'BUTTON').every(b => b.getAttribute('aria-disabled') !== 'true'));
+  assert.equal(p.sends.length, 0, 'never a chat message');
+});
+
+test('a single choice mixes options that do what they say with ordinary ones: each goes its own way; the one that takes words takes them as an optional note with the cat\'s own placeholder, its button always ready', async () => {
+  const p = page();
+  const mixed = { id: 'g', kind: 'choices', mode: 'single', title: '接下来', answered: false, selected: [], options: [
+    { id: 'stop', label: '先不做了', action: { kind: 'callback' } },
+    { id: 'say', label: '说点别的', custom: true, customPlaceholder: '想说什么', action: { kind: 'callback' } },
+    { id: 'plain', label: '继续' }] };
+  p.draw([choiceMessage(mixed)]);
+  const box = () => p.row('m-pick').querySelector('.ask')!;
+  const field = () => box().querySelector('input.ck-custom')!;
+  assert.equal(field().placeholder, '想说什么');
+  const send = () => all(box()).find(e => e.tagName === 'BUTTON' && e.classList.contains('ask-send'))!;
+  assert.equal(send().getAttribute('aria-label'), '提交：说点别的');
+  assert.ok(box().querySelector('.ask-opt.other')!.classList.contains('ck-acts'), 'its button is always ready');
+  // Empty: it goes without words.
+  send().click();
+  assert.deepEqual([p.sends.length, p.posts.length], [0, 1]);
+  assert.match(p.posts[0].path, /\/blocks\/g\/action$/);
+  assert.deepEqual(p.posts[0].body, { optionId: 'say', expectedThreadId: 't1' });
+  p.posts[0].answer({ status: 400, body: { error: '这个选项不支持直接操作' } });
+  await settle();
+  typeIn(field(), '换个话题');
+  field().dispatchEvent(new Ev('keydown', { key: 'Enter' }));
+  assert.deepEqual(p.posts[1].body, { optionId: 'say', customInput: '换个话题', expectedThreadId: 't1' });
+  p.posts[1].answer({ status: 400, body: { error: '这个选项不支持直接操作' } });
+  await settle();
+  opt(box(), '先不做了').click();
+  assert.deepEqual(p.posts[2].body, { optionId: 'stop', expectedThreadId: 't1' });
+  p.posts[2].answer({ status: 400, body: { error: '这个选项不支持直接操作' } });
+  await settle();
+  // An ordinary option is still the chat message, then its record; its busy note says 正在发送….
+  opt(box(), '继续').click();
+  assert.equal(p.sends.length, 1);
+  assert.equal(p.sends[0].text, '我选了：继续（接下来）');
+  assert.match(box().textContent, /正在发送…/);
+  p.sends[0].sent();
+  assert.match(p.posts[3].path, /\/blocks\/g\/answer$/);
+  // An ordinary option that takes words still needs them (a message without them would say nothing).
+  const q = page();
+  q.draw([choiceMessage(weekend)]);
+  const s = all(q.row('m-pick')).find(e => e.tagName === 'BUTTON' && e.classList.contains('ask-send'))!;
+  assert.equal(s.getAttribute('aria-label'), '发送：别的');
+  s.click();
+  assert.deepEqual([q.sends.length, q.posts.length], [0, 0]);
+});
+
+test('work picked up again after a restart or a sleep is a soft pill with a turning arrow or a moon before its words; other notices stay plain lines', () => {
+  const p = page();
+  p.draw([
+    { id: 'n1', notice: true, continuation: 'restart', content: '刚才中断了，接着做。', time: '2026-11-28T10:00:00Z' },
+    { id: 'n2', notice: true, continuation: 'sleep', content: '电脑睡着时中断了，接着做。' },
+    { id: 'n3', notice: true, continuation: 'other', content: '已记住这个偏好。' },
+    { id: 'n4', notice: true, content: '定时已按你的确认处理。' },
+  ]);
+  const line = (mid: string) => p.rows().find(r => r.dataset.mid === mid)!;
+  const look = (mid: string) => { const n = line(mid); return [n.className, n.dataset.continuation ?? null, n.querySelector('svg')?.dataset.icon ?? null, n.textContent]; };
+  assert.deepEqual(look('n1'), ['sysline ck-notice ck-continuation', 'restart', 'refresh-cw', '刚才中断了，接着做。']);
+  assert.deepEqual(look('n2'), ['sysline ck-notice ck-continuation', 'sleep', 'moon', '电脑睡着时中断了，接着做。']);
+  assert.deepEqual(look('n3'), ['sysline ck-notice', null, null, '已记住这个偏好。']);
+  assert.deepEqual(look('n4'), ['sysline ck-notice', null, null, '定时已按你的确认处理。']);
+  assert.equal(line('n1').dataset.time, '2026-11-28T10:00:00Z', 'it still takes part in the time dividers');
+  // The icon comes before the words.
+  assert.equal(line('n1').children[0].tagName, 'SVG');
+  assert.equal(line('n1').children[1].className, 'label');
 });
 
 test('an unfinished reply ends quietly: 详情 shows the engine\'s reason verbatim, 再发一次 sends the owner\'s words again and says so', async () => {
@@ -1869,6 +2255,8 @@ test('the page loads the round\'s scripts before app.js and its styles just befo
   assert.match(app, /confirm: \(item\) => cards\.find\(item\) \|\| \(item && item\.messageId \? cards\.locate\(item\) : false\),/);
   // A search of its own that ended quietly (a search, a quote's jump, another chat) is told back as onCancel.
   assert.match(app, /cards\.init\(\{[\s\S]*?locate: \(item, onCancel\) => locate\.find\(\{ sel: state\.sel, messageId: item\.messageId, onCancel \}\),[\s\S]*?cancelLocate: \(\) => locate\.cancel\(\),[\s\S]*?latest: \(\) => chatHistory\.latest\(\),\n  \}\);/);
+  // A gallery's pictures open in the shell's own viewer (item 64).
+  assert.match(app, /cards\.init\(\{[\s\S]*?openImages: \(urls, index, trigger\) => openShots\(urls, index, trigger\),[\s\S]*?\n  \}\);/);
   assert.doesNotMatch(app + read('client/public/chat-experience.js'), /approvalLabel/, 'the server names waiting requests in everyday words now');
   // Notifications never touch the document title (the contact list owns its count).
   for (const f of ['chat-notify.js', 'chat-notify-rules.js', 'chat-cards.js']) assert.doesNotMatch(read('client/public/' + f), /document\.title/);

@@ -116,6 +116,26 @@ html[data-theme="dark"] .ck-blocks { --cardx: var(--x-bot-bubble); }
 .ck-ask-choice > .ck-note .ck-link { margin-left: var(--x-s1); }
 .ask.done.ck-ask-choice > .ask-q { font-size: 13px; font-weight: 500; color: var(--x-faint); margin-bottom: var(--x-s1); }
 .ck-ask-choice .ask-chosen .icon { width: 18px; height: 18px; stroke-width: 2.4; }
+/* An option that does what it says and takes a note that may stay empty: its button is always ready. */
+.ck-ask-choice .ask-opt.other.ck-acts .ask-send { opacity: 1; }
+.ck-ask-choice .ask-opt.other.ck-acts .ask-send[aria-disabled="true"] { opacity: .35; }
+/* The optional note above a confirmation's answers (a request card's field look). */
+.ck-ask-choice > .ck-confirm-note {
+  display: block; width: calc(100% - 2 * var(--x-s2)); min-height: 40px; margin: 0 var(--x-s2) var(--x-s2); padding: var(--x-s3) var(--x-s5);
+  border: 0; border-radius: var(--x-r-sm); background: var(--fill); color: var(--x-text); font: inherit; font-size: 14px; outline: none;
+}
+.ck-ask-choice > .ck-confirm-note::placeholder { color: var(--x-faint); }
+.ck-ask-choice > .ck-confirm-note:focus { background: var(--hover); }
+.ck-ask-choice > .ck-confirm-note:focus-visible { box-shadow: 0 0 0 2px var(--ring); }
+/* card-grid: the options as cards side by side. Each sits on --fill, a step
+   above the card (--x-fill-1 is the card's own colour in the café themes),
+   and takes --row-hover under the pointer, as an option row does in app.css. */
+.ck-ask-choice .ask-opts.ck-opts-grid { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: var(--x-s2); padding: 0 var(--x-s1); }
+.ck-ask-choice .ck-opts-grid button.ask-opt { align-items: flex-start; min-height: 44px; padding: var(--x-s4); border-radius: var(--x-r-card); background: var(--fill); }
+.ck-ask-choice .ck-opts-grid button.ask-opt:hover, .ck-ask-choice .ck-opts-grid button.ask-opt.on { background: var(--row-hover); }
+.ck-ask-choice .ck-opts-grid .ask-opt[aria-disabled="true"]:hover { background: var(--fill); }
+.ck-ask-choice .ck-opts-grid .ask-opt .opt-t { padding-top: 4px; }
+.ck-ask-choice .ck-opts-grid .ask-opt.other { grid-column: 1 / -1; border-radius: var(--x-r-card); background: var(--fill); }
 
 /* ---- A card, a checklist, a diff: the same card surface, read only. */
 .ck-card { border-radius: 16px; padding: 14px 16px; background: var(--cardx); min-width: 0; }
@@ -157,6 +177,38 @@ html[data-theme="dark"] .ck-blocks { --cardx: var(--x-bot-bubble); }
 .ck-dl-del { background: var(--err-bg); }
 .ck-dl-hunk, .ck-dl-meta { color: var(--x-faint); }
 
+/* Pictures: one in its own proportions, two or more two to a row (one to a
+   row on a very narrow screen); the caption under its picture. */
+.ck-gallery { padding: var(--x-s3); }
+.ck-gallery > .ck-card-title { padding: var(--x-s1) var(--x-s2) var(--x-s3); }
+.ck-gallery-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--x-s2); }
+.ck-gallery-grid.ck-gallery-one { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 360px) { .ck-gallery-grid { grid-template-columns: minmax(0, 1fr); } }
+.ck-gallery-btn {
+  display: flex; flex-direction: column; gap: var(--x-s1); min-width: 0; padding: 0; border: 0; border-radius: var(--x-r-card);
+  background: transparent; color: inherit; font: inherit; text-align: left; cursor: zoom-in;
+}
+.ck-gallery-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ck-gallery-btn.broken { cursor: default; }
+.ck-gallery-one .ck-gallery-btn.broken { justify-self: stretch; }
+.ck-gallery-img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: var(--x-r-card); background: var(--hover); }
+/* One picture keeps its own proportions, no wider than the card nor taller than 360px. */
+.ck-gallery-one .ck-gallery-btn { justify-self: start; max-width: 100%; }
+.ck-gallery-one .ck-gallery-img { align-self: flex-start; width: auto; max-width: 100%; height: auto; max-height: 360px; aspect-ratio: auto; }
+.ck-gallery-broken {
+  display: grid; place-items: center; width: 100%; aspect-ratio: 1; padding: var(--x-s3); border-radius: var(--x-r-card);
+  background: var(--x-fill-2); font-size: 12px; line-height: 1.45; color: var(--x-faint); text-align: center;
+}
+.ck-gallery-one .ck-gallery-broken { aspect-ratio: 4 / 3; }
+.ck-gallery-cap { padding: 0 var(--x-s1) var(--x-s1); font-size: var(--x-fs-sm); line-height: 1.45; color: var(--x-text-2); overflow-wrap: anywhere; }
+
+/* A voice message: its title and length, the browser's player, what it says. */
+.ck-audio { display: grid; gap: var(--x-s3); }
+.ck-audio-dur { flex: none; font-size: 12px; line-height: 1.4; color: var(--x-muted); font-variant-numeric: tabular-nums; }
+.ck-card-title + .ck-audio-dur { margin-left: auto; }
+.ck-audio-player { display: block; width: 100%; height: 40px; }
+.ck-audio-text { margin: 0; font-size: 14px; line-height: 1.55; color: var(--x-text); white-space: pre-wrap; overflow-wrap: anywhere; }
+
 /* What cannot be drawn yet is said, quietly. */
 .ck-hidden { margin: 0; padding: 0 var(--x-s1); font-size: 12px; line-height: 18px; color: var(--x-faint); }
 
@@ -182,6 +234,9 @@ html[data-theme="dark"] .ck-blocks { --cardx: var(--x-bot-bubble); }
 /* A reminder that came due: the schedule card's alarm clock before its words, on a soft pill. */
 .sysline.ck-reminder { gap: var(--x-s2); padding: var(--x-s1) var(--x-s5); border-radius: var(--x-r-pill); background: var(--x-fill-1); color: var(--x-text-2); font-size: var(--x-fs-sm); }
 .sysline.ck-reminder .icon { width: 14px; height: 14px; flex: none; color: var(--x-muted); }
+/* Work picked up again after a restart or a sleep: the same soft pill, a turning arrow or a moon before its words. */
+.sysline.ck-continuation { gap: var(--x-s2); padding: var(--x-s1) var(--x-s5); border-radius: var(--x-r-pill); background: var(--x-fill-1); color: var(--x-text-2); font-size: var(--x-fs-sm); }
+.sysline.ck-continuation .icon { width: 14px; height: 14px; flex: none; color: var(--x-muted); }
 
 /* ---- 设置 → 通用 → 通知. */
 .ck-notify-said { margin-top: var(--x-s3); }

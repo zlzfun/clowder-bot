@@ -2,6 +2,8 @@ import type { NativeMessage } from './types.js';
 import { clip, plainLine } from './text.js';
 import { changeWords, triggerWords } from './trigger-words.js';
 import { runtimeCardBinding } from './runtime-interactions.js';
+import { nativeUploadPath, ttsAudioPath } from './file-path.js';
+import { isAllowedAudioUploadExt, isAllowedGalleryUploadExt, mediaToken } from './files.js';
 
 /**
  * What a cat attached to a message besides words and files, as the chat can
@@ -20,10 +22,12 @@ export type ChatBlock =
        */
       approval?: { id: string; kind: RequestKind; title: string; body?: string; state?: 'approved' | 'rejected' | 'closed'; selected?: string[] } }
   | { id: string; kind: 'checklist'; title?: string; items: Array<{ id: string; text: string; checked: boolean }> }
-  | { id: string; kind: 'choices'; mode: 'single' | 'multiple' | 'confirm'; title?: string; description?: string;
-      options: Array<{ id: string; label: string; emoji?: string; description?: string; custom?: true }>;
+  | { id: string; kind: 'choices'; mode: 'single' | 'multiple' | 'confirm'; layout?: 'grid'; title?: string; description?: string;
+      options: Array<{ id: string; label: string; emoji?: string; description?: string; custom?: true; customPlaceholder?: string; action?: { kind: 'callback' } }>;
       max?: number; template?: string; answered: boolean; selected: string[] }
-  | { id: string; kind: 'diff'; file: string; diff: string };
+  | { id: string; kind: 'diff'; file: string; diff: string }
+  | { id: string; kind: 'gallery'; title?: string; items: Array<{ url: string; alt?: string; caption?: string }> }
+  | { id: string; kind: 'audio'; url?: string; title?: string; text?: string; durationSec?: number; speaker?: string };
 
 export interface RuntimeBlockState {
   state?: 'approved' | 'rejected' | 'closed';
@@ -117,14 +121,83 @@ export function cardReceipts(message: NativeMessage, decided: ApprovalDecision[]
   }
   return used;
 }
+export interface MessageBlocksOptions {
+  threadId?: string;
+}
+
+const FRUSTRATION_CALLBACK_RE = /^\/api\/frustration-issues\/([A-Za-z0-9_-]{1,200})\/(confirm|skip)$/;
+
+/**
+ * Upstream F155 option.action endpoints that are self-contained and safe to execute
+ * from chat without requiring an unadapted React overlay (such as guide-actions/start).
+ */
+export function allowedCallbackEndpoint(endpoint: unknown): string | null {
+  if (typeof endpoint !== 'string' || !endpoint.startsWith('/api/') || endpoint.length > 500 || /[?#\\\s\x00-\x1f\x7f]/.test(endpoint)) {
+    return null;
+  }
+  if (endpoint === '/api/guide-actions/cancel' || endpoint === '/api/auto-dream/life-settings/decision') {
+    return endpoint;
+  }
+  if (FRUSTRATION_CALLBACK_RE.test(endpoint)) {
+    return endpoint;
+  }
+  return null;
+}
+
+export function isAllowlistedCallbackAction(action: unknown): action is { type: 'callback'; endpoint: string; payload?: Record<string, unknown> } {
+  const act = record(action);
+  if (act.type !== 'callback') return false;
+  if (!allowedCallbackEndpoint(act.endpoint)) return false;
+  return act.payload === undefined || (!!act.payload && typeof act.payload === 'object' && !Array.isArray(act.payload));
+}
+
+function safeHttpsUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 2048 || /[\s\x00-\x1f\x7f]/.test(trimmed)) return null;
+  if (!/^https:\/\//i.test(trimmed)) return null;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === 'https:' ? parsed.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function projectMediaUrl(
+  rawUrl: unknown,
+  kind: 'gallery' | 'audio',
+  message: NativeMessage,
+  blockIndex: number,
+  itemIndex: number,
+  threadId?: string,
+): string | null {
+  const https = safeHttpsUrl(rawUrl);
+  if (https) return https;
+  const tts = kind === 'audio' ? ttsAudioPath(rawUrl) : null;
+  if (tts) {
+    if (!threadId || message.isDraft) return tts;
+    const token = mediaToken(threadId, message.id, kind, blockIndex, itemIndex, tts);
+    return token ? `/xbot-api/media/${token}` : null;
+  }
+  const upload = nativeUploadPath(rawUrl);
+  if (!upload) return null;
+  if (kind === 'gallery' && !isAllowedGalleryUploadExt(upload)) return null;
+  if (kind === 'audio' && !isAllowedAudioUploadExt(upload)) return null;
+  if (!threadId || message.isDraft) return upload;
+  const token = mediaToken(threadId, message.id, kind, blockIndex, itemIndex, upload);
+  return token ? `/xbot-api/media/${token}` : null;
+}
+
 export function messageBlocks(
   message: NativeMessage,
   decided: ApprovalDecision[] = [],
   runtimeStates: ReadonlyMap<string, RuntimeBlockState> = new Map(),
+  options: MessageBlocksOptions = {},
 ): { blocks: ChatBlock[]; hidden: number } {
   const raw = record(message.extra?.rich).blocks, blocks: ChatBlock[] = [];
   let hidden = 0;
-  for (const entry of Array.isArray(raw) ? raw.slice(0, 50) : []) {
+  for (const [blockIndex, entry] of (Array.isArray(raw) ? raw.slice(0, 50) : []).entries()) {
     const block = record(entry), id = text(block.id, 200);
     if (!id) { hidden++; continue; }
     if (block.kind === 'file') continue;
@@ -179,33 +252,66 @@ export function messageBlocks(
       if (!items.length) { hidden++; continue; }
       blocks.push({ id, kind: 'checklist', ...(text(block.title, 300) ? { title: text(block.title, 300)! } : {}), items });
     } else if (block.kind === 'interactive' && Array.isArray(block.options)) {
-      // An option with a direct action calls a native endpoint instead of sending a chat message
-      // (upstream F155: guides, feedback). Those operations are not adapted, so such a block is not
-      // offered as an ordinary choice that would disable it without doing what it asks.
-      if (block.options.some(option => record(option).action !== undefined)) { hidden++; continue; }
       const mode = block.interactiveType === 'confirm' ? 'confirm' as const : block.interactiveType === 'multi-select' ? 'multiple' as const : 'single' as const;
-      let options = block.options.map(record).filter(option => typeof option.id === 'string' && typeof option.label === 'string').slice(0, 40)
+      // Any option with an unallowlisted action (e.g. guide-actions/start or untrusted URL),
+      // or any multi-select block carrying callback actions (upstream requires single-option callback),
+      // keeps the whole block in hidden++ so we never offer a dead or broken button.
+      const hasAction = block.options.some(option => record(option).action !== undefined);
+      if (hasAction && (mode === 'multiple' || block.options.some(option => record(option).action !== undefined && !isAllowlistedCallbackAction(record(option).action)))) {
+        hidden++; continue;
+      }
+      const layout = block.interactiveType === 'card-grid' ? 'grid' as const : undefined;
+      let optionsList = block.options.map(record).filter(option => typeof option.id === 'string' && typeof option.label === 'string').slice(0, 40)
         .map(option => ({ id: option.id as string, label: clip(option.label as string, 200),
           ...(text(option.emoji, 16) ? { emoji: text(option.emoji, 16)! } : {}), ...(text(option.description, 400) ? { description: text(option.description, 400)! } : {}),
-          ...(option.customInput === true ? { custom: true as const } : {}) }));
+          ...(option.customInput === true ? { custom: true as const } : {}),
+          ...(option.customInput === true && text(option.customInputPlaceholder, 200) ? { customPlaceholder: text(option.customInputPlaceholder, 200)! } : {}),
+          ...(isAllowlistedCallbackAction(option.action) ? { action: { kind: 'callback' as const } } : {}) }));
       if (mode === 'confirm') {
         // Exactly two answers, chosen as the native web client does: the option called __confirm__ or
         // else the first one confirms; the first other one cancels, or a plain 取消 when none is declared.
-        const yes = options.find(option => option.id === '__confirm__') ?? options[0] ?? { id: '__confirm__', label: '确认' };
-        options = [yes, options.find(option => option.id !== yes.id) ?? { id: '__cancel__', label: '取消' }];
+        const yes = optionsList.find(option => option.id === '__confirm__') ?? optionsList[0] ?? { id: '__confirm__', label: '确认' };
+        optionsList = [yes, optionsList.find(option => option.id !== yes.id) ?? { id: '__cancel__', label: '取消' }];
       }
-      if (!options.length) { hidden++; continue; }
+      if (!optionsList.length) { hidden++; continue; }
       const selected = Array.isArray(block.selectedIds) ? block.selectedIds.filter((value): value is string => typeof value === 'string') : [];
-      blocks.push({ id, kind: 'choices', mode,
+      blocks.push({ id, kind: 'choices', mode, ...(layout ? { layout } : {}),
         ...(text(block.title, 300) ? { title: text(block.title, 300)! } : {}), ...(text(block.description, 1000) ? { description: text(block.description, 1000)! } : {}),
-        options, ...(typeof block.maxSelect === 'number' && block.maxSelect > 0 ? { max: block.maxSelect } : {}),
+        options: optionsList, ...(typeof block.maxSelect === 'number' && block.maxSelect > 0 ? { max: block.maxSelect } : {}),
         ...(text(block.messageTemplate, 1000) ? { template: text(block.messageTemplate, 1000)! } : {}),
         // Native marks a choice that was made by disabling the block and recording what was picked.
         answered: block.disabled === true || selected.length > 0, selected });
     } else if (block.kind === 'diff' && typeof block.diff === 'string' && typeof block.filePath === 'string') {
       const file = block.filePath.trim().replace(/[\\/]+$/, '').split(/[\\/]/).pop() || '文件';
       blocks.push({ id, kind: 'diff', file: clip(file, 120), diff: clip(block.diff, 20000) });
-    } else hidden++; // media, audio, widgets: not drawn yet
+    } else if (block.kind === 'media_gallery' && Array.isArray(block.items)) {
+      const items = block.items.slice(0, 50).flatMap((rawItem, itemIndex) => {
+        const item = record(rawItem);
+        const url = projectMediaUrl(item.url, 'gallery', message, blockIndex, itemIndex, options.threadId);
+        if (!url) return [];
+        const alt = text(item.alt, 300);
+        const caption = text(item.caption, 500);
+        return [{ url, ...(alt ? { alt } : {}), ...(caption ? { caption } : {}) }];
+      });
+      if (!items.length) { hidden++; continue; }
+      blocks.push({ id, kind: 'gallery', ...(text(block.title, 300) ? { title: text(block.title, 300)! } : {}), items });
+    } else if (block.kind === 'audio') {
+      const rawUrl = typeof block.url === 'string' ? block.url.trim() : '';
+      const url = rawUrl ? projectMediaUrl(rawUrl, 'audio', message, blockIndex, 0, options.threadId) : null;
+      const transcript = text(block.text, 8000);
+      if (rawUrl && !url) { hidden++; continue; }
+      if (!url && !transcript) { hidden++; continue; }
+      const durationSec = typeof block.durationSec === 'number' && Number.isFinite(block.durationSec) && block.durationSec > 0 ? block.durationSec : undefined;
+      const speaker = text(block.speaker, 100);
+      blocks.push({
+        id, kind: 'audio',
+        ...(url ? { url } : {}),
+        ...(text(block.title, 300) ? { title: text(block.title, 300)! } : {}),
+        ...(transcript ? { text: transcript } : {}),
+        ...(durationSec !== undefined ? { durationSec } : {}),
+        ...(speaker ? { speaker } : {}),
+      });
+    } else hidden++; // html_widget and unknown kinds remain counted in blocks_hidden
   }
   return { blocks, hidden };
 }
@@ -226,5 +332,8 @@ export function blockLine(blocks: ChatBlock[]): string {
   const first = blocks[0];
   if (!first) return '';
   if (first.kind === 'card' && first.approval) return first.approval.title + (first.approval.body ? `：${first.approval.body}` : '');
-  return first.kind === 'diff' ? first.file : first.title ?? (first.kind === 'checklist' ? first.items[0]!.text : first.kind === 'choices' ? first.options.map(option => option.label).join(' / ') : '');
+  if (first.kind === 'diff') return first.file;
+  if (first.kind === 'gallery') return first.title ?? (plainLine(first.items[0]?.caption || first.items[0]?.alt || '') || '图片');
+  if (first.kind === 'audio') return first.title ?? (first.text ? clip(plainLine(first.text) || first.text, 80) : '语音消息');
+  return first.title ?? (first.kind === 'checklist' ? first.items[0]!.text : first.kind === 'choices' ? first.options.map(option => option.label).join(' / ') : '');
 }
