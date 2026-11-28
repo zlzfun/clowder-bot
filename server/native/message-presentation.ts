@@ -52,6 +52,7 @@ export function approvalReceiptText(receipt: NonNullable<ReturnType<typeof appro
   const said: Record<string, [string, string]> = {
     F221: ['已记住这个偏好。', '没有记这个偏好。'], F231: ['已更新关于你的资料。', '没有更新关于你的资料。'],
     F276: ['已记下这个人。', '没有记这个人。'], F139: ['定时已按你的确认处理。', '定时没有改动。'],
+    F306: ['已按你的确认处理。', '没有同意这项确认。'],
   };
   const [yes, no] = said[receipt.producerId] ?? ['已同意。', '已拒绝。'];
   return receipt.state === 'approved' ? yes : receipt.state === 'rejected' ? no : '这件事已经结束。';

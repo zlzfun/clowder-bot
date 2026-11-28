@@ -59,6 +59,8 @@ export class NativeFixture implements NativeTransport {
   queues = new Map<string, any>();
   taskRows: any[] = [];
   approvalItems: any[] = [];
+  settledApprovalItems: any[] = [];
+  runtimeInteractions = new Map<string, any>();
   artifactRows = new Map<string, any[]>();
   memoryViews: Record<string, any> = { profile: {readStatus:'ready',entries:[]}, taste: {readStatus:'ready',entries:[]} };
   uploads = new Map<string, Buffer>();
@@ -251,6 +253,63 @@ export class NativeFixture implements NativeTransport {
     else if (path === '/api/messages' && method === 'POST') result = { status: 'queued', userMessageId: 'message-1', entries: [{ entryId: 'queue-1', targetCatId: body.mentions?.[0] }], queuePosition: 1 };
     else if (url.pathname === '/api/tasks' && method === 'GET') result = {tasks:this.taskRows.filter(task=>task.threadId===url.searchParams.get('threadId'))};
     else if (url.pathname === '/api/approval-hub/pending') result = {items:this.approvalItems};
+    else if (url.pathname === '/api/approval-hub/settled') result = {items:this.settledApprovalItems};
+    else if (parts[2] === 'runtime-interactions' && parts[3]) {
+      const id = parts[3], rec = this.runtimeInteractions.get(id);
+      if (!rec) throw new ApiError(404, 'Interaction not found');
+      if (method === 'GET' && parts.length === 4) result = { interaction: rec };
+      else if (method === 'POST' && parts[4] === 'respond') {
+        const sameConvOp = rec.request?.kind === 'conversation_decision'
+          && typeof body?.operationId === 'string' && !!body.operationId
+          && (rec.submission?.operationId === body.operationId || rec.terminal?.operationId === body.operationId);
+        if (sameConvOp) {
+          if (rec.status === 'pending' && rec.submission) {
+            rec.status = rec.submission.terminal?.status ?? 'answered';
+            rec.terminal = rec.submission.terminal;
+            delete rec.submission;
+          }
+          result = { interaction: rec };
+        } else {
+          if (rec.status !== 'pending') throw new ApiError(409, 'runtime interaction is not pending');
+          if (body?.expectedRevision !== undefined && body.expectedRevision !== rec.revision) throw new ApiError(409, 'runtime interaction revision changed');
+          const response = body?.response;
+          const req = rec.request;
+          let status: string = 'answered', reasonCode: string = 'answered', redacted: any = response;
+          if (req.kind === 'question' && response?.kind === 'answers') {
+            const selectedOptionIndexes: Record<string, number[]> = {};
+            for (const q of req.questions ?? []) {
+              if (q.isSecret || !Array.isArray(q.options)) continue;
+              const idxs = (q.options as any[]).flatMap((o, i) => (response.answers?.[q.id] ?? []).includes(o.label) ? [i] : []);
+              if (idxs.length) selectedOptionIndexes[q.id] = idxs;
+            }
+            redacted = { kind: 'answers', answeredQuestionIds: Object.keys(response.answers ?? {}), secretQuestionIds: (req.questions ?? []).filter((q: any) => q.isSecret).map((q: any) => q.id), ...(Object.keys(selectedOptionIndexes).length ? { selectedOptionIndexes } : {}) };
+          } else if ((req.kind === 'approval' || req.kind === 'elicitation') && response?.kind === 'decision') {
+            const d = (req.decisions ?? []).find((c: any) => c.id === response.decisionId);
+            status = d?.outcome === 'decline' ? 'declined' : d?.outcome === 'cancel' ? 'cancelled' : 'answered';
+            reasonCode = d?.outcome === 'decline' ? 'user_rejected' : d?.outcome === 'cancel' ? 'user_cancelled' : 'answered';
+            redacted = { kind: 'decision', decisionId: response.decisionId };
+          } else if (req.kind === 'conversation_decision' && response?.kind === 'selection') {
+            redacted = { kind: 'selection', selectedIds: response.selectedIds };
+          }
+          rec.status = status;
+          rec.revision = (rec.revision ?? 1) + 1;
+          rec.terminal = {
+            status, reasonCode, settledAt: Date.now(), response: redacted,
+            ...(typeof body?.operationId === 'string' ? { operationId: body.operationId } : {}),
+          };
+          this.approvalItems = this.approvalItems.filter(i => i.proposalId !== id);
+          result = { interaction: rec };
+        }
+      } else if (method === 'POST' && parts[4] === 'reject') {
+        if (rec.status !== 'pending') throw new ApiError(409, 'runtime interaction is not pending');
+        if (rec.request?.kind !== 'question') throw new ApiError(400, 'only question interactions can use explicit rejection');
+        rec.status = 'declined';
+        rec.revision = (rec.revision ?? 1) + 1;
+        rec.terminal = { status: 'declined', reasonCode: 'user_rejected', settledAt: Date.now() };
+        this.approvalItems = this.approvalItems.filter(i => i.proposalId !== id);
+        result = { interaction: rec };
+      } else throw new Error(`Unconfigured fixture route: ${method} ${path}`);
+    }
     else if (parts[2] === 'memory' && parts[3] && ['profile','taste'].includes(parts[3])) {
       if(method!=='GET')throw new Error('Fixture forbids long-term memory writes');
       if(parts[5]==='source')result={status:'ready',sources:[]};

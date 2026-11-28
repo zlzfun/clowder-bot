@@ -184,6 +184,165 @@ test('expiry is said quietly and only when close; failures keep the server\'s wo
 });
 
 // ------------------------------------------------------------ choices, blocks, endings
+// ------------------------------------------------------------ F306 requests (item 59)
+const askOne = { kind: 'question', revision: 3, canReject: true, questions: [{ id: 'q1', header: '方案', question: '用哪个方案？', options: [{ label: '方案 A', description: '快一点' }, { label: '方案 B' }], isOther: true }] };
+const askMany = { kind: 'question', revision: 1, canReject: true, questions: [
+  { id: 'lang', header: '技术栈', question: '用什么写这个工具？', options: [{ label: 'TypeScript' }, { label: 'Go' }, { label: 'Rust' }], multiSelect: true, isOther: true },
+  { id: 'token', header: '令牌', question: '部署用的令牌是什么？', isSecret: true },
+  { id: 'note', header: '备注', question: '还有什么要交代的？', allowUnanswered: true },
+] };
+const askApproval = { kind: 'approval', revision: 2, decisions: [
+  { id: 'once', label: '允许一次', outcome: 'accept' }, { id: 'always', label: '始终允许', description: '以后同类操作不再询问', outcome: 'accept' }, { id: 'no', label: '拒绝', outcome: 'decline' },
+] };
+const askLink = (url: string) => ({ kind: 'elicitation', revision: 1, mode: 'url', message: '请先登录', url, decisions: [{ id: 'done', label: '我已完成', outcome: 'accept' }, { id: 'stop', label: '取消', outcome: 'cancel' }] });
+const askForm = { kind: 'elicitation', revision: 5, mode: 'form', message: '寄送信息', fields: [
+  { id: 'name', type: 'string', title: '收件人', required: true, minLength: 2, maxLength: 4 },
+  { id: 'count', type: 'integer', title: '份数', minimum: 1, maximum: 5, default: 2, required: true },
+  { id: 'ratio', type: 'number', title: '比例', required: false },
+  { id: 'size', type: 'string', title: '尺寸', enum: ['S', 'M', 'L'], default: 'M', description: '按平时穿的选', required: false },
+  { id: 'gift', type: 'boolean', title: '要包装', default: false, required: false },
+], decisions: [{ id: 'ok', label: '提交', outcome: 'accept' }, { id: 'no', label: '不填了', outcome: 'decline' }] };
+const askPick = { kind: 'conversation', revision: 1, mode: 'single', options: [{ id: 'sat', label: '周六', emoji: '📅' }, { id: 'sun', label: '周日' }, { id: 'other', label: '别的时间', custom: true }], allowText: true };
+const askSeveral = { kind: 'conversation', revision: 1, mode: 'multiple', options: [{ id: 'a', label: '咖啡' }, { id: 'b', label: '茶' }, { id: 'c', label: '果汁' }], max: 2, allowText: false };
+const askConfirm = { kind: 'conversation', revision: 1, mode: 'confirm', options: [{ id: '__confirm__', label: '开始' }, { id: '__cancel__', label: '先不用' }], allowText: false };
+const askGoOn = { kind: 'conversation', revision: 1, mode: 'confirm', options: [{ id: '__confirm__', label: '继续' }], allowText: false };
+// An F306 request as GET <scope>/approvals lists it, and the card block of its message.
+const rtItem = (id: string, mid: string, runtime: Any, over: Record<string, unknown> = {}) =>
+  ({ id, kind: 'question', title: '团子有件事要问你', body: '', messageId: mid, state: 'open', approve: { label: '提交回答' }, reject: { label: '拒绝' }, runtime, ...over });
+const rtMessage = (id: string, mid: string, kind = 'question', title = '有件事要问你') =>
+  ({ id: mid, role: 'assistant', content: '运行交互', speaker: { name: '团子' }, blocks: [{ id: 'blk-' + id, kind: 'card', title: '运行交互', approval: { id, kind, title } }] });
+
+test('F306 requests are read only as the contract describes them: each kind and part checked, labels kept exactly; a link that is not http(s) or any malformed part goes to the runtime panel; settled states and receipts are read from any row', () => {
+  const R = rules();
+  assert.deepEqual(plain(R.runtimePrompt({ ...askOne, questions: [{ ...askOne.questions[0], options: [{ label: ' 方案 A ' }, { label: '方案 B', description: '慢一点' }] }] })), { kind: 'question', revision: 3, questions: [{
+    id: 'q1', header: '方案', question: '用哪个方案？', options: [{ label: ' 方案 A ', description: '' }, { label: '方案 B', description: '慢一点' }],
+    multiSelect: false, isOther: true, isSecret: false, allowUnanswered: false }] }, 'an answer is the label itself, so the label is kept as the server gave it');
+  assert.deepEqual(plain(R.runtimePrompt(askApproval).decisions.map((d: Any) => [d.id, d.outcome, d.description])), [['once', 'accept', ''], ['always', 'accept', '以后同类操作不再询问'], ['no', 'decline', '']]);
+  assert.equal(R.runtimePrompt(askLink('https://login.example.com/device?code=AB12')).url, 'https://login.example.com/device?code=AB12');
+  assert.deepEqual(plain(R.runtimePrompt(askForm).fields.map((f: Any) => [f.id, f.type, f.default, f.enum, f.required])), [
+    ['name', 'string', null, null, true], ['count', 'integer', 2, null, true], ['ratio', 'number', null, null, false], ['size', 'string', 'M', ['S', 'M', 'L'], false], ['gift', 'boolean', false, null, false]]);
+  assert.deepEqual(plain(R.runtimePrompt(askSeveral)), { kind: 'conversation', revision: 1, mode: 'multiple', options: [
+    { id: 'a', label: '咖啡', emoji: '', description: '', custom: false }, { id: 'b', label: '茶', emoji: '', description: '', custom: false }, { id: 'c', label: '果汁', emoji: '', description: '', custom: false }], max: 2, allowText: false });
+  const decision = [{ id: 'x', label: '好', outcome: 'accept' }];
+  for (const bad of [
+    null, { ...askOne, revision: 0 }, { ...askOne, questions: [] }, { ...askOne, questions: [{ id: 'a', question: 'x' }, { id: 'a', question: 'y' }] },
+    { ...askOne, questions: [{ id: 'a', question: 'x', options: [] }] }, { ...askOne, questions: [{ id: 'a', question: 'x', options: [{ label: ' ' }] }] },
+    { kind: 'approval', revision: 1, decisions: [{ id: 'x', label: '好', outcome: 'maybe' }] }, { kind: 'approval', revision: 1, decisions: [] },
+    askLink('javascript:alert(1)'), askLink('data:text/html,hi'), askLink('file:///etc/passwd'), askLink('https://ok.example.com/a b'),
+    { kind: 'elicitation', revision: 1, mode: 'form', message: 'm', fields: [{ id: 'f', type: 'object' }], decisions: decision },
+    { kind: 'elicitation', revision: 1, mode: 'form', message: 'm', fields: [{ id: 'f', type: 'string', enum: [{}] }], decisions: decision },
+    { ...askConfirm, options: [...askConfirm.options, { id: 'later', label: '以后再说' }] }, { ...askPick, mode: 'grid' }, { kind: 'mystery', revision: 1 },
+  ]) assert.equal(R.runtimePrompt(bad), null, JSON.stringify(bad));
+  // A confirmation is its "yes", and its "no" when it has one (upstream allows a confirm block of one option).
+  assert.deepEqual(plain(R.runtimePrompt(askGoOn).options), [{ id: '__confirm__', label: '继续', emoji: '', description: '', custom: false }]);
+  const got = R.approvals({ threadId: 't1', approvals: [
+    rtItem('i1', 'm1', askOne),
+    rtItem('i2', 'm2', askLink('javascript:alert(1)'), { kind: 'other', approve: { label: '我已完成' }, reject: null }),
+  ], settled: [{ id: 'i3', state: 'approved', selected: ['方案 A', '', ' 方案  A '] }, { id: 'i4', state: 'open' }, { id: '', state: 'closed' }, { id: 'i5', state: 'closed' }] });
+  assert.equal(got.list[0].runtime.kind, 'question');
+  assert.deepEqual([got.list[1].runtime, got.list[1].approve, got.list[1].reject, got.list[1].note], [undefined, null, null, '这一项要在运行面板里回答'], 'never half drawn: the runtime panel');
+  assert.deepEqual(plain(got.settled), [{ id: 'i3', state: 'approved', selected: ['方案 A'] }, { id: 'i5', state: 'closed', selected: [] }]);
+  assert.deepEqual(plain(R.approvals({ threadId: 't', approvals: [] }).settled), []);
+  const hub = (over: Record<string, unknown> = {}, connector = 'approval-hub') => ({ native: { source: { connector, meta: { approvalDecisionReceipt: { kind: 'approval_decision_receipt', canonicalProposalId: 'p2', resolution: 'rejected', approvalCardRef: { messageId: 'm2' }, ...over } } } } });
+  assert.deepEqual(plain(R.receiptOf({ receipt: { proposalId: 'p1', state: 'approved' } })), { id: 'p1', state: 'approved' });
+  assert.deepEqual(plain(R.receiptOf({ receipt: { proposalId: 'p1', producerId: 'F306', state: 'rejected', cardMessageId: 'm1' } })), { id: 'p1', state: 'rejected', card: 'm1' }, 'the server\'s receipt names its card as the native one does');
+  assert.deepEqual(plain(R.receiptOf({ receipt: { proposalId: 'p1', state: 'approved', cardMessageId: '' } })), { id: 'p1', state: 'approved' });
+  assert.deepEqual(plain(R.receiptOf(hub())), { id: 'p2', state: 'rejected', card: 'm2' });
+  assert.deepEqual(plain(R.receiptOf(hub({ resolution: 'accepted', approvalCardRef: undefined }))), { id: 'p2', state: 'approved' });
+  assert.equal(R.receiptOf(hub({}, 'someone-else')), null);
+  assert.equal(R.receiptOf(hub({ kind: 'something_else' })), null);
+  assert.equal(R.receiptOf({ receipt: { proposalId: 'p1', state: 'open' } }), null);
+  assert.equal(R.receiptOf({ content: '已同意。' }), null);
+});
+
+test('an F306 answer is built from what the card shows and checked first in the server\'s own words: questions, forms, a cat\'s own choice, each native decision', () => {
+  const R = rules();
+  const one = R.runtimePrompt(askOne), many = R.runtimePrompt(askMany);
+  assert.deepEqual(plain(R.questionResponse(one, {})), { invalid: '请先选一项或写下回答', at: 'q1' });
+  assert.deepEqual(plain(R.questionResponse(one, { answers: { q1: { picks: ['方案 B'] } } })), { response: { kind: 'answers', answers: { q1: ['方案 B'] } } });
+  assert.deepEqual(plain(R.questionResponse(one, { answers: { q1: { picks: ['方案 B'], text: ' 先做原型 ' } } })).response.answers.q1, ['先做原型'], 'own words take the place of a single pick');
+  assert.equal(R.questionResponse(R.runtimePrompt({ ...askOne, questions: [{ id: 'q', header: 'h', question: '写点什么？' }] }), {}).invalid, '请先写下回答');
+  assert.equal(R.questionResponse(R.runtimePrompt({ ...askOne, questions: [{ id: 'q', header: 'h', question: '选？', options: [{ label: 'A' }], multiSelect: true }] }), {}).invalid, '请先至少选一项');
+  assert.equal(R.questionResponse(many, {}).invalid, '请回答：技术栈');
+  const draft: Any = { answers: { lang: { picks: ['Rust', 'TypeScript', 'Nope'], text: 'Zig' }, token: { text: 's3' }, note: { text: '' } } };
+  assert.equal(R.questionResponse(many, draft).invalid, '请回答：备注', 'left empty is not skipped: a question is left unanswered only on purpose');
+  draft.answers.note = { skip: true, text: 'left over' };
+  assert.deepEqual(plain(R.questionResponse(many, draft)), { response: { kind: 'answers', answers: { lang: ['TypeScript', 'Rust', 'Zig'], token: ['s3'], note: [] } } }, 'picks in their order, 其他 after them, a skipped question none');
+  assert.equal(R.runtimeResponse(many, 'submit', draft).response.kind, 'answers');
+
+  const form = R.runtimePrompt(askForm);
+  assert.deepEqual(plain(form.fields.map((f: Any) => R.fieldDefault(f))), ['', '2', '', '1', false]);
+  const check = (fields: Any) => R.runtimeResponse(form, 'pick:ok', { fields });
+  assert.equal(check({}).invalid, '请填写：收件人');
+  assert.equal(check({ name: '阿' }).invalid, '收件人至少需要 2 个字');
+  assert.equal(check({ name: '阿福阿福阿' }).invalid, '收件人最多 4 个字');
+  assert.equal(check({ name: '阿福', count: '2.5' }).invalid, '份数需要填写整数');
+  assert.equal(check({ name: '阿福', count: '0' }).invalid, '份数不能小于 1');
+  assert.equal(check({ name: '阿福', count: '9' }).invalid, '份数不能大于 5');
+  assert.equal(check({ name: '阿福', count: '' }).invalid, '请填写：份数');
+  assert.equal(check({ name: '阿福', ratio: 'abc' }).invalid, '比例需要填写数字');
+  assert.deepEqual(plain(check({ name: ' 阿福 ' })), { response: { kind: 'decision', decisionId: 'ok', content: { name: '阿福', count: 2, size: 'M', gift: false } } }, 'untouched fields send their defaults; an empty optional one is left out');
+  assert.deepEqual(plain(check({ name: '阿福', count: '3', ratio: '0.5', size: '', gift: true }).response.content), { name: '阿福', count: 3, ratio: 0.5, gift: true });
+  assert.deepEqual(plain(R.runtimeResponse(form, 'pick:no', { fields: {} })), { response: { kind: 'decision', decisionId: 'no' } }, 'declining sends no content and needs none');
+  assert.equal(R.runtimeResponse(form, 'pick:gone', {}).invalid, '请选择一项处理方式');
+  assert.deepEqual(plain(R.runtimeResponse(R.runtimePrompt(askApproval), 'pick:no', { fields: { x: 1 } })), { response: { kind: 'decision', decisionId: 'no' } });
+  assert.deepEqual(plain(R.runtimeResponse(R.runtimePrompt(askLink('https://a.example.com')), 'pick:done', {})), { response: { kind: 'decision', decisionId: 'done' } });
+
+  const pick = R.runtimePrompt(askPick);
+  assert.equal(R.conversationResponse(pick, {}).invalid, '请选一项，或写下你的回答');
+  assert.deepEqual(plain(R.conversationResponse(pick, { text: ' 都行 ' })), { response: { kind: 'text', text: '都行' } });
+  assert.deepEqual(plain(R.conversationResponse(pick, { picks: ['other'] })), { invalid: '请填写：别的时间', at: 'other' });
+  assert.deepEqual(plain(R.conversationResponse(pick, { picks: ['other'], custom: '下周一' })), { response: { kind: 'selection', selectedIds: ['other'], customInput: '下周一' } });
+  assert.deepEqual(plain(R.conversationResponse(pick, { picks: ['sat'], custom: '不带' })), { response: { kind: 'selection', selectedIds: ['sat'] } }, 'the 自定义 words go only with it');
+  assert.equal(R.conversationResponse(pick, { picks: ['sat', 'sun'] }).invalid, '这里只能选一项');
+  const several = R.runtimePrompt(askSeveral);
+  assert.equal(R.conversationResponse(several, {}).invalid, '请至少选一项');
+  assert.equal(R.conversationResponse(several, { picks: ['a', 'b', 'c'] }).invalid, '最多选 2 项');
+  assert.deepEqual(plain(R.conversationResponse(several, { picks: ['c', 'a', 'c', 'x'] }).response.selectedIds), ['c', 'a']);
+  const confirm = R.runtimePrompt(askConfirm);
+  assert.deepEqual(plain(R.runtimeResponse(confirm, 'opt:__cancel__', {})), { response: { kind: 'selection', selectedIds: ['__cancel__'] } });
+  assert.equal(R.runtimeResponse(confirm, 'opt:other', {}).invalid, '请选一项');
+
+  // The card's actions: the engine's decisions (the first that accepts is the primary, last), 提交回答 with 拒绝, a confirmation's answers.
+  assert.deepEqual(plain(R.runtimeActions(R.runtimePrompt(askApproval), { approve: { label: '允许一次' } })), [
+    { decision: 'pick:always', label: '始终允许', description: '以后同类操作不再询问' }, { decision: 'pick:no', label: '拒绝' }, { decision: 'pick:once', label: '允许一次', primary: true }]);
+  assert.deepEqual(plain(R.runtimeActions(one, { approve: { label: '提交回答' }, reject: { label: '拒绝' } })), [{ decision: 'reject', label: '拒绝' }, { decision: 'submit', label: '提交回答', primary: true }]);
+  assert.deepEqual(plain(R.runtimeActions(pick, { approve: { label: '确认' }, reject: null })), [{ decision: 'submit', label: '确认', primary: true }]);
+  assert.deepEqual(plain(R.runtimeActions(confirm, { approve: { label: '确认' } })), [{ decision: 'opt:__cancel__', label: '先不用' }, { decision: 'opt:__confirm__', label: '开始', primary: true }]);
+  const goOn = R.runtimePrompt(askGoOn);
+  assert.deepEqual(plain(R.runtimeActions(goOn, { approve: { label: '确认' } })), [{ decision: 'opt:__confirm__', label: '继续', primary: true }], 'one answer: no made-up 取消');
+  assert.deepEqual(plain(R.runtimeResponse(goOn, 'opt:__confirm__', {})), { response: { kind: 'selection', selectedIds: ['__confirm__'] } });
+  assert.equal(R.runtimeResponse(goOn, 'opt:__cancel__', {}).invalid, '请选一项');
+});
+
+test('a settled request says its outcome from any evidence the page has — its row, a receipt elsewhere, the settled read, the answer\'s own verified reply — with the public choices; and never stays 已提交 once everything was read again', () => {
+  const R = rules();
+  const q = { id: 'c', kind: 'card', title: '运行交互', approval: { id: 'i1', kind: 'question', title: '有件事要问你', body: '用哪个方案？' } };
+  assert.deepEqual([R.outcome('question', 'approved'), R.outcome('question', 'rejected'), R.outcome('question', 'closed')], ['已回答', '已拒绝', '已结束']);
+  assert.equal(R.card({ fact: { ...q, approval: { ...q.approval, state: 'approved', selected: ['方案 A'] } } }).text, '已回答：方案 A', 'the row\'s own state and choices');
+  const by = (resolved: Any, more: Record<string, unknown> = {}) => R.card({ fact: q, item: null, list: 'ready', resolved, ...more });
+  assert.deepEqual([by({ state: 'approved', selected: ['方案 A', '方案 B'] }).text, by({ state: 'approved' }).what, by({ state: 'approved' }).tone, by({ state: 'approved' }).mode], ['已回答：方案 A、方案 B', '用哪个方案？', 'ok', 'line']);
+  assert.equal(by({ state: 'rejected', selected: ['拒绝'] }).text, '已拒绝', 'a choice the outcome already says is not said twice');
+  assert.deepEqual([by({ state: 'closed' }).text, by({ state: 'closed' }).tone], ['已结束', 'exp']);
+  assert.equal(by({ state: 'open' }).text, '已处理', 'not an outcome');
+  assert.equal(R.card({ fact: { ...q, approval: { id: 'i2', kind: 'other', title: '有件事等你确认' } }, resolved: { state: 'approved', selected: ['始终允许'] } }).text, '已同意：始终允许');
+  assert.equal(R.card({ fact: { ...q, approval: { ...q.approval, state: 'rejected' } }, resolved: { state: 'approved' } }).text, '已拒绝', 'the row\'s own state comes first');
+  assert.equal(R.card({ fact: fact(), item: null, list: 'ready', resolved: { state: 'approved' } }).text, '已记住这个偏好', 'any request kind, in its own words');
+  // 已提交 until it can be known; read again everywhere and nothing says how: 已处理.
+  const sent = { phase: 'sent', decision: 'approve', settled: true, at: 1 };
+  assert.equal(R.card({ fact: q, item: null, list: 'ready', fresh: true, local: sent }).text, '已提交', 'unchanged: the receipt may still come');
+  assert.equal(R.card({ fact: q, item: null, list: 'ready', fresh: true, local: sent, reloaded: true }).text, '已处理');
+  assert.equal(R.card({ fact: q, item: null, list: 'ready', fresh: false, local: sent, reloaded: true }).text, '已提交', 'the list must have been read after the answer too');
+  assert.equal(R.card({ fact: q, item: { ...pref, id: 'i1' }, list: 'ready', fresh: true, local: sent, reloaded: true }).text, '已提交，还在处理', 'still listed: still being applied');
+  assert.equal(R.card({ fact: q, item: null, list: 'ready', fresh: true, local: sent, reloaded: true, resolved: { state: 'approved', selected: ['方案 A'] } }).text, '已回答：方案 A');
+  // The card itself: the prompt and its actions, busy with the one in flight.
+  const item = R.approvals({ threadId: 't1', approvals: [rtItem('i1', 'm1', askOne, { body: '用哪个方案？' })] }).list[0];
+  const open = R.card({ fact: q, item, list: 'ready' });
+  assert.deepEqual([open.mode, open.prompt.kind, plain(open.actions.map((a: Any) => a.decision)), open.note, open.runtime], ['ask', 'question', ['reject', 'submit'], '', false]);
+  assert.equal(R.card({ fact: q, item, list: 'ready', local: { phase: 'sending', decision: 'submit', at: 1 } }).busy, 'submit');
+  assert.equal(R.card({ fact: fact(), item: pref, list: 'ready' }).prompt, null, 'other requests keep their two answers');
+});
+
 test('a choice shows answered only from the record; a pick in flight, unsent or unrecorded says so and stays answerable', () => {
   const R = rules();
   const block = { mode: 'single', options: [{ id: 'a', label: '甲', emoji: '🍵' }, { id: 'b', label: '乙' }], answered: false, selected: [] };
@@ -462,7 +621,7 @@ const button = (root: El, text: string) => { const b = buttons(root, text)[0]; a
 
 // ---------------------------------------------------------------- the page
 type Reply = { status: number; body: Any } | Error;
-function page(opts: { approvals?: () => Any } = {}) {
+function page(opts: { approvals?: (path: string) => Any; latest?: () => Set<string>; locate?: (item: Any, onCancel?: () => void) => unknown; cancelLocate?: () => unknown; reload?: () => unknown } = {}) {
   const doc = new Doc();
   const h = (tag: string, cls = '') => { const e = doc.createElement(tag); if (cls) e.className = cls; return e; };
   const chat = h('div', 'chat'), thread = h('div', 'thread'), dock = h('div', 'dock');
@@ -472,7 +631,7 @@ function page(opts: { approvals?: () => Any } = {}) {
   doc.body.append(chat);
   const window: Any = { matchMedia: () => ({ matches: false }), requestAnimationFrame: (fn: () => void) => setTimeout(fn, 0) };
   const context = vm.createContext({ window, document: doc, console, Date, JSON, setTimeout, clearTimeout, setInterval: () => 0, encodeURIComponent });
-  for (const f of ['chat-live-rules.js', 'chat-live.js', 'chat-cards-rules.js', 'chat-cards.js']) vm.runInContext(read('client/public/' + f), context);
+  for (const f of ['chat-live-rules.js', 'chat-live.js', 'chat-cards-rules.js', 'chat-cards.js', 'chat-locate-rules.js', 'chat-locate.js']) vm.runInContext(read('client/public/' + f), context);
   const live = window.ClowderLive, cards = window.ClowderCards;
   const calls: Array<{ path: string; method: string; body?: Any }> = [];
   const posts: Array<{ path: string; body: Any; answer: (r: Reply) => void }> = [];
@@ -482,7 +641,7 @@ function page(opts: { approvals?: () => Any } = {}) {
   live.init({ thread, render: () => {}, row: () => h('div', 'msg bot'), queued: () => false, busy: () => false, unread: () => '', changed: () => {}, gap: () => {}, focusComposer: () => {} });
   cards.init({
     thread, icon,
-    api: async (path: string) => { calls.push({ path, method: 'GET' }); return opts.approvals ? opts.approvals() : { threadId: 't1', approvals: [] }; },
+    api: async (path: string) => { calls.push({ path, method: 'GET' }); return opts.approvals ? opts.approvals(path) : { threadId: 't1', approvals: [] }; },
     apiFetch: (path: string, opt: Any) => new Promise((resolve, reject) => {
       const body = JSON.parse(opt.body);
       calls.push({ path, method: opt.method, body });
@@ -490,7 +649,10 @@ function page(opts: { approvals?: () => Any } = {}) {
     }),
     render: (el: El, text: string) => el.append(text),
     send: (text: string, sent: () => void) => new Promise<void>((done) => sends.push({ text, sent, done })),
-    reload: () => { reloads++; },
+    reload: () => { reloads++; return opts.reload ? opts.reload() : undefined; },
+    ...(opts.latest ? { latest: opts.latest } : {}),
+    ...(opts.locate ? { locate: opts.locate } : {}),
+    ...(opts.cancelLocate ? { cancelLocate: opts.cancelLocate } : {}),
   });
   const sel = { type: 'bot', id: '团子' };
   live.select('bot:团子');
@@ -517,7 +679,7 @@ function page(opts: { approvals?: () => Any } = {}) {
   };
   const rows = () => (thread.children[0]?.children ?? []) as El[];
   const row = (mid: string) => rows().find(r => r.dataset.mid === mid)!;
-  return { doc, thread, cards, live, calls, posts, sends, draw, rows, row, reloads: () => reloads, window };
+  return { doc, thread, cards, live, calls, posts, sends, draw, rows, row, reloads: () => reloads, window, sel };
 }
 const cardMessage = (state?: string) => ({ id: 'm-card', role: 'assistant', content: '提议捕捉品味信号：回答简短一点，先说结论', blocks: [fact(state)], speaker: { name: '团子' } });
 const listWith = (...items: Any[]) => () => ({ threadId: 't1', approvals: items });
@@ -624,6 +786,600 @@ test('a request that cannot be agreed here shows its note and the runtime panel,
   assert.ok(card.classList.contains('ck-hit'));
   assert.equal(p.doc.activeElement, card);
   assert.equal(p.cards.find({ proposalId: 'gone', messageId: 'nowhere' }), false);
+});
+
+// ------------------------------------------------- F306 answered in the card (item 59)
+const typeIn = (input: El, value: string) => { input.value = value; input.dispatchEvent(new Ev('input')); };
+const opt = (root: El, label: string) => { const b = all(root).find(e => e.tagName === 'BUTTON' && e.querySelector('.ck-opt-label')?.textContent === label); assert.ok(b, 'no option ' + label); return b!; };
+const pressed = (root: El) => all(root).filter(e => e.tagName === 'BUTTON' && e.getAttribute('aria-pressed') === 'true').map(e => e.querySelector('.ck-opt-label')?.textContent ?? e.textContent);
+const invalidOf = (root: El) => { const n = root.querySelector('.ck-invalid')!; return n.hidden ? '' : n.textContent; };
+const inputs = (root: El) => all(root).filter(e => e.tagName === 'INPUT');
+
+test('an F306 question is answered in its card: a pick, or the owner\'s own words in its place, sent with its revision and one operation ID; nothing goes before the check passes, typing never redraws, and a redraw keeps the draft and the focus', async () => {
+  let list = [rtItem('i1', 'm-q', askOne, { body: '用哪个方案？' })];
+  const p = page({ approvals: () => ({ threadId: 't1', approvals: list }) });
+  const history = [rtMessage('i1', 'm-q')];
+  p.draw(history);
+  await settle();
+  const card = () => p.row('m-q').querySelector('.approval')!;
+  assert.match(card().textContent, /^团子有件事要问你用哪个方案？/);
+  assert.equal(card().querySelectorAll('.ck-q-text').length, 0, 'one question: its words are the card\'s, said once');
+  assert.deepEqual(all(card()).filter(e => e.tagName === 'BUTTON').map(b => [b.textContent, b.getAttribute('aria-pressed')]), [['A方案 A快一点', 'false'], ['B方案 B', 'false'], ['拒绝', null], ['提交回答', null]]);
+  assert.deepEqual([button(card(), '拒绝').className, button(card(), '提交回答').className], ['secondary', 'primary']);
+  const own = inputs(card())[0];
+  assert.deepEqual([own.type, own.placeholder, own.getAttribute('aria-label'), own.className], ['text', '其他…', '其他：用哪个方案？', 'ck-other']);
+  // Not answered yet: said in the card, nothing sent.
+  button(card(), '提交回答').click();
+  assert.equal(p.posts.length, 0);
+  assert.deepEqual([invalidOf(card()), card().querySelector('.ck-invalid')!.getAttribute('role')], ['请先选一项或写下回答', 'alert']);
+  // A pick: marked in place, nothing redrawn; the check's words go.
+  const a = opt(card(), '方案 A');
+  a.click();
+  assert.deepEqual([a.getAttribute('aria-pressed'), a.classList.contains('on'), invalidOf(card())], ['true', true, '']);
+  assert.equal(inputs(card())[0], own, 'a pick redraws nothing');
+  // The owner's own words take the place of the pick, in the very same field.
+  own.focus();
+  typeIn(own, '先做个原型');
+  assert.deepEqual([a.getAttribute('aria-pressed'), p.doc.activeElement === own], ['false', true]);
+  // A read that changes nothing keeps every element.
+  p.draw(history);
+  await settle();
+  assert.equal(inputs(card())[0], own);
+  // A read that changes the card (it is close to running out now) draws it again from the draft, focus back in the field.
+  list = [rtItem('i1', 'm-q', askOne, { body: '用哪个方案？', expiresAt: Date.now() + 3600e3 })];
+  p.draw([...history, cardMessage()]);
+  await settle(); await settle();
+  const again = inputs(card())[0];
+  assert.notEqual(again, own);
+  assert.match(card().textContent, /前有效/);
+  assert.deepEqual([again.value, p.doc.activeElement === again, pressed(card())], ['先做个原型', true, []]);
+  // Sent: the revision, an operation ID and the answer; in flight everything waits.
+  button(card(), '提交回答').click();
+  const first = p.posts[0].body;
+  assert.match(p.posts[0].path, /\/approvals\/i1$/);
+  assert.deepEqual({ ...first, operationId: typeof first.operationId }, { expectedThreadId: 't1', expectedRevision: 3, operationId: 'string', response: { kind: 'answers', answers: { q1: ['先做个原型'] } } });
+  assert.ok(first.operationId.length >= 10);
+  assert.match(card().textContent, /正在提交…/);
+  assert.equal(inputs(card())[0].readOnly, true);
+  assert.ok(all(card()).filter(e => e.tagName === 'BUTTON').every(b => b.getAttribute('aria-disabled') === 'true'));
+  assert.doesNotMatch(card().textContent, /已回答|已提交/, 'never optimistic');
+  // Refused: the server's words, the engine's reason behind 详情, the draft as it was; trying again is a new operation.
+  p.posts[0].answer({ status: 400, body: { error: '请检查你的回答是否完整有效', native: { error: 'answer for q1 is not allowed' } } });
+  await settle(); await settle();
+  assert.match(card().textContent, /请检查你的回答是否完整有效。详情/);
+  assert.equal(inputs(card())[0].value, '先做个原型');
+  button(card(), '详情').click();
+  assert.equal(card().querySelector('.ck-reason')!.textContent, 'answer for q1 is not allowed');
+  button(card(), '提交回答').click();
+  const second = p.posts[1].body.operationId;
+  assert.notEqual(second, first.operationId, 'refused: a new attempt');
+  // The connection lost: not known whether it arrived, so the same answer again is the same operation.
+  p.posts[1].answer(new Error('offline'));
+  await settle(); await settle();
+  assert.match(card().textContent, /不确定刚才的回答有没有送到/);
+  button(card(), '提交回答').click();
+  assert.equal(p.posts[2].body.operationId, second);
+  p.posts[2].answer(new Error('offline'));
+  await settle(); await settle();
+  // A changed answer is another operation.
+  typeIn(inputs(card())[0], '先做个原型，再定');
+  button(card(), '提交回答').click();
+  assert.notEqual(p.posts[3].body.operationId, second);
+  assert.deepEqual(p.posts[3].body.response.answers, { q1: ['先做个原型，再定'] });
+  // Verified by the engine: its outcome at once, without waiting for any receipt.
+  list = [];
+  p.posts[3].answer({ status: 200, body: { id: 'i1', decision: 'approve', settled: true, state: 'approved' } });
+  await settle(); await settle();
+  assert.match(p.row('m-q').textContent, /^已回答 · 用哪个方案？$/);
+  assert.equal(p.doc.activeElement.dataset.ckFocus, 'card', 'focus moves to the settled card, not lost');
+});
+
+test('an answer whose outcome is not known (503, 502, 504, 409) keeps its operation ID and the revision it first went with, even once a newer revision was read; only a changed answer, or one refused as it stands (400, 403, 404), is a new operation', async () => {
+  let list = [rtItem('i1', 'm-q', askOne, { body: '用哪个方案？' })];
+  const p = page({ approvals: () => ({ threadId: 't1', approvals: list }) });
+  p.draw([rtMessage('i1', 'm-q')]);
+  await settle();
+  const card = () => p.row('m-q').querySelector('.approval')!;
+  const send = () => { button(card(), '提交回答').click(); return p.posts.at(-1)!.body; };
+  const answer = async (r: Reply) => { p.posts.at(-1)!.answer(r); for (let i = 0; i < 4; i++) await settle(); };
+  opt(card(), '方案 A').click();
+  const first = send();
+  assert.equal(first.expectedRevision, 3);
+  // The engine could not finish: whether it took the answer is not known.
+  await answer({ status: 503, body: { error: '暂时连不上' } });
+  const second = send();
+  assert.deepEqual([second.operationId, second.expectedRevision], [first.operationId, 3]);
+  // It took it (its revision moved on) and still said no: the list read again has the newer revision.
+  list = [rtItem('i1', 'm-q', { ...askOne, revision: 4 }, { body: '用哪个方案？' })];
+  const reads = p.calls.filter(c => c.method === 'GET').length;
+  await answer({ status: 409, body: { error: '这件事状态已经变化，请刷新后再试' } });
+  assert.ok(p.calls.filter(c => c.method === 'GET').length > reads, 'the list was read again');
+  const third = send();
+  assert.deepEqual([third.operationId, third.expectedRevision, third.response], [first.operationId, 3, first.response], 'the same answer is the same operation, as it first went');
+  for (const status of [502, 504, 500]) {
+    await answer({ status, body: { error: '这一步没有成功，还没有生效' } });
+    const again = send();
+    assert.deepEqual([again.operationId, again.expectedRevision], [first.operationId, 3], String(status));
+  }
+  // A changed answer is another operation, with the revision read now.
+  await answer({ status: 503, body: {} });
+  opt(card(), '方案 B').click();
+  const changed = send();
+  assert.notEqual(changed.operationId, first.operationId);
+  assert.deepEqual([changed.expectedRevision, changed.response.answers], [4, { q1: ['方案 B'] }]);
+  await answer({ status: 409, body: { error: '这件事状态已经变化，请刷新后再试' } });
+  assert.equal(send().operationId, changed.operationId);
+  // Refused as it stands (not open here, not allowed): the same answer sent again is a new operation each time.
+  await answer({ status: 404, body: { error: '这件事已经处理过，或者不在这个对话里' } });
+  const after404 = send();
+  assert.notEqual(after404.operationId, changed.operationId);
+  assert.deepEqual([after404.expectedRevision, after404.response], [4, changed.response]);
+  await answer({ status: 403, body: { error: '没有权限' } });
+  const after403 = send();
+  assert.notEqual(after403.operationId, after404.operationId);
+  await answer({ status: 400, body: { error: '请检查你的回答是否完整有效' } });
+  assert.notEqual(send().operationId, after403.operationId);
+});
+
+test('several questions: each says its own words, many picks plus 其他, a secret typed hidden and never said back, one left unanswered only on purpose; 拒绝 refuses the whole request', async () => {
+  const p = page({ approvals: listWith(rtItem('i2', 'm-many', askMany, { body: '开工前确认几件事' })) });
+  p.draw([rtMessage('i2', 'm-many')]);
+  await settle();
+  const card = () => p.row('m-many').querySelector('.approval')!;
+  const groups = card().querySelectorAll('.ck-q');
+  assert.deepEqual(groups.map(g => [g.getAttribute('role'), g.getAttribute('aria-label'), g.querySelector('.ck-q-head')?.textContent ?? '', g.querySelector('.ck-q-text')!.textContent]), [
+    ['group', '用什么写这个工具？', '技术栈', '用什么写这个工具？'], ['group', '部署用的令牌是什么？', '', '部署用的令牌是什么？'], ['group', '还有什么要交代的？', '备注', '还有什么要交代的？']],
+    'a header its question already says (令牌) is not said twice');
+  const [other, token, note] = groups.map(g => g.querySelector('input')!);
+  assert.deepEqual([token.type, token.getAttribute('autocomplete'), token.className, note.type, other.type], ['password', 'new-password', 'ck-input', 'text', 'text']);
+  assert.deepEqual(buttons(card(), '跳过这题').length, 1, 'only the question that may be left unanswered');
+  button(card(), '提交回答').click();
+  assert.equal(invalidOf(card()), '请回答：技术栈');
+  opt(card(), 'Rust').click();
+  opt(card(), 'TypeScript').click();
+  typeIn(other, 'Zig');
+  assert.deepEqual(pressed(groups[0]), ['TypeScript', 'Rust'], 'several picks; 其他 goes with them');
+  button(card(), '提交回答').click();
+  assert.equal(invalidOf(card()), '请回答：令牌');
+  typeIn(token, 'tok-s3cret');
+  button(card(), '提交回答').click();
+  assert.equal(invalidOf(card()), '请回答：备注', 'left empty is not skipped');
+  typeIn(note, '随便写的');
+  const skip = button(card(), '跳过这题');
+  skip.click();
+  assert.deepEqual([skip.getAttribute('aria-pressed'), skip.classList.contains('on'), note.disabled, note.value, groups[2].classList.contains('ck-skipped')], ['true', true, true, '', true]);
+  button(card(), '提交回答').click();
+  assert.deepEqual(p.posts[0].body.response, { kind: 'answers', answers: { lang: ['TypeScript', 'Rust', 'Zig'], token: ['tok-s3cret'], note: [] } });
+  p.posts[0].answer({ status: 200, body: { id: 'i2', decision: 'approve', settled: true, state: 'approved', selected: ['TypeScript', 'Rust'] } });
+  await settle(); await settle();
+  assert.match(p.row('m-many').textContent, /^已回答：TypeScript、Rust · 开工前确认几件事$/);
+  assert.doesNotMatch(p.doc.body.textContent + JSON.stringify(p.cards.peek()), /tok-s3cret/, 'the secret is never shown, said or kept');
+  // 拒绝: the whole request, without answers.
+  const r = page({ approvals: listWith(rtItem('i2', 'm-many', askMany)) });
+  r.draw([rtMessage('i2', 'm-many')]);
+  await settle();
+  button(r.row('m-many'), '拒绝').click();
+  assert.deepEqual(r.posts[0].body, { decision: 'reject', expectedThreadId: 't1' });
+  r.posts[0].answer({ status: 200, body: { id: 'i2', decision: 'reject', settled: true, state: 'rejected' } });
+  await settle(); await settle();
+  assert.match(r.row('m-many').textContent, /^已拒绝/);
+});
+
+test('an F306 approval offers the engine\'s own decisions, the first that accepts as the primary; a link opens only http(s), in a new tab, saying where it goes; a form is filled in the card, checked, and sends its content only with an accepting decision', async () => {
+  const p = page({ approvals: listWith(rtItem('i3', 'm-ap', askApproval, { kind: 'other', title: '团子有件事等你确认', body: '运行 npm publish', approve: { label: '允许一次' }, reject: null })) });
+  p.draw([rtMessage('i3', 'm-ap', 'other', '有件事等你确认')]);
+  await settle();
+  const ap = p.row('m-ap').querySelector('.approval')!;
+  assert.deepEqual(all(ap).filter(e => e.tagName === 'BUTTON').map(b => [b.textContent, b.className, b.title]), [['始终允许', 'secondary', '以后同类操作不再询问'], ['拒绝', 'secondary', ''], ['允许一次', 'primary', '']]);
+  assert.equal(ap.querySelector('.ck-rt'), null, 'nothing to fill in: the decisions only');
+  button(ap, '始终允许').click();
+  assert.deepEqual({ ...p.posts[0].body, operationId: !!p.posts[0].body.operationId }, { expectedThreadId: 't1', expectedRevision: 2, operationId: true, response: { kind: 'decision', decisionId: 'always' } });
+  p.posts[0].answer({ status: 200, body: { id: 'i3', decision: 'approve', settled: true, state: 'approved', selected: ['始终允许'] } });
+  await settle(); await settle();
+  assert.match(p.row('m-ap').textContent, /^已同意：始终允许 · 运行 npm publish$/);
+
+  const linkItem = (id: string, mid: string, url: string) => rtItem(id, mid, askLink(url), { kind: 'other', title: '团子需要你补充信息', body: '请先登录', approve: { label: '我已完成' }, reject: null });
+  const u = page({ approvals: listWith(linkItem('i4', 'm-url', 'https://login.example.com/device?code=AB12'), linkItem('i5', 'm-bad', 'javascript:alert(1)')) });
+  u.draw([rtMessage('i4', 'm-url', 'other', '需要你补充信息'), rtMessage('i5', 'm-bad', 'other', '需要你补充信息')]);
+  await settle();
+  const link = all(u.row('m-url')).find(e => e.tagName === 'A')!;
+  assert.deepEqual([link.textContent, link.href, link.target, link.rel, link.getAttribute('aria-label')], ['打开链接', 'https://login.example.com/device?code=AB12', '_blank', 'noopener noreferrer', '打开链接：login.example.com']);
+  assert.equal(u.row('m-url').querySelector('.ck-host')!.textContent, 'login.example.com');
+  assert.deepEqual(all(u.row('m-url')).filter(e => e.tagName === 'BUTTON').map(b => [b.textContent, b.className]), [['取消', 'secondary'], ['我已完成', 'primary']]);
+  const bad = u.row('m-bad');
+  assert.deepEqual(all(bad).filter(e => e.tagName === 'BUTTON').length, 0, 'a link that is not a web address is not offered');
+  assert.deepEqual(all(bad).filter(e => e.tagName === 'A').map(e => [e.textContent, e.href]), [['打开运行面板', '/runtime.html']]);
+  assert.match(bad.textContent, /这一项要在运行面板里回答。/);
+  assert.doesNotMatch(bad.html, /javascript:/);
+  button(u.row('m-url'), '取消').click();
+  assert.deepEqual(u.posts[0].body.response, { kind: 'decision', decisionId: 'stop' });
+  u.posts[0].answer({ status: 200, body: { id: 'i4', decision: 'approve', settled: true, state: 'closed' } });
+  await settle(); await settle();
+  assert.match(u.row('m-url').textContent, /^已结束/);
+
+  const formItem = () => rtItem('i6', 'm-form', askForm, { kind: 'other', title: '团子需要你补充信息', body: '寄送信息', approve: { label: '提交' }, reject: null });
+  const f = page({ approvals: listWith(formItem()) });
+  f.draw([rtMessage('i6', 'm-form', 'other', '需要你补充信息')]);
+  await settle();
+  const fc = () => f.row('m-form').querySelector('.approval')!;
+  const controls = all(fc()).filter(e => e.tagName === 'INPUT' || e.tagName === 'SELECT');
+  assert.deepEqual(controls.map(c => [c.tagName, c.type, c.tagName === 'INPUT' && c.type === 'checkbox' ? c.checked : c.value]), [
+    ['INPUT', 'text', ''], ['INPUT', 'number', '2'], ['INPUT', 'number', ''], ['SELECT', '', '1'], ['INPUT', 'checkbox', false]]);
+  assert.deepEqual(fc().querySelectorAll('.ck-field-name').map(n => n.textContent), ['收件人', '份数', '比例', '尺寸', '要包装']);
+  assert.deepEqual([controls[0].maxLength, controls[1].getAttribute('step'), controls[1].getAttribute('min'), controls[1].getAttribute('max'), controls[2].getAttribute('step')], [4, '1', '1', '5', 'any']);
+  assert.deepEqual(all(fc()).filter(e => e.tagName === 'OPTION').map(o => [o.value, o.textContent]), [['', '不填'], ['0', 'S'], ['1', 'M'], ['2', 'L']]);
+  assert.match(fc().textContent, /按平时穿的选/);
+  button(fc(), '提交').click();
+  assert.equal(invalidOf(fc()), '请填写：收件人');
+  typeIn(controls[0], '阿');
+  assert.equal(invalidOf(fc()), '', 'typing takes the check\'s words away');
+  button(fc(), '提交').click();
+  assert.equal(invalidOf(fc()), '收件人至少需要 2 个字');
+  typeIn(controls[0], '阿福');
+  typeIn(controls[1], '2.5');
+  button(fc(), '提交').click();
+  assert.equal(invalidOf(fc()), '份数需要填写整数');
+  typeIn(controls[1], '3');
+  controls[3].value = '2';
+  controls[3].dispatchEvent(new Ev('change'));
+  controls[4].checked = true;
+  controls[4].dispatchEvent(new Ev('change'));
+  assert.equal(f.posts.length, 0, 'nothing went before the check passed');
+  button(fc(), '提交').click();
+  assert.deepEqual([f.posts[0].body.expectedRevision, f.posts[0].body.response], [5, { kind: 'decision', decisionId: 'ok', content: { name: '阿福', count: 3, size: 'L', gift: true } }]);
+  // Declined: nothing filled in goes with it, and nothing needs filling in.
+  const g = page({ approvals: listWith(formItem()) });
+  g.draw([rtMessage('i6', 'm-form', 'other', '需要你补充信息')]);
+  await settle();
+  button(g.row('m-form'), '不填了').click();
+  assert.deepEqual(g.posts[0].body.response, { kind: 'decision', decisionId: 'no' });
+});
+
+test('a cat\'s own choice answered in its card: one pick, the 自定义 option\'s words, or the owner\'s own reply in place of a pick; several up to max; a confirmation is its two answers, or its one', async () => {
+  const p = page({ approvals: listWith(rtItem('i7', 'm-co', askPick, { body: '什么时候去？', approve: { label: '确认' }, reject: null })) });
+  p.draw([rtMessage('i7', 'm-co')]);
+  await settle();
+  const card = () => p.row('m-co').querySelector('.approval')!;
+  const [custom, own] = inputs(card());
+  assert.deepEqual([custom.hidden, own.placeholder, own.getAttribute('aria-label')], [true, '写下你的回答…', '你的回答']);
+  assert.deepEqual(all(card()).filter(e => e.tagName === 'BUTTON').map(b => b.textContent), ['A📅 周六', 'B周日', 'C别的时间', '确认']);
+  button(card(), '确认').click();
+  assert.equal(invalidOf(card()), '请选一项，或写下你的回答');
+  opt(card(), '别的时间').click();
+  assert.deepEqual([custom.hidden, custom.placeholder, custom.getAttribute('aria-label'), p.doc.activeElement === custom], [false, '别的时间…', '别的时间', true]);
+  button(card(), '确认').click();
+  assert.equal(invalidOf(card()), '请填写：别的时间');
+  typeIn(custom, '下周一');
+  button(card(), '确认').click();
+  assert.deepEqual(p.posts[0].body.response, { kind: 'selection', selectedIds: ['other'], customInput: '下周一' });
+  p.posts[0].answer({ status: 400, body: { error: '填写补充说明前需要先选中自定义项' } });
+  await settle(); await settle();
+  assert.match(card().textContent, /填写补充说明前需要先选中自定义项。/);
+  assert.deepEqual([inputs(card())[0].value, pressed(card())], ['下周一', ['别的时间']], 'a refusal keeps what was picked and typed');
+  // The owner's own reply instead: the pick goes, and its words with it.
+  typeIn(inputs(card())[1], '都行');
+  assert.deepEqual([pressed(card()), inputs(card())[0].hidden], [[], true]);
+  button(card(), '确认').click();
+  assert.deepEqual(p.posts[1].body.response, { kind: 'text', text: '都行' });
+
+  const m = page({ approvals: listWith(rtItem('i8', 'm-many', askSeveral, { body: '要喝什么？', approve: { label: '确认' }, reject: null })) });
+  m.draw([rtMessage('i8', 'm-many')]);
+  await settle();
+  const mc = m.row('m-many').querySelector('.approval')!;
+  const limit = mc.querySelector('.ck-limit')!;
+  assert.deepEqual([limit.textContent, limit.classList.contains('visually-hidden')], ['最多选 2 项', true]);
+  opt(mc, '果汁').click();
+  opt(mc, '咖啡').click();
+  assert.deepEqual([opt(mc, '茶').getAttribute('aria-disabled'), limit.classList.contains('visually-hidden')], ['true', false], 'at the limit the others wait, and say why');
+  opt(mc, '茶').click();
+  button(mc, '确认').click();
+  assert.deepEqual(m.posts[0].body.response, { kind: 'selection', selectedIds: ['c', 'a'] });
+
+  const c = page({ approvals: listWith(rtItem('i9', 'm-yes', askConfirm, { body: '开始整理资料？', approve: { label: '确认' }, reject: null })) });
+  c.draw([rtMessage('i9', 'm-yes')]);
+  await settle();
+  const cc = c.row('m-yes').querySelector('.approval')!;
+  assert.deepEqual(all(cc).filter(e => e.tagName === 'BUTTON').map(b => [b.textContent, b.className]), [['先不用', 'secondary'], ['开始', 'primary']]);
+  assert.equal(cc.querySelector('.ck-rt'), null);
+  button(cc, '开始').click();
+  assert.deepEqual(c.posts[0].body.response, { kind: 'selection', selectedIds: ['__confirm__'] });
+  c.posts[0].answer({ status: 200, body: { id: 'i9', decision: 'approve', settled: true, state: 'approved', selected: ['开始'] } });
+  await settle(); await settle();
+  assert.match(c.row('m-yes').textContent, /^已回答：开始 · 开始整理资料？$/);
+
+  // A confirmation of one option is that one button: nothing to cancel with is made up.
+  const one = page({ approvals: listWith(rtItem('i10', 'm-go', askGoOn, { body: '接着整理？', approve: { label: '确认' }, reject: null })) });
+  one.draw([rtMessage('i10', 'm-go')]);
+  await settle();
+  const oc = one.row('m-go').querySelector('.approval')!;
+  assert.deepEqual(all(oc).filter(e => e.tagName === 'BUTTON').map(b => [b.textContent, b.className]), [['继续', 'primary']]);
+  assert.equal(oc.querySelector('.ck-rt'), null);
+  assert.doesNotMatch(oc.textContent, /运行面板/, 'answered here, not sent to the runtime panel');
+  button(oc, '继续').click();
+  assert.deepEqual(one.posts[0].body.response, { kind: 'selection', selectedIds: ['__confirm__'] });
+});
+
+test('a card on an earlier page settles from the engine\'s receipt on the newest one, from the settled read asked for by ID, or from the answer\'s own reply; with nothing anywhere it says 已处理 once everything was read again, never 已提交 for good', async () => {
+  const older = { ...cardMessage(), id: 'm-old' };
+  const later = { id: 'u2', role: 'user', content: '后来说的话' };
+  // The receipt is on the newest page, the card on one held from before.
+  const a = page({ approvals: listWith() });
+  a.draw([older, later, { id: 'n-r', role: 'assistant', notice: true, content: '已记住这个偏好。', receipt: { proposalId: 'p1', state: 'approved' } }]);
+  await settle();
+  assert.match(a.row('m-old').textContent, /^已记住这个偏好 · 回答简短一点，先说结论$/);
+  assert.deepEqual(a.calls, [], 'known from the receipt: nothing to ask');
+  // The engine's own receipt message as the row carries it.
+  const hubReceipt = (cardMessageId: string) => ({ id: 'n-x', role: 'assistant', notice: true, content: '没有记这个偏好。',
+    native: { source: { connector: 'approval-hub', meta: { approvalDecisionReceipt: { kind: 'approval_decision_receipt', canonicalProposalId: 'p1', resolution: 'rejected', approvalCardRef: { messageId: cardMessageId } } } } } });
+  const b = page({ approvals: listWith() });
+  b.draw([older, later, hubReceipt('m-old')]);
+  await settle();
+  assert.match(b.row('m-old').textContent, /^没有记这个偏好/);
+  // A receipt that names another message is not this card's.
+  const c = page({ approvals: listWith() });
+  c.draw([older, later, hubReceipt('m-elsewhere')]);
+  await settle();
+  assert.match(c.row('m-old').textContent, /^已处理/);
+  // The same for the receipt as the server projects it on the row (receipt.cardMessageId).
+  const served = (cardMessageId: string) => ({ id: 'n-s', role: 'assistant', notice: true, content: '已记住这个偏好。',
+    receipt: { proposalId: 'p1', producerId: 'taste', state: 'approved', cardMessageId } });
+  const c2 = page({ approvals: listWith() });
+  c2.draw([older, later, served('m-elsewhere')]);
+  await settle();
+  assert.match(c2.row('m-old').textContent, /^已处理/, 'a projected receipt for another message never settles this card');
+  const c3 = page({ approvals: listWith() });
+  c3.draw([older, later, served('m-old')]);
+  await settle();
+  assert.match(c3.row('m-old').textContent, /^已记住这个偏好 · 回答简短一点，先说结论$/);
+  assert.deepEqual(c3.calls, [], 'known from the receipt: nothing to ask');
+
+  // No receipt on any page held: a card on an earlier page is asked about by ID; one on the newest page is listed anyway.
+  const asks: string[] = [];
+  const d = page({ latest: () => new Set(['u-new']), approvals: (path) => { asks.push(path); return { threadId: 't1', approvals: [], settled: path.endsWith('?ids=p1') ? [{ id: 'p1', state: 'rejected' }] : [] }; } });
+  d.draw([older, { id: 'u-new', role: 'user', content: '新的一页' }]);
+  await settle(); await settle();
+  assert.deepEqual(asks, ['/xbot-api/bots/%E5%9B%A2%E5%AD%90/approvals?ids=p1']);
+  assert.match(d.row('m-old').textContent, /^没有记这个偏好/);
+  const onNewest: string[] = [];
+  const e = page({ latest: () => new Set(['m-card']), approvals: (path) => { onNewest.push(path); return { threadId: 't1', approvals: [pref] }; } });
+  e.draw([cardMessage()]);
+  await settle();
+  assert.deepEqual(onNewest, ['/xbot-api/bots/%E5%9B%A2%E5%AD%90/approvals']);
+
+  // Answered from here: the next read asks about it by ID, and the engine's settled state names the outcome.
+  let open = [pref];
+  const paths: string[] = [];
+  const f = page({ approvals: (path) => { paths.push(path); return !open.length && path.endsWith('?ids=p1') ? { threadId: 't1', approvals: [], settled: [{ id: 'p1', state: 'approved' }] } : { threadId: 't1', approvals: open }; } });
+  f.draw([cardMessage()]);
+  await settle();
+  button(f.row('m-card'), '记住').click();
+  open = [];
+  f.posts[0].answer({ status: 200, body: { id: 'p1', decision: 'approve', settled: true } });
+  await settle(); await settle();
+  assert.equal(paths.at(-1), '/xbot-api/bots/%E5%9B%A2%E5%AD%90/approvals?ids=p1');
+  assert.match(f.row('m-card').textContent, /^已记住这个偏好 · /);
+
+  // Nothing anywhere says how: 已提交 while the receipt may still come; once the list and the conversation were both read after the answer, 已处理.
+  let still = [pref];
+  let finish: () => void = () => {};
+  const g = page({ approvals: () => ({ threadId: 't1', approvals: still }), reload: () => new Promise<void>((done) => { finish = done; }) });
+  const history = [cardMessage()];
+  g.draw(history);
+  await settle();
+  button(g.row('m-card'), '记住').click();
+  still = [];
+  g.posts[0].answer({ status: 200, body: { id: 'p1', decision: 'approve', settled: true } });
+  await settle(); await settle();
+  assert.match(g.row('m-card').textContent, /^已提交 · /);
+  // A read of the conversation that is not the one asked for after the answer is not enough.
+  g.draw(history);
+  await settle(); await settle();
+  assert.match(g.row('m-card').textContent, /^已提交 · /);
+  finish();
+  await settle(); await settle();
+  assert.match(g.row('m-card').textContent, /^已处理 · 回答简短一点，先说结论$/);
+});
+
+test('more than 50 cards on earlier pages are asked about 50 a read, one read after another, and taken together once all came back: the 51st is answerable, never 已处理', async () => {
+  const ids = Array.from({ length: 51 }, (_, i) => 'p' + i);
+  const messages = ids.map((id, i) => ({ ...cardMessage(), id: 'm-' + i, blocks: [{ ...fact(), id: 'card-' + i, approval: { ...fact().approval, id } }] }));
+  const asks: string[][] = [];
+  let release: () => void = () => {};
+  const p = page({ latest: () => new Set(['u-new']), approvals: (path) => {
+    const part = (/\?ids=(.*)$/.exec(path)?.[1] ?? '').split(',').filter(Boolean).map(decodeURIComponent);
+    asks.push(part);
+    // p0 ended (the engine's settled read); the others are still open.
+    const reply = { threadId: 't1', approvals: part.filter(id => id !== 'p0').map(id => ({ ...pref, id, messageId: 'm-' + id.slice(1) })), settled: part.includes('p0') ? [{ id: 'p0', state: 'rejected' }] : [] };
+    return asks.length === 2 ? new Promise((done) => { release = () => done(reply); }) : reply;
+  } });
+  p.draw([...messages, { id: 'u-new', role: 'user', content: '新的一页' }]);
+  await settle(); await settle();
+  assert.deepEqual(asks.map(a => a.length), [50, 1], 'at most 50 a read (the server\'s limit)');
+  assert.deepEqual(asks.flat(), ids, 'every card asked about, once');
+  // Nothing is taken while a read is still on its way.
+  assert.equal(p.cards.peek().listState, 'loading');
+  assert.match(p.row('m-0').textContent, /正在读取…/);
+  assert.match(p.row('m-50').textContent, /正在读取…/);
+  release();
+  await settle(); await settle();
+  assert.equal(p.cards.peek().listState, 'ready');
+  assert.equal(p.cards.peek().list.length, 50);
+  const last = p.row('m-50');
+  assert.doesNotMatch(last.textContent, /已处理/);
+  assert.equal(button(last, '记住').getAttribute('aria-disabled'), null, 'the 51st is answerable');
+  assert.equal(button(p.row('m-49'), '记住').getAttribute('aria-disabled'), null);
+  assert.match(p.row('m-0').textContent, /^没有记这个偏好/, 'settled from the first read');
+});
+
+test('去确认 for a card further back than the history drawn finds its message on an earlier page through chat-locate.js and focuses the card itself; past the page limit or the start it says why and resolves without finding', async () => {
+  const far = { ...cardMessage(), id: 'm-far', blocks: [{ ...fact(), approval: { ...fact().approval, id: 'p-far' } }] };
+  const filler = (n: number) => [{ id: 'u-' + n + '-a', role: 'user', content: '第 ' + n + ' 页' }, { id: 'u-' + n + '-b', role: 'assistant', content: '好的' }];
+  const setup = (pages: Any[][]) => {
+    const notes: string[] = [];
+    let shown: Any[] = [{ id: 'u-new', role: 'user', content: '最新的话' }];
+    let asked = 0, loaded = 0;
+    const hold: Any = {};
+    const p = page({ approvals: listWith({ ...pref, id: 'p-far', messageId: 'm-far' }), locate: (item: Any) => hold.find({ sel: p.sel, messageId: item.messageId }) });
+    const L = p.window.ClowderLocate;
+    hold.find = L.find;
+    // The history's own loader as chat-history.js offers it: one earlier page per load, drawn before it resolves.
+    const history = {
+      older: () => ({ key: 'bot:团子', gen: 1, state: 'idle', more: pages.length > 0, loaded, drawn: loaded, error: '', asked, failures: 0 }),
+      load: async () => { asked++; const one = pages.pop(); if (one) { shown = [...one, ...shown]; loaded++; p.draw(shown); } },
+      whenDrawn: async () => true,
+    };
+    L.init({ thread: p.thread, selected: () => p.sel, history, note: (text: string) => notes.push(text), rest: () => {} });
+    p.draw(shown);
+    return { p, notes, asked: () => asked };
+  };
+  const item = { proposalId: 'p-far', messageId: 'm-far' };
+  const { p, notes } = setup([[far, ...filler(2)], filler(1)]);
+  await settle();
+  assert.equal(p.cards.find(item), false, 'not drawn yet');
+  assert.equal(await p.cards.locate(item), true);
+  await settle(); await settle();
+  const card = p.row('m-far').querySelector('.approval')!;
+  assert.equal(p.doc.activeElement, card, 'the card itself has focus, not only its message');
+  assert.ok(card.classList.contains('ck-hit'), 'and flashes, even drawn again when its list read came back');
+  assert.equal(button(card, '记住').getAttribute('aria-disabled'), null, 'answerable where it was found');
+  assert.equal(notes.at(-1), '', 'the search\'s note is taken back once found');
+  // Past the limit: the search stops and says so; nothing is found.
+  const deep = setup([[far], ...Array.from({ length: 12 }, (_, i) => filler(i))]);
+  await settle();
+  assert.equal(await deep.p.cards.locate(item), null);
+  assert.equal(deep.notes.at(-1), '往前翻了 10 页还没找到这条消息，先停在这里；可以接着往上翻看。');
+  assert.equal(deep.asked(), 10);
+  assert.equal(deep.p.row('m-far'), undefined);
+  // The start of the conversation, and no such message.
+  const short = setup([filler(1)]);
+  await settle();
+  assert.equal(await short.p.cards.locate(item), null);
+  assert.equal(short.notes.at(-1), '翻到了这段对话最早的消息，也没有找到这一条。');
+  // Nothing to look for, or no way to look further back.
+  assert.equal(await p.cards.locate({ proposalId: 'gone' }), false);
+  assert.equal(await page().cards.locate(item), false);
+});
+
+test('a card found where it is drawn ends a lookup still reading earlier pages: no further page, its note goes, the focus stays on the card found, and the 去确认 that began it has nothing to say', async () => {
+  const far = { ...cardMessage(), id: 'm-far', blocks: [{ ...fact(), approval: { ...fact().approval, id: 'p-far' } }] };
+  const filler = (n: number) => [{ id: 'u-' + n + '-a', role: 'user', content: '第 ' + n + ' 页' }, { id: 'u-' + n + '-b', role: 'assistant', content: '好的' }];
+  const farItem = { proposalId: 'p-far', messageId: 'm-far' };
+  // The card m-card (p1) is drawn; p-far is two pages back. Each earlier page waits until the test lets it come.
+  const setup = () => {
+    const notes: string[] = [];
+    const pages: Any[][] = [[far], filler(2), filler(1)];
+    let shown: Any[] = [cardMessage()];
+    let asked = 0, loaded = 0;
+    const waits: Array<() => void> = [];
+    const hold: Any = {};
+    const p = page({ approvals: listWith(pref, { ...pref, id: 'p-far', messageId: 'm-far' }),
+      locate: (item: Any) => hold.L.find({ sel: p.sel, messageId: item.messageId }), cancelLocate: () => hold.L.cancel() });
+    hold.L = p.window.ClowderLocate;
+    hold.L.init({ thread: p.thread, selected: () => p.sel, note: (text: string) => notes.push(text), rest: () => {}, history: {
+      older: () => ({ key: 'bot:团子', gen: 1, state: 'idle', more: pages.length > 0, loaded, drawn: loaded, error: '', asked, failures: 0 }),
+      load: () => new Promise<void>((done) => { asked++; waits.push(() => { const one = pages.pop(); if (one) { shown = [...one, ...shown]; loaded++; p.draw(shown); } done(); }); }),
+      whenDrawn: async () => true,
+    } });
+    p.draw(shown);
+    const next = async () => { waits.shift()!(); await settle(); await settle(); };
+    return { p, notes, asked: () => asked, next, near: () => p.row('m-card').querySelector('.approval')! };
+  };
+
+  // 去确认 for p1, drawn, while an earlier 去确认 for p-far is still reading back.
+  const a = setup();
+  await settle();
+  const going = a.p.cards.locate(farItem);
+  await settle();
+  assert.deepEqual([a.asked(), a.notes.at(-1)], [1, '正在往前找这条消息…']);
+  assert.equal(a.p.cards.find({ proposalId: 'p1' }), true);
+  assert.equal(a.notes.at(-1), '', 'the lookup\'s note goes with it');
+  assert.equal(a.p.doc.activeElement, a.near());
+  await a.next();
+  assert.equal(await going, undefined, 'gave way: nothing to say about it');
+  assert.equal(a.asked(), 1, 'no further page is read');
+  assert.equal(a.p.doc.activeElement, a.near(), 'the page that came late takes neither the scroll nor the focus');
+  assert.equal(a.notes.filter(t => t).length, 1, 'and puts up no note of its own');
+
+  // A notification's card, found once its chat has drawn, does the same.
+  const b = setup();
+  await settle();
+  const before = b.p.cards.locate(farItem);
+  await settle();
+  b.p.cards.locateSoon(b.p.sel, { proposalId: 'p1', messageId: 'm-card' });
+  assert.equal(b.p.doc.activeElement, b.near());
+  await b.next();
+  assert.equal(await before, undefined);
+  assert.equal(b.asked(), 1);
+
+  // A newer lookup: the older one gives way, the newer one finds the card.
+  const c = setup();
+  await settle();
+  const first = c.p.cards.locate(farItem);
+  await settle();
+  const second = c.p.cards.locate(farItem);
+  await settle();
+  await c.next();
+  assert.equal(await first, undefined);
+  await c.next();
+  await c.next();
+  assert.equal(await second, true);
+  assert.equal(c.p.doc.activeElement, c.p.row('m-far').querySelector('.approval'));
+});
+
+test('a search of the palette or a quote\'s jump that takes over from 去确认 still reading earlier pages: the lookup ends quietly and 去确认 resolves undefined, nothing to say; the lookup that took over finds its message', async () => {
+  const far = { ...cardMessage(), id: 'm-far', blocks: [{ ...fact(), approval: { ...fact().approval, id: 'p-far' } }] };
+  const filler = (n: number) => [{ id: 'u-' + n + '-a', role: 'user', content: '第 ' + n + ' 页' }, { id: 'u-' + n + '-b', role: 'assistant', content: '好的' }];
+  const farItem = { proposalId: 'p-far', messageId: 'm-far' };
+  const notes: string[] = [];
+  const pages: Any[][] = [[far], filler(2), filler(1)];
+  let shown: Any[] = [{ id: 'u-new', role: 'user', content: '最新的话' }, cardMessage()];
+  let asked = 0, loaded = 0, open: Any = null, inflight: Promise<void> | null = null;
+  const waits: Array<() => void> = [];
+  const hold: Any = {};
+  // Wired as app.js wires it: the lookup's quiet end is told back.
+  const p = page({ approvals: listWith(pref, { ...pref, id: 'p-far', messageId: 'm-far' }),
+    locate: (item: Any, onCancel?: () => void) => hold.L.find({ sel: p.sel, messageId: item.messageId, onCancel }), cancelLocate: () => hold.L.cancel() });
+  hold.L = p.window.ClowderLocate;
+  open = p.sel;
+  // The history's loader as chat-history.js offers it: a lookup's load joins the page already on its way.
+  hold.L.init({ thread: p.thread, selected: () => open, note: (text: string) => notes.push(text), rest: () => {}, history: {
+    older: () => ({ key: 'bot:团子', gen: 1, state: 'idle', more: pages.length > 0, loaded, drawn: loaded, error: '', asked, failures: 0 }),
+    load: () => inflight || (inflight = new Promise<void>((done) => { asked++; waits.push(() => { inflight = null; const one = pages.pop(); if (one) { shown = [...one, ...shown]; loaded++; p.draw(shown); } done(); }); })),
+    whenDrawn: async () => true,
+  } });
+  p.draw(shown);
+  await settle();
+  const next = async () => { waits.shift()!(); await settle(); await settle(); };
+  // A search hit drawn already (the palette's find), while 去确认 reads back.
+  const going = p.cards.locate(farItem);
+  await settle();
+  assert.equal(asked, 1);
+  assert.equal(await hold.L.find({ sel: p.sel, messageId: 'u-new' }), true);
+  await next();
+  assert.equal(await going, undefined, 'given way: nothing to say about it');
+  assert.equal(asked, 1, 'no further page');
+  assert.equal(p.doc.activeElement, p.row('u-new'), 'the search\'s message keeps the focus');
+  // A quote's jump to a message further back, while 去确认 reads back: the jump reads on and finds its message.
+  const again = p.cards.locate(farItem);
+  await settle();
+  const jump = hold.L.find({ sel: p.sel, messageId: 'u-2-a' });
+  await next();
+  assert.equal(await again, undefined);
+  assert.equal(await jump, true);
+  assert.equal(p.doc.activeElement, p.row('u-2-a'));
+  assert.equal(p.row('m-far'), undefined, 'a page further back, never read');
+  assert.equal(asked, 2);
+  // Another chat opened meanwhile ends it just as quietly.
+  const left = p.cards.locate(farItem);
+  await settle();
+  open = { type: 'bot', id: '栗子' };
+  await next();
+  assert.equal(await left, undefined);
+  // Only a search that stopped and said why is null: nothing earlier to read, and the card not there.
+  open = p.sel;
+  assert.equal(pages.length, 0);
+  assert.equal(await p.cards.locate({ proposalId: 'p-gone', messageId: 'm-gone' }), null);
+  assert.equal(notes.at(-1), '这条消息不在这段对话里，也没有更早的记录可以翻了。');
 });
 
 const choiceMessage = (block: Any) => ({ id: 'm-pick', role: 'assistant', content: '你想要哪一种？', native: { replyTo: 'u1' }, blocks: [block] });
@@ -1109,7 +1865,10 @@ test('the page loads the round\'s scripts before app.js and its styles just befo
   // A pick and 再发一次 use the normal send path with a card of their own, told when the server took the message.
   assert.match(app, /async function sendText\(text, pending, images, files, card\)/);
   assert.match(app, /markSent\(\);\n\s+try \{ if \(card && card\.sent\) card\.sent\(\); \}/);
-  assert.match(app, /confirm: \(item\) => cards\.find\(item\)/);
+  // 去确认: the card in the history, else its message on earlier pages (chat-locate.js), then the card itself (item 59).
+  assert.match(app, /confirm: \(item\) => cards\.find\(item\) \|\| \(item && item\.messageId \? cards\.locate\(item\) : false\),/);
+  // A search of its own that ended quietly (a search, a quote's jump, another chat) is told back as onCancel.
+  assert.match(app, /cards\.init\(\{[\s\S]*?locate: \(item, onCancel\) => locate\.find\(\{ sel: state\.sel, messageId: item\.messageId, onCancel \}\),[\s\S]*?cancelLocate: \(\) => locate\.cancel\(\),[\s\S]*?latest: \(\) => chatHistory\.latest\(\),\n  \}\);/);
   assert.doesNotMatch(app + read('client/public/chat-experience.js'), /approvalLabel/, 'the server names waiting requests in everyday words now');
   // Notifications never touch the document title (the contact list owns its count).
   for (const f of ['chat-notify.js', 'chat-notify-rules.js', 'chat-cards.js']) assert.doesNotMatch(read('client/public/' + f), /document\.title/);

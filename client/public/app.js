@@ -7753,8 +7753,9 @@
       const row = reactionRules.readFirst(state.drawn.messages, id);
       return [...liveRules.displaced(state.drawn, id), ...row, ...row.flatMap((r) => liveRules.displaced(state.drawn, r))];
     },
-    // 去确认 finds the request's card in the history (chat-cards.js).
-    confirm: (item) => cards.find(item),
+    // 去确认 finds the request's card in the history (chat-cards.js), or on an
+    // earlier page when it is not drawn (a promise; chat-locate.js reads back).
+    confirm: (item) => cards.find(item) || (item && item.messageId ? cards.locate(item) : false),
     // A confirmed read clears that conversation's dot at once; the next status poll agrees.
     onRead: (sel, threadId) => {
       const st = sel.type === "group" ? stStatus.groups[sel.id] : stStatus.map[sel.id];
@@ -7803,6 +7804,13 @@
     // A card's own words: the composer's draft and quote are left alone.
     send: (text, sent) => sendText(text, null, null, null, { sent }),
     reload: () => { state.sig = ""; return loadThread().catch(() => {}); },
+    // A request's card further back than the history drawn (去确认): its message on earlier pages (chat-locate.js);
+    // onCancel: that search ended quietly (a search, a quote's jump or another chat took over).
+    locate: (item, onCancel) => locate.find({ sel: state.sel, messageId: item.messageId, onCancel }),
+    // A card found where it is drawn ends a lookup still reading back (a search, an earlier 去确认).
+    cancelLocate: () => locate.cancel(),
+    // Which messages are the newest page's: a card on an earlier one is asked about by ID (chat-history.js).
+    latest: () => chatHistory.latest(),
   });
   // Desktop notifications (chat-notify.js), from the status polled above: a
   // click focuses the tab and opens that chat (and finds a request's card).

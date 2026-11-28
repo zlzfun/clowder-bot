@@ -21,7 +21,7 @@ UI 保留 Bot 名称和文件夹概念，实际成员、执行和历史以 Clowd
 | 头像/文件夹/置顶 | Bot presentation store |
 | 每只猫的强调色 | `bots[].accent {primary, secondary}` 取自原生成员的 `color`（只在两个值都是 `#rrggbb` 时下发），供聊天里做低调的强调色 |
 
-运行面板补充原生队列、会话链、原生消息分页、记忆 catalog/search、Agent 与审批。F306 question/approval/elicitation 使用原生 revision、cardRef、operationId；其他支持内联操作的审批按原生 manifest 转发。需要完整原生会话卡片的交互不会自动批准。
+运行面板补充原生队列、会话链、原生消息分页、记忆 catalog/search、Agent 与审批。F306 `question`/`approval`/`elicitation`/`conversation_decision` 已适配到聊天卡片与 `GET/POST /xbot-api/<bots|groups>/:chat/approvals`（通过原生 `/api/runtime-interactions/:id[/respond|/reject]` 使用原生 `revision`、`cardRef`、`operationId` 并核对终态）；其他支持内联操作的审批按原生 manifest 转发；极少数不支持内联的子类型保留在运行面板回答，不会自动批准。
 
 ## 开箱即用
 

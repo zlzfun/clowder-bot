@@ -241,6 +241,69 @@ test('a newer lookup takes the older one\'s note down; the older one\'s late end
   assert.equal(p.toast.text, '已复制');
 });
 
+test('cancel() ends a lookup under way before its next page, quietly: its note goes, the page already asked for never takes the focus; another toast stays, and a new lookup works', async () => {
+  const p = page({ total: 60, per: 10, auto: false });
+  const going = p.L.find({ sel: p.app.sel, seq: 23 });
+  await p.settle();
+  assert.deepEqual([p.calls.length, p.toast.text], [1, '正在往前找这条消息…']);
+  p.L.cancel();
+  assert.equal(p.toast.text, '', 'its note goes at once');
+  p.pending.shift()!.resolve({});
+  assert.equal(await going, null);
+  assert.equal(p.calls.length, 1, 'no further page');
+  assert.equal(p.doc.activeElement, p.doc.body, 'nothing takes the focus');
+  assert.deepEqual(p.toast.log, ['正在往前找这条消息…']);
+  // Nothing under way: the shell's own toast is left alone.
+  p.toast.text = '已复制';
+  p.L.cancel();
+  assert.equal(p.toast.text, '已复制');
+  // The next lookup is not affected.
+  assert.equal(await p.L.find({ sel: p.app.sel, seq: 55 }), true);
+  assert.equal(p.doc.activeElement, p.row(55));
+});
+
+test('onCancel tells a caller its lookup ended quietly — a newer lookup, cancel(), another chat, its still() — and is never called when it found the message, stopped and said why, or never began; what find resolves to stays the same', async () => {
+  const p = page({ total: 60, per: 10, auto: false });
+  let quiet = 0;
+  const onCancel = () => { quiet++; };
+  const never = () => assert.fail('not a quiet end');
+  // A newer lookup (a search of the palette, a quote's jump) takes over.
+  const first = p.L.find({ sel: p.app.sel, seq: 3, onCancel });
+  await p.settle();
+  assert.equal(await p.L.find({ sel: p.app.sel, seq: 55, onCancel: never }), true, 'found: no onCancel');
+  p.pending.shift()!.resolve({});
+  assert.equal(await first, null, 'null as before');
+  assert.equal(quiet, 1);
+  // cancel() (a card found where it is drawn).
+  const second = p.L.find({ sel: p.app.sel, seq: 13, onCancel });
+  await p.settle();
+  p.L.cancel();
+  p.pending.shift()!.resolve({});
+  assert.equal(await second, null);
+  assert.equal(quiet, 2);
+  // Its own still() moving on (the palette reopened).
+  let still = true;
+  const third = p.L.find({ sel: p.app.sel, seq: 13, still: () => still, onCancel });
+  await p.settle();
+  still = false;
+  p.pending.shift()!.resolve({});
+  assert.equal(await third, null);
+  assert.equal(quiet, 3);
+  // Another chat opened meanwhile.
+  const fourth = p.L.find({ sel: p.app.sel, seq: 13, onCancel });
+  await p.settle();
+  p.app.sel = { type: 'bot', id: '栗子' };
+  p.pending.shift()!.resolve({});
+  assert.equal(await fourth, null);
+  assert.equal(quiet, 4);
+  // No such chat open: false, nothing began.
+  assert.equal(await p.L.find({ sel: { type: 'bot', id: '团子' }, seq: 13, onCancel: never }), false);
+  // A search that stopped and said why: null with its words, no onCancel.
+  const q = page({ total: 30, per: 10 });
+  assert.equal(await q.L.find({ sel: q.app.sel, seq: 1000, onCancel: never }), null);
+  assert.equal(q.toast.text, '翻到了这段对话最早的消息，也没有找到这一条。');
+});
+
 test('wiring: the palette passes its operation, the shell its notes with owners; a quote\'s jump goes through it', () => {
   const html = read('client/index.html'), app = read('client/public/app.js'), pal = read('client/public/palette.js'), hist = read('client/public/chat-history.js');
   const scripts = [...html.matchAll(/<script src="\/([^"]+)"><\/script>/g)].map(m => m[1]);

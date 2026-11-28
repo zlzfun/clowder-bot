@@ -236,6 +236,15 @@
 
 **前端**：已完成并合入（第 60 项，`f279edd8`）：由本机 Claude Code（`claude-opus-5-5`，xhigh）实现。自定义应用详情页顶栏增加「停用／启用」，下方增加「猫猫」按猫开关列表，「是什么」一栏增加「编辑」原位修改程序/参数（支持整行粘贴自动拆分）或网址、只提交改动项。经过 Codex（`gpt-6-astra`，xhigh）两轮只读检视，4 条问题全部修正（停用态本机程序隐藏编辑并拒绝启动探活、写请求序号防止旧列表读取覆盖刚确认的写状态、503 保存失败保留 `off` 状态、按猫开关撞上 409 `app_disabled` 且列表读取失败时照实落为已停用）。全量测试通过。
 
+<a id="round-22"></a>
+### 第 22 轮 · 对话里回答猫的提问与跨页确认定位（2026-11-28）
+
+**内容**：完成待办 `T-04`。接通上游 F306 运行交互读写接口，使猫提出的提问、审批、链接/表单征询与对话内选项决定都能直接在聊天卡片里回答；补齐「去确认」跨页往前加载定位（最多 10 页）和早先页确认卡的已结算状态同步。
+
+**后端（适配层）**：已完成并合入（`378c9db3`）：新增 `server/native/runtime-interactions.ts`，从审批中心与消息 `extra.runtimeInteractionCard` 发现并受控并发读取 `/api/runtime-interactions/:id`，映射 `question`、`approval`、`elicitation`（`url`／`form`，严格校验 `http:`/`https:`）与 `conversation_decision` 四类交互；`POST /xbot-api/.../approvals/:id` 对齐 `cardRef`、`expectedRevision` 与幂等 `operationId` 转发原生 `respond`／`reject` 并回读终态（非用户决定的终态如 `defaulted`／`expired` 如实归为 `closed`）；`GET .../approvals?ids=...` 与历史分页读取补齐已结算回执状态。详见 [聊天体验适配契约](../chat-experience-api.md)「等你确认的事」。
+
+**前端**：已完成并合入（第 59 项，`378c9db3`）：由本机 Claude Code（`claude-opus-5-5`，xhigh）实现。`chat-cards*` 支持单题/多题、单选/多选、「其他」自定义输入、密码输入、可跳过题目、链接/表单征询与对话决定的原位作答及内存草稿保持；`GET .../approvals?ids=...` 按 50 条分批查询早先页卡片结果；「去确认」复用 `ClowderLocate` 往前翻页定位卡片并处理并发查找取消。经过 Codex（`gpt-6-astra`，xhigh）两轮只读检视，13 条问题全部修正。全量测试通过。
+
 ## 部署记录
 
 部署的做法在 [验证环境与部署](../operations.md)。第 17、18 轮的部署、2026-11-26 日常实例换引擎和 2026-11-27 部署「同一时间只有一只猫」只写在上面各轮自己的记录里，换引擎的经过另见 [上游维护记录](upstream-records.md)。

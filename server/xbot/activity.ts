@@ -32,13 +32,27 @@ export function createActivityRouter(bridge: BotBridge) {
     // What cats asked the owner to confirm here, and the owner's answer to one of them.
     router.get<{chat:string}>(`${scope}/approvals`, async (req,res) => {
       const {thread}=await context(String(req.params.chat));
-      res.json({threadId:thread.id,approvals:await bridge.approvals.list(thread.id)});
+      const rawIds = typeof req.query.ids === 'string' ? req.query.ids.split(',').map(s => s.trim()).filter(Boolean) : [];
+      const ids = z.array(z.string().min(1).max(200)).max(50).parse(rawIds);
+      const view = await bridge.approvals.listView(thread.id, ids);
+      res.json({threadId:thread.id,approvals:view.approvals,...(view.settled.length?{settled:view.settled}:{})});
     });
     router.post<{chat:string;id:string}>(`${scope}/approvals/:id`, async (req,res) => {
-      const {decision,expectedThreadId}=z.object({decision:z.enum(['approve','reject']),expectedThreadId:z.string().min(1).max(200)}).strict().parse(req.body);
+      const input=z.object({
+        decision:z.enum(['approve','reject']).optional(),
+        response:z.unknown().optional(),
+        expectedRevision:z.number().int().positive().optional(),
+        operationId:z.string().trim().min(1).max(200).optional(),
+        expectedThreadId:z.string().min(1).max(200),
+      }).strict().refine(v => v.decision !== undefined || v.response !== undefined, { message: '请提供确认决定或回答内容' }).parse(req.body);
       const {thread}=await context(String(req.params.chat));
-      if(thread.id!==expectedThreadId)throw new ApiError(409,'对话已变化，请刷新后重试');
-      res.json(await bridge.approvals.decide(thread.id,String(req.params.id),decision));
+      if(thread.id!==input.expectedThreadId)throw new ApiError(409,'对话已变化，请刷新后重试');
+      res.json(await bridge.approvals.decide(thread.id,String(req.params.id),{
+        ...(input.decision?{decision:input.decision}:{}),
+        ...(input.response!==undefined?{response:input.response}:{}),
+        ...(input.expectedRevision!==undefined?{expectedRevision:input.expectedRevision}:{}),
+        ...(input.operationId?{operationId:input.operationId}:{}),
+      }));
     });
     // Record that the owner answered a cat's choice block. The answer itself is an ordinary chat message
     // sent through the normal route; this only tells native which options were picked, so the block stops asking.

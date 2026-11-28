@@ -1,10 +1,11 @@
 import { ApiError } from '../errors.js';
 import type { BotBridge, QueueView } from './bridge.js';
-import { messageDisplayText, messagePresentation } from './message-presentation.js';
+import { approvalReceipt, messageDisplayText, messagePresentation } from './message-presentation.js';
 import type { NativeCat, NativeMessage } from './types.js';
 import { clip, plainLine } from './text.js';
 import { blockLine, messageBlocks, requestLine } from './blocks.js';
 import { approvalLine } from './approvals.js';
+import { readRuntimeInteractionsPartial, runtimeCardBinding, runtimeSummary } from './runtime-interactions.js';
 
 export interface ActivityItem {
   id: string; kind: 'approval'|'failure'|'running'|'queued'|'task'; label: string; threadId: string;
@@ -57,6 +58,7 @@ export class Activity {
     ]);
     const sources = ['queue', 'tasks', 'messages', 'approvals'];
     let ready = 0;
+    let threadMessages: NativeMessage[] = [];
     for (const [index, result] of inputs.entries()) {
       if (result.status === 'rejected') { view.errors.push({source:sources[index]!,message:'暂时无法确认进度，请重试'}); continue; }
       try {
@@ -87,6 +89,7 @@ export class Activity {
           }
         } else if (index === 2) {
           if (!Array.isArray(data.messages) || typeof data.hasMore !== 'boolean') throw new Error('messages unavailable');
+          threadMessages = data.messages as NativeMessage[];
           const replies = this.visibleReplies(threadId, data.messages, names), cursor = this.bridge.store.state.readCursors[threadId];
           const unread = replies.filter(message => after(message, cursor));
           view.unread = unread.length;
@@ -131,9 +134,41 @@ export class Activity {
         ready++;
       } catch { view.errors.push({source:sources[index]!,message:'暂时无法确认进度，请重试'}); }
     }
+    // Upstream F306ApprovalAdapter only projects `approval` into approval-hub/pending;
+    // discover pending `question` / `elicitation` / `conversation_decision` cards from messages.
+    let runtimeFailed = false;
+    if (threadMessages.length) {
+      const knownF306 = new Set(view.items.filter(i => i.kind === 'approval' && i.proposalId).map(i => i.proposalId!));
+      const receiptSettled = new Set(
+        threadMessages.map(approvalReceipt).filter((r): r is NonNullable<typeof r> => !!r && r.producerId === 'F306').map(r => r.proposalId),
+      );
+      const extraIds = threadMessages
+        .map(runtimeCardBinding)
+        .filter((b): b is NonNullable<typeof b> => !!b && !knownF306.has(b.interactionId) && !receiptSettled.has(b.interactionId))
+        .map(b => b.interactionId);
+      if (extraIds.length) {
+        const { records: interactions, failed } = await readRuntimeInteractionsPartial(this.bridge.native, extraIds);
+        if (failed) {
+          runtimeFailed = true;
+          view.errors.push({ source: 'runtime-interactions', message: '暂时无法确认进度，请重试' });
+        }
+        for (const [id, rec] of interactions) {
+          if (rec.status !== 'pending') continue;
+          const cardRef = record(rec.cardRef), req = record(rec.request), owner = record(req.owner);
+          const cardThread = cardRef.threadId ?? owner.threadId;
+          if (cardThread !== threadId || typeof cardRef.messageId !== 'string') continue;
+          const line = runtimeSummary(rec);
+          view.items.push({
+            id: `approval:F306:${id}`, kind: 'approval', threadId,
+            messageId: cardRef.messageId, proposalId: id, ...annotate(owner.catId),
+            label: line ? `等你确认：${line}` : '等你确认',
+          });
+        }
+      }
+    }
     view.items = [...new Map(view.items.map(item => [item.id,item])).values()].sort((a,b)=>rank[a.kind]-rank[b.kind]);
     for (const item of view.items) view.counts[item.kind]++;
-    view.readStatus = ready === inputs.length ? 'ready' : ready ? 'partial' : 'unavailable';
+    view.readStatus = ready === inputs.length && !runtimeFailed ? 'ready' : ready ? 'partial' : 'unavailable';
     return view;
   }
   async acknowledge(threadId: string, messageId: string, stillCurrent: () => boolean) {

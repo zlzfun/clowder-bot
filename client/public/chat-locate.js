@@ -2,14 +2,20 @@
 // loaded history (classic script, window.ClowderLocate). Loads after
 // chat-locate-rules.js and chat-history.js and before app.js, which calls
 // init() once; then:
-//   find({sel, messageId?, seq?, still?})  scroll to the message, flash it and
-//       give it focus. When it is not on screen, earlier pages are read through
-//       the history's own loader (ClowderHistory.load), within a budget of
-//       page requests (the history's own reading through empty pages counts),
-//       and each page is waited for until it is actually drawn, with one quiet
-//       progress note; a search that cannot find it stops and says why.
-//       Resolves to true (found), null (not found, and the owner was told why,
-//       or the lookup ended quietly) or false (no such chat open).
+//   find({sel, messageId?, seq?, still?, onCancel?})  scroll to the message,
+//       flash it and give it focus. When it is not on screen, earlier pages
+//       are read through the history's own loader (ClowderHistory.load),
+//       within a budget of page requests (the history's own reading through
+//       empty pages counts), and each page is waited for until it is actually
+//       drawn, with one quiet progress note; a search that cannot find it
+//       stops and says why. Resolves to true (found), null (not found, and the
+//       owner was told why, or the lookup ended quietly) or false (no such chat
+//       open). onCancel() is called just before a lookup that ended quietly
+//       resolves (a newer find, cancel(), another chat or conversation, its
+//       own still()), so a caller can tell that null from a search that said why.
+//   cancel()  ends the lookup under way, if any, quietly, and takes its note
+//       down: something else was found and focused at once (a request's card
+//       already drawn, chat-cards.js find).
 // The search palette's ClowderPalette.locate and a quote's jump use it.
 //
 // A lookup belongs to one operation: the chat and the history generation it
@@ -78,7 +84,7 @@
   const older = () => (H.history && H.history.older ? H.history.older()
     : { key: "", gen: 0, state: "end", more: false, loaded: 0, drawn: 0, error: "", asked: 0, failures: 0 });
 
-  async function find({ sel, messageId, seq, still } = {}) {
+  async function find({ sel, messageId, seq, still, onCancel } = {}) {
     if (!H || !sel || (!messageId && (seq == null || seq === ""))) return false;
     if (!sameChat(sel)) return false;
     const op = ++turn;
@@ -91,8 +97,12 @@
       const now = older();
       return op === turn && (!still || still() === true) && sameChat(sel) && now.key === key && now.gen === gen;
     };
-    // Ended without a word (another chat or conversation, a newer lookup, the palette moved on).
-    const quiet = () => { unsay(op); return null; };
+    // Ended without a word (another chat or conversation, a newer lookup, the palette moved on); the caller is told.
+    const quiet = () => {
+      unsay(op);
+      if (typeof onCancel === "function") onCancel();
+      return null;
+    };
     let stalled = false;
     for (;;) {
       if (!alive()) return quiet();
@@ -138,5 +148,11 @@
   // (focus the composer where that does not raise a phone's keyboard).
   function init(hooks) { H = hooks; }
 
-  window.ClowderLocate = Object.freeze({ init, find, mark });
+  // A lookup under way stops before its next step, as when a newer one starts.
+  function cancel() {
+    turn++;
+    unsay();
+  }
+
+  window.ClowderLocate = Object.freeze({ init, find, mark, cancel });
 })();
