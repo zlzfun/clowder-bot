@@ -11,7 +11,7 @@ import { ZodError } from 'zod';
 import { Doc, El, TextNode } from './fake-dom.js';
 import { createApp } from '../server/app.js';
 import { createXbotAppsRouter } from '../server/xbot/apps.js';
-import { BotApps, customPatchSchema, parseCustomApp } from '../server/native/apps.js';
+import { BotApps, WECHAT_PLUGIN, customPatchSchema, parseCustomApp } from '../server/native/apps.js';
 import { NativeFixture } from './native-fixture.js';
 import { WECHAT_DISCLOSURE } from './apps-fixture.js';
 
@@ -43,15 +43,46 @@ const browserFocusable = (n: El) => {
 }
 // Where focus is now, as a browser would report it: something hidden, disabled or detached has lost it.
 const focusIsUsable = (doc: Doc) => { const a = doc.activeElement as El; return a !== doc.body && a.isConnected && browserFocusable(a); };
-function load() {
+// The stream of 微信's changes (item 67), as a browser's EventSource: every one made is kept (sources), and the test
+// says what comes down it (emit). Without `es` the page has none, as before item 67 (every test written before it).
+// 'fake': a global EventSource and window.EventSource; 'window': only window.EventSource; 'throws': one whose
+// constructor throws (refused by the page's policy, say); `make`: one of the test's own (against the real adapter).
+type EsOption = 'fake' | 'window' | 'throws' | { make: (url: string) => Any };
+class FakeEventSource {
+  closed = false;
+  readyState = 0;
+  listeners = new Map<string, Array<(ev: Any) => void>>();
+  constructor(readonly url: string) {}
+  addEventListener(type: string, fn: (ev: Any) => void) { const l = this.listeners.get(type) ?? []; l.push(fn); this.listeners.set(type, l); }
+  close() { this.closed = true; this.readyState = 2; }
+  // What the server sends: `data` as it is sent (a string), or as JSON. A closed stream hears nothing, as a browser's;
+  // `force` delivers it anyway (a listener left behind would still be called).
+  emit(type: string, data?: unknown, force = false) {
+    if (this.closed && !force) return;
+    if (type === 'ready' || type === 'wechat') this.readyState = 1;
+    const ev = { type, data: data === undefined ? undefined : typeof data === 'string' ? data : JSON.stringify(data) };
+    for (const fn of this.listeners.get(type) ?? []) fn(ev);
+  }
+}
+function load(opt: { es?: EsOption } = {}) {
   const doc = new Doc();
   const window: Any = { crypto: webcrypto, matchMedia: () => ({ matches: false }) };
   let clock = 1_700_000_000_000, next = 0;
   const timers = new Map<number, { at: number; fn: () => void }>();
+  const sources: Any[] = [];
+  const es = opt.es;
+  const ES = es === undefined ? undefined : function EventSource(url: string) {
+    if (es === 'throws') throw new Error('EventSource is not allowed here');
+    const s = typeof es === 'object' ? es.make(String(url)) : new FakeEventSource(String(url));
+    sources.push(s);
+    return s;
+  };
+  if (ES) window.EventSource = ES;
   const context = vm.createContext({
     window, document: doc, console, URL, AbortController,
     setTimeout: (fn: () => void, ms = 0) => { const id = ++next; timers.set(id, { at: clock + ms, fn }); return id; },
     clearTimeout: (id: number) => { timers.delete(id); },
+    ...(ES && es !== 'window' ? { EventSource: ES } : {}),
   });
   vm.runInContext(read('client/public/apps-dialog-rules.js'), context);
   vm.runInContext(read('client/public/apps-dialog.js'), context);
@@ -69,7 +100,9 @@ function load() {
     clock = end;
     await settle();
   };
-  return { doc, window, timers, advance, now: () => clock, setNow: (t: number) => { clock = t; } };
+  // The streams still open, and the last one made.
+  const open = () => sources.filter((s) => !s.closed);
+  return { doc, window, timers, advance, sources, open, stream: () => sources.at(-1) as FakeEventSource, now: () => clock, setNow: (t: number) => { clock = t; } };
 }
 const R = load().window.ClowderAppsRules;
 
@@ -204,8 +237,8 @@ const one = (root: El, sel: string) => { const n = all(root, sel)[0]; assert.ok(
 const buttonOf = (root: El, label: string) => { const b = all(root, 'button').find((n) => seen(n).trim() === label); assert.ok(b, 'no button ' + label); return b!; };
 const noButton = (root: El, label: string) => assert.ok(!all(root, 'button').some((n) => seen(n).trim() === label), 'a button ' + label + ' is shown');
 
-async function opened(setup?: (s: Any, page: ReturnType<typeof load>) => void) {
-  const page = load(), srv = server(page);
+async function opened(setup?: (s: Any, page: ReturnType<typeof load>) => void, opt: { es?: EsOption } = {}) {
+  const page = load(opt), srv = server(page);
   if (setup) setup(srv, page);
   const opener = page.doc.createElement('button');
   opener.id = 'side-apps';
@@ -2738,6 +2771,507 @@ test('微信\'s own icon (the owner: 「这个应用的logo、我希望是微信
   assert.match(css, /\.ap-tile > \.ap-icon \{[^}]*position: absolute;[^}]*width: 122%; height: 122%;/);
 });
 
+// ---------------------------------------------------------------- item 67: the engine's word that 微信 changed
+// GET /xbot-api/apps/events (docs/apps-api.md): `ready` on connecting; `wechat` {appId, reason} for the engine's
+// plugin_operation_changed (install, update, removal) and for the adapter's resync after it lost the engine. Each is
+// one fresh read of 微信, ordered and given way as every read of it is; the poll and the zero-time read stay.
+const wechatReads = (srv: Any) => srv.sent('GET', /\/wechat$/).length;
+const changed = (page: ReturnType<typeof load>, reason = 'operation_changed') => page.stream().emit('wechat', { appId: 'wechat', reason });
+
+test('item 67: the stream of 微信\'s changes is open only while the dialog is — none before 应用 is opened, one while it is, closed with it however it closes; opening again opens a fresh one', async () => {
+  let before = -1;
+  const { page, srv, opener } = await opened((_s, p) => { before = p.sources.length; }, { es: 'fake' });
+  assert.equal(before, 0, 'nothing listens before 应用 is opened');
+  assert.equal(page.sources.length, 1);
+  assert.equal(page.stream().url, '/xbot-api/apps/events');
+  assert.equal(page.open().length, 1);
+  // Connecting is no change: nothing is read for it.
+  page.stream().emit('ready', { appId: 'wechat' });
+  await settle();
+  assert.equal(wechatReads(srv), 0);
+  // Closed by ×: the stream with it; were a listener left behind, it would send nothing.
+  const first = page.stream();
+  (page.doc.querySelector('.ap-x') as El).click();
+  assert.equal(first.closed, true);
+  assert.equal(page.open().length, 0);
+  const sent = srv.calls.length;
+  first.emit('wechat', { appId: 'wechat', reason: 'operation_changed' }, true);
+  await settle();
+  assert.equal(srv.calls.length, sent, 'nothing is sent once the dialog is closed');
+  // Opened again: a fresh stream; Escape on the list closes it.
+  page.window.ClowderApps.open({ opener });
+  await settle();
+  assert.deepEqual([page.sources.length, page.open().length], [2, 1]);
+  (page.doc.activeElement as El).key('Escape');
+  assert.equal(page.window.ClowderApps.isOpen(), false);
+  assert.equal(page.open().length, 0);
+  // Opened over itself: the old one is closed first; one stream at a time.
+  page.window.ClowderApps.open({ opener });
+  await settle();
+  page.window.ClowderApps.open({ opener });
+  await settle();
+  assert.equal(page.sources.length, 4);
+  assert.deepEqual(page.open(), [page.stream()]);
+  page.stream().emit('wechat', { appId: 'wechat', reason: 'resync' });
+  await settle();
+  assert.equal(wechatReads(srv), 1, 'the open dialog\'s stream is read for');
+  page.window.ClowderApps.close();
+  assert.equal(page.open().length, 0);
+  assert.equal(page.timers.size, 0, 'nothing on a timer either');
+});
+
+test('item 67: each `wechat` event is one fresh read of 微信 — the row and the open page follow what it answers; a start it sees end is said, as the poll\'s is; the ten minutes it answers count down and are read again at zero', async () => {
+  const { page, srv, row, body, voice } = await opened(on(), { es: 'fake' });
+  const base = { ...srv.wechat };
+  assert.equal(seen(row('wechat')), '微信已打开');
+  // Removed elsewhere (operation_changed): the row says what the read answered.
+  srv.wechat = { id: 'wechat', kind: 'wechat', title: '微信', state: 'unavailable', reason: '这台电脑上还没有它的程序包' };
+  changed(page);
+  await settle();
+  assert.equal(wechatReads(srv), 1);
+  assert.equal(seen(row('wechat')), '微信这台电脑上还没有它的程序包');
+  // Installed again and starting (the adapter's resync): the open page shows it starting, and the 2 s poll runs.
+  row('wechat').click();
+  await settle();
+  srv.wechat = { ...base, state: 'starting', authorization: undefined };
+  srv.starts = 1000;
+  changed(page, 'resync');
+  await settle();
+  assert.equal(wechatReads(srv), 2);
+  assert.equal(seen(one(body(), '.ap-state')), '正在启动…');
+  assert.equal(seen(one(body(), '.ap-note')), R.WECHAT_SLOW);
+  await page.advance(2_000);
+  assert.equal(wechatReads(srv), 3, 'the poll reads every 2 s, as before');
+  // Its start ends and the read an event led to sees it first: said, as when the poll sees it.
+  srv.wechat = { ...base, state: 'on', authorization: { active: true, remaining_ms: 300_000, until: new Date(page.now() + 300_000).toISOString() } };
+  changed(page);
+  await settle();
+  assert.equal(wechatReads(srv), 4);
+  assert.equal(seen(one(body(), '.ap-state')), '已打开');
+  assert.equal(voice(), R.SAID.started);
+  assert.equal(seen(one(body(), '.ap-clock')), '5:00');
+  await page.advance(10_000);
+  assert.equal(wechatReads(srv), 4, 'no poll once it is on; the clock is this page\'s');
+  assert.equal(seen(one(body(), '.ap-clock')), '4:50');
+  srv.wechat = { ...srv.wechat, authorization: { active: false, remaining_ms: 0 } };
+  await page.advance(290_000);
+  assert.equal(wechatReads(srv), 5, 'the zero-time read, as before');
+  assert.equal(voice(), R.SAID.ended);
+  assert.equal(seen(one(body(), '.ap-open')), R.OPEN_CHAT + R.OPEN_OFF + '授权 10 分钟');
+  (page.doc.activeElement as El).key('Escape');
+  assert.equal(seen(row('wechat')), '微信已打开');
+});
+
+test('item 67: events that come together are one read — a burst while the read an event led to is on its way is one more read once it answers, not one each', async () => {
+  const { page, srv, row } = await opened(on(), { es: 'fake' });
+  const gates: Array<ReturnType<typeof hold>> = [];
+  srv.on.set('GET /xbot-api/apps/wechat', (c: Call) => { const g = hold(); gates.push(g); return g.promise.then(() => srv.fallback(c)); });
+  changed(page);
+  await settle();
+  assert.equal(wechatReads(srv), 1);
+  for (let i = 0; i < 5; i++) changed(page, i % 2 ? 'resync' : 'operation_changed');
+  await settle();
+  assert.equal(wechatReads(srv), 1, 'nothing on top of the read on its way');
+  srv.wechat = { ...srv.wechat, state: 'off', authorization: undefined };
+  gates[0]!.release();
+  await settle();
+  assert.equal(wechatReads(srv), 2, 'one more for all five');
+  gates[1]!.release();
+  await settle();
+  assert.equal(wechatReads(srv), 2, 'and no more');
+  assert.equal(seen(row('wechat')), '微信未打开');
+  // One event with nothing on its way: one read; nothing is read by itself afterwards.
+  srv.on.delete('GET /xbot-api/apps/wechat');
+  changed(page);
+  await settle();
+  assert.equal(wechatReads(srv), 3);
+  await page.advance(600_000);
+  assert.equal(wechatReads(srv), 3);
+});
+
+test('item 67: an event while the list is first being read waits for it, then is one read; with the list unread it is still read once, and the list still offers to try again', async () => {
+  const gate = hold();
+  const { page, srv, row } = await opened((s) => {
+    s.on.set('GET /xbot-api/apps', () => { const answer = s.listNow(); return gate.promise.then(() => answer); });
+  }, { es: 'fake' });
+  srv.wechat = { ...srv.wechat, state: 'on', authorization: { active: false, remaining_ms: 0 } };
+  changed(page);
+  changed(page, 'resync');
+  await settle();
+  assert.equal(wechatReads(srv), 0, 'the list reads 微信 too: nothing on top of it');
+  gate.release();
+  await settle();
+  assert.equal(wechatReads(srv), 1, 'once it is read, one read for both');
+  assert.equal(seen(row('wechat')), '微信已打开', 'what that read answered (the list was asked for before 微信 was opened)');
+  // The list could not be read.
+  const listGate = hold();
+  const b = await opened((s) => { s.on.set('GET /xbot-api/apps', () => listGate.promise); }, { es: 'fake' });
+  changed(b.page);
+  await settle();
+  assert.equal(wechatReads(b.srv), 0);
+  listGate.reject(fail(502));
+  await settle();
+  assert.equal(wechatReads(b.srv), 1, 'read once the list has settled');
+  assert.equal(all(b.body(), '.ap-fail').length, 1);
+  b.srv.on.delete('GET /xbot-api/apps');
+  buttonOf(b.body(), '再试一次').click();
+  await settle();
+  assert.equal(seen(b.row('wechat')), '微信未打开');
+  assert.equal(wechatReads(b.srv), 1);
+});
+
+test('item 67: a write of 微信 goes first — an event while 授权 is on its way is read after its answer, and an event\'s read on its way when 关闭 is pressed never paints over 关闭\'s answer; an event before a write that fails is covered by the read that follows it, and one during that read waits until what failed is said', async () => {
+  const auth = hold();
+  const { page, srv, row, body } = await opened((s) => {
+    on()(s);
+    s.on.set('POST /xbot-api/apps/wechat/authorize', (c: Call) => auth.promise.then(() => s.fallback(c)));
+  }, { es: 'fake' });
+  row('wechat').click();
+  await settle();
+  buttonOf(body(), '授权 10 分钟').focus();
+  buttonOf(body(), '授权 10 分钟').click();
+  await settle();
+  changed(page);
+  changed(page);
+  await settle();
+  assert.equal(wechatReads(srv), 0, 'nothing while the write is on its way');
+  auth.release();
+  await settle();
+  assert.equal(wechatReads(srv), 1, 'one read after its answer');
+  const at = (method: string, re: RegExp) => srv.calls.findIndex((c: Call) => c.method === method && re.test(c.path));
+  assert.ok(at('GET', /\/wechat$/) > at('POST', /\/authorize$/));
+  assert.equal(seen(one(body(), '.ap-clock')), '10:00');
+  assert.equal(page.doc.activeElement, one(body(), '.ap-open .ap-way-st'), 'focus where the write\'s answer is, as before');
+  // An event's read on its way when 关闭 is pressed: its answer, from before 关闭, is not shown after 关闭's.
+  const stale = hold();
+  srv.on.set('GET /xbot-api/apps/wechat', (c: Call) => { const answer = srv.fallback(c); return stale.promise.then(() => answer); });
+  changed(page);
+  await settle();
+  assert.equal(wechatReads(srv), 2);
+  buttonOf(body(), '关闭').click();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-state')), '未打开');
+  stale.release();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-state')), '未打开', '关闭\'s answer stays');
+  assert.equal(all(body(), '.ap-clock').length, 0);
+  assert.equal(wechatReads(srv), 2);
+  srv.on.delete('GET /xbot-api/apps/wechat');
+  // An event before a write that fails: the read that follows the failure covers it — one read, not two.
+  const conn = hold(), lost = fail(undefined, '连不上 clowder-bot');
+  srv.on.set('POST /xbot-api/apps/wechat/connect', () => conn.promise);
+  buttonOf(body(), '打开').focus();
+  buttonOf(body(), '打开').click();
+  await settle();
+  changed(page);
+  await settle();
+  assert.equal(wechatReads(srv), 2);
+  conn.reject(lost);
+  await settle();
+  assert.equal(wechatReads(srv), 3, 'the read after the failure, and only it');
+  assert.equal(seen(one(body(), '.ap-note')), R.wechatError(lost, 'connect').text);
+  // An event while that read is on its way waits until what failed is said (and focus is on what was tried), then is one read.
+  const after = hold();
+  srv.on.set('POST /xbot-api/apps/wechat/connect', () => { throw lost; });
+  srv.on.set('GET /xbot-api/apps/wechat', (c: Call) => after.promise.then(() => srv.fallback(c)));
+  buttonOf(body(), '打开').click();
+  await settle();
+  assert.equal(wechatReads(srv), 4, 'the read after the failure is on its way');
+  changed(page);
+  changed(page, 'resync');
+  await settle();
+  assert.equal(wechatReads(srv), 4, 'the events wait for it');
+  after.release();
+  await settle();
+  assert.equal(wechatReads(srv), 5, 'then one read for both');
+  assert.equal(seen(one(body(), '.ap-note')), R.wechatError(lost, 'connect').text, 'what failed is still said');
+  assert.equal(seen(page.doc.activeElement), '打开', 'and focus stays on what was tried');
+});
+
+test('item 67: the read an event led to is evidence in the order it was asked for — overtaken by 再看一次, by the zero-time read or by a list read asked for after it, its late answer is not shown', async () => {
+  // 再看一次.
+  const a = await opened((s) => { s.wechat = { ...s.wechat, state: 'on', authorization: undefined }; }, { es: 'fake' });
+  a.row('wechat').click();
+  await settle();
+  const slow = hold();
+  a.srv.on.set('GET /xbot-api/apps/wechat', (c: Call) => { const answer = a.srv.fallback(c); return slow.promise.then(() => answer); });
+  changed(a.page);
+  await settle();
+  assert.equal(wechatReads(a.srv), 1);
+  a.srv.on.delete('GET /xbot-api/apps/wechat');
+  a.srv.wechat = { ...a.srv.wechat, authorization: { active: true, remaining_ms: 300_000, until: new Date(a.page.now() + 300_000).toISOString() } };
+  buttonOf(a.body(), '再看一次').focus();
+  buttonOf(a.body(), '再看一次').click();
+  await settle();
+  assert.equal(seen(one(a.body(), '.ap-clock')), '5:00');
+  slow.release();
+  await settle();
+  assert.equal(seen(one(a.body(), '.ap-clock')), '5:00', 'its older answer (unknown) is not shown');
+  assert.equal(wechatReads(a.srv), 2, 'and nothing more is read');
+  // An event while 再看一次 is on its way waits for it (and for focus to land), then is one read.
+  a.srv.wechat = { ...a.srv.wechat, authorization: undefined };
+  changed(a.page);
+  await settle();
+  assert.equal(seen(one(a.body(), '.ap-open')), R.OPEN_CHAT + R.OPEN_UNKNOWN + '再看一次撤销');
+  const manual = hold();
+  a.srv.on.set('GET /xbot-api/apps/wechat', (c: Call) => manual.promise.then(() => a.srv.fallback(c)));
+  buttonOf(a.body(), '再看一次').focus();
+  buttonOf(a.body(), '再看一次').click();
+  await settle();
+  assert.equal(wechatReads(a.srv), 4);
+  changed(a.page);
+  await settle();
+  assert.equal(wechatReads(a.srv), 4, 'nothing on top of 再看一次');
+  manual.release();
+  await settle();
+  assert.equal(wechatReads(a.srv), 5, 'then one read');
+  assert.equal(a.page.doc.activeElement, one(a.body(), '.ap-open .ap-way-st'), 'focus where 再看一次 put it');
+  // The zero-time read.
+  const b = await opened(on(5_000), { es: 'fake' });
+  b.row('wechat').click();
+  await settle();
+  const late = hold();
+  b.srv.on.set('GET /xbot-api/apps/wechat', (c: Call) => { const answer = b.srv.fallback(c); return late.promise.then(() => answer); });
+  changed(b.page);
+  await settle();
+  b.srv.on.delete('GET /xbot-api/apps/wechat');
+  b.srv.wechat = { ...b.srv.wechat, authorization: { active: false, remaining_ms: 0 } };
+  await b.page.advance(5_000);
+  assert.equal(wechatReads(b.srv), 2, 'the zero-time read goes, though the event\'s is on its way');
+  assert.equal(seen(one(b.body(), '.ap-open')), R.OPEN_CHAT + R.OPEN_OFF + '授权 10 分钟');
+  late.release();
+  await settle();
+  assert.equal(seen(one(b.body(), '.ap-open')), R.OPEN_CHAT + R.OPEN_OFF + '授权 10 分钟', 'still over');
+  assert.equal(all(b.body(), '.ap-clock').length, 0);
+  // A list read asked for after it (custom:x found gone).
+  const xGate = hold();
+  const c = await opened((s) => {
+    on()(s);
+    s.add('custom:x', 'X', { type: 'program', program: 'node', args: [], secrets: [] });
+    s.on.set('GET /xbot-api/apps/custom%3Ax', () => xGate.promise.then(() => { s.custom = []; throw fail(404, '没有这个应用'); }));
+  }, { es: 'fake' });
+  c.row('wechat').click();
+  await settle();
+  const older = hold();
+  c.srv.on.set('GET /xbot-api/apps/wechat', (call: Call) => { const answer = c.srv.fallback(call); return older.promise.then(() => answer); });
+  changed(c.page);
+  await settle();
+  c.srv.wechat = { ...c.srv.wechat, state: 'off', authorization: undefined };
+  xGate.release();
+  await settle();
+  assert.equal(c.srv.sent('GET', /^\/xbot-api\/apps$/).length, 2);
+  assert.equal(seen(one(c.body(), '.ap-state')), '未打开', 'the list read, asked for later: closed');
+  older.release();
+  await settle();
+  assert.equal(seen(one(c.body(), '.ap-state')), '未打开', 'the event\'s older answer (on) is not shown');
+});
+
+test('item 67: only a `wechat` event about 微信 is read for — unreadable, empty, other apps\' and other kinds of events are not', async () => {
+  const { page, srv } = await opened(on(), { es: 'fake' });
+  const s = page.stream(), sent = srv.calls.length;
+  for (const data of ['{not json', '', undefined, 'null', '"wechat"', '["wechat"]', 42, true, {}, { appId: 'custom:x', reason: 'operation_changed' }, { appId: 'WeChat' }, { app: 'wechat' }])
+    s.emit('wechat', data);
+  for (const type of ['message', 'ready', 'heartbeat', 'custom']) s.emit(type, { appId: 'wechat', reason: 'operation_changed' });
+  await settle();
+  assert.equal(srv.calls.length, sent, 'nothing is read for any of them');
+  // About 微信, whatever the reason (or none): one read.
+  s.emit('wechat', { appId: 'wechat' });
+  await settle();
+  assert.equal(wechatReads(srv), 1);
+});
+
+test('item 67: without the stream nothing is missing — no EventSource, one that throws, one only on window, a stream that fails: nothing is said about it, and the 2 s poll, the countdown and 再看一次 work as before; connected again after failing, one read', async () => {
+  for (const es of [undefined, 'throws', 'window', 'fake'] as const) {
+    const where = String(es);
+    const { page, srv, row, body, voice } = await opened((s) => { s.starts = 2; }, es ? { es } : {});
+    const streaming = es === 'fake' || es === 'window';
+    if (streaming) {
+      assert.equal(page.open().length, 1, where);
+      // It fails, and fails again trying to connect: the browser's own retrying.
+      page.stream().emit('error');
+      page.stream().emit('error');
+    } else assert.equal(page.sources.length, 0, where);
+    await settle();
+    assert.equal(srv.calls.length, 1, where + ': only the list is read');
+    assert.equal(all(page.doc.body, '[role="alert"]').filter((n) => seen(n).trim()).length, 0, where + ': nothing is said about it');
+    assert.equal(seen(row('wechat')), '微信未打开', where);
+    // The poll.
+    row('wechat').click();
+    await settle();
+    buttonOf(body(), '打开').click();
+    await settle();
+    assert.equal(seen(one(body(), '.ap-state')), '正在启动…', where);
+    await page.advance(6_000);
+    assert.equal(seen(one(body(), '.ap-state')), '已打开', where);
+    assert.equal(voice(), R.SAID.started, where);
+    // The countdown, and its zero-time read (here: the ten minutes cannot be read).
+    buttonOf(body(), '授权 10 分钟').click();
+    await settle();
+    assert.equal(seen(one(body(), '.ap-clock')), '10:00', where);
+    await page.advance(5_000);
+    assert.equal(seen(one(body(), '.ap-clock')), '9:55', where);
+    srv.on.set('GET /xbot-api/apps/wechat', () => ({ ...srv.wechat, authorization: undefined }));
+    await page.advance(595_000);
+    assert.equal(seen(one(body(), '.ap-open')), R.OPEN_CHAT + R.OPEN_UNKNOWN + '再看一次撤销', where);
+    // 再看一次.
+    srv.on.delete('GET /xbot-api/apps/wechat');
+    srv.wechat = { ...srv.wechat, authorization: { active: false, remaining_ms: 0 } };
+    buttonOf(body(), '再看一次').click();
+    await settle();
+    assert.equal(seen(one(body(), '.ap-open')), R.OPEN_CHAT + R.OPEN_OFF + '授权 10 分钟', where);
+    if (streaming) {
+      // Connected again after failing: what was said meanwhile was not heard — one read; connected with nothing missed: none.
+      const reads = wechatReads(srv);
+      page.stream().emit('ready', { appId: 'wechat' });
+      await settle();
+      assert.equal(wechatReads(srv), reads + 1, where);
+      page.stream().emit('ready', { appId: 'wechat' });
+      await settle();
+      assert.equal(wechatReads(srv), reads + 1, where);
+    }
+    page.window.ClowderApps.close();
+    assert.equal(page.open().length, 0, where);
+    assert.equal(page.timers.size, 0, where);
+  }
+});
+
+test('item 67: the read an event led to and the poll — a poll that gave up is not started again by it (再看一次 still does); a poll a failed read stopped runs again once it answers starting; its own failure says nothing while 微信 is not on (the poll goes on), and leaves the ten minutes unknown while it is', async () => {
+  const { page, srv, row, body, voice } = await opened((s) => { s.starts = 1000; }, { es: 'fake' });
+  row('wechat').click();
+  await settle();
+  buttonOf(body(), '打开').click();
+  await settle();
+  await page.advance(130_000);
+  const total = wechatReads(srv);
+  assert.equal(seen(one(body(), '.ap-note')), R.WECHAT_STILL);
+  assert.equal(voice(), R.SAID.still);
+  // Still starting, by the read a resync led to: the poll stays given up, and 再看一次 stays.
+  changed(page, 'resync');
+  await settle();
+  assert.equal(wechatReads(srv), total + 1);
+  await page.advance(60_000);
+  assert.equal(wechatReads(srv), total + 1, 'the poll is not started again');
+  assert.equal(seen(one(body(), '.ap-note')), R.WECHAT_STILL);
+  // 再看一次 starts it again, as before.
+  buttonOf(body(), '再看一次').click();
+  await settle();
+  assert.equal(wechatReads(srv), total + 2);
+  await page.advance(2_000);
+  assert.equal(wechatReads(srv), total + 3, 'the poll runs again');
+  assert.equal(seen(one(body(), '.ap-note')), R.WECHAT_SLOW);
+  // A poll read fails: it stops and says so, with 再看一次 (as before).
+  srv.on.set('GET /xbot-api/apps/wechat', () => { throw fail(502); });
+  await page.advance(2_000);
+  const unread = R.wechatError(fail(502), 'reread').text;
+  assert.equal(seen(one(body(), '.ap-note')), unread);
+  const stopped = wechatReads(srv);
+  await page.advance(10_000);
+  assert.equal(wechatReads(srv), stopped);
+  // The read an event led to answers still starting: the failure no longer stands, and the poll runs again.
+  srv.on.delete('GET /xbot-api/apps/wechat');
+  changed(page);
+  await settle();
+  assert.equal(seen(one(body(), '.ap-note')), R.WECHAT_SLOW);
+  noButton(body(), '再看一次');
+  await page.advance(2_000);
+  assert.equal(wechatReads(srv), stopped + 2);
+  // The read an event led to fails while 微信 is not on: nothing is said, and the poll goes on.
+  let failOnce = true;
+  srv.on.set('GET /xbot-api/apps/wechat', (c: Call) => { if (failOnce) { failOnce = false; throw fail(502); } return srv.fallback(c); });
+  changed(page);
+  await settle();
+  assert.equal(wechatReads(srv), stopped + 3);
+  assert.equal(seen(one(body(), '.ap-note')), R.WECHAT_SLOW, 'nothing is said');
+  assert.ok(!one(body(), '.ap-note').classList.contains('bad'));
+  assert.equal(one(body(), '.ap-note').getAttribute('role'), null);
+  srv.on.delete('GET /xbot-api/apps/wechat');
+  srv.starts = 0;
+  await page.advance(2_000);
+  assert.equal(wechatReads(srv), stopped + 4, 'the poll goes on');
+  assert.equal(seen(one(body(), '.ap-state')), '已打开');
+  assert.equal(voice(), R.SAID.started);
+  // On, counting down: its failure leaves the ten minutes unknown (no countdown), said under their row.
+  buttonOf(body(), '授权 10 分钟').click();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-clock')), '10:00');
+  srv.on.set('GET /xbot-api/apps/wechat', () => { throw fail(502); });
+  changed(page);
+  await settle();
+  assert.equal(all(body(), '.ap-clock').length, 0);
+  assert.equal(seen(one(body(), '.ap-open')), R.OPEN_CHAT + R.OPEN_UNKNOWN + '再看一次撤销');
+  assert.equal(seen(one(body(), '.ap-auth-note')), unread);
+  assert.equal(seen(one(body(), '.ap-state')), '已打开', 'by name and 关闭 as before');
+});
+
+test('item 67, codex r1: a failed read said under the ten minutes goes once 微信 is read again — the read an event led to fails while it counts down, the next one answers its time left: the countdown is back, nothing failed is said, and it does not come back', async () => {
+  const { page, srv, row, body } = await opened(on(300_000), { es: 'fake' });
+  row('wechat').click();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-clock')), '5:00');
+  srv.on.set('GET /xbot-api/apps/wechat', () => { throw fail(502); });
+  changed(page);
+  await settle();
+  assert.equal(all(body(), '.ap-clock').length, 0);
+  assert.equal(seen(one(body(), '.ap-auth-note')), R.wechatError(fail(502), 'reread').text);
+  assert.equal(one(body(), '.ap-auth-note').getAttribute('role'), 'alert');
+  // Read again, by the next event: it answers, so the failure no longer stands.
+  srv.on.delete('GET /xbot-api/apps/wechat');
+  changed(page);
+  await settle();
+  assert.equal(wechatReads(srv), 2);
+  assert.equal(all(body(), '.ap-auth-note').length, 0, 'the failed read is no longer said');
+  assert.equal(body().querySelector('.ap-auth-note')!.getAttribute('role'), null);
+  assert.equal(seen(one(body(), '.ap-clock')), '5:00', 'the countdown, from what it answered');
+  noButton(body(), '再看一次');
+  buttonOf(body(), '撤销');
+  // Closed and opened again elsewhere, each read by an event: the failure is not said again.
+  srv.wechat = { ...srv.wechat, state: 'off', authorization: undefined };
+  changed(page);
+  await settle();
+  assert.equal(seen(one(body(), '.ap-state')), '未打开');
+  on(300_000)(srv);
+  changed(page);
+  await settle();
+  assert.equal(seen(one(body(), '.ap-state')), '已打开');
+  assert.equal(all(body(), '.ap-auth-note').length, 0);
+});
+
+test('item 67, codex r1: what 授权 or 撤销 failed to do stays under the ten minutes across the read an event leads to — 撤销 failed with its read, the event\'s read brings the countdown back and 没能撤销 is still said; 授权 failed, the event\'s read leaves 没能授权', async () => {
+  const lost = fail(undefined, '连不上 clowder-bot');
+  const { page, srv, row, body } = await opened((s) => {
+    on(300_000)(s);
+    s.on.set('POST /xbot-api/apps/wechat/revoke', () => { throw lost; });
+    s.on.set('GET /xbot-api/apps/wechat', () => { throw lost; });
+  }, { es: 'fake' });
+  row('wechat').click();
+  await settle();
+  buttonOf(body(), '撤销').click();
+  await settle();
+  const revoked = R.wechatError(lost, 'revoke').text;
+  assert.equal(all(body(), '.ap-clock').length, 0);
+  assert.equal(seen(one(body(), '.ap-auth-note')), revoked);
+  srv.on.delete('GET /xbot-api/apps/wechat');
+  changed(page);
+  await settle();
+  assert.equal(seen(one(body(), '.ap-clock')), '5:00', 'the countdown, from what the event\'s read answered');
+  assert.equal(seen(one(body(), '.ap-auth-note')), revoked, 'what 撤销 failed to do is still said');
+  assert.equal(one(body(), '.ap-auth-note').getAttribute('role'), 'alert');
+  // 授权 fails; the read after it answers 未授权. An event's read leaves what failed said.
+  srv.on.delete('POST /xbot-api/apps/wechat/revoke');
+  buttonOf(body(), '撤销').click();
+  await settle();
+  assert.equal(all(body(), '.ap-auth-note').length, 0);
+  srv.on.set('POST /xbot-api/apps/wechat/authorize', () => { throw fail(502); });
+  buttonOf(body(), '授权 10 分钟').click();
+  await settle();
+  const authorized = R.wechatError(fail(502), 'authorize').text;
+  assert.equal(seen(one(body(), '.ap-auth-note')), authorized);
+  changed(page);
+  await settle();
+  assert.equal(seen(one(body(), '.ap-open')), R.OPEN_CHAT + R.OPEN_OFF + '授权 10 分钟');
+  assert.equal(seen(one(body(), '.ap-auth-note')), authorized, 'what 授权 failed to do is still said');
+});
+
 // ---------------------------------------------------------------- against the real adapter
 // The dialog over the production router and the adapter (server/xbot/apps.ts, server/native/apps.ts) on the
 // scripted engine of tests/apps-fixture.ts, through real HTTP: what it sends is what the adapter accepts,
@@ -2866,6 +3400,92 @@ test('against the real adapter: 微信 opened and authorized (the countdown from
   assert.equal(row('custom:' + row2.id), null);
   assert.equal(native.apps.rows.some((r) => r.id === row2.id), false);
   page.window.ClowderApps.close();
+});
+
+// Item 67 over the production router and the adapter, through real HTTP: the page listens where the router sends,
+// to the events it writes (a browser's EventSource is stood in for by fetch, reading the stream as it comes).
+test('item 67, against the real adapter: the dialog listens where the router sends — 微信 removed and installed again elsewhere is read when the engine says so, another plugin\'s change is not, the adapter\'s resync is; closing the dialog ends its subscription', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'bot-apps-events-')), native = new NativeFixture();
+  const runtime = createApp({ native, dataFile: join(dir, 'presentation.json') });
+  const app = express();
+  app.use(express.json());
+  const router = createXbotAppsRouter(runtime.bridge, new BotApps(native, runtime.store, 'darwin'));
+  app.use('/xbot-api', router);
+  app.use((error: Any, _req: Any, res: Any, _next: Any) => res.status(error.status ?? 500).json({ error: error.message, ...(error.code ? { code: error.code } : {}) }));
+  const server = app.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(async () => { router.close(); await runtime.close(); server.closeAllConnections(); await new Promise<void>((r) => server.close(() => r())); rmSync(dir, { recursive: true, force: true }); });
+  const origin = `http://127.0.0.1:${(server.address() as Any).port}`;
+  const calls: string[] = [];
+  const api = async (path: string, opt: Any = {}) => {
+    calls.push((opt.method || 'GET') + ' ' + path);
+    const res = await fetch(origin + path, { method: opt.method || 'GET', headers: opt.body ? { 'Content-Type': 'application/json' } : {}, body: opt.body ? JSON.stringify(opt.body) : undefined, signal: opt.signal })
+      .catch(() => { throw new Error('连不上 clowder-bot'); });
+    const data: Any = await res.json().catch(() => ({}));
+    if (!res.ok) throw Object.assign(new Error(data.error || 'request failed'), { status: res.status }, data.code ? { code: data.code } : {});
+    return data;
+  };
+  const make = (url: string) => {
+    const listeners = new Map<string, Array<(ev: Any) => void>>(), ctrl = new AbortController();
+    const s: Any = {
+      url, closed: false,
+      addEventListener: (type: string, fn: (ev: Any) => void) => { listeners.set(type, [...(listeners.get(type) ?? []), fn]); },
+      close: () => { s.closed = true; ctrl.abort(); },
+    };
+    const emit = (type: string, data?: string) => { if (!s.closed) for (const fn of listeners.get(type) ?? []) fn({ type, data }); };
+    fetch(origin + url, { signal: ctrl.signal }).then(async (res) => {
+      if (!res.ok || !res.body) { emit('error'); return; }
+      const reader = res.body.getReader(), decoder = new TextDecoder();
+      let buf = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        for (let at = buf.indexOf('\n\n'); at >= 0; at = buf.indexOf('\n\n')) {
+          const block = buf.slice(0, at);
+          buf = buf.slice(at + 2);
+          let type = 'message';
+          const data: string[] = [];
+          for (const line of block.split('\n')) { if (line.startsWith('event: ')) type = line.slice(7); else if (line.startsWith('data: ')) data.push(line.slice(6)); }
+          if (data.length) emit(type, data.join('\n'));
+        }
+      }
+    }).catch(() => emit('error'));
+    return s;
+  };
+  const page = load({ es: { make } });
+  const until = async (ok: () => boolean, what: string) => {
+    for (let i = 0; i < 400 && !ok(); i++) await new Promise((r) => setTimeout(r, 5));
+    assert.ok(ok(), what);
+  };
+  page.window.ClowderApps.init({ api, icon: icon(page.doc), now: page.now });
+  page.window.ClowderApps.open({});
+  const row = (id: string) => page.doc.querySelector(`.ap-row[data-app="${id}"]`) as El;
+  const reads = () => calls.filter((c) => c === 'GET /xbot-api/apps/wechat').length;
+  await until(() => !!row('wechat') && native.userListeners.size === 1, 'the list is read and the stream is open');
+  assert.equal(page.sources.length, 1);
+  assert.equal(page.sources[0].url, '/xbot-api/apps/events');
+  assert.equal(seen(row('wechat')), '微信未打开');
+  assert.equal(reads(), 0, 'connecting is no change');
+  // Removed elsewhere: the engine says so, and the page reads 微信 once.
+  const plugin = native.apps.plugin;
+  native.apps.plugin = null;
+  native.emitUserEvent({ type: 'plugin_operation_changed', pluginId: WECHAT_PLUGIN });
+  await until(() => seen(row('wechat')) === '微信这台电脑上还没有它的程序包', 'read when the engine said so');
+  assert.equal(reads(), 1);
+  // Another plugin's change is not 微信's; installed again is.
+  native.emitUserEvent({ type: 'plugin_operation_changed', pluginId: 'official.github-operations' });
+  native.apps.plugin = plugin;
+  native.emitUserEvent({ type: 'plugin_operation_changed', pluginId: WECHAT_PLUGIN });
+  await until(() => seen(row('wechat')) === '微信未打开', 'installed again');
+  assert.equal(reads(), 2, 'one read each time the engine spoke of 微信, none for the other plugin');
+  // The adapter lost the engine and is back: one read.
+  native.emitUserEvent({ type: 'disconnected' });
+  native.emitUserEvent({ type: 'resync' });
+  await until(() => reads() === 3, 'the resync\'s read');
+  page.window.ClowderApps.close();
+  assert.equal(page.sources[0].closed, true);
+  await until(() => native.userListeners.size === 0, 'closing the dialog ends its subscription');
 });
 
 // ---------------------------------------------------------------- the page and the shell
