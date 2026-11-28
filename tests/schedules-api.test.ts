@@ -31,7 +31,18 @@ class ScheduleFixture extends NativeFixture {
     this.calls.push({ path, method: options.method ?? 'GET', body: options.body });
     if (this.fail) throw this.fail;
     if (path === '/api/schedule/tasks' && !options.method) return structuredClone({ tasks: this.schedules, botScheduleVersion: this.version, botSchedulerReady: this.ready }) as T;
-    if (options.method === 'POST') return { success: true, proposed: false, task: { id: 'dyn-created' } } as T;
+    if (path === '/api/schedule/tasks' && options.method === 'POST') return { success: true, proposed: false, task: { id: 'dyn-created' } } as T;
+    const paramMatch = /^\/api\/schedule\/tasks\/([^/]+)\/parameters$/.exec(path);
+    if (paramMatch && options.method === 'POST') {
+      const id = decodeURIComponent(paramMatch[1]!);
+      const task = this.schedules.find(s => (s.dynamicTaskId ?? s.id) === id);
+      if (!task) throw new ApiError(404, 'Dynamic task not found');
+      if (task.trigger.type === 'once') throw new ApiError(400, 'Parameter updates require an existing recurring task');
+      const next = options.body?.paramsPatch?.message;
+      const changed = typeof next === 'string' && next !== task.prompt;
+      if (typeof next === 'string') task.prompt = next;
+      return { success: true, proposed: false, taskId: task.id, changed } as T;
+    }
     if (options.method === 'PATCH') return { success: true, enabled: options.body.enabled } as T;
     if (options.method === 'DELETE') return { success: true } as T;
     if (path.includes('/runs?')) return { runs: this.runs } as T;
@@ -147,4 +158,57 @@ test('status distinguishes enabled, effective, registration and trigger delivery
     assert.equal(scheduleStatus(sample({ trigger: { type: 'once', fireAt: 10 }, enabled: false, registered: false,
       lastRun: { outcome, started_at: '2026-01-01T00:00:00Z', error_summary: null } }), 20), status);
   }
+});
+
+test('edit prompt updates recurring reminders via native F139 parameters and keeps name and trigger intact', async t => {
+  const r = await setup(t);
+  r.native.schedules.push(sample({ id: 'dyn-interval', dynamicTaskId: 'dyn-interval', trigger: { type: 'interval', ms: 600000 }, prompt: '喝水' }));
+  const res = await r.call('/dyn-task-a', 'PATCH', { prompt: '  检查构建并发送报告  ' });
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { success: true, id: 'dyn-task-a', prompt: '检查构建并发送报告', changed: true });
+  assert.deepEqual(r.native.calls.at(-1), { path: '/api/schedule/tasks/dyn-task-a/parameters', method: 'POST', body: { paramsPatch: { message: '检查构建并发送报告' } } });
+  const list = await (await r.call()).json();
+  assert.equal(list.routines[0].prompt, '检查构建并发送报告');
+  assert.equal(list.routines[0].name, '每日检查');
+
+  const unchanged = await r.call('/dyn-task-a', 'PATCH', { prompt: '检查构建并发送报告' });
+  assert.equal(unchanged.status, 200);
+  assert.deepEqual(await unchanged.json(), { success: true, id: 'dyn-task-a', prompt: '检查构建并发送报告', changed: false });
+
+  const intervalRes = await r.call('/dyn-interval', 'PATCH', { prompt: '喝温水' });
+  assert.equal(intervalRes.status, 200);
+  assert.deepEqual(await intervalRes.json(), { success: true, id: 'dyn-interval', prompt: '喝温水', changed: true });
+});
+
+test('edit prompt rejects one-shot schedules, invalid input, missing ownership, unready scheduler, and unconfirmed native answers', async t => {
+  const r = await setup(t);
+  r.native.schedules.push(
+    sample({ id: 'dyn-once', trigger: { type: 'once', fireAt: Date.now() + 60000 } }),
+    sample({ id: 'dyn-other', targetCatId: 'cat-b' }),
+    sample({ id: 'dyn-paused', enabled: false, effectiveEnabled: false, registered: false, prompt: '旧消息' }),
+  );
+  for (const bad of [{}, { prompt: '' }, { prompt: '   ' }, { prompt: 'x'.repeat(16001) }, { enabled: true, prompt: '新消息' }, { prompt: '新消息', name: '改名' }]) {
+    assert.equal((await r.call('/dyn-task-a', 'PATCH', bad)).status, 400, JSON.stringify(bad));
+  }
+  assert.equal((await r.call('/dyn-once', 'PATCH', { prompt: '改一下' })).status, 409);
+  assert.equal((await r.call('/dyn-other', 'PATCH', { prompt: '改一下' })).status, 404);
+  r.native.ready = false;
+  assert.equal((await r.call('/dyn-task-a', 'PATCH', { prompt: '改一下' })).status, 503);
+  r.native.ready = true;
+  assert.equal(r.native.calls.some(c => c.path.endsWith('/parameters')), false);
+
+  // Enabled tasks require a deliverable thread/runtime, whereas paused tasks can still edit their message before resuming.
+  r.native.threads.get('thread-current')!.preferredCats = ['cat-b'];
+  assert.equal((await r.call('/dyn-task-a', 'PATCH', { prompt: '改一下' })).status, 409);
+  const pausedRes = await r.call('/dyn-paused', 'PATCH', { prompt: '新消息' });
+  assert.equal(pausedRes.status, 200);
+  assert.equal((await pausedRes.json()).prompt, '新消息');
+
+  // Unconfirmed or proposed native replies are never reported as applied.
+  const baseRequest = r.native.request.bind(r.native);
+  r.native.request = (async (path: string, options?: any) => {
+    if (path.endsWith('/parameters')) return { success: true, proposed: true };
+    return baseRequest(path, options);
+  }) as typeof r.native.request;
+  assert.equal((await r.call('/dyn-paused', 'PATCH', { prompt: '再改' })).status, 502);
 });
