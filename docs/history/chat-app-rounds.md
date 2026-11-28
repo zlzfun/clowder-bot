@@ -218,6 +218,15 @@
 
 **没有做**：第二层文档里过期的说法只改了核实过的几处，其余列在待办第五节；features.md 里标着「待实测」的几处都没有实测。
 
+<a id="round-20"></a>
+### 第 20 轮 · 这台电脑：确认核对与状态区分（2026-11-28）
+
+**内容**：完成待办 `T-22` 与 `T-23`。打开「可以用这台电脑」时，请求带上使用者在确认框里同意关掉或停下的猫名单（`confirmOff`），服务端在改动注册表或结束任何一轮之前核对；视图把「现在还开着的猫」（`others`）和「开关已关掉、但还没确认停下的猫」（`lingering`）拆开，确认框与拒绝提示照实区分。
+
+**后端（适配层）**：已完成并合入（`faada1f4`）：`ComputerView` 拆分 `others` 与 `lingering`（读的时候经 `busy()` 现看，确认已空闲的从 `lingering` 清掉）；`PUT /xbot-api/bots/:name/computer` 校验 `{enabled, confirmOff?}`，授权到位后（以及驱动路径变更触发重装后）核对 `confirmOff`，对不上时 409 `computer_confirm_changed` 并带回当前最新 `ComputerView`，注册表和正在进行的回复都不动；`handOver` 只结束已核对的那批 `lingeringIds`。详见 [接口范围](../xbot-api.md)「这台电脑」。
+
+**前端**：已完成并合入（第 58 项，`8bfb8ca8`）：由本机 Claude Code（`claude-opus-5-5`，xhigh）实现。`profile-rules.js` 解析 `lingering`、导出 `computerAffected`，确认框按四种情形（无、仅 `others`、仅 `lingering`、两者都有）用一句日常中文如实说明；`profile.js` 打开时始终传 `confirmOff`（含等系统授权后的自动重发），遇到 409 `computer_confirm_changed` 先使别的猫的缓存视图作废（`forgetOthers`），再用返回的 `details` 直接更新当前视图并在资料页可见且无其他弹窗时立即重新弹出确认框；`app.js` 在 `api()` 错误对象上透传 `details`。经过 Codex（`gpt-6-astra`，xhigh）两轮只读检视，4 条问题全部修正（空闲 `lingering` 猫在交接前新开一轮不被误停、409 分支先做 `forgetOthers`、队列读取失败时文案保留「还没确认停下／要是还在回复」的不确定性、驱动重装后二次核对 `confirmOff`）。`npm test` 885 项（881 通过，4 项按原因跳过）、`tsc --noEmit`、`verify:frontend` 与生产构建通过。
+
 ## 部署记录
 
 部署的做法在 [验证环境与部署](../operations.md)。第 17、18 轮的部署、2026-11-26 日常实例换引擎和 2026-11-27 部署「同一时间只有一只猫」只写在上面各轮自己的记录里，换引擎的经过另见 [上游维护记录](upstream-records.md)。
