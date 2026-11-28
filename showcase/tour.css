@@ -26,6 +26,8 @@ body.t-page {
 .t-vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 .t-wrap { width: min(1120px, calc(100% - 48px)); margin-inline: auto; }
+/* A host cat's colour spreads a little past its picture (.t-tinted); on a narrow window it must not scroll the page sideways. */
+.t-page main { overflow-x: clip; }
 @media (max-width: 640px) { .t-wrap { width: calc(100% - 32px); } }
 
 .t-skip {

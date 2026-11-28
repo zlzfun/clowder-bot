@@ -58,21 +58,61 @@ const breedNames: Record<string, [string, string, string | null]> = {
   'turkish-van': ['梵花猫', '墨墨', 'kimi'], dsh: ['小鲸鱼', '鲸鲸', null], 'dragon-li': ['狸花猫', '小狸花', 'opencode'],
   bengal: ['孟加拉猫', '斑斑', 'antigravity'], 'golden-chinchilla': ['金渐层', '金哥', 'opencode'],
 };
+const runtimeStatuses = ['configured', 'login_required', 'unknown', 'not_installed'] as const;
+type RuntimeStatus = typeof runtimeStatuses[number];
 const agentSets: Record<string, NativeRuntime[]> = (() => {
-  const make = (id: string, label: string, clientId: string, status: 'configured' | 'login_required' | 'unknown' | 'not_installed', loginCommand: string): NativeRuntime =>
+  const make = (id: string, label: string, clientId: string, status: RuntimeStatus, loginCommand: string): NativeRuntime =>
     ({ id, label, clientId, installed: status !== 'not_installed', configuredModel: status === 'not_installed' ? undefined : 'preview-model', configuredEffort: 'medium',
       models: [], command: id, readiness: { status, checkedAt: Date.now(), loginCommand } });
-  const set = (codex: any, claude: any, kimi: any = 'not_installed') => [make('codex', 'Codex', 'openai', codex, 'codex login'), make('claude', 'Claude Code', 'anthropic', claude, 'claude auth login'),
-    make('kimi', 'Kimi', 'kimi', kimi, 'kimi login')];
+  const set = (codex: RuntimeStatus, claude: RuntimeStatus, kimi: RuntimeStatus = 'not_installed') =>
+    [make('codex', 'Codex', 'openai', codex, 'codex login'), make('claude', 'Claude Code', 'anthropic', claude, 'claude auth login'),
+      make('kimi', 'Kimi', 'kimi', kimi, 'kimi login')];
   // The other tools the pinned engine's detection lists (ids, labels and clients read from the isolated runtime, 2026-11-12); the app
   // cannot connect cats to them yet. On the showcase's computer the two whose cats are staged as answering (DSH, AGY) are installed.
   const others = (here: string[]): NativeRuntime[] => [['dsh', 'DSH', 'acp', 'acp'], ['agy-native', 'AGY Native', 'google', undefined], ['agy-acp', 'AGY 官方 ACP', 'google', undefined], ['pi', 'Pi', 'acp', 'acp']]
     .map(([id, label, clientId, transport]) => ({ id: id!, label: label!, clientId: clientId!, installed: here.includes(id!), models: [], ...(transport ? { transport } : {}),
       readiness: { status: here.includes(id!) ? 'configured' as const : 'not_installed' as const, checkedAt: Date.now() } }));
   return { ready: set('configured', 'configured'), unknown: set('unknown', 'not_installed'), login: set('login_required', 'not_installed'), none: set('not_installed', 'not_installed'),
+    // All four face states at once (ready + login + missing + unsupported): Claude Code ready, Codex needs login, Kimi missing, plus the engine's unadapted list.
+    mixed: [...set('login_required', 'configured', 'not_installed'), ...others(['dsh', 'agy-native'])],
     // The showcase's computer: the three tools the app can connect, all logged in, and the engine's list of the rest.
     showcase: [...set('configured', 'configured', 'configured'), ...others(['dsh', 'agy-native'])] };
 })();
+function resolveAgents(spec: unknown, current: NativeRuntime[]): { runtimes: NativeRuntime[]; label: string } | null {
+  if (typeof spec === 'string') {
+    const trimmed = spec.trim();
+    if (agentSets[trimmed]) return { runtimes: agentSets[trimmed]!, label: trimmed };
+    if (!trimmed.includes('=')) return null;
+    const map: Record<string, RuntimeStatus> = {};
+    for (const part of trimmed.split(',')) {
+      const [id, status] = part.split('=').map(s => s.trim());
+      if (!id || !runtimeStatuses.includes(status as RuntimeStatus)) return null;
+      map[id] = status as RuntimeStatus;
+    }
+    return resolveAgents(map, current);
+  }
+  if (!spec || typeof spec !== 'object' || Array.isArray(spec)) return null;
+  const overrides = spec as Record<string, unknown>;
+  const entries = Object.entries(overrides);
+  if (!entries.length) return null;
+  const base = ['codex', 'claude', 'kimi'].every(id => current.some(r => r.id === id)) ? current : agentSets.showcase!;
+  const byId = new Map<string, RuntimeStatus>();
+  for (const [id, status] of entries) {
+    if (!['codex', 'claude', 'kimi'].includes(id) || !runtimeStatuses.includes(status as RuntimeStatus)) return null;
+    byId.set(id, status as RuntimeStatus);
+  }
+  const runtimes = base.map(runtime => {
+    const next = byId.get(runtime.id);
+    if (!next) return runtime;
+    return {
+      ...runtime,
+      installed: next !== 'not_installed',
+      configuredModel: next === 'not_installed' ? undefined : (runtime.configuredModel ?? 'preview-model'),
+      readiness: { ...(runtime.readiness ?? {}), status: next, checkedAt: Date.now() },
+    };
+  });
+  return { runtimes, label: 'custom' };
+}
 
 export class PreviewNative extends NativeFixture {
   listeners = new Map<string, Set<(event: NativeEvent) => void>>();
@@ -316,6 +356,15 @@ export class PreviewNative extends NativeFixture {
     return members.slice(0, 1);
   }
   script(cat: NativeCat, text: string, threadId: string, said?: NativeMessage) {
+    // One emoji and nothing else, as a reaction is sent: under a question of the cat's own it is the go-ahead and the cat
+    // goes on; anywhere else there is nothing to do, and the cat answers with one emoji, as it is told to (chatManner).
+    if (soleEmoji(text)) {
+      const about = said?.replyTo ? (this.messages.get(threadId) ?? []).find(message => message.id === said.replyTo) : undefined;
+      const asked = about?.type === 'assistant' && /[?？][\s\S]{0,3}$/.test(about.content.replace(/\n\n\[[^\]]*🐾\]\s*$/u, '').trim());
+      const reply = asked ? `好，那就这么办，我接着做。\n\n这是预览环境里的固定回复，不是真的猫在回答。\n\n[${cat.name}/${showcase ? '示例' : 'preview'}🐾]` : '🐾';
+      return { steps: [] as Array<[string, Record<string, unknown>]>, reply, fail: false, think: 500,
+        blocks: [] as Array<Record<string, unknown>>, proposal: undefined, files: [] as NonNullable<Script['files']> };
+    }
     const staged = this.scene?.(threadId, cat, text);
     if (staged) return { steps: staged.steps ?? [], reply: staged.reply + `\n\n[${cat.name}/示例🐾]`, fail: staged.fail ?? false, think: staged.think ?? 500,
       blocks: staged.blocks ?? [], proposal: staged.proposal, files: staged.files ?? [] };
@@ -323,13 +372,6 @@ export class PreviewNative extends NativeFixture {
     let reply: string, fail: boolean | string = false, think = 500;
     if (text.startsWith('聊天页的开场邀请')) reply = `你好呀，我是${cat.name}。今天想聊点什么？`;
     else if (/失败/.test(text)) { reply = '我先看一下…'; fail = true; }
-    // One emoji and nothing else, as a reaction is sent: under a question of the cat's own it is the go-ahead and the cat
-    // goes on; anywhere else there is nothing to do, and the cat answers with one emoji, as it is told to (chatManner).
-    else if (soleEmoji(text)) {
-      const about = said?.replyTo ? (this.messages.get(threadId) ?? []).find(message => message.id === said.replyTo) : undefined;
-      const asked = about?.type === 'assistant' && /[?？][\s\S]{0,3}$/.test(about.content.replace(/\n\n\[[^\]]*🐾\]\s*$/u, '').trim());
-      reply = asked ? '好，那就这么办，我接着做。\n\n这是预览环境里的固定回复，不是真的猫在回答。' : '🐾';
-    }
     else if (/^(谢谢|多谢|辛苦了|晚安|再见)/.test(text.trim())) reply = '🐾';
     else if (/长/.test(text)) reply = ['## 先说结论', '这是一段**预览用**的长回复，用来看一条回复被写出来的样子。', '',
       '- 第一点：列表、`行内代码` 和[链接](https://example.com)都会出现。', '- 第二点：下面有一段代码。', '- 第三点：最后是一张表。', '',
@@ -364,7 +406,7 @@ export class PreviewNative extends NativeFixture {
       detail: { takeaway: '回答简短一点，先说结论', quote: text.slice(0, 60), privacy: 'sensitive' } }; }
     else if (/提醒|定时/.test(text)) { reply = '可以，我来设一个定时，等你确认。'; proposal = { feature: 'F139', title: '提议新建定时任务', summary: 'Create schedule: 喝水提醒',
       detail: { mutationKind: 'create', trigger: { type: 'cron', expression: '0 9 * * *', timezone: 'Asia/Shanghai' } } }; }
-    return { steps, reply: reply + `\n\n[${cat.name}/preview🐾]`, fail, think, blocks, proposal, files: [] as NonNullable<Script['files']> };
+    return { steps, reply: reply === '🐾' ? '🐾' : reply + `\n\n[${cat.name}/preview🐾]`, fail, think, blocks, proposal, files: [] as NonNullable<Script['files']> };
   }
   async turn(threadId: string, cat: NativeCat, user: NativeMessage) {
     const list = this.messages.get(threadId)!, invocationId = randomUUID(), key = `${threadId}:${cat.id}:${invocationId}`;
@@ -454,7 +496,7 @@ const showcase = process.env.PREVIEW_SCENE === 'showcase';
 // 这台电脑 without a real driver: what the adapter would be told in each state. `needs` stays until {"computer":"ready"} (the owner granting).
 const computerModes = ['none', 'absent', 'needs', 'ready'] as const;
 const computer: ComputerDriver & { mode: typeof computerModes[number] } = {
-  mode: showcase ? 'none' : 'ready',
+  mode: 'ready',
   get supported() { return this.mode !== 'none'; },
   async locate() { return this.mode === 'needs' || this.mode === 'ready' ? { command: '/preview/CuaDriver.app/Contents/MacOS/cua-driver', args: ['mcp'] } : undefined; },
   async permissions() { return this.mode === 'ready' ? { state: 'granted' } : this.mode === 'needs' ? { state: 'needed', missing: ['accessibility', 'screen_recording'] } : { state: 'unknown' }; },
@@ -471,17 +513,27 @@ runtime.store.state.deviceName = showcase ? '示例环境' : '预览环境';
 // Seeded cats come from the same quick creation the first screen uses: 团子 is 布偶猫's cat and answers the way
 // Claude Code does, 栗子 is 缅因猫's and answers the way Codex does (see turn()); 年糕 is a custom cat that only borrows a face.
 const seeds: Array<[string, Record<string, unknown>]> = [['团子', { face: 'ragdoll' }], ['栗子', { face: 'maine-coon' }], ['年糕', { face: 'siamese', custom: true, agent: 'claude' }]];
-if (!showcase) for (const [name, simple] of seeds.slice(0, Math.max(0, Math.min(3, Number(process.env.PREVIEW_CATS ?? 2)))))
-  await runtime.bridge.createBot({ name, simple, idempotencyKey: randomUUID() });
+if (!showcase) {
+  for (const [name, simple] of seeds.slice(0, Math.max(0, Math.min(3, Number(process.env.PREVIEW_CATS ?? 2)))))
+    await runtime.bridge.createBot({ name, simple, idempotencyKey: randomUUID() });
+  const chosen = process.env.PREVIEW_AGENTS ? resolveAgents(process.env.PREVIEW_AGENTS, native.runtimes) : { runtimes: agentSets.mixed!, label: 'mixed' };
+  if (!chosen) throw new Error('Invalid PREVIEW_AGENTS: ' + process.env.PREVIEW_AGENTS);
+  native.runtimes = chosen.runtimes;
+}
+const agentsLabel = () => Object.entries(agentSets).find(([, set]) => set === native.runtimes)?.[0] ?? 'custom';
 /** The staged scene's demo line for each chat and where it goes, by the chat's name (see `{"play": …}` below). */
 let plays = new Map<string, { line: string; cat?: string; group?: string }>();
 // What this is, readable without changing anything: a tool that clicks through the staged chats (scripts/showcase-shots.mjs)
 // asks here first, so it can never be pointed at a real instance; the guide asks whether the staged chats are behind it.
 runtime.app.get('/__preview', (_req, res) => res.json({ preview: true, scene: showcase ? 'showcase' : 'plain', staged: plays.size > 0,
-  zone: Intl.DateTimeFormat().resolvedOptions().timeZone, plays: [...plays.keys()], cats: native.cats.map(cat => cat.name), computer: computer.mode }));
+  zone: Intl.DateTimeFormat().resolvedOptions().timeZone, plays: [...plays.keys()], cats: native.cats.map(cat => cat.name), computer: computer.mode, agents: agentsLabel() }));
 runtime.app.post('/__preview', async (req, res) => {
   const input = req.body ?? {};
-  if (typeof input.agents === 'string') { if (!agentSets[input.agents]) return res.status(400).json({ error: 'agents: ' + Object.keys(agentSets).join(' | ') }); native.runtimes = agentSets[input.agents]!; }
+  if (input.agents !== undefined) {
+    const resolved = resolveAgents(input.agents, native.runtimes);
+    if (!resolved) return res.status(400).json({ error: 'agents: ' + Object.keys(agentSets).join(' | ') + ' or {codex|claude|kimi: configured|login_required|unknown|not_installed}' });
+    native.runtimes = resolved.runtimes;
+  }
   if (typeof input.speed === 'number' && input.speed > 0 && input.speed <= 20) native.speed = input.speed;
   if (typeof input.approvals === 'string') native.hubFails = input.approvals === 'failing';
   if (typeof input.computer === 'string') { if (!computerModes.includes(input.computer)) return res.status(400).json({ error: 'computer: ' + computerModes.join(' | ') }); computer.mode = input.computer; }
@@ -517,7 +569,7 @@ runtime.app.post('/__preview', async (req, res) => {
     try { await (cat ? runtime.bridge.direct(cat).then(thread => runtime.bridge.send(thread, { text: target.line }, cat)) : runtime.bridge.send(group!, { text: target.line })); }
     catch (error) { return res.status(502).json({ error: 'play: ' + (error instanceof Error ? error.message : 'not sent') }); }
   }
-  res.json({ agents: Object.entries(agentSets).find(([, set]) => set === native.runtimes)?.[0], speed: native.speed, approvals: native.hubFails ? 'failing' : 'working', cats: native.cats.map(cat => cat.name), computer: computer.mode });
+  res.json({ agents: agentsLabel(), speed: native.speed, approvals: native.hubFails ? 'failing' : 'working', cats: native.cats.map(cat => cat.name), computer: computer.mode });
 });
 // The illustrated guide to what the app can do (showcase/), next to the staged chats it points at.
 if (existsSync(join(root, 'showcase'))) runtime.app.use('/tour', express.static(join(root, 'showcase'), { etag: false, lastModified: false, setHeaders: res => res.setHeader('Cache-Control', 'no-store') }));
@@ -529,6 +581,11 @@ const server = runtime.app.listen(port, '127.0.0.1', () => {
   // The staged chats are made through the adapter's own routes, like an owner would make them.
   seedShowcase({ native, base: `http://127.0.0.1:${port}` }).then(scene => {
     plays = scene.plays;
+    if (process.env.PREVIEW_AGENTS) {
+      const chosen = resolveAgents(process.env.PREVIEW_AGENTS, native.runtimes);
+      if (!chosen) throw new Error('Invalid PREVIEW_AGENTS: ' + process.env.PREVIEW_AGENTS);
+      native.runtimes = chosen.runtimes;
+    }
     console.log(`showcase (staged chats on the scripted fixture, no engine): http://127.0.0.1:${port}  ·  guide: http://127.0.0.1:${port}/tour/`);
   }).catch(error => { console.error('[showcase] could not stage the chats:', error); process.exitCode = 1; close(); });
 });

@@ -64,8 +64,6 @@
 
 ### 外观与说明页
 
-- **T-30** 能力说明页（`/tour/`）和示例场景没有跟上：没有「这台电脑」「应用」两项；面板改动后四组图（`files-tab`、`reminder-tab`、`memory-tab`、`profile`）没有重拍；回复与表情回应进没进说明页，日志没提（推断：没有）。——出处：history/chat-app-rounds.md「第 17 轮」「第 18 轮」；xbot-frontend.md 第 50、51、54 项
-- **T-31** 示例和预览数据里摆不出「没装」「没登录」的猫，要常驻得改 `scripts/preview-fixture.ts` 或示例数据。——出处：xbot-frontend.md 第 44、45 项；history/chat-app-rounds.md「第 13 轮」
 - **T-32** 配色的收尾：运行面板不跟配色（要先把它换到 token 上）；样页「在应用里试」的窗口里猫名字的颜色不跟着换；配色不在多个标签页之间同步；`manifest.webmanifest`、`/tour/`、`/template-lab/` 不跟配色（摘录 02 记为可做，摘录 03 记为「已知局限，不做动态」）。——出处：history/chat-app-rounds.md「第 15 轮」；xbot-frontend.md 第 47、48 项
 - **T-33** 详情面板：并列时点顶栏猫头打开后顶栏重新居中，原地再点一下关不上；窗口拉窄越过界线的途中遮罩会淡入一次。——出处：history/chat-app-rounds.md「第 17 轮」；xbot-frontend.md 第 50 项
 - **T-34** 其余小处：侧栏展开那一刻窄条里当前聊天的高亮没有淡出；透明头像的取舍（胡须、耳簇尖、浅色毛的轮廓），任务执行条 `.work-stack` 没有接缝；说明页自己的局限（手机上小字、列表 8 秒读一次、集章只认本页点进去的、`file://` 字体、没有登录检查）。（归类是推断）——出处：xbot-frontend.md 第 22、36、37、43 项

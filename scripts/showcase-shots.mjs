@@ -20,10 +20,16 @@
 // set is taken from a showcase started with TZ=Asia/Shanghai (the adapter's
 // default zone for a cat), which makes it the same whichever machine retakes
 // it. The staged chats are dated relative to "now", so all pictures are taken
-// in one run, the light and the dark page side by side at each step. Two of
-// them change what is staged: 宪宪 plays its demo (the reply is caught while
-// it is being written) and the contact list is taken first, before opening a
-// chat clears its unread count. The cats are called by their names (宪宪, 砚砚,
+// in one run, the light and the dark page side by side at each step. Three of
+// them change what is staged: 宪宪 is asked once (through the adapter, not
+// typed into each page) to use this computer and is caught while the 在用电脑
+// step shows; later it plays its demo (the reply is caught while it is being
+// written); and the contact list is taken first, before opening a chat clears
+// its unread count. The rest only look: the emoji row over a message is opened
+// and closed without picking, the 这台电脑 question for another cat is
+// cancelled, 应用 is opened and closed. 应用 is taken with 微信's drawn mark
+// ({"wechat": "icon-off"}, put back afterwards), not the icon of whatever
+// computer retakes it. The cats are called by their names (宪宪, 砚砚,
 // 烁烁…: what their templates call them). ONLY=live,group retakes some (the
 // rest keep theirs).
 //
@@ -78,9 +84,10 @@ for (const theme of ['light', 'dark']) {
   pages.push({ theme, page });
 }
 const both = (fn) => Promise.all(pages.map(({ page, theme }) => fn(page, theme)));
-// Nothing hovered (a hover shows a message's time or a tooltip) and nothing focused.
+// Nothing hovered (a hover shows a message's time or a tooltip) and nothing focused,
+// unless the picture is of what a hover or the focus shows (`keep`: the pointer stays where it is).
 const still = (page) => page.mouse.move(1439, 899).then(() => page.evaluate(() => document.activeElement?.blur?.()));
-const settle = async (page, focus) => { if (focus) await page.mouse.move(1439, 899); else await still(page); await page.evaluate(() => document.fonts.ready); await page.waitForTimeout(400); };
+const settle = async (page, focus, keep) => { if (keep) { /* as it is */ } else if (focus) await page.mouse.move(1439, 899); else await still(page); await page.evaluate(() => document.fonts.ready); await page.waitForTimeout(400); };
 
 /**
  * A box around elements, in page coordinates, with some room and clamped to the
@@ -110,7 +117,11 @@ async function around(page, selectors, pad = 16, limit = {}) {
   if (!box) throw new Error('nothing to frame: ' + selectors.join(', '));
   return box;
 }
-/** The drawer from its top to the end of what it shows (it is as tall as the window). */
+/**
+ * The detail panel from its top to the end of what it shows (it is as tall as the window). At 1440 wide it
+ * stands beside the chat (docs/xbot-frontend.md items 50, 51): its edge against the chat is straight, × at
+ * its top right, the cat's face (编辑资料) at its top left.
+ */
 const panel = (page) => page.evaluate(() => {
   const box = document.querySelector('#panel').getBoundingClientRect();
   let bottom = box.top;
@@ -131,9 +142,9 @@ async function drawer(page, name, tab) {
 // At 1440 wide the panel sits beside the chat (docs/xbot-frontend.md item 50), with no scrim to click away:
 // the identity chip that opened it closes it again.
 const closePanel = (page) => page.locator('#head-chip').click();
-async function shoot(name, frame, { focus = false } = {}) {
+async function shoot(name, frame, { focus = false, keep = false } = {}) {
   await both(async (page, theme) => {
-    await settle(page, focus);
+    await settle(page, focus, keep);
     const clip = typeof frame === 'function' ? await frame(page) : frame;
     await page.screenshot({ path: join(out, `${name}-${theme}.png`), clip });
   });
@@ -203,7 +214,7 @@ try {
     await both(closePanel);
   }
 
-  // 说一句就设提醒: 鲸鲸, a reminder come due (after its time divider) and the one still waiting.
+  // 说一句就设提醒: 鲸鲸, a reminder come due (after its time divider) and the one still waiting, and its 定时.
   if (wanted('reminder')) {
     await both(async (page) => { await open(page, '鲸鲸'); await thread(page, 'bottom'); });
     await shoot('reminder', async page => around(page, ['#thread .tdiv:has(+ .ck-reminder)', '@last:1'], 20, { ...(await column(page)), y0: 64 }));
@@ -212,14 +223,18 @@ try {
     await both(closePanel);
   }
 
-  // 要记住的事先问你: 小狸花's card, and what is kept under 资料 → 记忆.
+  // 要记住的事先问你: 小狸花's card, and what is kept under 资料 → 记忆: 事项 opened (item 62), with its one record and
+  // the way back to where it was said.
   if (wanted('memory')) {
     await both(async (page) => { await open(page, '小狸花'); await thread(page, 'bottom'); });
     await shoot('memory', async page => around(page, ['@last:3'], 20, { ...(await column(page)), y0: 64 }));
     await both(async (page) => {
       await drawer(page, '小狸花', '记忆');
-      await page.locator('#panel').getByText('你的偏好', { exact: true }).click();
-      await page.waitForTimeout(700);
+      await page.locator('#panel').getByText('事项', { exact: true }).click();
+      await page.locator('#panel').getByText('「页边」首页改版', { exact: true }).waitFor();
+      await page.locator('#panel').getByText(/^记录/).first().click();
+      await page.locator('#panel').getByText('在对话里查看', { exact: true }).waitFor();
+      await page.waitForTimeout(500);
     });
     await shoot('memory-tab', panel);
     await both(closePanel);
@@ -257,10 +272,31 @@ try {
     await both(async (page) => { await page.locator('#input').press('Escape'); await page.locator('#input').press('Backspace'); });
   }
 
-  // 资料页: a cat's 资料, technical settings folded under 高级.
+  // 回复与表情回应: 读书会, 鲸鲸's 定了 under the pointer (表情 and 回复 at its foot, its time beside them) with the emoji
+  // row open over it (your 👍 already there, so taken), the chips on its corner, 墨墨's reply quoting 鲸鲸 (鲸鲸's small
+  // face on the quote), and 鲸鲸's 🐾 on your 辛苦鲸鲸啦. Nothing is picked: Escape closes the row again.
+  if (wanted('react')) {
+    await both(async (page) => {
+      await open(page, '读书会'); await thread(page, 'bottom');
+      const row = page.locator('#thread .msg', { hasText: '定了，《清单革命》' }).last();
+      await row.locator('.bot-bubble').hover();
+      await row.locator('.rx-act-react').click();
+      await page.locator('.rx-pick').waitFor();
+      await page.waitForTimeout(400);
+    });
+    // Above, no sliver of the row before 鲸鲸's (the emoji row floats up close to it).
+    await shoot('react', async page => around(page, ['.rx-pick', '@last:3'], 18, { ...(await column(page)), y0: await page.evaluate(() => {
+      const rows = [...document.querySelectorAll('#thread .thread-inner > .msg')], before = rows.at(-4);
+      return Math.max(64, before ? Math.ceil(before.getBoundingClientRect().bottom) + 2 : 64);
+    }) }), { keep: true });
+    await both(async (page) => { await page.keyboard.press('Escape'); await page.locator('.rx-pick').waitFor({ state: 'detached' }); });
+  }
+
+  // 资料页: a cat's 资料 beside the chat, technical settings folded under 高级; 宪宪 has 置顶 and 可以用这台电脑 on. The
+  // pointer rests on its face, which shows the way to 编辑资料 (item 51).
   if (wanted('profile')) {
-    await both(page => drawer(page, '宪宪', '资料'));
-    await shoot('profile', panel);
+    await both(async (page) => { await drawer(page, '宪宪', '资料'); await page.locator('#panel .pf-computer [role="switch"]').waitFor(); await page.locator('#panel .pf-edit').hover(); });
+    await shoot('profile', panel, { keep: true });
     await both(closePanel);
   }
 
@@ -280,6 +316,45 @@ try {
       return { ...box, height: Math.min(box.height, Math.ceil(end + 48 - box.y)) };
     });
     await both(page => page.locator('#settings-close').click());
+  }
+
+  // 可以用这台电脑: switching it on for 砚砚 asks first, and says whose goes off (宪宪 has it on): the question is
+  // cancelled, nothing is sent. Then 宪宪 is asked, once, through the adapter, to use this computer, slowed down, and
+  // caught while the quiet line under its reply says 在用电脑 (the stop button in the composer); its reply is let finish.
+  if (wanted('computer')) {
+    await both(async (page) => {
+      await drawer(page, '砚砚', '资料');
+      await page.locator('#panel .pf-computer [role="switch"]').click();
+      await page.locator('.pf-modal .pf-card').waitFor();
+      await page.waitForTimeout(400);
+    });
+    await shoot('computer-ask', page => around(page, ['.pf-modal .pf-card'], 0));
+    await both(async (page) => { await page.locator('.pf-modal .pf-card').getByRole('button', { name: '取消', exact: true }).click(); await page.locator('.pf-modal').waitFor({ state: 'detached' }); await closePanel(page); });
+    await both(async (page) => { await open(page, '宪宪'); await thread(page, 'bottom'); });
+    await preview({ speed: 4 });
+    try {
+      const sent = await fetch(new URL('/xbot-api/bots/' + encodeURIComponent('宪宪') + '/messages', base), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: '用电脑帮我算一下 12 × 12' }) });
+      if (!sent.ok) throw new Error(`宪宪 was not asked: ${sent.status} ${await sent.text()}`);
+      await sent.text();
+      await both(page => page.waitForFunction(() => /在用电脑/.test(document.querySelector('#thread .msg.live .lv-step')?.textContent || ''), null, { timeout: 60_000 }));
+      await shoot('computer', async page => around(page, ['@last:2', '.composer'], 16, { ...(await column(page)), y0: 64 }));
+    } finally { await preview({ speed: 1 }); }
+    await both(page => page.waitForFunction(() => !document.querySelector('#thread .msg.live') && /144/.test([...document.querySelectorAll('#thread .thread-inner > .msg')].at(-1)?.textContent || ''), null, { timeout: 90_000 }));
+  }
+
+  // 应用: the dialog from the sidebar, 微信 first, then the apps added here (网页阅读 connected, 本地笔记索引 paused)
+  // and the way to add one, once every check has settled. Its × closes it (the focus was taken off it for the picture).
+  if (wanted('apps')) {
+    await preview({ wechat: 'icon-off' });
+    try {
+      await both(async (page) => {
+        await page.locator('#side-apps').click();
+        await page.waitForFunction(() => { const card = document.querySelector('.ap-modal .ap-card'); return card && /网页阅读[\s\S]*已连接/.test(card.textContent || '') && /已停用/.test(card.textContent || '') && !/正在检查/.test(card.textContent || ''); }, null, { timeout: 30_000 });
+        await page.waitForTimeout(500);
+      });
+      await shoot('apps', page => around(page, ['.ap-modal .ap-card'], 0));
+      await both(async (page) => { await page.locator('.ap-modal .ap-card').getByRole('button', { name: '关闭', exact: true }).click(); await page.locator('.ap-modal').waitFor({ state: 'detached' }); });
+    } finally { await preview({ wechat: 'icon-on' }); }
   }
 
   // 回复是活的: 宪宪 plays its demo, slowed down; caught while it is writing (the stop button in the composer).

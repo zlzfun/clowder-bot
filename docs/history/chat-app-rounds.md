@@ -290,6 +290,15 @@
 
 **前端**：已完成并合入（第 67 项，`88c03108`）：由本机 Claude Code（`claude-opus-5-5`，xhigh）实现。`apps-dialog.js` 仅在「应用」弹窗打开期间建立 `EventSource('/xbot-api/apps/events')`、关闭弹窗即断开，合并重读微信状态并严格让位给在途写操作，恢复正常读取时自动收起先前的读取错误提示。经过 Codex（`gpt-6-astra`，xhigh）只读检视，2 条问题全部修正。全量 963 项测试（959 通过，4 项按原因跳过）通过。
 
+<a id="round-28"></a>
+### 第 28 轮 · 能力说明页更新与预览多态夹具（2026-11-28）
+
+**内容**：完成待办 `T-30` 与 `T-31`。更新预览夹具以开箱常驻展现「能领 / 未登录 / 未安装 / 暂不支持」四类猫脸状态，扩展 `showcase` 示例场景并为 `/tour/` 能力说明页补齐「回复与表情回应」「可以用这台电脑」「应用」三节及重拍全套 44 张亮/暗色真实截图。
+
+**后端与示例夹具**：已完成并合入（`a5bb6a1a`）：`scripts/preview-fixture.ts` 新增 `mixed` 运行时预设（可通过 `PREVIEW_AGENTS` 或 `POST /__preview` 切换，默认普通预览在建好示例猫后呈混合状态）；`scripts/showcase-scene.ts` 补齐电脑开关与步骤、群聊引用与折叠表情回应、事项记忆及自定义 MCP 应用（含按猫屏蔽与停用态）。
+
+**前端与说明页**：已完成并合入（第 66 项，`5fb40e80`）：由本机 Claude Code（`claude-opus-5-5`，xhigh）实现。更新 `showcase/index.html`、`showcase/tour.css`、`scripts/showcase-shots.mjs` 与 `tests/tour.test.ts`，在隔离示例环境重拍 22 组共 44 张亮暗截图。经过 Codex（`gpt-6-astra`，xhigh）只读检视，2 条问题全部修正（非 macOS 下微信状态断言兼容、事项记录时间戳单调性）。全量测试通过。
+
 ## 部署记录
 
 部署的做法在 [验证环境与部署](../operations.md)。第 17、18 轮的部署、2026-11-26 日常实例换引擎和 2026-11-27 部署「同一时间只有一只猫」只写在上面各轮自己的记录里，换引擎的经过另见 [上游维护记录](upstream-records.md)。
