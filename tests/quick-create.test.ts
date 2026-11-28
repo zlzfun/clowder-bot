@@ -320,7 +320,7 @@ test('which tool a face\'s cat thinks with is read from faces[].tool as the serv
     ['ragdoll', 'Claude Code', 'ready', true, 'claude', ''], ['maine-coon', 'Codex', 'ready', true, 'codex', ''],
     ['siamese', 'Gemini', 'unsupported', false, '', '暂不支持 Gemini'], ['turkish-van', 'Kimi', 'missing', false, '', '这台电脑上还没有装 Kimi'],
     ['dsh', 'DSH', 'unsupported', false, '', '暂不支持 DSH'], ['dragon-li', 'OpenCode', 'unsupported', false, '', '暂不支持 OpenCode'],
-    ['bengal', 'Antigravity', 'unsupported', false, '', '暂不支持 Antigravity'], ['golden-chinchilla', 'OpenCode', 'unsupported', false, '', '暂不支持 OpenCode'],
+    ['bengal', 'Antigravity', 'unsupported', false, '', 'Antigravity 已停用'], ['golden-chinchilla', 'OpenCode', 'unsupported', false, '', '暂不支持 OpenCode'],
   ]);
   const maine = R.start(START.codexLogin).faces.find((f: Any) => f.id === 'maine-coon').tool;
   assert.deepEqual(plain(maine), { label: 'Codex', state: 'login', usable: false, id: '', reason: 'Codex 还没有登录', loginCommand: 'codex login' });

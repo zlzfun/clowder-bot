@@ -407,6 +407,43 @@ test('an unfinished reply says how it ended; the server\'s stand-in words and a 
   assert.equal(R.hiddenText(0), '');
 });
 
+// 改回默认设置 (item 65, T-15): ended.code and ended.resetAgent from the transcript and group reads.
+const EVERYDAY = /Agent|Bot|Thread|session|模型|推理强度|原生|调用|会话|线程|群组|Clowder AI/i;
+const RESET_FAILED = '没能改回默认设置，请稍后再试。';
+test('改回默认设置 (item 65): an ending keeps the engine\'s code and the cat the server says can go back to the defaults, only when given; why a reset did not go through is said in everyday words', () => {
+  const R = rules();
+  // Not given: the line exactly as before.
+  assert.deepEqual(plain(R.ending({ ended: { how: 'failed', reason: 'rate limit' } })), { how: 'failed', label: '这次没完成', reason: 'rate limit', again: true });
+  assert.deepEqual(plain(R.ending({ ended: { how: 'failed', reason: ' 模型名不被支持 ', code: ' model_not_found ', resetAgent: { bot: ' 团子 ' } } })),
+    { how: 'failed', label: '这次没完成', reason: '模型名不被支持', again: true, code: 'model_not_found', resetBot: '团子' });
+  assert.deepEqual(plain(R.ending({ ended: { how: 'failed', code: 'rate_limit' } })), { how: 'failed', label: '这次没完成', reason: '', again: true, code: 'rate_limit' }, 'a code without an offer');
+  assert.deepEqual(plain(R.ending({ ended: { how: 'interrupted', code: 'x' } })), { how: 'interrupted', label: '中途被打断', reason: '', again: true, code: 'x' });
+  // Only a failed reply offers it; an offer that is not a cat's name is none.
+  assert.equal('resetBot' in R.ending({ ended: { how: 'interrupted', resetAgent: { bot: '团子' } } }), false);
+  assert.equal('resetBot' in R.ending({ ended: { how: 'stopped', resetAgent: { bot: '团子' } } }), false);
+  for (const bad of [{ bot: '' }, { bot: '  ' }, { bot: 7 }, {}, '团子', null, true]) {
+    assert.equal('resetBot' in R.ending({ ended: { how: 'failed', code: 'model_not_found', resetAgent: bad } }), false, JSON.stringify(bad));
+  }
+  for (const bad of ['', '  ', 42, null, {}]) assert.equal('code' in R.ending({ ended: { how: 'failed', code: bad } }), false, JSON.stringify(bad));
+  // Why it did not go through: the shell's api() errors (status, the server's words; a 5xx loses them).
+  const E = (status: number | undefined, message = 'request failed') => R.resetError(Object.assign(new Error(message), status === undefined ? {} : { status }));
+  assert.equal(E(409, '这只猫猫还在忙，等它做完或先停止，再换 Agent'), '它还在忙，等它做完或停下再改。', 'busy: the server\'s sentence says so');
+  assert.equal(E(409, 'Configuration revision conflict'), '它的设置刚有变化，请再试一次。', 'another 409 is a change made meanwhile, not called busy');
+  assert.equal(E(409), '它的设置刚有变化，请再试一次。');
+  assert.equal(E(422, '这只猫猫当前不是可恢复的本机 Agent 接入方式，请在资料 › 高级里选择'), '这里改不回默认设置，可以到它的资料 › 高级里看看。', 'where it can be done instead');
+  assert.equal(E(503, '服务出了点问题，请稍后再试。'), RESET_FAILED);
+  assert.equal(E(502), RESET_FAILED);
+  assert.equal(E(404, '找不到这只猫猫'), '找不到这只猫猫。', 'the server\'s own everyday words');
+  assert.equal(E(undefined, '连不上 clowder-bot'), '连不上 clowder-bot。', 'the product\'s own name is not a technical word');
+  assert.equal(E(400, '暂时没有可用的模型'), RESET_FAILED, 'technical words stay out');
+  assert.equal(E(403, '这个 Bot 不能改'), RESET_FAILED);
+  assert.equal(E(400, 'Invalid input: resetDefaults'), RESET_FAILED, 'words that are not everyday ones');
+  for (const nothing of [null, undefined, {}, 'oops']) assert.equal(R.resetError(nothing), RESET_FAILED);
+  for (const [status, message] of [[409, '还在忙'], [409, ''], [422, ''], [503, ''], [404, '找不到这只猫猫'], [400, 'Agent 模型 session']] as const) {
+    assert.doesNotMatch(E(status, message).replace(/clowder-bot/g, ''), EVERYDAY);
+  }
+});
+
 // ------------------------------------------------------------ notification rules
 const status = (bots: Any[], groups: Any[] = []) => ({ bots, groups });
 const act = (over: Record<string, unknown> = {}) => ({ threadId: 't1', readStatus: 'ready', items: [], counts: {}, unread: 0, last: null, ...over });
@@ -621,7 +658,7 @@ const button = (root: El, text: string) => { const b = buttons(root, text)[0]; a
 
 // ---------------------------------------------------------------- the page
 type Reply = { status: number; body: Any } | Error;
-function page(opts: { approvals?: (path: string) => Any; latest?: () => Set<string>; locate?: (item: Any, onCancel?: () => void) => unknown; cancelLocate?: () => unknown; reload?: () => unknown } = {}) {
+function page(opts: { approvals?: (path: string) => Any; latest?: () => Set<string>; locate?: (item: Any, onCancel?: () => void) => unknown; cancelLocate?: () => unknown; reload?: () => unknown; resetAgent?: (name: string) => unknown } = {}) {
   const doc = new Doc();
   const h = (tag: string, cls = '') => { const e = doc.createElement(tag); if (cls) e.className = cls; return e; };
   const chat = h('div', 'chat'), thread = h('div', 'thread'), dock = h('div', 'dock');
@@ -653,6 +690,7 @@ function page(opts: { approvals?: (path: string) => Any; latest?: () => Set<stri
     ...(opts.latest ? { latest: opts.latest } : {}),
     ...(opts.locate ? { locate: opts.locate } : {}),
     ...(opts.cancelLocate ? { cancelLocate: opts.cancelLocate } : {}),
+    ...(opts.resetAgent ? { resetAgent: opts.resetAgent } : {}),
   });
   const sel = { type: 'bot', id: '团子' };
   live.select('bot:团子');
@@ -1574,6 +1612,444 @@ test('再发一次 on a reply that took in what was said meanwhile sends all of 
   assert.equal(q.sends.length, 2);
   assert.match(other.textContent, /再发了 1 句，第 2 句没有发出去/);
   assert.doesNotMatch(other.textContent, /再发一次$/);
+});
+
+// ---------------------------------------------------------------- 改回默认设置 (item 65)
+// A reply that failed on the cat's own model setting, as the transcript gives it: with the server's
+// offer (ended.resetAgent) while the cat still has that setting, without it once it went back.
+const modelFailed = (offer = true, more: Record<string, unknown> = {}) => [
+  { id: 'u1', role: 'user', content: '帮我查一下' },
+  { id: 'r1', role: 'assistant', content: '这次没完成', status: 'failed', native: { replyTo: 'u1' },
+    ended: { how: 'failed', reason: '模型名不被支持', code: 'model_not_found', ...(offer ? { resetAgent: { bot: '团子' } } : {}), ...more } },
+];
+function deferred() {
+  let resolve!: (v?: unknown) => void, reject!: (e: unknown) => void;
+  const promise = new Promise((ok, no) => { resolve = ok; reject = no; });
+  return { promise, resolve, reject };
+}
+const refusal = (status: number, message: string) => Object.assign(new Error(message), { status });
+const endedLine = (p: Any) => p.row('r1').querySelector('.ck-ended')! as El;
+const spoken = (p: Any) => p.doc.body.children.find((n: El) => n.classList.contains('visually-hidden'))?.textContent ?? '';
+
+test('改回默认设置 is under a reply that failed on the cat\'s own setting only when the server offers it and the shell can do it, before 再发一次; in a group it names the cat to a screen reader', () => {
+  const asked: string[] = [];
+  const resetAgent = (name: string) => { asked.push(name); return new Promise(() => {}); };
+  const p = page({ resetAgent });
+  p.draw(modelFailed());
+  const line = endedLine(p);
+  assert.equal(line.textContent, '这次没完成详情改回默认设置再发一次');
+  const btn = button(line, '改回默认设置');
+  assert.deepEqual([btn.className, btn.type, btn.getAttribute('aria-label'), btn.getAttribute('aria-disabled')], ['text-btn ck-link', 'button', null, null], 'its words are its name in a cat\'s own chat');
+  // The engine's reason stays behind 详情, as for any ending.
+  assert.equal(p.row('r1').querySelector('.ck-reason')!.hidden, true);
+  // Not offered by the server (another failure, or the setting already went back): the line as before.
+  const q = page({ resetAgent });
+  q.draw(modelFailed(false));
+  assert.equal(endedLine(q).textContent, '这次没完成详情再发一次');
+  const rate = page({ resetAgent });
+  rate.draw(modelFailed(false, { code: 'rate_limit', reason: 'rate limit' }));
+  assert.equal(endedLine(rate).textContent, '这次没完成详情再发一次');
+  // Offered, but the shell cannot do it: nothing to press.
+  const r = page();
+  r.draw(modelFailed());
+  assert.equal(endedLine(r).textContent, '这次没完成详情再发一次');
+  // An interrupted reply is not offered it.
+  const s = page({ resetAgent });
+  s.draw(modelFailed(true, { how: 'interrupted' }));
+  assert.equal(endedLine(s).textContent, '中途被打断详情再发一次');
+  // In a group the row is that cat's reply; the button names it for a screen reader.
+  const body = p.doc.createElement('div');
+  const said = { id: 'g2', kind: 'bot', text: '这次没完成', native: { replyTo: 'g1' }, ended: { how: 'failed', code: 'model_not_found', resetAgent: { bot: '团子' } } };
+  p.cards.ending(body, said, [{ id: 'g1', kind: 'person', text: '大家好' }, said], true);
+  assert.equal(button(body, '改回默认设置').getAttribute('aria-label'), '把 团子 改回默认设置');
+  assert.equal(body.textContent, '这次没完成改回默认设置再发一次');
+  assert.deepEqual(asked, [], 'drawing never resets anything');
+});
+
+test('改回默认设置 goes once and says it is going; once the server did it the line says so and focus goes on to 再发一次 (or the words when there is none), never to the page', async () => {
+  const asks: Any[] = [];
+  const p = page({ resetAgent: (name: string) => { const d = deferred(); asks.push({ name, ...d }); return d.promise; } });
+  p.draw(modelFailed());
+  const line = endedLine(p);
+  const btn = button(line, '改回默认设置');
+  btn.focus();
+  btn.click();
+  assert.deepEqual(asks.map((a) => a.name), ['团子']);
+  assert.deepEqual([btn.textContent, btn.getAttribute('aria-disabled'), p.doc.activeElement === btn], ['正在改回默认设置…', 'true', true], 'focus stays on it while it goes');
+  btn.click();
+  btn.click();
+  assert.equal(asks.length, 1, 'pressing again while it goes sends nothing');
+  assert.equal(line.querySelectorAll('.ck-said').length, 0, 'not said to be done before the server did it');
+  asks[0].resolve();
+  await settle();
+  const said = line.querySelector('.ck-said')!;
+  assert.deepEqual([said.tagName, said.textContent, said.getAttribute('role')], ['SPAN', '已改回默认设置', 'status']);
+  assert.equal(line.textContent, '这次没完成详情已改回默认设置再发一次');
+  assert.equal(btn.isConnected, false);
+  assert.equal(p.doc.activeElement, button(line, '再发一次'), 'focus goes on to what comes next');
+  assert.equal(spoken(p), '已改回默认设置');
+  // 再发一次 is ready and sends the owner's words.
+  button(line, '再发一次').click();
+  assert.equal(p.sends[0].text, '帮我查一下');
+  // Nothing to send again (it answered nothing on this page): focus on the words, which can hold it.
+  const q = page({ resetAgent: () => Promise.resolve() });
+  q.draw([{ id: 'r1', role: 'assistant', content: '这次没完成', ended: { how: 'failed', code: 'model_not_found', resetAgent: { bot: '团子' } } }]);
+  const only = button(endedLine(q), '改回默认设置');
+  only.focus();
+  only.click();
+  await settle();
+  const words = endedLine(q).querySelector('.ck-said')!;
+  assert.deepEqual([q.doc.activeElement === words, words.tabIndex, endedLine(q).textContent], [true, -1, '这次没完成已改回默认设置']);
+  // A press that left focus where it was (a pointer, in some browsers): focus is not moved.
+  const r = page({ resetAgent: () => Promise.resolve() });
+  r.draw(modelFailed());
+  const composer = r.doc.createElement('textarea');
+  r.doc.body.append(composer);
+  composer.focus();
+  button(endedLine(r), '改回默认设置').click();
+  await settle();
+  assert.match(endedLine(r).textContent, /已改回默认设置/);
+  assert.equal(r.doc.activeElement, composer);
+  // Nor when nothing held it (a pointer press that did not focus the button): it stays with the page.
+  const t = page({ resetAgent: () => Promise.resolve() });
+  t.draw(modelFailed());
+  button(endedLine(t), '改回默认设置').click();
+  await settle();
+  assert.match(endedLine(t).textContent, /已改回默认设置/);
+  assert.equal(t.doc.activeElement, t.doc.body);
+});
+
+test('改回默认设置: when the shell\'s read of the conversation draws the reply anew (no longer offered), the new line says it was done and the focus the redraw took goes to 再发一次; a read that still offers it is left as the server says', async () => {
+  let p: Any = null;
+  p = page({ resetAgent: async () => { p.draw(modelFailed(false)); } });
+  p.draw(modelFailed());
+  const old = p.row('r1');
+  const btn = button(old.querySelector('.ck-ended')!, '改回默认设置');
+  btn.focus();
+  btn.click();
+  await settle();
+  const row = p.row('r1');
+  assert.notEqual(row, old, 'the row was drawn anew without the offer');
+  const line = row.querySelector('.ck-ended')!;
+  assert.equal(line.textContent, '这次没完成详情已改回默认设置再发一次');
+  assert.equal(buttons(row, '改回默认设置').length, 0);
+  assert.equal(p.doc.activeElement, button(line, '再发一次'), 'not the row the redraw handed it to, and never the page');
+  assert.equal(spoken(p), '已改回默认设置');
+  // The next read of the same record keeps the row and what it said.
+  p.draw(modelFailed(false));
+  assert.equal(p.row('r1'), row);
+  assert.match(p.row('r1').textContent, /已改回默认设置/);
+  // Drawn anew still offering it (the cat has its own setting again): that line is the server's word, nothing is claimed on it.
+  let q: Any = null;
+  q = page({ resetAgent: async () => { q.draw(modelFailed(true, { reason: '模型名不被支持。' })); } });
+  q.draw(modelFailed());
+  const before = q.row('r1');
+  const first = button(before.querySelector('.ck-ended')!, '改回默认设置');
+  first.focus();
+  first.click();
+  await settle();
+  assert.notEqual(q.row('r1'), before);
+  const fresh = endedLine(q);
+  assert.equal(fresh.textContent, '这次没完成详情改回默认设置再发一次');
+  assert.equal(button(fresh, '改回默认设置').getAttribute('aria-disabled'), null, 'offered as drawn, ready');
+  assert.equal(q.doc.activeElement, button(fresh, '改回默认设置'), 'focus on it again');
+  assert.equal(spoken(q), '', 'nothing announced as done');
+});
+
+test('改回默认设置 that did not go through says why right under the line in everyday words and is offered again with focus on it; pressing again clears that line; busy and a server failure are told apart', async () => {
+  const asks: Any[] = [];
+  const p = page({ resetAgent: () => { const d = deferred(); asks.push(d); return d.promise; } });
+  p.draw(modelFailed());
+  const row = p.row('r1'), line = endedLine(p);
+  const btn = button(line, '改回默认设置');
+  btn.focus();
+  btn.click();
+  asks[0].reject(refusal(409, '这只猫猫还在忙，等它做完或先停止，再换 Agent'));
+  await settle();
+  const errs = () => row.querySelectorAll('.ck-ended-err');
+  const err = errs()[0];
+  assert.ok(err, 'said');
+  assert.deepEqual([err.tagName, err.className, err.getAttribute('role'), err.textContent], ['P', 'ck-err ck-ended-err', 'alert', '它还在忙，等它做完或停下再改。']);
+  const kids = line.parentElement!.children;
+  assert.equal(kids[kids.indexOf(line) + 1], err, 'right under the line, inside the reply');
+  assert.deepEqual([btn.isConnected, btn.textContent, btn.hasAttribute('aria-disabled'), p.doc.activeElement === btn], [true, '改回默认设置', false, true], 'offered again, focus kept');
+  assert.equal(row.querySelectorAll('.ck-said').length, 0, 'nothing claims it was done');
+  assert.doesNotMatch(err.textContent, EVERYDAY, 'the server\'s technical words stay out');
+  assert.equal(spoken(p), '', 'nothing announced as done');
+  // Pressed again: the old reason goes while it goes; a server failure is said plainly.
+  btn.click();
+  assert.equal(errs().length, 0);
+  assert.equal(btn.textContent, '正在改回默认设置…');
+  asks[1].reject(refusal(503, '服务出了点问题，请稍后再试。'));
+  await settle();
+  assert.deepEqual(errs().map((e: El) => e.textContent), [RESET_FAILED], 'one line, the latest reason');
+  // And once it goes through, the line says so and the reason is gone.
+  btn.click();
+  asks[2].resolve();
+  await settle();
+  assert.equal(errs().length, 0);
+  assert.equal(line.textContent, '这次没完成详情已改回默认设置再发一次');
+  // A reason kept on the row across a redraw of the same record.
+  const q = page({ resetAgent: () => Promise.reject(refusal(404, '找不到这只猫猫')) });
+  q.draw(modelFailed());
+  button(endedLine(q), '改回默认设置').click();
+  await settle();
+  q.draw(modelFailed());
+  assert.deepEqual(q.row('r1').querySelectorAll('.ck-ended-err').map((e: El) => e.textContent), ['找不到这只猫猫。']);
+  // The row drawn anew while it went (still offering it), then refused: said under the new line, focus on its button.
+  let w: Any = null;
+  w = page({ resetAgent: async () => { w.draw(modelFailed(true, { reason: '模型名不被支持。' })); throw refusal(409, '这只猫猫还在忙'); } });
+  w.draw(modelFailed());
+  const gone = w.row('r1'), first = button(gone.querySelector('.ck-ended')!, '改回默认设置');
+  first.focus();
+  first.click();
+  await settle();
+  assert.notEqual(w.row('r1'), gone);
+  const now = endedLine(w);
+  assert.deepEqual(w.row('r1').querySelectorAll('.ck-ended-err').map((e: El) => e.textContent), ['它还在忙，等它做完或停下再改。']);
+  assert.equal(w.doc.activeElement, button(now, '改回默认设置'));
+});
+
+test('改回默认设置 answered after the owner moved to another conversation draws nothing on the one left', async () => {
+  for (const outcome of ['done', 'refused'] as const) {
+    const asks: Any[] = [];
+    const p = page({ resetAgent: () => { const d = deferred(); asks.push(d); return d.promise; } });
+    p.draw(modelFailed());
+    const row = p.row('r1');
+    const btn = button(endedLine(p), '改回默认设置');
+    btn.focus();
+    btn.click();
+    p.cards.select({ type: 'bot', id: '别的猫' });
+    if (outcome === 'done') asks[0].resolve(); else asks[0].reject(refusal(409, '这只猫猫还在忙'));
+    await settle();
+    assert.deepEqual([row.querySelectorAll('.ck-said').length, row.querySelectorAll('.ck-ended-err').length, btn.textContent, btn.getAttribute('aria-disabled')],
+      [0, 0, '正在改回默认设置…', 'true'], outcome + ': the line left behind is not touched');
+    assert.equal(spoken(p), '', outcome);
+  }
+});
+
+// Codex review r1 (item 65): a redraw while it goes must not offer it again.
+const pendingReset = () => {
+  const asks: Any[] = [];
+  const p = page({ resetAgent: (name: string) => { const d = deferred(); asks.push({ name, ...d }); return d.promise; } });
+  return { p, asks };
+};
+const said = (p: Any) => p.thread.querySelectorAll('.ck-said').map((e: El) => e.textContent);
+const errors = (p: Any) => p.thread.querySelectorAll('.ck-ended-err').map((e: El) => e.textContent);
+// A group with 团子 opened meanwhile, its own failed reply from 团子 offering it too.
+const otherChat = (p: Any) => {
+  p.cards.select({ type: 'group', id: 'g1' });
+  const inner = p.doc.createElement('div'), row = p.doc.createElement('div'), body = p.doc.createElement('div');
+  inner.className = 'thread-inner';
+  inner.dataset.chat = 'group:g1';
+  row.className = 'msg bot';
+  row.dataset.mid = 'g2';
+  const m = { id: 'g2', kind: 'bot', text: '这次没完成', native: { replyTo: 'g1m' }, ended: { how: 'failed', code: 'model_not_found', resetAgent: { bot: '团子' } } };
+  p.cards.ending(body, m, [{ id: 'g1m', kind: 'person', text: '大家好' }, m], true);
+  row.append(body);
+  inner.append(row);
+  p.live.commit(inner, []);
+  p.cards.rendered();
+  return row;
+};
+
+test('改回默认设置 still going when a read of the conversation draws its row anew: the new line says it is going and sends nothing more, 再发一次 still sends; once the server did it, that is said once', async () => {
+  const { p, asks } = pendingReset();
+  p.draw(modelFailed());
+  const old = p.row('r1');
+  button(old.querySelector('.ck-ended')!, '详情').click();
+  const first = button(old.querySelector('.ck-ended')!, '改回默认设置');
+  first.focus();
+  first.click();
+  assert.equal(asks.length, 1);
+  // The same record read again keeps its row (详情 still open), its button still going.
+  p.draw(modelFailed());
+  assert.equal(p.row('r1'), old, 'what it says is not drawn into the markup: the row is kept');
+  assert.equal(old.querySelector('.ck-reason')!.hidden, false);
+  assert.deepEqual([first.isConnected, first.textContent, first.getAttribute('aria-disabled')], [true, '正在改回默认设置…', 'true']);
+  // A read that draws the row anew (the record changed meanwhile): the line drawn in its place says it is going.
+  p.draw(modelFailed(true, { reason: '模型名不被支持。' }));
+  const row = p.row('r1');
+  assert.notEqual(row, old, 'drawn anew');
+  assert.equal(endedLine(p).textContent, '这次没完成详情正在改回默认设置…再发一次');
+  assert.equal(buttons(row, '改回默认设置').length, 0, 'nothing ready to press');
+  const going = button(endedLine(p), '正在改回默认设置…');
+  assert.equal(going.getAttribute('aria-disabled'), 'true');
+  going.click();
+  assert.equal(asks.length, 1, 'pressing the new one sends nothing more');
+  // That record read again keeps the new row.
+  p.draw(modelFailed(true, { reason: '模型名不被支持。' }));
+  assert.equal(p.row('r1'), row);
+  // 再发一次 while it goes sends the owner's words, and nothing more is reset.
+  button(endedLine(p), '再发一次').click();
+  assert.deepEqual([p.sends.length, p.sends[0].text, asks.length], [1, '帮我查一下', 1]);
+  // An ending drawn anywhere else meanwhile (not in the history) sends nothing either.
+  const body = p.doc.createElement('div');
+  p.cards.ending(body, modelFailed()[1], modelFailed(), false);
+  button(body, '改回默认设置').click();
+  assert.equal(asks.length, 1, 'one at a time');
+  // The shell's reread after the PUT drops the offer, then the server's answer: said once, where the line is now.
+  p.draw(modelFailed(false, { reason: '模型名不被支持。' }));
+  asks[0].resolve();
+  await settle();
+  const line = endedLine(p);
+  assert.match(line.textContent, /^这次没完成详情已改回默认设置/);
+  assert.deepEqual(said(p).filter((t: string) => t === '已改回默认设置'), ['已改回默认设置'], 'one receipt');
+  assert.equal(buttons(p.thread, '改回默认设置').length + buttons(p.thread, '正在改回默认设置…').length, 0);
+  assert.equal(spoken(p), '已改回默认设置');
+});
+
+test('改回默认设置 answered after a redraw meanwhile that still offers it: the new line is ready again, nothing is claimed, the next press goes; a refusal said under it stays across the next read of the same record', async () => {
+  const { p, asks } = pendingReset();
+  p.draw(modelFailed());
+  button(endedLine(p), '改回默认设置').click();
+  p.draw(modelFailed(true, { reason: '模型名不被支持。' }));
+  assert.equal(button(endedLine(p), '正在改回默认设置…').getAttribute('aria-disabled'), 'true');
+  asks[0].resolve();
+  await settle();
+  const fresh = endedLine(p);
+  assert.equal(fresh.textContent, '这次没完成详情改回默认设置再发一次');
+  assert.equal(button(fresh, '改回默认设置').hasAttribute('aria-disabled'), false);
+  assert.deepEqual([said(p), spoken(p)], [[], '']);
+  button(fresh, '改回默认设置').click();
+  assert.equal(asks.length, 2, 'the next press goes');
+  // Refused after the row was drawn anew while it went: said under the new line, which a read of the same record keeps.
+  p.draw(modelFailed(true, { reason: '模型名不被支持' }));
+  const now = p.row('r1');
+  asks[1].reject(refusal(409, '这只猫猫还在忙'));
+  await settle();
+  assert.deepEqual(errors(p), ['它还在忙，等它做完或停下再改。']);
+  assert.equal(button(endedLine(p), '改回默认设置').hasAttribute('aria-disabled'), false);
+  p.draw(modelFailed(true, { reason: '模型名不被支持' }));
+  assert.equal(p.row('r1'), now, 'the row is kept');
+  assert.deepEqual(errors(p), ['它还在忙，等它做完或停下再改。'], 'and the reason with it');
+});
+
+test('改回默认设置 for a cat goes once in a conversation: its other replies there say it is going and send nothing; the server\'s answer leaves one receipt, on the line pressed, and the others ready or gone as the server drew them', async () => {
+  const second = (offer = true) => [
+    { id: 'u2', role: 'user', content: '再查一次' },
+    { id: 'r2', role: 'assistant', content: '这次没完成', status: 'failed', native: { replyTo: 'u2' },
+      ended: { how: 'failed', reason: '模型名不被支持', code: 'model_not_found', ...(offer ? { resetAgent: { bot: '团子' } } : {}) } },
+  ];
+  const lineOf = (p: Any, mid: string) => p.row(mid).querySelector('.ck-ended')! as El;
+  // Done: the shell's reread drops both offers.
+  const { p, asks } = pendingReset();
+  p.draw([...modelFailed(), ...second()]);
+  const other = button(lineOf(p, 'r2'), '改回默认设置');
+  button(lineOf(p, 'r1'), '改回默认设置').click();
+  assert.deepEqual([other.textContent, other.getAttribute('aria-disabled')], ['正在改回默认设置…', 'true'], 'the other reply of the same cat');
+  other.click();
+  assert.equal(asks.length, 1, 'not sent twice');
+  p.draw([...modelFailed(false), ...second(false)]);
+  asks[0].resolve();
+  await settle();
+  assert.match(lineOf(p, 'r1').textContent, /已改回默认设置/);
+  assert.equal(lineOf(p, 'r2').textContent, '这次没完成详情再发一次', 'gone as the server drew it, nothing claimed there');
+  assert.deepEqual(said(p), ['已改回默认设置']);
+  // Refused: said under the line pressed only; the other reply's button is ready again and goes when pressed.
+  const q = pendingReset();
+  q.p.draw([...modelFailed(), ...second()]);
+  button(lineOf(q.p, 'r1'), '改回默认设置').click();
+  q.asks[0].reject(refusal(409, '这只猫猫还在忙'));
+  await settle();
+  assert.deepEqual(errors(q.p), ['它还在忙，等它做完或停下再改。']);
+  assert.equal(q.p.row('r1').querySelectorAll('.ck-ended-err').length, 1);
+  const ready = button(lineOf(q.p, 'r2'), '改回默认设置');
+  assert.equal(ready.hasAttribute('aria-disabled'), false);
+  ready.click();
+  assert.deepEqual(q.asks.map((a: Any) => a.name), ['团子', '团子']);
+  assert.equal(button(lineOf(q.p, 'r1'), '正在改回默认设置…').getAttribute('aria-disabled'), 'true', 'the line pressed first waits for it too');
+});
+
+test('改回默认设置 going is kept by conversation and cat, whatever the owner opens meanwhile: back before the server answered, the line is drawn going; answered while away, it is ready on return', async () => {
+  const { p, asks } = pendingReset();
+  p.draw(modelFailed());
+  button(endedLine(p), '改回默认设置').click();
+  // Another conversation's line is its own: never told how this one ended, it is not drawn going.
+  const away = otherChat(p);
+  assert.equal(button(away, '改回默认设置').hasAttribute('aria-disabled'), false);
+  p.cards.select(p.sel);
+  p.draw(modelFailed());
+  const going = button(endedLine(p), '正在改回默认设置…');
+  assert.equal(going.getAttribute('aria-disabled'), 'true');
+  going.click();
+  assert.equal(asks.length, 1);
+  asks[0].resolve();
+  await settle();
+  assert.equal(button(endedLine(p), '改回默认设置').hasAttribute('aria-disabled'), false, 'the server still offers it: ready');
+  assert.deepEqual(said(p), []);
+  // Pressed, then away while the server answers: back, it is drawn ready and goes when pressed.
+  button(endedLine(p), '改回默认设置').click();
+  assert.equal(asks.length, 2);
+  otherChat(p);
+  asks[1].reject(refusal(503, '服务出了点问题'));
+  await settle();
+  p.cards.select(p.sel);
+  p.draw(modelFailed());
+  const back = button(endedLine(p), '改回默认设置');
+  assert.equal(back.hasAttribute('aria-disabled'), false);
+  back.click();
+  assert.equal(asks.length, 3);
+});
+
+// The shell's hook as app.js hands it (cards.init): run on its own, with the shell's functions faked.
+function resetHook(opts: { sel: Any; groups?: Any[]; open?: boolean; put?: () => unknown; lists?: () => unknown; thread?: () => unknown; during?: (state: Any) => void } ) {
+  const app = read('client/public/app.js');
+  const code = /\n {4}resetAgent: async \(name\) => \{\n[\s\S]*?\n {4}\},\n/.exec(app);
+  assert.ok(code, 'cards.init is handed resetAgent');
+  const log: Any[] = [];
+  const state: Any = { sel: opts.sel, groups: opts.groups ?? [], sig: 'x' };
+  const out: Any = {};
+  vm.runInNewContext(code![0].trim().replace(/^resetAgent: /, 'out.resetAgent = ').replace(/,$/, ';'), {
+    out, state, encodeURIComponent,
+    api: async (path: string, opt: Any) => { log.push(['api', path, opt.method, plain(opt.body)]); opts.during?.(state); if (opts.put) return opts.put(); return { name: '团子', agent: {} }; },
+    refreshLists: async () => { log.push(['lists']); if (opts.lists) return opts.lists(); },
+    panel: { classList: { contains: (c: string) => c === 'open' && !!opts.open } },
+    loadPanel: async () => { log.push(['panel']); },
+    loadThread: async () => { log.push(['thread', state.sig]); if (opts.thread) return opts.thread(); },
+  });
+  return { run: (name: string) => out.resetAgent(name), log, state };
+}
+
+test('the shell\'s 改回默认设置: one PUT …/agent {resetDefaults: true}; then the lists, the cat\'s open panel and the conversation that shows it are read again; only the PUT can fail it', async () => {
+  const PUT = ['api', '/xbot-api/bots/%E5%9B%A2%E5%AD%90/agent', 'PUT', { resetDefaults: true }];
+  const own = { type: 'bot', id: '团子' };
+  const a = resetHook({ sel: own, open: true });
+  assert.equal(await a.run('团子'), undefined);
+  assert.deepEqual(a.log, [PUT, ['lists'], ['panel'], ['thread', '']], 'the conversation read afresh (its signature cleared)');
+  const closed = resetHook({ sel: own, open: false });
+  await closed.run('团子');
+  assert.deepEqual(closed.log, [PUT, ['lists'], ['thread', '']], 'no panel to read when it is closed');
+  // A group with the cat in it: its conversation, never a cat's panel.
+  const group = { type: 'group', id: 'g1' };
+  const g = resetHook({ sel: group, open: true, groups: [{ id: 'g1', members: ['团子', '砚砚'] }] });
+  await g.run('团子');
+  assert.deepEqual(g.log, [PUT, ['lists'], ['thread', '']]);
+  // The owner moved on while it went: another cat's chat, or a group without it, is not read.
+  const other = { type: 'bot', id: '砚砚' }, without = { type: 'group', id: 'g2' };
+  for (const next of [other, without]) {
+    const moved = resetHook({ sel: own, open: true, groups: [{ id: 'g2', members: ['砚砚', '墨墨'] }], during: (state) => { state.sel = next; } });
+    await moved.run('团子');
+    assert.deepEqual(moved.log, [PUT, ['lists']], next.type);
+  }
+  // The conversation it was asked from, still open, is read even when the lists no longer put the cat in it.
+  const left = resetHook({ sel: group, groups: [{ id: 'g1', members: ['砚砚'] }] });
+  await left.run('团子');
+  assert.deepEqual(left.log, [PUT, ['lists'], ['thread', '']]);
+  // The PUT refused: the same error, nothing else read.
+  const busy = refusal(409, '这只猫猫还在忙，等它做完或先停止，再换 Agent');
+  const no = resetHook({ sel: own, open: true, put: () => { throw busy; } });
+  await assert.rejects(no.run('团子'), (e: Any) => e === busy);
+  assert.deepEqual(no.log, [PUT]);
+  // A read after it that fails does not make it a failure: it was done.
+  const flaky = resetHook({ sel: own, open: true, lists: () => { throw new Error('连不上 clowder-bot'); }, thread: () => { throw new Error('连不上 clowder-bot'); } });
+  await flaky.run('团子');
+  assert.deepEqual(flaky.log, [PUT, ['lists'], ['panel'], ['thread', '']]);
+  // Handed to chat-cards.js before locate, latest still the last hook.
+  const app = read('client/public/app.js');
+  const init = /\n {2}cards\.init\(\{\n[\s\S]*?\n {2}\}\);\n/.exec(app)![0];
+  assert.ok(init.indexOf('resetAgent: async (name) =>') > init.indexOf('reload: () =>') && init.indexOf('resetAgent: async (name) =>') < init.indexOf('locate: (item, onCancel)'));
+  assert.match(init, /latest: \(\) => chatHistory\.latest\(\),\n {2}\}\);\n$/);
 });
 
 // ---------------------------------------------------------------- notifications page

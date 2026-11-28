@@ -8,7 +8,7 @@
 //   words()    for the words a reply shows (a request's message and an ended
 //              reply's stand-in words are not shown as words);
 //   blocks()   to add a reply's cards, checklists, choices and diffs under its words;
-//   ending()   to add how an unfinished reply ended (详情, 再发一次);
+//   ending()   to add how an unfinished reply ended (详情, 改回默认设置, 再发一次);
 //   notice()   for a receipt or refusal line (a row with notice: true);
 //   rendered() right after the history was committed (ClowderLive.commit);
 //   find()     (去确认) the request's card when it is drawn: true / false;
@@ -100,6 +100,10 @@
   const decisions = new Map();
   // Picks in progress, by conversation, message and block.
   const picks = new Map();
+  // 改回默认设置 in progress, by conversation and cat: until the server
+  // answered, every line for that cat in that conversation, drawn before or
+  // anew meanwhile, says it is going and sends nothing.
+  const resets = new Set();
   // What the owner has picked, typed or skipped in an F306 request's card,
   // by conversation and request: kept across every read and redraw until the
   // answer is in (a redraw draws from it; typing never redraws).
@@ -343,26 +347,111 @@
   }
 
   // How a reply that did not finish ended: a quiet line under it, the
-  // engine's reason behind 详情 (verbatim), and for a failed or interrupted
-  // one 再发一次, which sends the owner's message it answered again.
+  // engine's reason behind 详情 (verbatim), 改回默认设置 when the server says
+  // the cat's own settings can go back to the defaults (the reply failed on
+  // them), and for a failed or interrupted one 再发一次, which sends the
+  // owner's message it answered again.
   function ending(body, m, messages, group) {
     const e = R.ending(m);
     if (!e) return;
+    const mid = String(m.native_message_id || m.id || "");
     const line = node("div", "lv-ended ck-ended");
+    // Which message it ends, for the line a read of the conversation draws in its place (not part of the markup).
+    line._ckMid = mid;
     line.append(node("span", "ck-ended-label", e.label));
     // The box's ID follows its message, so a redraw of the same row draws the same markup.
     const reason = e.reason ? reveal(line, e.reason) : null;
-    if (reason) reason.id = "ck-reason-" + String(m.native_message_id || m.id || "").replace(/[^\w-]/g, "");
+    if (reason) reason.id = "ck-reason-" + mid.replace(/[^\w-]/g, "");
     if (reason) line.lastChild.setAttribute("aria-controls", reason.id);
+    if (e.resetBot && H && typeof H.resetAgent === "function") {
+      const btn = button("text-btn ck-link", "改回默认设置", () => resetDefaults(e.resetBot, mid, line, btn));
+      // Whose settings it puts back (not part of the markup). Drawn ready even while that goes, so a
+      // redraw of the same record draws the same markup and keeps the row; rendered() says it is going.
+      btn._ckReset = e.resetBot;
+      // In a group the button says whose settings: the row is that cat's reply, the words are the same.
+      if (group) btn.setAttribute("aria-label", "把 " + e.resetBot + " 改回默认设置");
+      line.append(btn);
+    }
     const again = e.again ? R.resend(messages, m, group) : null;
     if (again) {
       const btn = button("text-btn ck-link", "再发一次", () => resend(again, btn));
+      btn._ckAgain = true;
       const count = (again.all || []).length;
       btn.setAttribute("aria-label", "再发一次：" + R.oneLine(again.text).slice(0, 40) + (count > 1 ? "，共 " + count + " 句" : ""));
       line.append(btn);
     }
     body.append(line);
     if (reason) body.append(reason);
+  }
+  // The ending line of a message as the history shows it now (a read of the
+  // conversation may have drawn its row anew), or null.
+  function endingOf(mid) {
+    if (!mid || !H || !H.thread) return null;
+    return [...H.thread.querySelectorAll(".ck-ended")].find((l) => l._ckMid === mid) || null;
+  }
+  const kidOf = (line, mark) => [...line.children].find((n) => n[mark] && n.isConnected) || null;
+  // The 改回默认设置 buttons the history shows now: one cat's, or every one.
+  function resetOffers(bot) {
+    if (!H || !H.thread) return [];
+    return [...H.thread.querySelectorAll(".ck-ended")].flatMap((l) => [...l.children].filter((n) => n._ckReset && (bot == null || n._ckReset === bot)));
+  }
+  function resetGoing(btn, going) {
+    if (going) btn.setAttribute("aria-disabled", "true");
+    else btn.removeAttribute("aria-disabled");
+    btn.textContent = going ? "正在改回默认设置…" : "改回默认设置";
+  }
+  // 改回默认设置: the cat's own settings back to the defaults, through the
+  // shell (H.resetAgent: the server's PUT …/agent {resetDefaults}, after which
+  // it reads the lists, the open panel and this conversation again; the reply
+  // no longer offers it then, and 再发一次 is ready). Said once the server has
+  // done it, where the line is now; a refusal says why under the line in
+  // everyday words and the button is offered again. One at a time for a cat
+  // in a conversation: while it goes, every line for that cat there, drawn
+  // before or anew meanwhile, says it is going and sends nothing. Nothing is
+  // drawn once the owner has moved to another conversation.
+  async function resetDefaults(bot, mid, line, btn) {
+    const key = S.key, id = key + "\0" + bot;
+    if (btn.getAttribute("aria-disabled") === "true" || resets.has(id)) return;
+    const had = document.activeElement === btn;
+    resets.add(id);
+    resetGoing(btn, true);
+    for (const b of resetOffers(bot)) resetGoing(b, true);
+    if (line._ckErr) { line._ckErr.remove(); line._ckErr = null; }
+    let failed = null;
+    try { await H.resetAgent(bot); } catch (e) { failed = e || {}; } finally { resets.delete(id); }
+    if (S.key !== key) return;
+    // Every line for this cat is ready again, as the server's reread drew it; what this press led to follows.
+    for (const b of resetOffers(bot)) resetGoing(b, false);
+    // This line, or the one drawn in its place meanwhile.
+    const now = btn.isConnected ? line : endingOf(mid);
+    // Focus left on the button, or taken by the redraw (to the page, or the row drawn anew): it comes back here.
+    const taken = () => { const a = document.activeElement; return had && (!a || !a.isConnected || a === btn || (!!now && a.contains(now))); };
+    if (failed) {
+      const offer = now === line ? btn : now ? kidOf(now, "_ckReset") : null;
+      if (!offer) return;
+      resetGoing(offer, false);
+      const err = node("p", "ck-err ck-ended-err", R.resetError(failed));
+      err.setAttribute("role", "alert");
+      if (now._ckErr) now._ckErr.remove();
+      now.after(err);
+      now._ckErr = err;
+      if (taken() && offer !== document.activeElement) offer.focus({ preventScroll: true });
+      return;
+    }
+    // A line drawn anew that offers it again is the server's word now: it stands, and nothing is claimed.
+    const offer = now && now !== line ? kidOf(now, "_ckReset") : null;
+    if (offer) { if (taken()) offer.focus({ preventScroll: true }); return; }
+    announce("已改回默认设置");
+    if (!now) return;
+    const said = node("span", "ck-said", "已改回默认设置");
+    said.setAttribute("role", "status");
+    const focus = taken();
+    if (now === line) btn.replaceWith(said);
+    else now.insertBefore(said, kidOf(now, "_ckAgain"));
+    if (!focus) return;
+    const again = kidOf(now, "_ckAgain");
+    if (again && again.getAttribute("aria-disabled") !== "true") again.focus({ preventScroll: true });
+    else { said.tabIndex = -1; said.focus({ preventScroll: true }); }
   }
   // Sends what the reply was answering again, each as the ordinary message
   // it was, in order, through the normal send path, one after the server
@@ -401,6 +490,8 @@
   // page's answer in flight. A frame whose view did not change is untouched.
   function rendered() {
     repaint();
+    // A line drawn anew while its cat's 改回默认设置 goes says it is going too.
+    for (const b of resetOffers()) if (resets.has(S.key + "\0" + b._ckReset)) resetGoing(b, true);
     // A redraw that replaced the focused frame's row: focus goes to the new one.
     const f = S.focus;
     if (f && !hasFocus()) {
@@ -1189,6 +1280,10 @@
   //   render(el, text)    Markdown as a reply's words are drawn;
   //   send(text, sent)    the normal send path (sent() once the server took it);
   //   reload()            read the open conversation again (a promise of that read);
+  //   resetAgent(name)    改回默认设置: the server puts the cat's own settings
+  //                       back to the defaults, then the shell reads the lists,
+  //                       the open panel and the conversation again (a promise:
+  //                       rejects only when the server did not do it);
   //   locate(item, onCancel)  find a message on earlier pages (chat-locate.js
   //                       find: true, null when not found and said why, false;
   //                       onCancel() when that search ended quietly);

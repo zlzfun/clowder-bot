@@ -517,10 +517,33 @@
   // words, the server writes these same words as the reply (b1dbf60a,
   // message-presentation.ts), so there is no separate stand-in to know.
   const ENDED = { stopped: "已停止", failed: "这次没完成", interrupted: "中途被打断" };
+  // code: the engine's reason code, when it gave one. resetBot: the cat whose
+  // own settings the server says can go back to the defaults here (a failed
+  // reply only; the server offers it for model_not_found, and drops it once
+  // they have), for 改回默认设置. Both only when present.
   function ending(m) {
     const e = m && m.ended;
     if (!e || typeof e !== "object" || !ENDED[e.how]) return null;
-    return { how: e.how, label: ENDED[e.how], reason: str(e.reason).trim(), again: e.how !== "stopped" };
+    const out = { how: e.how, label: ENDED[e.how], reason: str(e.reason).trim(), again: e.how !== "stopped" };
+    const code = str(e.code).trim();
+    if (code) out.code = code;
+    const bot = e.how === "failed" && e.resetAgent && typeof e.resetAgent === "object" ? str(e.resetAgent.bot).trim() : "";
+    if (bot) out.resetBot = bot;
+    return out;
+  }
+  // Why 改回默认设置 did not go through, in everyday words. Busy (409, the
+  // server's own sentence says so): wait for it. Another 409 is a change made
+  // meanwhile: try again. 422: it cannot be done here, so where it can. A 5xx,
+  // or words that are not everyday ones, are said plainly; the server's own
+  // everyday words otherwise (找不到这只猫猫, 连不上 clowder-bot).
+  const TECHNICAL = /agent|bot|thread|session|模型|推理强度|原生|调用|会话|线程|群组|clowder ai/i;
+  function resetError(err) {
+    const status = err && Number.isSafeInteger(err.status) ? err.status : 0;
+    const said = oneLine(err && err.message).replace(/[。.]+$/, "");
+    if (status === 409) return /忙/.test(said) ? "它还在忙，等它做完或停下再改。" : "它的设置刚有变化，请再试一次。";
+    if (status === 422) return "这里改不回默认设置，可以到它的资料 › 高级里看看。";
+    if (status >= 500 || !han(said) || TECHNICAL.test(said.replace(/clowder-bot/gi, ""))) return "没能改回默认设置，请稍后再试。";
+    return said + "。";
   }
 
   // A message that carries a request for the owner's confirmation: the card
@@ -569,6 +592,6 @@
     KINDS, STATES, approvals, runtimePrompt, receiptOf, labels, outcome, wording, expiry, card, failure,
     runtimeActions, answerOf, questionResponse, fieldDefault, formResponse, conversationResponse, runtimeResponse,
     buildSelectionMessage, choiceMessage, canPick, optionText, choice,
-    diffLines, hiddenText, ending, request, words, resend, count, oneLine,
+    diffLines, hiddenText, ending, resetError, request, words, resend, count, oneLine,
   });
 })();

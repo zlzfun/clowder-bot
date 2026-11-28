@@ -7804,6 +7804,23 @@
     // A card's own words: the composer's draft and quote are left alone.
     send: (text, sent) => sendText(text, null, null, null, { sent }),
     reload: () => { state.sig = ""; return loadThread().catch(() => {}); },
+    // 改回默认设置 under a reply that failed on the cat's own model setting (the server offers it as
+    // ended.resetAgent): the server puts its settings back to the defaults, history kept. Only that can
+    // fail the action; then the lists, its open panel and the conversation that shows it (the one it was
+    // asked from, still open, or the cat's own or a group's with it) are read again (the reply no longer
+    // offers it), and a read that fails is left to the next poll.
+    resetAgent: async (name) => {
+      const from = state.sel;
+      await api("/xbot-api/bots/" + encodeURIComponent(name) + "/agent", { method: "PUT", body: { resetDefaults: true } });
+      try { await refreshLists(); } catch (e) { /* the next poll reads them */ }
+      if (state.sel && state.sel.type === "bot" && state.sel.id === name && panel.classList.contains("open")) await loadPanel().catch(() => {});
+      const sel = state.sel;
+      const group = sel && sel.type === "group" ? (state.groups || []).find((g) => g.id === sel.id) : null;
+      if (sel && (sel === from || (sel.type === "bot" ? sel.id === name : !!group && (group.members || []).map(String).includes(name)))) {
+        state.sig = "";
+        await loadThread().catch(() => {});
+      }
+    },
     // A request's card further back than the history drawn (去确认): its message on earlier pages (chat-locate.js);
     // onCancel: that search ended quietly (a search, a quote's jump or another chat took over).
     locate: (item, onCancel) => locate.find({ sel: state.sel, messageId: item.messageId, onCancel }),
