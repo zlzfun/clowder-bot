@@ -8,3 +8,9 @@ export function nativeUploadPath(value: unknown): string | null {
   })) return null;
   return value;
 }
+
+/** Upstream F34 VoiceBlockSynthesizer publishes synthesized voice blocks at /api/tts/audio/{64-hex}.{wav|mp3}. */
+export function ttsAudioPath(value: unknown): string | null {
+  if (typeof value !== 'string' || !/^\/api\/tts\/audio\/[0-9a-f]{64}\.(?:wav|mp3)$/.test(value)) return null;
+  return value;
+}

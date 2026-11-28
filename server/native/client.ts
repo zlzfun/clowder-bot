@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { io, type Socket } from 'socket.io-client';
 import { ApiError } from '../errors.js';
 import type { NativeEvent, NativeTransport } from './types.js';
-import { nativeUploadPath } from './file-path.js';
+import { nativeUploadPath, ttsAudioPath } from './file-path.js';
 
 export class NativeClient implements NativeTransport {
   private cookie = '';
@@ -67,6 +67,14 @@ export class NativeClient implements NativeTransport {
   async readFile(path: string, maxBytes: number): Promise<Buffer> {
     if (!nativeUploadPath(path) || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 20 * 1024 * 1024)
       throw new ApiError(400, '文件来源不可访问');
+    return this.readBinary(path, maxBytes);
+  }
+  async readTtsAudio(path: string, maxBytes: number): Promise<Buffer> {
+    if (!ttsAudioPath(path) || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 20 * 1024 * 1024)
+      throw new ApiError(400, '音频来源不可访问');
+    return this.readBinary(path, maxBytes);
+  }
+  private async readBinary(path: string, maxBytes: number): Promise<Buffer> {
     await this.authenticate();
     let response: Response;
     try {

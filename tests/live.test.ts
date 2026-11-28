@@ -355,8 +355,8 @@ test('what the engine did by itself is a quiet line in the chat’s words; the s
     group('all-carded', 5000, [carded]), group('mixed', 6000, [carded, written, failed]), group('failed', 7000, [failed, { ...failed, itemId: 'd' }])]);
   const rows = (await (await r.call('/xbot-api/bots/Ada/transcript')).json()).messages.filter((m: any) => m.id);
   const of = (id: string) => rows.find((m: any) => m.id === id);
-  assert.deepEqual(['restarted', 'slept', 'asked'].map(id => [of(id).content, of(id).notice]),
-    [['刚才中断了，接着做。', true], ['电脑睡着时中断了，接着做。', true], ['上一条在等你决定；能自己定的会先定。', true]]);
+  assert.deepEqual(['restarted', 'slept', 'asked'].map(id => [of(id).content, of(id).notice, of(id).continuation]),
+    [['刚才中断了，接着做。', true, 'restart'], ['电脑睡着时中断了，接着做。', true, 'sleep'], ['上一条在等你决定；能自己定的会先定。', true, undefined]]);
   assert.match(of('restarted').native.content, /runtime 重启/, 'the native record keeps the engine’s line');
   assert.equal(of('all-carded'), undefined, 'every item has its own card on the page: nothing more is drawn');
   assert.deepEqual([of('mixed').content, of('mixed').notice, of('mixed').blocks, of('mixed').blocks_hidden], ['记下了 1 件事，有 1 项没记成。', true, undefined, undefined]);
@@ -366,5 +366,5 @@ test('what the engine did by itself is a quiet line in the chat’s words; the s
   const chat = await (await r.call('/xbot-api/groups', 'POST', { members: ['Ada', 'Bob'] })).json();
   r.native.messages.set(chat.id, [slept, group('all-carded', 5000, [carded]), group('failed', 7000, [failed])]);
   const lines = (await (await r.call(`/xbot-api/groups/${chat.id}`)).json()).messages;
-  assert.deepEqual(lines.map((line: any) => [line.id, line.text, line.notice]), [['slept', '电脑睡着时中断了，接着做。', true], ['failed', '有 1 项没记成。', true]]);
+  assert.deepEqual(lines.map((line: any) => [line.id, line.text, line.notice, line.continuation]), [['slept', '电脑睡着时中断了，接着做。', true, 'sleep'], ['failed', '有 1 项没记成。', true, undefined]]);
 });

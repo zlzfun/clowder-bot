@@ -360,10 +360,12 @@ export async function seedShowcase({ native, base }: { native: PreviewNative; ba
     room.say(start + 3 * MIN, '那先只画启动图。');
     room.reply(bengal, start + 4 * MIN, '来了来了！启动图我想这样画：一只猫趴在摊开的书上，书页的边上', { status: 'interrupted', reason: 'process_restart' });
     room.say(start + 9 * MIN, '继续。');
-    const last = room.reply(bengal, start + 11 * MIN, '画好了，第一稿的说明在卡片里；我还录了一段语音讲解。', { blocks: [
+    const last = room.reply(bengal, start + 11 * MIN, '画好了，第一稿的说明在卡片里；我还录了一段语音讲解，外加一个交互预览。', { blocks: [
       { id: 'draft', kind: 'card', v: 1, title: '启动图 · 第 1 稿', tone: 'success', bodyMarkdown: '一只猫趴在摊开的书上，页边写满了批注。主色取自首页的纸页感配色。',
         fields: [{ label: '尺寸', value: '1290 × 2796' }, { label: '格式', value: 'PNG' }] },
-      { id: 'voice', kind: 'audio', v: 1, url: '/uploads/preview/voice-note.mp3', title: '语音讲解' }] });
+      { id: 'voice', kind: 'audio', v: 1, url: '/uploads/preview/voice-note.mp3', title: '语音讲解' },
+      { id: 'preview-widget', kind: 'html_widget', v: 1, title: '交互预览', html: '<p>preview</p>' }] });
+    native.uploads.set('/uploads/preview/voice-note.mp3', Buffer.from([0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]));
     await seen(bengal, room, last);
     // Every other try fails, so 再发一次 can be seen doing its job.
     live.set(room.threadId, (_cat, _said, turn) => turn % 2 ? { think: 1500, reply: '我试试看…', fail: 'timeout' }
