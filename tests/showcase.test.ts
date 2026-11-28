@@ -49,7 +49,7 @@ test('the showcase stages one cat per template, and each chat shows what it is t
 
   // It says what it is without being asked to do anything: a tool that clicks through the staged chats checks this first.
   const identity = await get('/__preview');
-  assert.deepEqual([identity.preview, identity.scene, identity.staged, identity.zone], [true, 'showcase', true, zone]);
+  assert.deepEqual([identity.preview, identity.scene, identity.staged, identity.zone, identity.computer, identity.agents], [true, 'showcase', true, zone, 'ready', 'showcase']);
   assert.deepEqual(identity.plays.sort(), [...catTemplates.map(template => template[5]), '产品评审', '读书会'].sort());
 
   // The cats are the engine's templates: the name the template gives its cat, its face, its colour — and its own tool.
@@ -111,6 +111,31 @@ test('the showcase stages one cat per template, and each chat shows what it is t
   const source = await get(`/xbot-api/memory/taste/${taste[0].id}/source?revision=${encodeURIComponent(taste[0].revision)}`);
   assert.deepEqual(source.sources.map((item: any) => [item.label, item.canOpen, item.messageId]), [['小狸花', true, li.find((message: any) => message.content === '以后回答我，先说结论，再给依据。').id]]);
   assert.deepEqual((await get('/xbot-api/memory/profile')).entries.map((entry: any) => [entry.id, entry.title]), [['capsule', '开场简介']]);
+  const matters = await get('/xbot-api/memory/matters');
+  assert.deepEqual(matters.entries.map((entry: any) => [entry.id, entry.title, entry.entryCount]), [['matter-yebian-home', '「页边」首页改版', 1]]);
+  const matterDetail = await get('/xbot-api/memory/matters/matter-yebian-home?expectedRevision=1');
+  assert.equal(matterDetail.entries[0].sourceStatus, 'current');
+  assert.equal(matterDetail.entries[0].source.canOpen, true);
+  assert.ok(matterDetail.entries[0].recordedAt >= matterDetail.entries[0].source.occurredAt);
+  assert.equal(matterDetail.entries[0].source.messageId, li.find((message: any) => message.content === '「页边」首页改版定下来走纸页感了，先把这个事项记一下。').id);
+  // 这台电脑: 宪宪 has it on; other cats see 宪宪 in others; 应用: 微信 + 2 custom MCP apps (one active with 斑斑 off, one paused).
+  assert.equal((await get(`${chat('宪宪')}/computer`)).on, true);
+  assert.deepEqual((await get(`${chat('砚砚')}/computer`)).others, ['宪宪']);
+  const apps = await get('/xbot-api/apps');
+  assert.deepEqual(apps.apps.map((app: any) => [app.title, app.state]), [[ '微信', process.platform === 'darwin' ? 'off' : 'unavailable' ], ['网页阅读', 'unchecked'], ['本地笔记索引', 'off']]);
+  const readerDetail = await get(`/xbot-api/apps/${encodeURIComponent(apps.apps[1].id)}`);
+  assert.equal(readerDetail.state, 'on');
+  assert.equal(readerDetail.cats.find((cat: any) => cat.name === '斑斑').enabled, false);
+  assert.equal(readerDetail.cats.find((cat: any) => cat.name === '宪宪').enabled, true);
+  // T-31: switching runtime states exposes ready, login, missing, and unsupported simultaneously without interception, then restores showcase.
+  assert.equal((await post('/__preview', { agents: 'mixed' })).status, 200);
+  const mixedFaces = (await get('/xbot-api/start')).faces;
+  assert.deepEqual(mixedFaces.map((face: any) => [face.nickname, face.tool.state]), [
+    ['宪宪', 'ready'], ['砚砚', 'login'], ['烁烁', 'unsupported'], ['墨墨', 'missing'],
+    ['鲸鲸', 'unsupported'], ['小狸花', 'unsupported'], ['斑斑', 'unsupported'], ['金哥', 'unsupported'],
+  ]);
+  assert.equal(mixedFaces[1].tool.loginCommand, 'codex login');
+  assert.equal((await post('/__preview', { agents: 'showcase' })).status, 200);
   const bengal = await rows('斑斑');
   assert.deepEqual(bengal.filter((message: any) => message.ended).map((message: any) => [message.ended.how, message.ended.reason]), [['failed', 'timeout'], ['interrupted', 'process_restart']]);
   assert.equal(bengal.at(-1).blocks_hidden, 1);
@@ -124,10 +149,15 @@ test('the showcase stages one cat per template, and each chat shows what it is t
   const [paged, whole] = await Promise.all([get(`${chat('金哥')}/transcript`), get(review)]);
   assert.deepEqual([paged.hasMore, whole.hasMore, whole.messages.length], [true, false, 10]);
   assert.ok(whole.messages.some((message: any) => message.notice && message.text === '金哥不在这个群里，没有回答。'));
-  // The vote in 读书会 was answered the way the app words an answer to a titled choice.
-  const voted = (await get(club)).messages;
+  // The vote in 读书会 was answered the way the app words an answer to a titled choice, plus a quoted reply and folded reactions.
+  const voted = (await get(`${club}?reactions=1`)).messages;
   assert.deepEqual(voted.flatMap((message: any) => (message.blocks ?? []).map((block: any) => [block.kind, block.title, block.answered, block.selected])), [['choices', '这个月读哪一本', true, ['list']]]);
   assert.ok(voted.some((message: any) => message.kind === 'person' && message.text === '我选了：《清单革命》（这个月读哪一本）'));
+  assert.ok(voted.some((message: any) => message.sender === '墨墨' && message.reply_to > 0));
+  const decidedRow = voted.find((message: any) => message.sender === '鲸鲸' && message.text.startsWith('定了，《清单革命》'));
+  assert.deepEqual(decidedRow.reactions.map((rx: any) => [rx.emoji, rx.mine]), [['👍', true], ['🐾', false]]);
+  const thanksRow = voted.find((message: any) => message.kind === 'person' && message.text === '辛苦鲸鲸啦，周六见。');
+  assert.deepEqual(thanksRow.reactions.map((rx: any) => [rx.emoji, rx.name]), [['🐾', '鲸鲸']]);
 
   // Each chat's demo line, played to its end (fast). An unknown name, or a name that is only a property of an object, is refused.
   const play = async (name: string) => (await post('/__preview', { play: name })).status;
@@ -207,4 +237,46 @@ test('the showcase stages one cat per template, and each chat shows what it is t
   assert.equal(await play('读书会'), 200);
   const next = await until('读书会', async () => (await get(club)).messages.at(-1), message => message.kind === 'bot' && message.status === 'completed' && message.text.startsWith('下次是周六晚上 8 点'));
   assert.ok(next.text.endsWith(said));
+
+  // Sending a sole-emoji reaction in showcase gets a clean 🐾 reaction back (folded when read with ?reactions=1); asking 宪宪 about 这台电脑 runs computer steps.
+  const baseRagdoll = (await rows('宪宪')).at(-1);
+  assert.equal((await post(`${chat('宪宪')}/messages`, { text: '👍', reply_to: baseRagdoll.seq })).status, 200);
+  const reacted = await until('宪宪 reacts with 🐾', async () => (await get(`${chat('宪宪')}/transcript?reactions=1`)).messages.find((m: any) => m.id === baseRagdoll.id), row => (row?.reactions ?? []).length >= 2);
+  assert.deepEqual(reacted.reactions.map((rx: any) => [rx.emoji, rx.mine]), [['👍', true], ['🐾', false]]);
+  assert.equal((await post(`${chat('宪宪')}/messages`, { text: '用电脑帮我算一下 12 × 12' })).status, 200);
+  const computed = await last('宪宪', message => message.content.includes('144'));
+  assert.ok(computed.content.includes('**144**'));
+});
+
+test('plain preview exposes ready, login, missing, and unsupported faces out of the box without interception', async t => {
+  const port = await freePort(), base = `http://127.0.0.1:${port}`;
+  const child = spawn(process.execPath, ['--import', 'tsx', 'scripts/preview-fixture.ts'], { cwd: root, stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env, PREVIEW_PORT: String(port), PREVIEW_PARENT: 'stdin' } });
+  const gone = new Promise<void>(done => child.once('exit', () => done()));
+  t.after(async () => {
+    child.stdin.end(); child.kill('SIGTERM');
+    const force = setTimeout(() => child.kill('SIGKILL'), 3000);
+    await gone; clearTimeout(force);
+  });
+  let output = '';
+  await new Promise<void>((done, fail) => {
+    const timer = setTimeout(() => fail(new Error('the preview did not start:\n' + output)), 30_000);
+    const read = (chunk: Buffer) => { output += chunk; if (/preview \(scripted fixture/.test(output)) { clearTimeout(timer); done(); } };
+    child.stdout.on('data', read); child.stderr.on('data', read);
+    child.once('exit', code => { clearTimeout(timer); fail(new Error(`the preview exited (${code}):\n${output}`)); });
+  });
+  const get = async (path: string) => { const response = await fetch(base + path); assert.equal(response.status, 200, path); return response.json() as Promise<any>; };
+  const identity = await get('/__preview');
+  assert.deepEqual([identity.preview, identity.scene, identity.staged, identity.agents, identity.computer], [true, 'plain', false, 'mixed', 'ready']);
+  assert.deepEqual(identity.cats, ['团子', '栗子']);
+  const start = await get('/xbot-api/start');
+  assert.deepEqual(start.faces.map((face: any) => [face.nickname, face.tool.state, face.tool.usable]), [
+    ['宪宪', 'ready', true], ['砚砚', 'login', false], ['烁烁', 'unsupported', false], ['墨墨', 'missing', false],
+    ['鲸鲸', 'unsupported', false], ['小狸花', 'unsupported', false], ['斑斑', 'unsupported', false], ['金哥', 'unsupported', false],
+  ]);
+  assert.equal(start.faces[1].tool.loginCommand, 'codex login');
+  const inventory = await get('/xbot-api/agents');
+  assert.deepEqual(inventory.agents.slice(0, 3).map((agent: any) => [agent.id, agent.readiness.status]), [
+    ['codex', 'login_required'], ['claude', 'configured'], ['kimi', 'not_installed'],
+  ]);
 });

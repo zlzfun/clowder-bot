@@ -242,7 +242,8 @@ export async function seedShowcase({ native, base }: { native: PreviewNative; ba
     const last = room.reply(ragdoll, ago(21 * MIN), '```text\n每周回顾\n├─ 这一周（日期、笔记数）\n├─ 按书翻一遍\n└─ 三个问题\n```\n\n三块，够了。');
     await seen(ragdoll, room, last);
     await call('POST', `/bots/${enc(ragdoll.name)}/pin`, { pinned: true });
-    live.set(room.threadId, cat => ({ think: 900,
+    await call('PUT', `/bots/${enc(ragdoll.name)}/computer`, { enabled: true });
+    live.set(room.threadId, (cat, said) => /电脑/.test(said) ? undefined as unknown as Script : ({ think: 900,
       steps: steps(cat, [['Read', { file_path: '/页边/docs/每周回顾.md' }], ['WebSearch', { query: '笔记应用 每周回顾 提醒文案' }], ['Write', { file_path: '/页边/docs/回顾提醒.md', content: '…' }]], []),
       reply: ['## 提醒文案，三个版本', '', '看了现有的方案，也查了几款笔记应用的写法。我的建议是**第二个**。', '',
         '1. **平实**：这一周记了 12 条，翻一遍？', '2. **带一点好奇**：这周有一条笔记，你大概已经忘了。', '3. **只说时间**：周日晚上，回顾一下。', '',
@@ -336,17 +337,41 @@ export async function seedShowcase({ native, base }: { native: PreviewNative; ba
 
   // ── 小狸花（狸花猫）· 要记住的事先问你；记住了什么，资料页里看得到 ────────────────────────
   {
-    const room = chat('dragon-li'), start = clock(2, 20, 30), later = clock(1, 22, 5);
+    const room = chat('dragon-li'), start = clock(2, 20, 30), mid = clock(2, 20, 45), later = clock(1, 22, 5);
     const first = room.say(start, '以后回答我，先说结论，再给依据。');
     room.reply(li, start + 30_000, '明白：先结论，后依据。这一条我想记下来，等你点头。');
     room.answer(room.ask(li, start + 40_000, preference('回答时先说结论，再给依据', first.content)), true, start + 90_000);
     room.say(start + 4 * MIN, '猫为什么喜欢钻纸箱？');
     room.reply(li, start + 5 * MIN, '**结论：纸箱让猫觉得安全。**\n\n依据有三条：\n\n1. 四面围合，能藏身，也能看着外面；\n2. 瓦楞纸保温，趴着暖和；\n3. 对猫来说是新东西，可以挠，可以啃。');
+    const aboutMatter = room.say(mid, '「页边」首页改版定下来走纸页感了，先把这个事项记一下。');
+    const notedMatter = room.reply(li, mid + 30_000, '记下了：「页边」首页改版走纸页感，米白底配红书签。');
     const second = room.say(later, '还有，引用资料的时候带上出处。');
     room.reply(li, later + 30_000, '好。这一条也想记下来。');
     const open = room.ask(li, later + 40_000, preference('引用资料时带上出处', second.content));
     await seen(li, room, room.list.find(message => message.id === open.navigation.approvalCardRef.messageId)!);
     native.notes.set(room.threadId, [{ key: 'note-showcase', value: '「页边」首页定了纸页感；导出先做 Markdown。', updatedAt: later }]);
+    const matter = {
+      matterId: 'matter-yebian-home',
+      title: '「页边」首页改版',
+      description: '首页改为纸页感，深色模式单独调一套颜色。',
+      revision: 1,
+      status: 'active',
+      entryCount: 1,
+      updatedAt: notedMatter.timestamp,
+    };
+    native.memoryViews.matters = { items: [matter] };
+    native.matterPages[matter.matterId] = {
+      matter,
+      entries: [{
+        entryId: 'entry-yebian-paper',
+        status: 'active',
+        sourceStatus: 'current',
+        summary: '首页改版定下来走纸页感。',
+        quote: aboutMatter.content,
+        recordedAt: notedMatter.timestamp,
+        source: { threadId: room.threadId, messageId: aboutMatter.id, timestamp: aboutMatter.timestamp },
+      }],
+    };
     live.set(room.threadId, (_cat, said) => /以后|记住|不要|总是|每次/.test(said)
       ? { reply: '好。这一条我想记下来，等你点头。', proposal: preference(said.replace(/\s+/g, ' ').slice(0, 60), said.slice(0, 60)) }
       : { reply: '**结论：先小范围试，再决定要不要做大。**\n\n依据：\n\n1. 试一次的成本低，一周就能看到有没有人用；\n2. 做大之后再改方向，代价是现在的好几倍。\n\n出处：这是示例环境里的固定回答，没有引用外部资料。' });
@@ -428,13 +453,13 @@ export async function seedShowcase({ native, base }: { native: PreviewNative; ba
     plays.set(name, { group: group.id, line: `@${ragdoll.name} @${maine.name} @${siamese.name} 各说一句：今天最想改哪里？` });
   }
 
-  // ── 读书会（群）· 四只猫的群；群里也能投票 ────────────────────────────────────
+  // ── 读书会（群）· 四只猫的群；群里也能投票、引用与表情回应 ──────────────────────────────
   {
     const name = '读书会', members = [whale, li, van, gold];
     const group = await call('POST', '/groups', { name, members: members.map(cat => cat.name), idempotencyKey: randomUUID() });
     const room = new Chat(native, group.id), start = clock(3, 20, 0);
     room.say(start, `${members.map(cat => '@' + cat.name).join(' ')} 这个月读书会读什么？各提一本，说一句理由。`);
-    room.reply(whale, start + 40_000, '《思考，快与慢》。读书会上最常吵的就是“直觉靠不靠谱”，这本正好当裁判。');
+    const whalePick = room.reply(whale, start + 40_000, '《思考，快与慢》。读书会上最常吵的就是“直觉靠不靠谱”，这本正好当裁判。');
     room.reply(li, start + 55_000, '《枪炮、病菌与钢铁》。每个结论后面都跟着证据，适合一起挑刺。');
     room.reply(van, start + 70_000, '《清单革命》。薄，一周能读完，读完就能用上。');
     room.reply(gold, start + 85_000, '《人月神话》。老书，但你们正在做产品，会读出新东西。');
@@ -442,11 +467,25 @@ export async function seedShowcase({ native, base }: { native: PreviewNative; ba
     room.reply(whale, start + 5 * MIN, '那就在这儿投：', { blocks: [choice('vote', 'select', '这个月读哪一本', [{ id: 'fast', label: '《思考，快与慢》' }, { id: 'guns', label: '《枪炮、病菌与钢铁》' },
       { id: 'list', label: '《清单革命》' }, { id: 'month', label: '《人月神话》' }], { disabled: true, selectedIds: ['list'] })] });
     room.say(start + 6 * MIN, '我选了：《清单革命》（这个月读哪一本）');
-    await read(`/groups/${enc(group.id)}`, group.id, room.reply(whale, start + 7 * MIN, '定了，《清单革命》。周六晚上 8 点，我提前一天提醒大家。'));
+    const decided = room.reply(whale, start + 7 * MIN, '定了，《清单革命》。周六晚上 8 点，我提前一天提醒大家。');
+    room.reply(van, start + 7 * MIN + 20_000, '《思考，快与慢》下个月也可以接着读，这周先看薄的这本节奏更好。', { to: whalePick.id });
+    const ownerThumb = room.say(start + 7 * MIN + 40_000, '👍', { replyTo: decided.id });
+    room.reply(whale, start + 7 * MIN + 50_000, '🐾', { to: ownerThumb.id });
+    const thanks = room.say(start + 8 * MIN, '辛苦鲸鲸啦，周六见。');
+    const last = room.reply(whale, start + 8 * MIN + 20_000, '🐾', { to: thanks.id });
+    await read(`/groups/${enc(group.id)}`, group.id, last);
     const lines: Record<string, string> = { [whale.id]: '下次是周六晚上 8 点，读《清单革命》的前三章。', [li.id]: '我带了三条想挑刺的地方，到时候说。',
       [van.id]: '我已经读完了，做了一页笔记，会前发给大家。', [gold.id]: '我负责计时，每人五分钟。' };
-    live.set(group.id, cat => ({ reply: lines[cat.id]! }));
+    live.set(room.threadId, cat => ({ reply: lines[cat.id]! }));
     plays.set(name, { group: group.id, line: `@${whale.name} 下次读书会是什么时候？` });
+  }
+
+  // ── 应用：自定义 MCP 应用（一个已连接且按猫关闭了斑斑，一个已停用）；微信保持未打开 ────────────────
+  {
+    const reader = await call('POST', '/apps/custom', { name: '网页阅读', url: 'https://mcp.example.com/reader' });
+    await call('PUT', `/apps/${enc(reader.id)}/cats/${enc(bengal.name)}`, { enabled: false });
+    const notesApp = await call('POST', '/apps/custom', { name: '本地笔记索引', program: 'npx', args: ['-y', '@example/notes-mcp'] });
+    await call('PUT', `/apps/${enc(notesApp.id)}/enabled`, { enabled: false });
   }
 
   // What the owner's profile already holds (read-only in the app, kept by the engine): native's opening capsule, under native's own title.
@@ -459,8 +498,10 @@ export async function seedShowcase({ native, base }: { native: PreviewNative; ba
   native.scene = (threadId, cat, said) => {
     const make = live.get(threadId);
     if (!make) return undefined;
-    const turn = (turns.get(threadId) ?? 0) + 1; turns.set(threadId, turn);
+    const turn = (turns.get(threadId) ?? 0) + 1;
     const script = make(cat, said, turn);
+    if (!script) return undefined;
+    turns.set(threadId, turn);
     if (script.fail || told.has(threadId)) return script;
     told.add(threadId);
     return { ...script, reply: script.reply + '\n\n（这里是示例环境，回复是预先写好的。）' };
