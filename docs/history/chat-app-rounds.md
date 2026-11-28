@@ -227,6 +227,15 @@
 
 **前端**：已完成并合入（第 58 项，`8bfb8ca8`）：由本机 Claude Code（`claude-opus-5-5`，xhigh）实现。`profile-rules.js` 解析 `lingering`、导出 `computerAffected`，确认框按四种情形（无、仅 `others`、仅 `lingering`、两者都有）用一句日常中文如实说明；`profile.js` 打开时始终传 `confirmOff`（含等系统授权后的自动重发），遇到 409 `computer_confirm_changed` 先使别的猫的缓存视图作废（`forgetOthers`），再用返回的 `details` 直接更新当前视图并在资料页可见且无其他弹窗时立即重新弹出确认框；`app.js` 在 `api()` 错误对象上透传 `details`。经过 Codex（`gpt-6-astra`，xhigh）两轮只读检视，4 条问题全部修正（空闲 `lingering` 猫在交接前新开一轮不被误停、409 分支先做 `forgetOthers`、队列读取失败时文案保留「还没确认停下／要是还在回复」的不确定性、驱动重装后二次核对 `confirmOff`）。`npm test` 885 项（881 通过，4 项按原因跳过）、`tsc --noEmit`、`verify:frontend` 与生产构建通过。
 
+<a id="round-21"></a>
+### 第 21 轮 · 自定义应用：按猫开关、停用与编辑配置（2026-11-28）
+
+**内容**：完成待办 `T-28` 及 `T-27` 的自定义应用全局停用／启用与按猫开关部分。
+
+**后端（适配层）**：已完成并合入（`f279edd8`）：新增 `PUT /xbot-api/apps/:id/enabled`（调原生 `PATCH /api/capabilities` 的 `scope: "global"` 并读回核对）和 `PUT /xbot-api/apps/:id/cats/:name`（调 `scope: "cat"` 写 `blockedCats` 并读回核对，全局停用时 409 `app_disabled`）；详情与写应答附带 `cats[]`；扩展 `PATCH /xbot-api/apps/:id` 支持原位修改 `program`、`args` 或 `url`（保留原密钥与启停配置；因上游 `mcp/install` 会对本机程序自动启动探活，已停用的程序型应用修改程序或参数时拒绝 409 `app_disabled`，避免在停用态意外拉起子进程）。详见 [应用](../apps-api.md)。
+
+**前端**：已完成并合入（第 60 项，`f279edd8`）：由本机 Claude Code（`claude-opus-5-5`，xhigh）实现。自定义应用详情页顶栏增加「停用／启用」，下方增加「猫猫」按猫开关列表，「是什么」一栏增加「编辑」原位修改程序/参数（支持整行粘贴自动拆分）或网址、只提交改动项。经过 Codex（`gpt-6-astra`，xhigh）两轮只读检视，4 条问题全部修正（停用态本机程序隐藏编辑并拒绝启动探活、写请求序号防止旧列表读取覆盖刚确认的写状态、503 保存失败保留 `off` 状态、按猫开关撞上 409 `app_disabled` 且列表读取失败时照实落为已停用）。全量测试通过。
+
 ## 部署记录
 
 部署的做法在 [验证环境与部署](../operations.md)。第 17、18 轮的部署、2026-11-26 日常实例换引擎和 2026-11-27 部署「同一时间只有一只猫」只写在上面各轮自己的记录里，换引擎的经过另见 [上游维护记录](upstream-records.md)。

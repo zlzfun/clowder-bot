@@ -7,7 +7,7 @@
 | 应用 | 上游机制（固定版本，未打补丁） | Bot 自己保存的 |
 | --- | --- | --- |
 | 微信 | 官方插件 `official.wechat-visible-reader`：插件管理的读取与启停，插件自己声明的「短时授权」操作 | 无 |
-| 自定义应用 | 能力登记表里的外部 MCP：安装、探活、改密钥、删除 | 使用者起的名字（`presentation.json` 的 `apps`，按原生 id） |
+| 自定义应用 | 能力登记表里的外部 MCP：安装、改配置、探活、改密钥、全局与按猫启停、删除 | 使用者起的名字（`presentation.json` 的 `apps`，按原生 id） |
 
 装没装、开没开、连没连上、授没授权，每次都从引擎读回来。密钥只进引擎，不进 Bot 的存储，也不出现在任何回应里（只列名称；`detail` 也不带引擎的原话，见下）。
 
@@ -16,9 +16,11 @@
 ## Bot API
 
 - `GET /xbot-api/apps` → `{ apps: App[] }`。第一项总是微信，其后是登记表里的外部 MCP。不探活。微信的状态读不到时，它以 `unavailable`、`reason: 没能读到它的状态` 出现，其余应用照常列出（单独读 `GET /xbot-api/apps/wechat` 则照实报错）。
-- `GET /xbot-api/apps/:id` → `App`。自定义应用在这里探活一次（引擎启动或连接它、列出工具）。
+- `GET /xbot-api/apps/:id` → `App`。自定义应用在这里探活一次（引擎启动或连接它、列出工具），并附带当前每只猫是否可用（`cats[]`）。
 - `POST /xbot-api/apps/custom` → 201 `App`（已探活；探不了时是 `unchecked`）。同一个 `idempotencyKey` 配上不同的内容：409 `idempotency_conflict`。
-- `PATCH /xbot-api/apps/:id`（自定义）body `{ name?, secrets? }` → `App`（已探活；密钥已经交给引擎而探不了时是 `unchecked`）。
+- `PATCH /xbot-api/apps/:id`（自定义）body `{ name?, program?, args?, url?, secrets? }` → `App`（已探活；引擎已收下修改而探不了时是 `unchecked`）。程序型只能改 `program`/`args`，网址型只能改 `url`。
+- `PUT /xbot-api/apps/:id/enabled`（自定义）body `{ enabled: boolean }` → `App`。全局停用或启用（停用后状态为 `off`、不探活；启用后按上游规则清掉按猫屏蔽并探活）。
+- `PUT /xbot-api/apps/:id/cats/:name`（自定义）body `{ enabled: boolean }` → `App`。按猫开关（写入上游 `blockedCats` 并读回核对）；应用本身处于全局停用（`off`）时回 409 `app_disabled`。
 - `DELETE /xbot-api/apps/:id`（自定义）→ `{ removed: true }`。微信回 405 `app_builtin`。
 - `POST /xbot-api/apps/wechat/connect`、`/disconnect`、`/authorize`、`/revoke` → `App`（微信）。请求体为空对象。
 - `GET /xbot-api/apps/wechat/icon` → `image/png`（256 像素见方）：微信的图标。没有可用的图时 404。
@@ -35,6 +37,7 @@ reason?        不可用的原因，一句人话。failed、unavailable 一定�
 detail?        供排查的技术线索，不需要它也能操作。微信：引擎的诊断码与说明。自定义：只有认得出的片段（HTTP 状态码、ENOENT 一类的错误码、timeout、MCP error 码），不是引擎的原话
 source?        自定义：{type:"program", program, args[], secrets[]} 或 {type:"url", url, secrets[]}；secrets 只是名称
 tools?         自定义、探活成功后：[{name, description?}]
+cats?          自定义详情与写操作后：[{name, enabled, avatar?, avatar_seed?, avatar_url?, templateId?, accent?}]；读不到猫列表时省略
 authorization? 微信、state 为 on 且读到了插件的回答时：{active, remaining_ms, until?}。on 而没有这一项＝没能读到，是「不知道」，不是「没授权」
 disclosure?    微信：插件自己的隐私说明，原文
 version?       微信：插件版本
@@ -44,7 +47,7 @@ version?       微信：插件版本
 
 | state | 微信 | 自定义 |
 | --- | --- | --- |
-| `off` | 插件已安装、未启用 | 引擎里这一行被停用（`reason: 已停用`；这一版不提供开关） |
+| `off` | 插件已安装、未启用 | 引擎里这一行被停用（`reason: 已停用`，可经 `PUT .../enabled` 启用） |
 | `starting` | 已启用，运行时还在启动 | — |
 | `on` | 运行中 | 探活成功，`tools` 是它提供的工具 |
 | `failed` | 已启用但没有运行 | 探活失败；`reason` 是翻译过的原因，`detail` 是引擎的错误原文 |
@@ -114,13 +117,15 @@ version?       微信：插件版本
 - 同一个请求重发（回应丢了、Bot 重启过）会算出同一段码，从引擎的登记表里找到上一次装好的那一行并返回它，不会装第二个。Bot 不为此记任何东西。
 - 同一个 `idempotencyKey` 配上不同的程序、参数、网址或密钥名称：409 `idempotency_conflict`，什么也不装。
 
-`PATCH` 的 `secrets` 是合并：给出的名称被替换或新增，其余保留；不能删除单个密钥（上游没有这个操作），要删就移除应用重加。请求头的名称不分大小写：添加时两种写法算重复（400），修改时按已存的那个写法替换（引擎会把两种写法都留下，发出去时并成一个值）。环境变量区分大小写。`name` 只改 Bot 保存的名字；只改名字而没能存下来是 500「名字没能保存，请再试一次」，名字不变。
+`PATCH` 的 `secrets` 是合并：给出的名称被替换或新增，其余保留；不能删除单个密钥（上游没有这个操作），要删就移除应用重加。请求头的名称不分大小写：添加时两种写法算重复（400），修改时按已存的那个写法替换（引擎会把两种写法都留下，发出去时并成一个值）。环境变量区分大小写。`PATCH` 修改 `program`/`args` 或 `url` 时复用上游 `POST /api/capabilities/mcp/install` 合并更新，保持传输类型不变（程序型不能改 `url`，网址型不能改 `program`/`args`），并保留既有的环境变量、请求头、`globalEnabled` 与 `blockedCats`。因上游 `install` 对本机程序型即使在 `globalEnabled: false` 时也会立即探活执行一次，已停用（`off`）的程序型应用不允许改 `program`/`args`（回 409 `app_disabled`）；`name`、`secrets` 与网址型的 `url`（上游不自动探活）不受影响。`name` 只改 Bot 保存的名字；只改名字而没能存下来是 500「名字没能保存，请再试一次」，名字不变。
+
+全局启停（`PUT /xbot-api/apps/:id/enabled`）调用上游 `PATCH /api/capabilities`（`scope: "global"`），写后立即从 `GET /api/capabilities` 读回核对；按上游自身语义，全局启用会清掉各猫的屏蔽状态。按猫开关（`PUT /xbot-api/apps/:id/cats/:name`）调用上游 `PATCH /api/capabilities`（`scope: "cat"`），同样写后读回核对；若应用本身处于全局停用（`globalEnabled: false`），上游单独移出 `blockedCats` 仍不会让猫拿到工具，因此此时直接拒绝（409 `app_disabled`）。微信是插件 limb 贡献而非登记表里的外部 MCP，不提供按猫开关。
 
 移除是硬删除（上游的 `?hard=true`），不可恢复。引擎自带的 MCP 服务（`cat-cafe-*`）和插件带来的不在这个列表里，这些接口也碰不到它们（404）。「这台电脑」在同一张登记表里也有一行（id `computer`，见 [接口范围](xbot-api.md)「这台电脑」）：它不是应用，有自己在猫的资料里的开关，这里不列出，`custom:computer` 一律 404；使用者把自己的应用叫作 computer 也不会撞上它，因为每个应用的 id 都带着自己的码。
 
 **范围与确认**（事实如下；摆在「添加」之前的只需要不说就会误导人的：所有猫都能用、用的时候不会再问；填了密钥时，在密钥旁边说它不加密存在这台电脑上。其余的不必写在面上）：
 
-- 加上之后**所有猫**都能用，新建的猫也自动有。上游是全局登记加按猫屏蔽，这一版不做按猫开关。
+- 加上之后默认**所有猫**都能用，新建的猫也自动有；在应用详情页可全局停用/启用或按猫单独开关。
 - 猫用它**不会逐次询问**。上游让本机 Agent 以全权限运行，没有按工具调用的审批；唯一的确认点是「添加」。
 - 本机程序型的应用会**在这台电脑上、以使用者的身份运行那个程序**。
 - 密钥明文存在引擎的数据目录里（`workspace/.cat-cafe/capabilities.json`，引擎回应里打码）。
@@ -150,7 +155,6 @@ version?       微信：插件版本
 - 微信的程序包不在引擎里时（`unavailable`），这一版不提供从目录安装。
 - 远程服务只能用固定的请求头登录；需要浏览器登录（OAuth）的服务接不了，上游没有这个流程。
 - 网址型的应用只对 Claude Code、Codex、Kimi 等几种 Agent 生效（上游的限制）。
-- 没有按猫开关，没有暂停，只能移除。
 - 官方插件要先能装上依赖：Node 自带的证书验不过 npm 官方源的机器上，需要在全局 npm 配置里指定证书文件（见[维护说明](upstream-maintenance.md)「插件依赖与证书」）。
 
 ## 验证

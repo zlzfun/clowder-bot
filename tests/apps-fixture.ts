@@ -10,7 +10,7 @@ export const WECHAT_DISCLOSURE = '不会保存截图。识别出的微信文字�
 const PLUGIN = 'official.wechat-visible-reader', OPERATION = 'visibleReadingAuthorization';
 
 interface Server { transport: string; command: string; args: string[]; url?: string; env?: Record<string, string>; headers?: Record<string, string> }
-interface Row { id: string; type: string; source: string; enabled: boolean; globalEnabled?: boolean; mcpServer: Server }
+interface Row { id: string; type: string; source: string; enabled: boolean; globalEnabled?: boolean; blockedCats?: string[]; mcpServer: Server }
 export interface ScriptedPlugin {
   artifact: 'absent' | 'installed' | 'quarantined'; intent: 'disabled' | 'enabled';
   live: 'stopped' | 'starting' | 'running' | 'crashed'; lifecycleRevision: number;
@@ -38,9 +38,15 @@ export class NativeAppsScript {
   operationState: string | null = null;
   now: () => number = () => Date.now();
 
-  private view(row: Row) {
+  private view(row: Row, catIds: string[] = []) {
     const { env, headers, ...server } = row.mcpServer;
-    return { ...row, mcpServer: { ...server, ...(env ? { env: masked(env), envKeys: Object.keys(env) } : {}), ...(headers ? { headers: masked(headers) } : {}) } };
+    const cats = Object.fromEntries(catIds.map(id => [id, !(row.blockedCats?.includes(id) ?? false)]));
+    return {
+      ...row,
+      cats,
+      ...(row.blockedCats?.length ? { blockedCats: [...row.blockedCats] } : {}),
+      mcpServer: { ...server, ...(env ? { env: masked(env), envKeys: Object.keys(env) } : {}), ...(headers ? { headers: masked(headers) } : {}) },
+    };
   }
   /** When set, every probe answers this (the preview's "nothing connects" switch). */
   probeAll?: { connectionStatus: string; tools?: Array<{ name: string; description?: string }>; error?: string };
@@ -74,7 +80,30 @@ export class NativeAppsScript {
   }
 
   /** These rows as `GET /api/capabilities` lists them (tests/native-fixture.ts answers that route: it holds the rest of the registry). */
-  items(): unknown[] { return this.rows.map(row => this.view(row)); }
+  items(catIds: string[] = []): unknown[] { return this.rows.map(row => this.view(row, catIds)); }
+  /** `PATCH /api/capabilities` for external/managed MCP rows held here (matches upstream `routes/capabilities.ts`). */
+  patchCapability(body: any, catIds: string[] = []): unknown | undefined {
+    const row = this.rows.find(item => item.id === body?.capabilityId && item.type === body?.capabilityType);
+    if (!row) return undefined;
+    if (body.source && row.source !== body.source) return undefined;
+    if (body.scope === 'global') {
+      row.globalEnabled = body.enabled;
+      if (body.enabled) delete row.blockedCats;
+      else if (catIds.length) row.blockedCats = [...catIds];
+    } else if (body.scope === 'cat' && body.catId) {
+      const blocked = new Set(row.blockedCats ?? []);
+      if (body.enabled) blocked.delete(body.catId);
+      else blocked.add(body.catId);
+      if (blocked.size) row.blockedCats = [...blocked];
+      else delete row.blockedCats;
+    } else if (body.scope === 'project') {
+      if (body.enabled) delete row.blockedCats;
+      else if (catIds.length) row.blockedCats = [...catIds];
+    } else {
+      throw new ApiError(400, `Invalid scope "${body.scope}"`);
+    }
+    return { ok: true, capability: this.view(row, catIds) };
+  }
   /** `undefined`: not one of these routes. */
   handle(url: URL, method: string, body: any): unknown {
     const parts = url.pathname.split('/').map(decodeURIComponent), missing = (id: string) => new ApiError(404, `MCP "${id}" not found`, { error: `MCP "${id}" not found` });
@@ -85,7 +114,13 @@ export class NativeAppsScript {
       const env = { ...existing?.mcpServer.env, ...body.env }, headers = { ...existing?.mcpServer.headers, ...body.headers };
       if (Object.keys(env).length) server.env = env;
       if (Object.keys(headers).length) server.headers = headers;
-      const row: Row = { id: body.id, type: 'mcp', enabled: true, source: 'external', globalEnabled: true, mcpServer: server };
+      // Upstream `mergeExternalMcpEntry` preserves existing `globalEnabled` and `blockedCats`.
+      const row: Row = {
+        id: body.id, type: 'mcp', enabled: true, source: 'external',
+        globalEnabled: existing ? (existing.globalEnabled ?? true) : true,
+        ...(existing?.blockedCats?.length ? { blockedCats: [...existing.blockedCats] } : {}),
+        mcpServer: server,
+      };
       this.rows = [...this.rows.filter(item => item.id !== body.id), row];
       const { envKeys: _keys, ...capabilityServer } = this.view(row).mcpServer as Record<string, unknown>;
       return { ok: true, capability: { ...row, mcpServer: capabilityServer }, probe: server.url ? null : server.command ? { connectionStatus: this.probe(row).connectionStatus, tools: this.probe(row).tools ?? [] } : null };

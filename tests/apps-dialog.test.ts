@@ -11,7 +11,7 @@ import { ZodError } from 'zod';
 import { Doc, El, TextNode } from './fake-dom.js';
 import { createApp } from '../server/app.js';
 import { createXbotAppsRouter } from '../server/xbot/apps.js';
-import { BotApps, parseCustomApp } from '../server/native/apps.js';
+import { BotApps, customPatchSchema, parseCustomApp } from '../server/native/apps.js';
 import { NativeFixture } from './native-fixture.js';
 import { WECHAT_DISCLOSURE } from './apps-fixture.js';
 
@@ -85,13 +85,20 @@ function server(page: ReturnType<typeof load>) {
     on: new Map<string, (c: Call) => Any>(),
     starts: 0, // reads that a started 微信 stays starting
     deaf: false, // true: an aborted request still answers later (a late success after the page gave up on it)
+    // The engine's cats, as GET /api/cats lists them (null: they could not be read, so no answer carries `cats`).
+    // A custom app's detail and every write's answer carry each with whether it may use the app (docs/apps-api.md).
+    cats: null as Any[] | null,
   };
-  const app = (c: Any) => {
-    const { checked, ...row } = c;
-    return { ...row, ...(checked || { state: 'unchecked' }) };
-  };
-  S.add = (id: string, title: string, source: Any, checked: Any = { state: 'on', tools: [{ name: 'app_probe', description: 'Returns a fixed marker.' }] }) => {
-    S.custom.push({ id, kind: 'custom', title, source, checked });
+  const PROBE = { state: 'on', tools: [{ name: 'app_probe', description: 'Returns a fixed marker.' }] };
+  const isOff = (c: Any) => !!c.checked && c.checked.state === 'off';
+  // A custom app as the adapter answers its detail: what its check found and, where the cats could be read, each cat
+  // with whether it may use it (none while it is turned off, as upstream's global switch blocks every cat).
+  const app = (c: Any) => ({
+    id: c.id, kind: 'custom', title: c.title, source: c.source, ...(c.checked || { state: 'unchecked' }),
+    ...(S.cats ? { cats: S.cats.map((cat: Any) => ({ ...cat, enabled: !isOff(c) && !c.blocked.includes(cat.name) })) } : {}),
+  });
+  S.add = (id: string, title: string, source: Any, checked: Any = PROBE) => {
+    S.custom.push({ id, kind: 'custom', title, source, checked, blocked: [] as string[], was: null });
   };
   // The list as the adapter would answer it now (a copy: what was true when the request was answered).
   S.listNow = () => plain({ apps: [S.wechat, ...S.custom.map((x: Any) => ({ id: x.id, kind: 'custom', title: x.title, source: x.source, state: x.checked && x.checked.state === 'off' ? 'off' : 'unchecked', ...(x.checked && x.checked.state === 'off' ? { reason: '已停用' } : {}) }))] });
@@ -127,10 +134,39 @@ function server(page: ReturnType<typeof load>) {
     }
     const row = S.custom.find((x: Any) => x.id === id);
     if (!row) throw fail(404, '没有这个应用');
+    const rest = c.path.slice(base.length + 1).split('/').slice(1);
     if (c.method === 'GET') return app(row);
+    // 停用 / 启用: off checks nothing and no cat may use it; on again gives it to every cat and is checked.
+    if (c.method === 'PUT' && rest[0] === 'enabled' && rest.length === 1) {
+      if (typeof c.body?.enabled !== 'boolean') throw fail(400, 'enabled: Invalid input');
+      if (!c.body.enabled && !isOff(row)) { row.was = row.checked; row.checked = { state: 'off', reason: '已停用' }; }
+      else if (c.body.enabled && isOff(row)) { row.checked = row.was || PROBE; row.was = null; row.blocked = []; }
+      return app(row);
+    }
+    // One cat's switch: refused while the app is off; a cat the engine does not have is 404.
+    if (c.method === 'PUT' && rest[0] === 'cats' && rest.length === 2) {
+      const name = decodeURIComponent(rest[1]!);
+      if (typeof c.body?.enabled !== 'boolean') throw fail(400, 'enabled: Invalid input');
+      if (!S.cats || !S.cats.some((cat: Any) => cat.name === name)) throw fail(404, '找不到这只猫猫');
+      if (isOff(row)) throw fail(409, '应用已停用，请先启用应用', 'app_disabled');
+      row.blocked = c.body.enabled ? row.blocked.filter((n: string) => n !== name) : [...new Set([...row.blocked, name])];
+      return app(row);
+    }
     if (c.method === 'PATCH') {
-      if (c.body.name) row.title = c.body.name;
-      if (c.body.secrets) row.source = { ...row.source, secrets: [...new Set([...row.source.secrets, ...Object.keys(c.body.secrets)])] };
+      const b = c.body;
+      // A program's app takes a program and arguments; an address's, an address (400 otherwise, as the adapter).
+      if (row.source.type === 'url' && ('program' in b || 'args' in b)) throw fail(400, '网址型应用不能修改程序或参数');
+      if (row.source.type === 'program' && 'url' in b) throw fail(400, '本机程序型应用不能修改网址');
+      // A program's app turned off takes no new program or arguments (the engine would start it); an address still can.
+      if (row.source.type === 'program' && isOff(row) && ('program' in b || 'args' in b)) throw fail(409, '应用已停用，请先启用后再修改程序', 'app_disabled');
+      if (b.name) row.title = b.name;
+      if (b.secrets) row.source = { ...row.source, secrets: [...new Set([...row.source.secrets, ...Object.keys(b.secrets)])] };
+      if ('program' in b) row.source = { ...row.source, program: b.program };
+      if ('args' in b) row.source = { ...row.source, args: b.args };
+      if ('url' in b) row.source = { ...row.source, url: b.url };
+      // A changed program is checked again (still off where it was turned off).
+      if (('program' in b || 'args' in b || 'url' in b) && !isOff(row))
+        row.checked = /missing/.test(row.source.program || '') ? { state: 'failed', reason: `这台电脑上找不到「${row.source.program}」`, detail: 'ENOENT' } : PROBE;
       return app(row);
     }
     if (c.method === 'DELETE') { S.custom = S.custom.filter((x: Any) => x !== row); return { removed: true }; }
@@ -1658,6 +1694,988 @@ test('review r2 (3): a check on its way for the old configuration loses its clai
   assert.ok(shown(buttonOf(second.body(), '再检查')) && !buttonOf(second.body(), '再检查').disabled, 'and 再检查 can be pressed again');
 });
 
+// ---------------------------------------------------------------- item 60: 停用 / 启用, the cats' switches, 编辑
+// The engine's cats as the adapter lists them with a custom app (docs/apps-api.md `cats`); 缅因猫 has a photo.
+const CATS = [
+  { name: '布偶猫', avatar: 'generated', avatar_seed: 'cat:ragdoll', avatar_url: '', templateId: 'ragdoll' },
+  { name: '缅因猫', avatar: 'custom', avatar_seed: 'cat:maine-coon', avatar_url: '/xbot-api/bots/%E7%BC%85%E5%9B%A0%E7%8C%AB/avatar?v=3', templateId: 'maine-coon' },
+];
+const withCats = (s: Any) => { s.cats = CATS.map((c) => ({ ...c })); };
+const lists = (srv: Any) => srv.sent('GET', /^\/xbot-api\/apps$/).length;
+const catPath = (id: string, name: string) => 'PUT /xbot-api/apps/' + encodeURIComponent(id) + '/cats/' + encodeURIComponent(name);
+// custom:y is found gone by its opening check once its gate opens, so the list is read again then (what changed
+// elsewhere meanwhile is what that read finds).
+const goneLater = (gate: ReturnType<typeof hold>) => (s: Any) => {
+  s.add('custom:y', 'Y', { type: 'program', program: 'node', args: [], secrets: [] });
+  s.on.set('GET /xbot-api/apps/custom%3Ay', () => gate.promise.then(() => { s.custom = s.custom.filter((x: Any) => x.id !== 'custom:y'); throw fail(404, '没有这个应用'); }));
+};
+
+test('item 60 rules: a program, its arguments or an address changed in place is checked as the adapter checks it, and only what changed is sent; the cats shown; what 停用 / 启用 and a cat\'s switch say when they fail', () => {
+  const prog = { type: 'program', program: 'npx', args: ['-y', 'notes-mcp@1.2.3'], secrets: ['K'] };
+  // The same as it is (spaces and blank lines aside): nothing to send.
+  assert.deepEqual(plain(R.sourceChange(prog, { program: ' npx ', args: '-y\n\n  notes-mcp@1.2.3 \n' })), { body: {}, changed: false, problems: [] });
+  // Only what changed: the adapter keeps the rest (arguments nobody touched are never rewritten).
+  assert.deepEqual(plain(R.sourceChange(prog, { program: 'uvx', args: '-y\nnotes-mcp@1.2.3' })), { body: { program: 'uvx' }, changed: true, problems: [] });
+  assert.deepEqual(plain(R.sourceChange(prog, { program: 'npx', args: '' }).body), { args: [] }, 'the arguments cleared');
+  assert.deepEqual(plain(R.sourceChange(prog, { program: 'node', args: 'server.js\n--stdio' }).body), { program: 'node', args: ['server.js', '--stdio'] });
+  const url = { type: 'url', url: 'https://old.example/mcp', secrets: ['Authorization'] };
+  assert.deepEqual(plain(R.sourceChange(url, { url: ' https://old.example/mcp ' })), { body: {}, changed: false, problems: [] });
+  assert.deepEqual(plain(R.sourceChange(url, { url: 'https://new.example/mcp', program: 'x' }).body), { url: 'https://new.example/mcp' }, 'an address\'s app sends only an address');
+  // What passes here passes the server's PATCH; each refusal here is one the server makes too.
+  for (const [src, form] of [[prog, { program: 'uvx', args: 'a\nb' }], [prog, { program: 'npx', args: '' }], [url, { url: 'http://localhost:3000/mcp' }]] as Array<[Any, Any]>) {
+    const r = R.sourceChange(src, form);
+    assert.deepEqual(plain(r.problems), []);
+    assert.doesNotThrow(() => customPatchSchema.parse(r.body), JSON.stringify(form));
+  }
+  const refused: Array<[Any, Any, string, Any]> = [
+    [prog, { program: '   ', args: '' }, 'program', { program: '   ' }],
+    [prog, { program: 'p'.repeat(513), args: '' }, 'program', { program: 'p'.repeat(513) }],
+    [prog, { program: 'npx', args: Array.from({ length: 33 }, (_, i) => 'a' + i).join('\n') }, 'args', { args: Array.from({ length: 33 }, (_, i) => 'a' + i) }],
+    [prog, { program: 'npx', args: 'x'.repeat(2049) }, 'args', { args: ['x'.repeat(2049)] }],
+    [url, { url: 'http://example.com/mcp' }, 'url', { url: 'http://example.com/mcp' }],
+    [url, { url: 'https://u:p@example.com/' }, 'url', { url: 'https://u:p@example.com/' }],
+    [url, { url: '' }, 'url', { url: '' }],
+  ];
+  for (const [src, form, fieldName, raw] of refused) {
+    assert.ok(R.sourceChange(src, form).problems.some((p: Any) => p.field === fieldName), JSON.stringify(form).slice(0, 60) + ' is refused here');
+    assert.throws(() => customPatchSchema.parse(raw), ZodError, JSON.stringify(raw).slice(0, 60) + ' is refused by the server');
+  }
+  assert.equal(R.sourceChange(url, { url: 'http://example.com/mcp' }).problems[0].text, R.URL_SAID, 'the server\'s own sentence');
+  // The cats: shown where it is not turned off and the server said which cats there are.
+  const cats = [{ name: '布偶猫', enabled: true }, { name: '缅因猫', enabled: false }];
+  assert.deepEqual(plain(R.catsOf({ kind: 'custom', state: 'on', cats })), cats);
+  assert.deepEqual(plain(R.catsOf({ kind: 'custom', state: 'failed', cats })), cats, 'one that does not answer is still someone\'s to switch');
+  assert.deepEqual([R.catsOf({ kind: 'custom', state: 'off', cats }), R.catsOf({ kind: 'custom', state: 'on' }), R.catsOf({ kind: 'custom', state: 'on', cats: [] }), R.catsOf({ kind: 'wechat', state: 'on', cats })].map((x: Any) => x.length), [0, 0, 0, 0]);
+  // 停用 / 启用, and while it is on its way.
+  assert.deepEqual([R.toggleLabel({ state: 'on' }), R.toggleLabel({ state: 'failed' }), R.toggleLabel({ state: 'unchecked' }), R.toggleLabel({ state: 'off' })], ['停用', '停用', '停用', '启用']);
+  assert.deepEqual([R.toggleLabel({ state: 'on' }, { on: false }), R.toggleLabel({ state: 'off' }, { on: true })], ['正在停用…', '正在启用…']);
+  // What they say when they fail.
+  assert.equal(R.patchError(fail(404), 'source').kind, 'gone');
+  assert.deepEqual(plain(R.patchError(fail(undefined), 'source')), { kind: 'unsure', text: '没能确认保存好了没有，可以再试一次。' });
+  assert.deepEqual(plain(R.patchError(fail(400, 'program: 请填要运行的程序'), 'source')), { kind: 'form', text: '请填要运行的程序。' });
+  assert.deepEqual(plain(R.patchError(fail(400, 'not everyday words'), 'source')), { kind: 'form', text: '没能保存。' });
+  assert.deepEqual(plain(R.patchError(fail(502, '没能停用，请再试一次'), 'toggle', false)), { kind: 'unsure', text: '没能确认停用了没有，可以再试一次。' }, 'a 5xx may have been done');
+  assert.equal(R.patchError(fail(undefined), 'toggle', true).text, '没能确认启用了没有，可以再试一次。');
+  assert.deepEqual([R.patchError(fail(400, 'x'), 'toggle', true).text, R.patchError(fail(400, 'x'), 'toggle', false).text], ['没能启用。', '没能停用。']);
+  assert.equal(R.patchError(fail(404, '找不到这只猫猫'), 'cat', false, '布偶猫').kind, 'gone', 'the app or the cat: the list says which');
+  assert.deepEqual(plain(R.patchError(fail(409, '应用已停用，请先启用应用', 'app_disabled'), 'cat', true, '布偶猫')), { kind: 'disabled', text: '应用已停用，请先启用应用。' });
+  assert.equal(R.patchError(fail(409, 'stale', 'app_disabled'), 'cat', true, '布偶猫').text, '它已经停用了，先启用它。');
+  assert.deepEqual(plain(R.patchError(fail(503), 'cat', false, ' 布偶猫 ')), { kind: 'unsure', text: '没能确认「布偶猫」改好了没有，可以再试一次。' });
+  assert.equal(R.patchError(fail(400, 'bad'), 'cat', false, '布偶猫').text, '没能改好「布偶猫」，稍后再试。');
+  assert.deepEqual([R.toggleFailed(false, fail(undefined)), R.toggleFailed(true, fail(503))], ['没能停用：连不上 clowder-bot，稍后再试。', '没能启用：服务出了点问题，稍后再试。']);
+  // An app turned off meanwhile was not checked and is not counted when the opening checks are said.
+  assert.equal(R.checked([{ title: 'A', state: 'on' }, { title: 'B', state: 'off' }]), '「A」已连接。');
+  // None of these words is the engine's (tests/vocabulary.test.ts scans the scripts; these are built at run time).
+  for (const said of ['正在停用…', '正在启用…', R.patchError(fail(503), 'cat', false, '布偶猫').text, R.toggleFailed(true, fail(503))])
+    assert.doesNotMatch(said, /(?<![\w-])bots?\b|会话|线程|原生|调用|模型|MCP/i);
+});
+
+test('item 60: 停用 / 启用 at the top, by the state — nothing moves before the server answers; off, 再检查 and the cats go; on again is checked and gives it to every cat; the list row follows', async () => {
+  const gates: Array<ReturnType<typeof hold>> = [];
+  const { page, srv, row, body } = await opened((s) => {
+    withCats(s);
+    s.add('custom:a', 'A', { type: 'program', program: 'node', args: ['a.js'], secrets: [] });
+  });
+  row('custom:a').click();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-state')), '已连接');
+  // Where 微信 has 关闭 / 打开: at the top, beside 再检查.
+  assert.deepEqual(all(one(body(), '.ap-hero-acts'), 'button').map((b) => seen(b)), ['停用', '再检查']);
+  assert.ok(one(body(), '.ap-toggle').classList.contains('secondary'));
+  assert.deepEqual(all(body(), '.ap-cat-switch').map((s) => s.getAttribute('aria-checked')), ['true', 'true']);
+  srv.on.set('PUT /xbot-api/apps/custom%3Aa/enabled', (c: Call) => { const g = hold(); gates.push(g); return g.promise.then(() => srv.fallback(c)); });
+  buttonOf(body(), '停用').focus();
+  buttonOf(body(), '停用').click();
+  await settle();
+  assert.deepEqual(srv.sent('PUT', /custom%3Aa\/enabled$/).map((c: Call) => c.body), [{ enabled: false }]);
+  assert.equal(seen(one(body(), '.ap-toggle')), '正在停用…');
+  assert.equal(one(body(), '.ap-toggle').disabled, true);
+  assert.equal(seen(one(body(), '.ap-state')), '已连接', 'not off before the answer — nor 正在检查…: turning it off checks nothing');
+  assert.equal(page.doc.activeElement, page.doc.querySelector('.ap-card'), 'focus waits on the card while the button cannot be pressed');
+  assert.ok(all(body(), '.ap-cat-switch').every((s) => s.getAttribute('aria-disabled') === 'true'), 'no switch of it meanwhile');
+  assert.equal(buttonOf(body(), '再检查').disabled, true);
+  // Pressing again meanwhile sends nothing.
+  one(body(), '.ap-toggle').click();
+  all(body(), '.ap-cat-switch')[0]!.click();
+  await settle();
+  assert.equal(srv.calls.filter((c: Call) => c.method === 'PUT').length, 1);
+  gates[0]!.release();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-state')), '已停用');
+  assert.equal(page.doc.activeElement, one(body(), '.ap-state'), 'focus lands on what it now is');
+  assert.deepEqual(all(one(body(), '.ap-hero-acts'), 'button').map((b) => seen(b)), ['启用']);
+  assert.ok(one(body(), '.ap-toggle').classList.contains('primary'));
+  assert.equal(all(body(), '.ap-cats-sec').length, 0, 'no cat can use it while it is off: no switches (its answer still listed them)');
+  assert.equal(all(body(), '.ap-tool').length, 0);
+  assert.deepEqual(stuck(one(body(), '.ap-app')), [], 'nothing left locked');
+  assert.equal(srv.sent('GET', /custom%3Aa$/).length, 1, 'it was not checked for it');
+  // The list row follows; back on its page, it is still off (the dialog's own record of the answer).
+  page.doc.activeElement.key('Escape');
+  assert.equal(seen(one(row('custom:a'), '.ap-st-word')), '已停用');
+  row('custom:a').click();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-state')), '已停用');
+  assert.equal(all(body(), '.ap-cats-sec').length, 0);
+  // 启用: its answer is a fresh check, so meanwhile it is being checked.
+  buttonOf(body(), '启用').focus();
+  buttonOf(body(), '启用').click();
+  await settle();
+  assert.deepEqual(srv.sent('PUT', /custom%3Aa\/enabled$/).at(-1).body, { enabled: true });
+  assert.equal(seen(one(body(), '.ap-toggle')), '正在启用…');
+  assert.equal(seen(one(body(), '.ap-state')), '正在检查…');
+  assert.equal(all(body(), '.ap-cats-sec').length, 0);
+  gates[1]!.release();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-state')), '已连接');
+  assert.equal(page.doc.activeElement, one(body(), '.ap-state'));
+  assert.deepEqual(all(body(), '.ap-cat-switch').map((s) => s.getAttribute('aria-checked')), ['true', 'true'], 'every cat again, as upstream does');
+  assert.deepEqual(all(one(body(), '.ap-hero-acts'), 'button').map((b) => seen(b)), ['停用', '再检查']);
+  assert.deepEqual(stuck(one(body(), '.ap-app')), []);
+  page.doc.activeElement.key('Escape');
+  assert.equal(seen(one(row('custom:a'), '.ap-st-word')), '已连接');
+});
+
+test('item 60: a lost answer to 停用 / 启用 is followed by one read of the list, which says whether it was done; unread too, nothing is claimed and the same button can be pressed again; 404 is gone', async () => {
+  const { page, srv, row, body } = await opened((s) => s.add('custom:a', 'A', { type: 'program', program: 'node', args: [], secrets: [] }));
+  row('custom:a').click();
+  await settle();
+  const path = 'PUT /xbot-api/apps/custom%3Aa/enabled', press = (label: string) => { buttonOf(body(), label).focus(); buttonOf(body(), label).click(); };
+  // Lost, and done: the list says it is off; nothing failed.
+  srv.on.set(path, (c: Call) => { srv.fallback(c); throw fail(502, '没能停用，请再试一次'); });
+  let n = lists(srv);
+  press('停用');
+  await settle();
+  assert.equal(lists(srv), n + 1, 'one read of the list (it checks nothing)');
+  assert.equal(seen(one(body(), '.ap-state')), '已停用');
+  assert.equal(all(body(), '.ap-note').length, 0);
+  assert.equal(page.doc.activeElement, one(body(), '.ap-state'));
+  // Lost, and not done: the list says it is still off; what failed.
+  srv.on.set(path, () => { throw fail(503); });
+  press('启用');
+  await settle();
+  assert.equal(seen(one(body(), '.ap-state')), '已停用');
+  assert.equal(seen(one(body(), '.ap-note')), '没能启用：服务出了点问题，稍后再试。');
+  assert.equal(page.doc.activeElement, one(body(), '.ap-note'));
+  srv.on.delete(path);
+  press('启用');
+  await settle();
+  assert.equal(seen(one(body(), '.ap-state')), '已连接');
+  assert.equal(all(body(), '.ap-note').length, 0, 'what failed goes with the next answer');
+  // Lost while on, and not done: still what was checked (the list calls it unchecked, and it is what was checked).
+  srv.on.set(path, () => { throw fail(undefined, '连不上 clowder-bot'); });
+  press('停用');
+  await settle();
+  assert.equal(seen(one(body(), '.ap-state')), '已连接');
+  assert.equal(all(body(), '.ap-tool').length, 1);
+  assert.equal(seen(one(body(), '.ap-note')), '没能停用：连不上 clowder-bot，稍后再试。');
+  // Lost, and the list cannot be read either: nothing is known — not 已连接, no tools; 停用 can be pressed again.
+  srv.on.set('GET /xbot-api/apps', () => { throw fail(undefined, '连不上 clowder-bot'); });
+  n = lists(srv);
+  press('停用');
+  await settle();
+  assert.equal(lists(srv), n + 1);
+  assert.equal(seen(one(body(), '.ap-state')), '没能检查');
+  assert.equal(all(body(), '.ap-tool').length, 0);
+  assert.equal(seen(one(body(), '.ap-note')), '没能确认停用了没有，可以再试一次。');
+  assert.ok(!buttonOf(body(), '停用').disabled, 'the same button, to ask for the same thing again');
+  // Off, lost, and unread: still off as last known (启用 again), never shown as on.
+  srv.on.delete('GET /xbot-api/apps');
+  srv.on.delete(path);
+  press('停用');
+  await settle();
+  srv.on.set(path, () => { throw fail(undefined, '连不上 clowder-bot'); });
+  srv.on.set('GET /xbot-api/apps', () => { throw fail(undefined, '连不上 clowder-bot'); });
+  press('启用');
+  await settle();
+  assert.equal(seen(one(body(), '.ap-state')), '已停用');
+  assert.equal(seen(one(body(), '.ap-note')), '没能确认启用了没有，可以再试一次。');
+  assert.ok(shown(buttonOf(body(), '启用')));
+  assert.deepEqual(stuck(one(body(), '.ap-app')), []);
+  // Removed elsewhere: 404 is gone — back on the list, its row gone.
+  const b = await opened((s) => {
+    s.add('custom:b', 'B', { type: 'program', program: 'node', args: [], secrets: [] });
+    s.on.set('PUT /xbot-api/apps/custom%3Ab/enabled', () => { s.custom = []; throw fail(404, '没有这个应用'); });
+  });
+  b.row('custom:b').click();
+  await settle();
+  buttonOf(b.body(), '停用').click();
+  await settle();
+  assert.equal(b.title(), '应用');
+  assert.equal(b.row('custom:b'), null);
+  assert.equal(b.voice(), '「B」已经不在了。');
+});
+
+test('item 60: the list read again takes what it says now — an app turned on again elsewhere is not kept off (its open page offers 停用 and 再检查), one turned off elsewhere is off; what a check found stays only while the list calls it unchecked', async () => {
+  const yGate = hold();
+  const { page, srv, row, body } = await opened((s) => {
+    withCats(s);
+    s.add('custom:a', 'A', { type: 'program', program: 'node', args: [], secrets: [] }, { state: 'off', reason: '已停用' });
+    s.add('custom:b', 'B', { type: 'program', program: 'node', args: [], secrets: [] });
+    goneLater(yGate)(s);
+  });
+  assert.equal(seen(one(row('custom:b'), '.ap-st-word')), '已连接');
+  row('custom:a').click();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-state')), '已停用');
+  // Elsewhere: A turned on, B turned off. Y turns out gone, so the list is read again.
+  srv.custom[0].checked = { state: 'on', tools: [] };
+  srv.custom[1].was = srv.custom[1].checked;
+  srv.custom[1].checked = { state: 'off', reason: '已停用' };
+  yGate.release();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-state')), '未检查', 'on again: not kept off — the page open on it follows at once');
+  assert.deepEqual(all(one(body(), '.ap-hero-acts'), 'button').map((b) => seen(b)), ['停用', '再检查']);
+  page.doc.activeElement.key('Escape');
+  assert.equal(seen(one(row('custom:a'), '.ap-st-word')), '未检查');
+  assert.equal(seen(one(row('custom:b'), '.ap-st-word')), '已停用', 'turned off elsewhere: off, though its check had found it on');
+  // Turned off by this page, then on again elsewhere: the next list read says so too.
+  const zGate = hold();
+  const second = await opened((s) => {
+    withCats(s);
+    s.add('custom:c', 'C', { type: 'program', program: 'node', args: [], secrets: [] });
+    s.add('custom:z', 'Z', { type: 'program', program: 'node', args: [], secrets: [] });
+    s.on.set('GET /xbot-api/apps/custom%3Az', () => zGate.promise.then(() => { s.custom = s.custom.filter((x: Any) => x.id !== 'custom:z'); throw fail(404, '没有这个应用'); }));
+  });
+  second.row('custom:c').click();
+  await settle();
+  buttonOf(second.body(), '停用').click();
+  await settle();
+  assert.equal(seen(one(second.body(), '.ap-state')), '已停用');
+  second.srv.custom[0].checked = { state: 'on', tools: [] };
+  zGate.release();
+  await settle();
+  assert.equal(seen(one(second.body(), '.ap-state')), '未检查');
+  assert.equal(seen(one(second.body(), '.ap-toggle')), '停用');
+});
+
+test('item 60: which cats may use it — each by its face, name and switch, only where it is not off and the cats are known; a switch moves when the server answers, and focus stays on it', async () => {
+  const gate = hold();
+  const { page, srv, row, body } = await opened((s, p) => {
+    withCats(s);
+    s.add('custom:a', 'A', { type: 'program', program: 'node', args: [], secrets: [] });
+    // The page's portrait helper (cat-avatars.js), drawn as the app draws it.
+    p.window.ClowderAvatars = { createPortrait: (seed: string, tmpl: string) => { const svg = p.doc.createElementNS('svg', 'svg'); svg.setAttribute('data-cat-id', tmpl || seed); return svg; } };
+  });
+  row('custom:a').click();
+  await settle();
+  const sec = one(body(), '.ap-cats-sec');
+  assert.equal(seen(one(sec, 'h3')), '猫猫');
+  assert.equal(one(sec, 'ul').getAttribute('aria-labelledby'), one(sec, 'h3').id);
+  const rows = all(sec, '.ap-cat'), sws = all(sec, '.ap-cat-switch');
+  assert.deepEqual(rows.map((r) => seen(r)), ['布偶猫', '缅因猫'], 'a face and a name; no caption');
+  assert.deepEqual(sws.map((s) => [s.tagName, s.getAttribute('role'), s.getAttribute('aria-checked'), s.getAttribute('aria-label')]), [['BUTTON', 'switch', 'true', '布偶猫'], ['BUTTON', 'switch', 'true', '缅因猫']]);
+  assert.ok(sws.every((s) => s.classList.contains('g7-switch')), 'the app\'s own switch');
+  // Faces: the clay portrait, or the photo; decorative (the name is beside it); app.js's own redraw finds them.
+  const [f1, f2] = rows.map((r) => one(r, '.ap-cat-face'));
+  assert.deepEqual([f1!.getAttribute('aria-hidden'), f1!.dataset.avatarBot, one(f1!, 'svg').getAttribute('data-cat-id')], ['true', '布偶猫', 'ragdoll']);
+  const photo = one(f2!, 'img') as Any;
+  assert.deepEqual([photo.src, photo.getAttribute('alt')], [CATS[1]!.avatar_url, '']);
+  photo.dispatch('error');
+  assert.equal(one(f2!, 'svg').getAttribute('data-cat-id'), 'maine-coon', 'a photo that does not load: the portrait');
+  // Off for 布偶猫, held.
+  srv.on.set(catPath('custom:a', '布偶猫'), (c: Call) => gate.promise.then(() => srv.fallback(c)));
+  sws[0]!.focus();
+  sws[0]!.click();
+  await settle();
+  assert.deepEqual(srv.sent('PUT', /\/cats\//).map((c: Call) => [decodeURIComponent(c.path.split('/').pop()!), c.body]), [['布偶猫', { enabled: false }]]);
+  assert.equal(sws[0]!.getAttribute('aria-checked'), 'true', 'not before the server answers');
+  assert.equal(sws[0]!.getAttribute('aria-busy'), 'true');
+  assert.ok(shown(one(rows[0]!, '.ap-cat-spin')), 'the spinner beside the switch on its way');
+  assert.equal(all(rows[1]!, '.ap-cat-spin').length, 0);
+  assert.ok(sws.every((s) => s.getAttribute('aria-disabled') === 'true' && !s.disabled), 'every switch waits, and keeps focus');
+  assert.equal(page.doc.activeElement, sws[0], 'focus stays on the switch pressed');
+  assert.equal(one(body(), '.ap-toggle').disabled, true, 'no 停用 meanwhile either');
+  assert.equal(seen(one(body(), '.ap-state')), '正在检查…', 'its answer is a fresh check');
+  sws[0]!.click(); sws[1]!.click(); rows[1]!.click();
+  await settle();
+  assert.equal(srv.sent('PUT', /\/cats\//).length, 1, 'nothing more is sent meanwhile');
+  gate.release();
+  await settle();
+  assert.deepEqual(all(sec, '.ap-cat-switch'), sws, 'the same switches');
+  assert.deepEqual(sws.map((s) => s.getAttribute('aria-checked')), ['false', 'true']);
+  assert.ok(sws.every((s) => !s.hasAttribute('aria-disabled') && !s.hasAttribute('aria-busy')));
+  assert.equal(all(body(), '.ap-cat-spin').length, 0);
+  assert.equal(page.doc.activeElement, sws[0], 'still on the switch: it says how it now stands');
+  assert.equal(seen(one(body(), '.ap-state')), '已连接');
+  assert.deepEqual(stuck(one(body(), '.ap-app')), []);
+  // The whole row is the switch's label.
+  srv.on.delete(catPath('custom:a', '布偶猫'));
+  one(rows[0]!, '.ap-cat-name').click();
+  await settle();
+  assert.deepEqual(srv.sent('PUT', /\/cats\//).at(-1).body, { enabled: true });
+  assert.equal(sws[0]!.getAttribute('aria-checked'), 'true');
+  // No cats known (they could not be read), or none at all: no section; neither while it is checking for the first time.
+  const unknown = await opened((s) => s.add('custom:b', 'B', { type: 'program', program: 'node', args: [], secrets: [] }));
+  unknown.row('custom:b').click();
+  await settle();
+  assert.equal(all(unknown.body(), '.ap-cats-sec').length, 0);
+  assert.ok(!seen(unknown.body()).includes('猫猫'));
+  const none = await opened((s) => { s.cats = []; s.add('custom:b', 'B', { type: 'program', program: 'node', args: [], secrets: [] }); });
+  none.row('custom:b').click();
+  await settle();
+  assert.equal(all(none.body(), '.ap-cats-sec').length, 0);
+});
+
+test('item 60: a switch that failed says so under the cats and stays where the server last put it; 409 (turned off meanwhile) reads the list and says so at the top; 404 tells a cat gone from the app gone', async () => {
+  const { page, srv, row, body } = await opened((s) => { withCats(s); s.add('custom:a', 'A', { type: 'program', program: 'node', args: [], secrets: [] }); });
+  row('custom:a').click();
+  await settle();
+  const sw = (name = '布偶猫') => one(body(), `.ap-cat[data-cat="${name}"] .ap-cat-switch`);
+  const path = catPath('custom:a', '布偶猫');
+  // Lost: unconfirmed, the switch where it was; focus stays on it (the line is an alert).
+  srv.on.set(path, () => { throw fail(undefined, '连不上 clowder-bot'); });
+  sw().focus();
+  sw().click();
+  await settle();
+  assert.equal(sw().getAttribute('aria-checked'), 'true');
+  assert.equal(seen(one(body(), '.ap-cat-note')), '没能确认「布偶猫」改好了没有，可以再试一次。');
+  assert.equal(one(body(), '.ap-cat-note').getAttribute('role'), 'alert');
+  assert.equal(page.doc.activeElement, sw());
+  assert.equal(seen(one(body(), '.ap-state')), '已连接', 'its connection is not what was asked about');
+  assert.deepEqual(stuck(one(body(), '.ap-app')), []);
+  // The same press again asks for the same thing.
+  srv.on.delete(path);
+  sw().click();
+  await settle();
+  assert.deepEqual(srv.sent('PUT', /\/cats\//).map((c: Call) => c.body), [{ enabled: false }, { enabled: false }]);
+  assert.equal(sw().getAttribute('aria-checked'), 'false');
+  assert.equal(all(body(), '.ap-cat-note').length, 0, 'what failed goes with the next answer');
+  // A 4xx: the server's sentence.
+  srv.on.set(path, () => { throw fail(400, '这只猫猫现在不能改'); });
+  sw().click();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-cat-note')), '这只猫猫现在不能改。');
+  assert.equal(sw().getAttribute('aria-checked'), 'false');
+  // 409: turned off elsewhere meanwhile — the list says so, the switches go, the top says why; focus on that line.
+  srv.on.delete(path);
+  srv.custom[0].was = srv.custom[0].checked;
+  srv.custom[0].checked = { state: 'off', reason: '已停用' };
+  const n = lists(srv);
+  sw().click();
+  await settle();
+  assert.equal(lists(srv), n + 1);
+  assert.equal(seen(one(body(), '.ap-state')), '已停用');
+  assert.equal(all(body(), '.ap-cats-sec').length, 0);
+  assert.equal(seen(one(body(), '.ap-note')), '应用已停用，请先启用应用。');
+  assert.equal(page.doc.activeElement, one(body(), '.ap-note'));
+  assert.equal(seen(one(body(), '.ap-toggle')), '启用');
+  // 404, a cat deleted elsewhere: the app is still listed, so the cat is what is gone — its row goes.
+  const b = await opened((s) => {
+    withCats(s);
+    s.add('custom:a', 'A', { type: 'program', program: 'node', args: [], secrets: [] });
+    s.on.set(catPath('custom:a', '缅因猫'), () => { s.cats = s.cats.filter((c: Any) => c.name !== '缅因猫'); throw fail(404, '找不到这只猫猫'); });
+  });
+  b.row('custom:a').click();
+  await settle();
+  const m = one(b.body(), '.ap-cat[data-cat="缅因猫"] .ap-cat-switch');
+  m.focus();
+  m.click();
+  await settle();
+  assert.equal(b.title(), 'A', 'still on its page');
+  assert.deepEqual(all(b.body(), '.ap-cat').map((r) => seen(r)), ['布偶猫']);
+  assert.equal(seen(one(b.body(), '.ap-cat-note')), '「缅因猫」已经不在了。');
+  assert.equal(b.page.doc.activeElement, one(b.body(), '.ap-cat-note'));
+  // 404, the app removed elsewhere: back on the list, said once.
+  const c = await opened((s) => {
+    withCats(s);
+    s.add('custom:a', 'A', { type: 'program', program: 'node', args: [], secrets: [] });
+    s.add('custom:k', 'K', { type: 'program', program: 'node', args: [], secrets: [] });
+    s.on.set(catPath('custom:a', '布偶猫'), () => { s.custom = s.custom.filter((x: Any) => x.id !== 'custom:a'); throw fail(404, '没有这个应用'); });
+  });
+  c.row('custom:a').click();
+  await settle();
+  one(c.body(), '.ap-cat-switch').focus();
+  one(c.body(), '.ap-cat-switch').click();
+  await settle();
+  assert.equal(c.title(), '应用');
+  assert.equal(c.row('custom:a'), null);
+  assert.equal(c.page.doc.activeElement, c.row('custom:k'), 'focus on the row now in its place');
+  assert.equal(c.voice(), '「A」已经不在了。');
+});
+
+test('item 60: 编辑 puts the program and its arguments in fields where they were — unchanged just closes, Escape leaves only the editor, a bad program is said at its field; saved, only what changed is sent and the answer is shown', async () => {
+  const gate = hold();
+  const { page, srv, row, body, title } = await opened((s) => s.add('custom:a', 'A', { type: 'program', program: 'npx', args: ['-y', 'notes-mcp@1.2.3'], secrets: ['NOTES_TOKEN'] }));
+  row('custom:a').click();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-cmd')), 'npx -y notes-mcp@1.2.3');
+  const edit = buttonOf(body(), '编辑');
+  assert.ok(edit.classList.contains('text-btn'));
+  assert.equal(edit.getAttribute('aria-label'), '编辑程序和参数');
+  edit.click();
+  assert.equal(all(body(), '.ap-src').length, 0, 'the box makes way for its editor');
+  let form = one(body(), '.ap-src-form');
+  assert.deepEqual(all(form, 'label').map((l) => seen(l)), ['程序', '参数']);
+  let [programIn] = all(form, 'input') as Any[], argsIn = one(form, 'textarea') as Any;
+  assert.deepEqual([programIn.value, argsIn.value], ['npx', '-y\nnotes-mcp@1.2.3']);
+  assert.equal(page.doc.activeElement, programIn);
+  // The same as it is: nothing sent; the box comes back, focus on 编辑.
+  buttonOf(form, '保存').click();
+  await settle();
+  assert.equal(srv.sent('PATCH', /custom%3Aa$/).length, 0);
+  assert.equal(all(body(), '.ap-src-form').length, 0);
+  assert.equal(page.doc.activeElement, buttonOf(body(), '编辑'));
+  // Escape: only the editor (not back to the list); what was typed goes with it.
+  buttonOf(body(), '编辑').click();
+  (page.doc.activeElement as Any).value = 'zzz';
+  page.doc.activeElement.key('Escape');
+  assert.equal(title(), 'A');
+  assert.equal(all(body(), '.ap-src-form').length, 0);
+  assert.equal(seen(one(body(), '.ap-cmd')), 'npx -y notes-mcp@1.2.3');
+  assert.equal(page.doc.activeElement, buttonOf(body(), '编辑'));
+  buttonOf(body(), '编辑').click();
+  form = one(body(), '.ap-src-form');
+  [programIn] = all(form, 'input') as Any[];
+  argsIn = one(form, 'textarea');
+  assert.equal(programIn.value, 'npx', 'opened again: what is there, not what was typed and left');
+  // A bad program: said at its field, focus there, nothing sent.
+  programIn.value = '  ';
+  buttonOf(form, '保存').click();
+  await settle();
+  assert.equal(seen(one(form, '.ap-err')), '填上要运行的程序');
+  assert.equal(programIn.getAttribute('aria-invalid'), 'true');
+  assert.equal(page.doc.activeElement, programIn);
+  assert.equal(srv.sent('PATCH', /custom%3Aa$/).length, 0);
+  // Saved (Enter in 程序), held: locked, saying so, focus waiting on the editor; Escape meanwhile does nothing.
+  srv.on.set('PATCH /xbot-api/apps/custom%3Aa', (c: Call) => gate.promise.then(() => srv.fallback(c)));
+  programIn.value = 'uvx';
+  argsIn.value = 'notes-mcp\n\n --stdio \n';
+  programIn.key('Enter');
+  await settle();
+  assert.deepEqual(srv.sent('PATCH', /custom%3Aa$/).map((c: Call) => c.body), [{ program: 'uvx', args: ['notes-mcp', '--stdio'] }]);
+  assert.equal(seen(one(form, '.ap-src-acts .primary')), '正在保存…');
+  assert.ok(programIn.readOnly && argsIn.readOnly);
+  assert.equal(buttonOf(form, '取消').disabled, true);
+  assert.equal(page.doc.activeElement, form, 'focus waits on the editor itself');
+  form.key('Escape');
+  assert.equal(title(), 'A');
+  assert.ok(form.isConnected && shown(form), 'Escape while it saves leaves it be');
+  assert.equal(seen(one(body(), '.ap-state')), '正在检查…', 'the answer is a fresh check');
+  gate.release();
+  await settle();
+  assert.equal(all(body(), '.ap-src-form').length, 0);
+  assert.equal(seen(one(body(), '.ap-cmd')), 'uvx notes-mcp --stdio');
+  assert.equal(seen(one(body(), '.ap-note')), '已保存。');
+  assert.equal(page.doc.activeElement, one(body(), '.ap-note'), 'focus on the line that says it');
+  assert.equal(seen(one(body(), '.ap-state')), '已连接');
+  assert.deepEqual(all(body(), '.ap-names code').map((c) => seen(c)), ['NOTES_TOKEN'], 'its secrets stay');
+  assert.deepEqual(all(body(), '.ap-tool-name').map((c) => seen(c)), ['app_probe']);
+  assert.deepEqual(stuck(one(body(), '.ap-app')), []);
+  // The arguments cleared: only they are sent.
+  srv.on.delete('PATCH /xbot-api/apps/custom%3Aa');
+  buttonOf(body(), '编辑').click();
+  one(one(body(), '.ap-src-form'), 'textarea').value = '';
+  buttonOf(one(body(), '.ap-src-form'), '保存').click();
+  await settle();
+  assert.deepEqual(srv.sent('PATCH', /custom%3Aa$/).at(-1).body, { args: [] });
+  assert.equal(seen(one(body(), '.ap-cmd')), 'uvx');
+  // A program that is not there: saved all the same (the engine took it); the state says why.
+  buttonOf(body(), '编辑').click();
+  (all(one(body(), '.ap-src-form'), 'input')[0] as Any).value = 'missing-thing';
+  buttonOf(one(body(), '.ap-src-form'), '保存').click();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-cmd')), 'missing-thing');
+  assert.equal(seen(one(body(), '.ap-state')), '这台电脑上找不到「missing-thing」');
+  assert.equal(seen(one(body(), '.ap-note')), '已保存。');
+  page.doc.activeElement.key('Escape');
+  assert.equal(seen(one(row('custom:a'), '.ap-st-word')), '这台电脑上找不到「missing-thing」');
+});
+
+test('item 60: in the editor a whole command line pasted over the program replaces it and the arguments while those are as they were; arguments the owner typed are left alone', async () => {
+  const { row, body } = await opened((s) => s.add('custom:a', 'A', { type: 'program', program: 'npx', args: ['-y', 'old-mcp'], secrets: [] }));
+  row('custom:a').click();
+  await settle();
+  buttonOf(body(), '编辑').click();
+  const form = one(body(), '.ap-src-form'), programIn = all(form, 'input')[0] as Any, argsIn = one(form, 'textarea') as Any;
+  const paste = (text: string) => programIn.dispatch('paste', { clipboardData: { getData: () => text } });
+  // Wholly selected, as it is on opening.
+  programIn.selectionStart = 0;
+  programIn.selectionEnd = programIn.value.length;
+  let ev = paste('uvx mcp-server-git --repository "/Users/me/My Repo"');
+  assert.ok(ev.defaultPrevented);
+  assert.deepEqual([programIn.value, argsIn.value], ['uvx', 'mcp-server-git\n--repository\n/Users/me/My Repo']);
+  assert.equal(seen(one(form, '.ap-split')), '参数已经分到下面。');
+  programIn.dispatch('input');
+  assert.equal(all(form, '.ap-split').length, 0);
+  // Arguments the owner typed: pasted as it is.
+  argsIn.value = 'mine';
+  programIn.value = '';
+  ev = paste('node server.js');
+  assert.ok(!ev.defaultPrevented);
+  assert.equal(argsIn.value, 'mine');
+  // Part of the program selected: as pasted.
+  argsIn.value = '-y\nold-mcp';
+  programIn.value = 'npx';
+  programIn.selectionStart = 1;
+  programIn.selectionEnd = 2;
+  assert.ok(!paste('node server.js').defaultPrevented);
+});
+
+test('item 60: an address is edited the same way; a lost answer keeps what was typed and its last check no longer holds; a 4xx is the server\'s sentence; a repaint keeps the editor, a change found elsewhere closes it; 404 is gone', async () => {
+  const yGate = hold();
+  const { page, srv, row, body } = await opened((s) => {
+    s.add('custom:u', 'U', { type: 'url', url: 'https://old.example/mcp', secrets: ['Authorization'] });
+    goneLater(yGate)(s);
+  });
+  row('custom:u').click();
+  await settle();
+  assert.equal(buttonOf(body(), '编辑').getAttribute('aria-label'), '编辑网址');
+  buttonOf(body(), '编辑').click();
+  const form = one(body(), '.ap-src-form'), urlIn = one(form, 'input') as Any;
+  assert.deepEqual(all(form, 'label').map((l) => seen(l)), ['网址']);
+  assert.deepEqual([urlIn.type, urlIn.value], ['url', 'https://old.example/mcp']);
+  // Refused here as the server refuses it.
+  urlIn.value = 'http://example.com/mcp';
+  urlIn.key('Enter');
+  await settle();
+  assert.equal(seen(one(form, '.ap-err')), R.URL_SAID);
+  assert.equal(srv.sent('PATCH', /custom%3Au$/).length, 0);
+  // Lost: the editor stays with what was typed, and says it could not be confirmed; what was checked no longer holds.
+  srv.on.set('PATCH /xbot-api/apps/custom%3Au', () => { throw fail(undefined, '连不上 clowder-bot'); });
+  urlIn.value = 'https://new.example/mcp';
+  urlIn.focus();
+  urlIn.key('Enter');
+  await settle();
+  assert.deepEqual(srv.sent('PATCH', /custom%3Au$/).map((c: Call) => c.body), [{ url: 'https://new.example/mcp' }]);
+  assert.equal(one(body(), '.ap-src-form'), form);
+  assert.deepEqual([urlIn.value, urlIn.readOnly], ['https://new.example/mcp', false]);
+  assert.equal(seen(one(form, '.ap-src-err')), '没能确认保存好了没有，可以再试一次。');
+  assert.equal(one(form, '.ap-src-err').getAttribute('role'), 'alert');
+  assert.equal(page.doc.activeElement, urlIn);
+  assert.equal(seen(one(body(), '.ap-state')), '没能检查');
+  assert.equal(all(body(), '.ap-tool').length, 0);
+  assert.deepEqual(stuck(one(body(), '.ap-app')), []);
+  // A 4xx: the server's sentence, without its field.
+  srv.on.set('PATCH /xbot-api/apps/custom%3Au', () => { throw fail(400, 'url: 网址需要以 https:// 开头（本机地址可以用 http://），且不带用户名密码'); });
+  urlIn.key('Enter');
+  await settle();
+  assert.equal(seen(one(form, '.ap-src-err')), '网址需要以 https:// 开头（本机地址可以用 http://），且不带用户名密码。');
+  // A repaint (再检查's answer) keeps the editor and what is typed in it.
+  srv.on.delete('PATCH /xbot-api/apps/custom%3Au');
+  buttonOf(body(), '再检查').click();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-state')), '已连接');
+  assert.equal(one(body(), '.ap-src-form'), form);
+  assert.equal(urlIn.value, 'https://new.example/mcp');
+  // Changed elsewhere (another address): found by the list read again, the editor (begun on the old one) closes.
+  srv.custom[0].source = { type: 'url', url: 'https://elsewhere.example/mcp', secrets: ['Authorization'] };
+  yGate.release();
+  await settle();
+  assert.equal(all(body(), '.ap-src-form').length, 0);
+  assert.equal(seen(one(body(), '.ap-cmd')), 'https://elsewhere.example/mcp');
+  assert.equal(seen(one(body(), '.ap-state')), '未检查');
+  assert.ok(focusIsUsable(page.doc));
+  // Saved: the address sent alone; its secrets stay.
+  buttonOf(body(), '编辑').click();
+  (one(one(body(), '.ap-src-form'), 'input') as Any).value = 'https://new.example/mcp';
+  buttonOf(one(body(), '.ap-src-form'), '保存').click();
+  await settle();
+  assert.deepEqual(srv.sent('PATCH', /custom%3Au$/).at(-1).body, { url: 'https://new.example/mcp' });
+  assert.equal(seen(one(body(), '.ap-cmd')), 'https://new.example/mcp');
+  assert.deepEqual(all(body(), '.ap-names code').map((c) => seen(c)), ['Authorization']);
+  // Removed elsewhere: 404 is gone.
+  const b = await opened((s) => {
+    s.add('custom:b', 'B', { type: 'program', program: 'node', args: [], secrets: [] });
+    s.on.set('PATCH /xbot-api/apps/custom%3Ab', () => { s.custom = []; throw fail(404, '没有这个应用'); });
+  });
+  b.row('custom:b').click();
+  await settle();
+  buttonOf(b.body(), '编辑').click();
+  (all(one(b.body(), '.ap-src-form'), 'input')[0] as Any).value = 'python3';
+  buttonOf(one(b.body(), '.ap-src-form'), '保存').click();
+  await settle();
+  assert.equal(b.title(), '应用');
+  assert.equal(b.row('custom:b'), null);
+});
+
+// ---------------------------------------------------------------- item 60, Codex review r1 (2026-11-28)
+// Each test here failed on the page as item 60 first left it.
+// Every list read after the first is held until released; each answers the list as it was when it was asked for.
+const heldLists = (gates: Array<ReturnType<typeof hold>>) => (s: Any) => {
+  let n = 0;
+  s.on.set('GET /xbot-api/apps', () => { const answer = s.listNow(); if (n++ === 0) return answer; const g = hold(); gates.push(g); return g.promise.then(() => answer); });
+};
+// custom:x is found gone by its opening check at once, so the list is read again right after opening.
+const goneAtOnce = (s: Any) => {
+  s.add('custom:x', 'X', { type: 'program', program: 'node', args: [], secrets: [] });
+  s.on.set('GET /xbot-api/apps/custom%3Ax', () => { s.custom = s.custom.filter((x: Any) => x.id !== 'custom:x'); throw fail(404, '没有这个应用'); });
+};
+
+test('codex r1 (1): a program\'s app turned off offers no 编辑 (the engine would start it to take the change) — an editor open when it is turned off goes; an address\'s app still offers it; 409 app_disabled (turned off elsewhere meanwhile) reads the list and says so at the top', async () => {
+  // The rule: 409 app_disabled on a source edit is its own kind — the server's sentence, else one of ours.
+  assert.deepEqual(plain(R.patchError(fail(409, '应用已停用，请先启用后再修改程序', 'app_disabled'), 'source')), { kind: 'disabled', text: '应用已停用，请先启用后再修改程序。' });
+  assert.equal(R.patchError(fail(409, 'disabled', 'app_disabled'), 'source').text, '它已经停用了，先启用它。');
+  assert.equal(R.patchError(fail(409, '别的冲突', 'other'), 'source').kind, 'form');
+  const { page, srv, row, body } = await opened((s) => {
+    s.add('custom:a', 'A', { type: 'program', program: 'npx', args: ['-y', 'notes-mcp'], secrets: ['K'] });
+    s.add('custom:u', 'U', { type: 'url', url: 'https://old.example/mcp', secrets: [] }, { state: 'off', reason: '已停用' });
+  });
+  row('custom:a').click();
+  await settle();
+  // An editor open when it is turned off goes with 停用's answer; what it is stays shown, with no 编辑.
+  buttonOf(body(), '编辑').click();
+  (all(one(body(), '.ap-src-form'), 'input')[0] as Any).value = 'uvx';
+  buttonOf(body(), '停用').focus();
+  buttonOf(body(), '停用').click();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-state')), '已停用');
+  assert.equal(all(body(), '.ap-src-form').length, 0);
+  assert.equal(seen(one(body(), '.ap-cmd')), 'npx -y notes-mcp');
+  noButton(body(), '编辑');
+  assert.ok(focusIsUsable(page.doc));
+  // Its name and its secrets can still be changed.
+  assert.ok(shown(one(page.doc.querySelector('.ap-title') as El, '.ap-name')));
+  buttonOf(body(), '换一个值');
+  assert.equal(srv.sent('PATCH', /custom%3Aa$/).length, 0, 'nothing of the editor was sent');
+  // On again: 编辑 again.
+  buttonOf(body(), '启用').click();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-state')), '已连接');
+  buttonOf(body(), '编辑');
+  // An address's app turned off still offers 编辑 (an address is not reached to take it); saved, it is still off.
+  page.doc.activeElement.key('Escape');
+  row('custom:u').click();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-state')), '已停用');
+  buttonOf(body(), '编辑').click();
+  (one(one(body(), '.ap-src-form'), 'input') as Any).value = 'https://new.example/mcp';
+  buttonOf(one(body(), '.ap-src-form'), '保存').click();
+  await settle();
+  assert.deepEqual(srv.sent('PATCH', /custom%3Au$/).map((c: Call) => c.body), [{ url: 'https://new.example/mcp' }]);
+  assert.equal(seen(one(body(), '.ap-cmd')), 'https://new.example/mcp');
+  assert.equal(seen(one(body(), '.ap-state')), '已停用');
+  assert.equal(seen(one(body(), '.ap-note')), '已保存。');
+  // Turned off elsewhere while its editor is open: 保存 is refused (409 app_disabled); the list read says it is off, the
+  // editor goes and the top says what the server said; focus lands there.
+  page.doc.activeElement.key('Escape');
+  row('custom:a').click();
+  await settle();
+  buttonOf(body(), '编辑').click();
+  const programIn = all(one(body(), '.ap-src-form'), 'input')[0] as Any;
+  programIn.value = 'uvx';
+  srv.custom[0].was = srv.custom[0].checked;
+  srv.custom[0].checked = { state: 'off', reason: '已停用' };
+  const n = lists(srv);
+  programIn.key('Enter');
+  await settle();
+  assert.deepEqual(srv.sent('PATCH', /custom%3Aa$/).map((c: Call) => c.body), [{ program: 'uvx' }]);
+  assert.equal(lists(srv), n + 1, 'one read of the list');
+  assert.equal(seen(one(body(), '.ap-state')), '已停用');
+  assert.equal(all(body(), '.ap-src-form').length, 0);
+  noButton(body(), '编辑');
+  assert.equal(seen(one(body(), '.ap-cmd')), 'npx -y notes-mcp', 'not changed');
+  assert.equal(seen(one(body(), '.ap-note')), '应用已停用，请先启用后再修改程序。');
+  assert.ok(one(body(), '.ap-note').classList.contains('bad'));
+  assert.equal(page.doc.activeElement, one(body(), '.ap-note'));
+  assert.deepEqual(all(one(body(), '.ap-hero-acts'), 'button').map((b) => seen(b)), ['启用']);
+  assert.deepEqual(stuck(one(body(), '.ap-app')), []);
+  page.doc.activeElement.key('Escape');
+  assert.equal(seen(one(row('custom:a'), '.ap-st-word')), '已停用');
+  // The same, and the list cannot be read: the refusal itself says it is off.
+  const b = await opened((s) => s.add('custom:b', 'B', { type: 'program', program: 'node', args: [], secrets: [] }));
+  b.row('custom:b').click();
+  await settle();
+  buttonOf(b.body(), '编辑').click();
+  (all(one(b.body(), '.ap-src-form'), 'input')[0] as Any).value = 'python3';
+  b.srv.custom[0].checked = { state: 'off', reason: '已停用' };
+  b.srv.on.set('GET /xbot-api/apps', () => { throw fail(undefined, '连不上 clowder-bot'); });
+  buttonOf(one(b.body(), '.ap-src-form'), '保存').click();
+  await settle();
+  assert.equal(seen(one(b.body(), '.ap-state')), '已停用');
+  assert.equal(all(b.body(), '.ap-src-form').length, 0);
+  noButton(b.body(), '编辑');
+  assert.equal(seen(one(b.body(), '.ap-note')), '应用已停用，请先启用后再修改程序。');
+  assert.equal(seen(one(b.body(), '.ap-toggle')), '启用');
+  // Refused, and on again by the time the list is read: what was typed stays, with what the server said; 保存 again.
+  const c = await opened((s) => s.add('custom:c', 'C', { type: 'program', program: 'node', args: [], secrets: [] }));
+  c.row('custom:c').click();
+  await settle();
+  buttonOf(c.body(), '编辑').click();
+  const cIn = all(one(c.body(), '.ap-src-form'), 'input')[0] as Any;
+  cIn.value = 'python3';
+  c.srv.on.set('PATCH /xbot-api/apps/custom%3Ac', () => { throw fail(409, '应用已停用，请先启用后再修改程序', 'app_disabled'); });
+  cIn.key('Enter');
+  await settle();
+  assert.equal(seen(one(c.body(), '.ap-src-err')), '应用已停用，请先启用后再修改程序。');
+  assert.deepEqual([cIn.value, cIn.readOnly], ['python3', false]);
+  assert.equal(c.page.doc.activeElement, cIn);
+  assert.equal(seen(one(c.body(), '.ap-state')), '已连接');
+  c.srv.on.delete('PATCH /xbot-api/apps/custom%3Ac');
+  cIn.key('Enter');
+  await settle();
+  assert.equal(seen(one(c.body(), '.ap-cmd')), 'python3');
+  assert.equal(seen(one(c.body(), '.ap-note')), '已保存。');
+});
+
+test('codex r1 (2): a list asked for before a write answered never paints over the write — 停用 answered while an older list read is held stays 已停用 with 启用, in either order; an app added meanwhile stays, one removed meanwhile does not come back', async () => {
+  // The list asked for first (X found gone on opening); 停用 asked for and answered after it; the list answers last.
+  let gates: Array<ReturnType<typeof hold>> = [];
+  const { page, row, body } = await opened((s) => {
+    withCats(s);
+    s.add('custom:a', 'A', { type: 'program', program: 'node', args: [], secrets: [] });
+    goneAtOnce(s);
+    heldLists(gates)(s);
+  });
+  assert.equal(gates.length, 1, 'the list read again after X was found gone, held');
+  assert.equal(row('custom:x'), null);
+  row('custom:a').click();
+  await settle();
+  buttonOf(body(), '停用').focus();
+  buttonOf(body(), '停用').click();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-state')), '已停用');
+  gates[0]!.release();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-state')), '已停用', 'the older list (未检查, so 停用) gives way to 停用\'s answer');
+  assert.deepEqual(all(one(body(), '.ap-hero-acts'), 'button').map((b) => seen(b)), ['启用']);
+  assert.equal(all(body(), '.ap-cats-sec').length, 0);
+  page.doc.activeElement.key('Escape');
+  assert.equal(seen(one(row('custom:a'), '.ap-st-word')), '已停用');
+  // The other order: the list asked for while 停用 is on its way (Y found gone meanwhile), answered after it.
+  gates = [];
+  const yGate = hold(), put = hold();
+  const b = await opened((s) => {
+    s.add('custom:a', 'A', { type: 'program', program: 'node', args: [], secrets: [] });
+    goneLater(yGate)(s);
+    heldLists(gates)(s);
+    s.on.set('PUT /xbot-api/apps/custom%3Aa/enabled', (c: Call) => put.promise.then(() => s.fallback(c)));
+  });
+  b.row('custom:a').click();
+  await settle();
+  buttonOf(b.body(), '停用').click();
+  await settle();
+  yGate.release();
+  await settle();
+  assert.equal(gates.length, 1, 'asked for while 停用 was on its way');
+  put.release();
+  await settle();
+  assert.equal(seen(one(b.body(), '.ap-state')), '已停用');
+  gates[0]!.release();
+  await settle();
+  assert.equal(seen(one(b.body(), '.ap-state')), '已停用', 'a read that overlapped the write gives way to it');
+  assert.equal(seen(one(b.body(), '.ap-toggle')), '启用');
+  // Added while an older list read is held: that list does not have it yet; it stays, on its page and in the list.
+  gates = [];
+  const c = await opened((s) => { goneAtOnce(s); heldLists(gates)(s); });
+  one(c.body(), '.ap-row-add').click();
+  await settle();
+  const form = one(c.body(), 'form');
+  const [nameIn, programIn] = all(form, 'input') as Any[];
+  nameIn.value = 'N';
+  programIn.value = 'node';
+  buttonOf(form, '添加').click();
+  await settle();
+  assert.equal(c.title(), 'N');
+  gates[0]!.release();
+  await settle();
+  assert.equal(c.title(), 'N', 'still on its page');
+  assert.equal(seen(one(c.body(), '.ap-state')), '已连接');
+  c.page.doc.activeElement.key('Escape');
+  assert.ok(c.row('custom:n'), 'and in the list');
+  // Removed while an older list read is held: that list still has it; it does not come back.
+  gates = [];
+  const d = await opened((s) => {
+    s.add('custom:a', 'A', { type: 'program', program: 'node', args: [], secrets: [] });
+    s.add('custom:b', 'B', { type: 'program', program: 'node', args: [], secrets: [] });
+    goneAtOnce(s);
+    heldLists(gates)(s);
+  });
+  d.row('custom:a').click();
+  await settle();
+  buttonOf(d.body(), '移除').click();
+  buttonOf(d.page.doc.querySelector('.ap-confirm') as El, '移除').click();
+  await settle();
+  assert.equal(d.row('custom:a'), null);
+  gates[0]!.release();
+  await settle();
+  assert.equal(d.row('custom:a'), null, 'not brought back by a list asked for before it went');
+  assert.ok(d.row('custom:b'));
+  assert.equal(d.page.doc.activeElement, d.row('custom:b'), 'focus stays on the row now in its place');
+  // Nor is it in the order: B removed next, focus goes to 添加自定义应用 (no row of A's left to go to).
+  d.row('custom:b').click();
+  await settle();
+  buttonOf(d.body(), '移除').click();
+  buttonOf(d.page.doc.querySelector('.ap-confirm') as El, '移除').click();
+  await settle();
+  assert.equal(d.page.doc.activeElement, one(d.body(), '.ap-row-add'));
+  // A removal let go of (Escape) that the engine went on with: the list read after it is taken — it is gone.
+  const del = hold();
+  const e = await opened((s) => {
+    s.add('custom:a', 'A', { type: 'program', program: 'node', args: [], secrets: [] });
+    s.add('custom:b', 'B', { type: 'program', program: 'node', args: [], secrets: [] });
+    s.on.set('DELETE /xbot-api/apps/custom%3Aa', (c: Call) => { s.fallback(c); return del.promise; });
+  });
+  e.row('custom:a').click();
+  await settle();
+  buttonOf(e.body(), '移除').click();
+  buttonOf(e.page.doc.querySelector('.ap-confirm') as El, '移除').click();
+  await settle();
+  const listed = lists(e.srv);
+  e.page.doc.activeElement.key('Escape');
+  await settle();
+  assert.equal(lists(e.srv), listed + 1);
+  assert.equal(e.title(), '应用');
+  assert.equal(e.row('custom:a'), null);
+  assert.equal(e.page.doc.activeElement, e.row('custom:b'));
+});
+
+test('codex r1 (3): an app turned off whose new address or secret was lost stays 已停用 with 启用 — a lost answer does not turn it on', async () => {
+  const { page, srv, row, body } = await opened((s) => s.add('custom:u', 'U', { type: 'url', url: 'https://old.example/mcp', secrets: ['Authorization'] }, { state: 'off', reason: '已停用' }));
+  row('custom:u').click();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-state')), '已停用');
+  srv.on.set('PATCH /xbot-api/apps/custom%3Au', () => { throw fail(503); });
+  buttonOf(body(), '编辑').click();
+  const urlIn = one(one(body(), '.ap-src-form'), 'input') as Any;
+  urlIn.value = 'https://new.example/mcp';
+  urlIn.key('Enter');
+  await settle();
+  assert.deepEqual(srv.sent('PATCH', /custom%3Au$/).map((c: Call) => c.body), [{ url: 'https://new.example/mcp' }]);
+  assert.equal(seen(one(body(), '.ap-src-err')), '没能确认保存好了没有，可以再试一次。');
+  assert.equal(seen(one(body(), '.ap-state')), '已停用', 'not 没能检查');
+  assert.deepEqual(all(one(body(), '.ap-hero-acts'), 'button').map((b) => seen(b)), ['启用']);
+  assert.equal(page.doc.activeElement, urlIn);
+  // A secret's new value, lost: the same.
+  buttonOf(one(body(), '.ap-src-form'), '取消').click();
+  buttonOf(body(), '换一个值').click();
+  (page.doc.activeElement as Any).value = 'Bearer new';
+  page.doc.activeElement.key('Enter');
+  await settle();
+  assert.deepEqual(srv.sent('PATCH', /custom%3Au$/).at(-1).body, { secrets: { Authorization: 'Bearer new' } });
+  assert.equal(seen(one(body(), '.ap-secret-edit .ap-err')), '没能确认保存好了没有，可以再试一次。');
+  assert.equal(seen(one(body(), '.ap-state')), '已停用');
+  assert.deepEqual(all(one(body(), '.ap-hero-acts'), 'button').map((b) => seen(b)), ['启用']);
+  assert.deepEqual(stuck(one(body(), '.ap-app')), []);
+  page.doc.activeElement.key('Escape');
+  page.doc.activeElement.key('Escape');
+  assert.equal(seen(one(row('custom:u'), '.ap-st-word')), '已停用');
+});
+
+test('codex r2: cat-toggle 409 app_disabled with failed list read applies off state', async () => {
+  const withA = (s: Any) => { withCats(s); s.add('custom:a', 'A', { type: 'program', program: 'node', args: [], secrets: [] }); };
+  const refused = (s: Any) => s.on.set(catPath('custom:a', '布偶猫'), () => { throw fail(409, '应用已停用，请先启用应用', 'app_disabled'); });
+  const sw = (root: El, name = '布偶猫') => one(root, `.ap-cat[data-cat="${name}"] .ap-cat-switch`);
+  // Turned off elsewhere meanwhile, and the list cannot be read: the refusal itself says it is off (as for a save) —
+  // 已停用, no cat's switch, 启用; the server's sentence at the top, and focus on it.
+  const { page, srv, row, body } = await opened(withA);
+  row('custom:a').click();
+  await settle();
+  assert.equal(seen(one(body(), '.ap-state')), '已连接');
+  refused(srv);
+  srv.on.set('GET /xbot-api/apps', () => { throw fail(502, '没能读取应用'); });
+  const n = lists(srv);
+  sw(body()).focus();
+  sw(body()).click();
+  await settle();
+  assert.equal(lists(srv), n + 1, 'one read of the list');
+  assert.equal(seen(one(body(), '.ap-state')), '已停用');
+  assert.equal(all(body(), '.ap-cats-sec').length, 0);
+  assert.equal(all(body(), '.ap-cat-switch').length, 0);
+  assert.deepEqual(all(one(body(), '.ap-hero-acts'), 'button').map((b) => seen(b)), ['启用']);
+  noButton(body(), '编辑');
+  assert.equal(seen(one(body(), '.ap-note')), '应用已停用，请先启用应用。');
+  assert.ok(one(body(), '.ap-note').classList.contains('bad'));
+  assert.equal(page.doc.activeElement, one(body(), '.ap-note'));
+  assert.deepEqual(stuck(one(body(), '.ap-app')), []);
+  page.doc.activeElement.key('Escape');
+  assert.equal(seen(one(row('custom:a'), '.ap-st-word')), '已停用');
+  // The same with its program's editor open: the editor goes with it, nothing of what was typed is sent.
+  const b = await opened(withA);
+  b.row('custom:a').click();
+  await settle();
+  buttonOf(b.body(), '编辑').click();
+  (all(one(b.body(), '.ap-src-form'), 'input')[0] as Any).value = 'python3';
+  refused(b.srv);
+  b.srv.on.set('GET /xbot-api/apps', () => { throw fail(undefined, '连不上 clowder-bot'); });
+  sw(b.body()).focus();
+  sw(b.body()).click();
+  await settle();
+  assert.equal(seen(one(b.body(), '.ap-state')), '已停用');
+  assert.equal(all(b.body(), '.ap-src-form').length, 0);
+  noButton(b.body(), '编辑');
+  assert.equal(seen(one(b.body(), '.ap-cmd')), 'node', 'not changed');
+  assert.equal(b.srv.sent('PATCH', /custom%3Aa$/).length, 0);
+  assert.equal(seen(one(b.body(), '.ap-note')), '应用已停用，请先启用应用。');
+  assert.equal(b.page.doc.activeElement, one(b.body(), '.ap-note'));
+  // A write of this page answered while that list was being read is newer than the refusal: its answer stands.
+  const c = await opened(withA);
+  c.row('custom:a').click();
+  await settle();
+  const gate = hold();
+  refused(c.srv);
+  c.srv.on.set('GET /xbot-api/apps', () => gate.promise.then(() => { throw fail(502, '没能读取应用'); }));
+  sw(c.body()).focus();
+  sw(c.body()).click();
+  await settle();
+  one(c.page.doc.querySelector('.ap-title') as El, '.ap-name').click();
+  const nameIn = c.page.doc.activeElement as Any;
+  nameIn.value = 'A2';
+  nameIn.key('Enter');
+  await settle();
+  assert.deepEqual(c.srv.sent('PATCH', /custom%3Aa$/).map((x: Call) => x.body), [{ name: 'A2' }]);
+  gate.release();
+  await settle();
+  assert.equal(c.title(), 'A2');
+  assert.equal(seen(one(c.body(), '.ap-state')), '已连接', 'the rename answered after the refusal');
+  assert.equal(all(c.body(), '.ap-cat-switch').length, 2);
+  assert.deepEqual(all(one(c.body(), '.ap-hero-acts'), 'button').map((x) => seen(x)), ['停用', '再检查']);
+  // And for a save refused the same way (saveSource): the newer answer stands, what was typed stays, 保存 again.
+  const d = await opened(withA);
+  d.row('custom:a').click();
+  await settle();
+  buttonOf(d.body(), '编辑').click();
+  const progIn = all(one(d.body(), '.ap-src-form'), 'input')[0] as Any;
+  progIn.value = 'python3';
+  const dGate = hold();
+  d.srv.on.set('PATCH /xbot-api/apps/custom%3Aa', (x: Call) => {
+    if ('program' in x.body) throw fail(409, '应用已停用，请先启用后再修改程序', 'app_disabled');
+    return d.srv.fallback(x);
+  });
+  d.srv.on.set('GET /xbot-api/apps', () => dGate.promise.then(() => { throw fail(502, '没能读取应用'); }));
+  progIn.key('Enter');
+  await settle();
+  one(d.page.doc.querySelector('.ap-title') as El, '.ap-name').click();
+  const dName = d.page.doc.activeElement as Any;
+  dName.value = 'A2';
+  dName.key('Enter');
+  await settle();
+  assert.deepEqual(d.srv.sent('PATCH', /custom%3Aa$/).map((x: Call) => x.body), [{ program: 'python3' }, { name: 'A2' }]);
+  dGate.release();
+  await settle();
+  assert.equal(seen(one(d.body(), '.ap-state')), '已连接');
+  assert.equal(seen(one(d.body(), '.ap-src-err')), '应用已停用，请先启用后再修改程序。');
+  assert.deepEqual([progIn.value, progIn.readOnly], ['python3', false]);
+});
+
+test('item 60: the new controls are 44px to touch at 390px and show focus; nothing of theirs moves under reduced motion; their words are everyday words', async () => {
+  const css = read('client/public/apps-dialog.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  const phone = /@media \(max-width: 560px\) \{([\s\S]*?)\n\}/.exec(css)![1]!;
+  for (const sel of ['.ap-src-btn', '.ap-src-form .field input', '.ap-src-form .field textarea', '.ap-src-acts > button', '.ap-cat'])
+    assert.ok(new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[^{]*\\{[^}]*min-height: (44|52)px').test(phone), sel);
+  // The switch's track stays as it is drawn; the area around it takes the touch (the row too is a target).
+  assert.match(phone, /\.ap-cat-switch::before \{ content: ""; position: absolute; inset: -12px -6px; \}/);
+  assert.match(css, /\.ap-hero-acts > button \{ min-height: 44px; \}/, '停用 / 启用 sit with 再检查');
+  for (const sel of ['.ap-cat-switch', '.ap-src-btn', '.ap-toggle']) assert.match(css, new RegExp(sel.replace('.', '\\.') + ':focus-visible \\{ outline: 2px solid var\\(--accent\\)'), sel);
+  const reduced = /@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?)\n\}/.exec(css)![1]!;
+  assert.match(reduced, /\.ap-cat-switch::after, \.ap-cat-spin > \.st-spin \{ transition: none; animation: none; \}/);
+  // Tokens only (the stylesheet test above holds for these rules too); the switch is the app's own, themed there.
+  assert.doesNotMatch(css, /\.g7-switch[^{]*\{[^}]*background/, 'its colours are devices.css\'s and cafe-theme.css\'s');
+  // What the page shows of them, seen and heard: no engine words, no captions.
+  const { page, row, body } = await opened((s) => { withCats(s); s.add('custom:a', 'A', { type: 'program', program: 'node', args: [], secrets: ['K'] }); });
+  row('custom:a').click();
+  await settle();
+  buttonOf(body(), '编辑').click();
+  const words: string[] = [];
+  for (const n of page.doc.querySelectorAll('.ap-card *')) {
+    for (const k of n.kids) if (k instanceof TextNode) words.push(k.data);
+    for (const a of ['aria-label', 'data-tip', 'placeholder', 'title']) if (n.getAttribute(a)) words.push(n.getAttribute(a)!);
+  }
+  const said = words.join('\n');
+  for (const word of [/(?<![\w-])bots?\b/i, /xbot/i, /(?<![\w-])threads?\b/i, /sessions?\b/i, /会话/, /线程/, /原生/, /调用/, /模型/, /Clowder AI/i, /MCP/, /blockedCats|globalEnabled/])
+    assert.doesNotMatch(said, word);
+  for (const w of ['猫猫', '布偶猫', '停用', '程序', '参数', '保存', '取消']) assert.ok(said.includes(w), w);
+});
+
 // ---------------------------------------------------------------- 微信's own icon (round 6)
 test('微信\'s own icon (the owner: 「这个应用的logo、我希望是微信图标。」): where the row carries `icon` it takes the tile\'s place, in the list and on the page — decorative, never announced, made once however often its row repaints; absent, the drawn bubble; one that does not load ends on the bubble and is not asked for again', async () => {
   const ICON = '/xbot-api/apps/wechat/icon?v=7u77mttx1en6';
@@ -1724,8 +2742,12 @@ test('微信\'s own icon (the owner: 「这个应用的logo、我希望是微信
 // The dialog over the production router and the adapter (server/xbot/apps.ts, server/native/apps.ts) on the
 // scripted engine of tests/apps-fixture.ts, through real HTTP: what it sends is what the adapter accepts,
 // and what it shows is what the adapter answered.
-test('against the real adapter: 微信 opened and authorized (the countdown from its answer) and revoked; a program added with a secret, connected, its tools shown, removed', async (t) => {
+test('against the real adapter: 微信 opened and authorized (the countdown from its answer) and revoked; a program added with a secret, connected, its tools shown, a cat switched off, turned off and on, its arguments and program edited, removed', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'bot-apps-dialog-')), native = new NativeFixture();
+  native.cats.push(
+    { id: 'cat-ragdoll', name: '布偶猫', displayName: '布偶猫', breedId: 'ragdoll', roleDescription: '', clientId: 'anthropic', defaultModel: '', mentionPatterns: [], color: { primary: '#556677', secondary: '#ddeeff' } },
+    { id: 'cat-maine', name: '缅因猫', displayName: '缅因猫', breedId: 'maine-coon', roleDescription: '', clientId: 'openai', defaultModel: '', mentionPatterns: [], color: { primary: '#775544', secondary: '#eeddcc' } },
+  );
   const runtime = createApp({ native, dataFile: join(dir, 'presentation.json') });
   const app = express();
   app.use(express.json());
@@ -1800,6 +2822,44 @@ test('against the real adapter: 微信 opened and authorized (the countdown from
   // The adapter gives every app an id of its own: the name's letters and a code (docs/apps-api.md).
   const row2 = native.apps.rows.find((r) => /^probe-[0-9a-f]{8}$/.test(r.id))!;
   assert.deepEqual([row2.mcpServer.command, row2.mcpServer.args, row2.mcpServer.env], ['node', ['probe.mjs'], { PROBE_TOKEN: 'shh' }]);
+  // Item 60. The engine's cats, each with a switch (the adapter reads them with the app and from the engine after each write).
+  const live = () => native.apps.rows.find((r) => r.id === row2.id)!;
+  const sw = (name: string) => one(body(), `.ap-cat[data-cat="${name}"] .ap-cat-switch`);
+  assert.deepEqual(all(body(), '.ap-cat').map((n) => seen(n)), ['布偶猫', '缅因猫']);
+  assert.deepEqual(all(body(), '.ap-cat-switch').map((n) => n.getAttribute('aria-checked')), ['true', 'true']);
+  sw('布偶猫').focus();
+  sw('布偶猫').click();
+  await until(() => sw('布偶猫').getAttribute('aria-checked') === 'false', '布偶猫 switched off, as the engine read back');
+  assert.deepEqual(live().blockedCats, ['cat-ragdoll'], 'upstream\'s own per-cat block');
+  assert.equal(sw('缅因猫').getAttribute('aria-checked'), 'true');
+  await until(() => !sw('布偶猫').hasAttribute('aria-disabled'), 'unlocked');
+  assert.equal(page.doc.activeElement, sw('布偶猫'));
+  // 停用: off in the engine, the switches gone; 启用: on again, every cat again (upstream clears the blocks), checked.
+  buttonOf(body(), '停用').click();
+  await until(() => seen(one(body(), '.ap-state')) === '已停用', 'turned off');
+  assert.equal(live().globalEnabled, false);
+  assert.equal(all(body(), '.ap-cats-sec').length, 0);
+  buttonOf(body(), '启用').click();
+  await until(() => seen(one(body(), '.ap-state')) === '已连接', 'turned on and checked');
+  assert.equal(live().globalEnabled, true);
+  assert.equal(live().blockedCats, undefined);
+  assert.deepEqual(all(body(), '.ap-cat-switch').map((n) => n.getAttribute('aria-checked')), ['true', 'true']);
+  // 编辑: the arguments changed in place; the engine keeps its secret, the page shows what it answered.
+  buttonOf(body(), '编辑').click();
+  (one(one(body(), '.ap-src-form'), 'textarea') as Any).value = 'probe.mjs\n--verbose';
+  buttonOf(one(body(), '.ap-src-form'), '保存').click();
+  await until(() => all(body(), '.ap-src-form').length === 0, 'saved');
+  assert.equal(seen(one(body(), '.ap-cmd')), 'node probe.mjs --verbose');
+  assert.equal(seen(one(body(), '.ap-note')), '已保存。');
+  assert.equal(seen(one(body(), '.ap-state')), '已连接');
+  assert.deepEqual([live().mcpServer.command, live().mcpServer.args, live().mcpServer.env], ['node', ['probe.mjs', '--verbose'], { PROBE_TOKEN: 'shh' }]);
+  // The program changed: one the engine cannot find is saved all the same, and says why.
+  buttonOf(body(), '编辑').click();
+  (all(one(body(), '.ap-src-form'), 'input')[0] as Any).value = 'not-a-program-bin';
+  buttonOf(one(body(), '.ap-src-form'), '保存').click();
+  await until(() => all(body(), '.ap-src-form').length === 0, 'saved again');
+  assert.equal(seen(one(body(), '.ap-state')), '这台电脑上找不到「not-a-program-bin」');
+  assert.deepEqual([live().mcpServer.command, live().mcpServer.args], ['not-a-program-bin', ['probe.mjs', '--verbose']], 'only the program was sent');
   buttonOf(body(), '移除').click();
   buttonOf(page.doc.querySelector('.ap-confirm') as El, '移除').click();
   await until(() => seen(page.doc.querySelector('.ap-title')) === '应用', 'back on the list');

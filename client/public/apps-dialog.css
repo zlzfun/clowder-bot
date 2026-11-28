@@ -11,7 +11,10 @@
    busy — the spinner; idle (not open, not checked) — a short bar; off
    (cannot be used here, turned off in the engine) — a struck ring.
    The card hangs from a fixed line (its top edge stays put while its height
-   is eased); at 560px and below it is a sheet from the bottom edge. */
+   is eased); at 560px and below it is a sheet from the bottom edge.
+   Item 60: a custom app's 停用 / 启用 beside 再检查, 编辑 in the box of what
+   it is (the editor takes its place), and the cats as settings rows with the
+   devices switch (.g7-switch, themed in devices.css and cafe-theme.css). */
 
 .ap-modal { --ap-top: max(16px, calc((100vh - 640px) / 2)); place-items: start center; padding-top: var(--ap-top); }
 @supports (height: 100dvh) { .ap-modal { --ap-top: max(16px, calc((100dvh - 640px) / 2)); } }
@@ -143,12 +146,44 @@
 /* Ours, under the quotation. */
 .ap-more-box .ap-source-note { color: var(--x-text); }
 
-/* A custom app: what it is, its secrets by name, its tools. */
-.ap-cmd {
-  display: flex; align-items: flex-start; gap: var(--x-s3); padding: var(--x-s4) var(--x-s5); border-radius: 10px; background: var(--x-fill-1);
-  font: 12.5px/1.6 var(--x-mono); color: var(--x-text); overflow-wrap: anywhere;
+/* A custom app: 停用 / 启用 at the top (by 再检查), what it is with 编辑 beside it, its secrets by name, the cats
+   that may use it, its tools. */
+.ap-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ap-src {
+  display: flex; align-items: flex-start; gap: var(--x-s3); padding: var(--x-s4) var(--x-s3) var(--x-s4) var(--x-s5); border-radius: 10px; background: var(--x-fill-1);
 }
+.ap-cmd { flex: 1; min-width: 0; font: 12.5px/1.6 var(--x-mono); color: var(--x-text); overflow-wrap: anywhere; }
 .ap-cmd code { font: inherit; min-width: 0; user-select: all; }
+/* 编辑 keeps to the first line of what it edits. */
+.ap-src-btn { flex: none; min-height: 28px; margin: -4px 0; padding: 0 var(--x-s3); font-size: var(--x-fs-sm); color: var(--x-text-2); }
+.ap-src-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+/* The editor in the box's place: the add form's fields (on the card, filled), 保存 and 取消 under them. */
+.ap-src-form { display: flex; flex-direction: column; gap: var(--x-s2); min-width: 0; }
+.ap-src-form:focus { outline: none; }
+.ap-src-form .field { margin: 0 0 var(--x-s2); }
+.ap-src-form .field input, .ap-src-form .field textarea { background: var(--x-fill-1); font-family: var(--x-mono); font-size: 13px; }
+.ap-src-form .field input:focus, .ap-src-form .field textarea:focus { background: var(--x-fill-2); }
+.ap-src-form .field textarea { min-height: 72px; }
+.ap-src-form .ap-split { margin: 0; }
+/* The cats: XBot's settings rows (a face, a name, the devices switch at the right); the whole row is the switch's
+   label. A switch on its way has the status spinner beside it; every switch of the app waits meanwhile. */
+.ap-cats { list-style: none; margin: 0; padding: 0; border-radius: var(--x-r-card); background: var(--x-fill-1); overflow: hidden; }
+.ap-cat {
+  display: flex; align-items: center; gap: var(--x-s4); min-height: 48px; padding: var(--x-s2) var(--x-s5) var(--x-s2) 14px;
+  border-top: 1px solid var(--x-fill-2); cursor: pointer;
+}
+.ap-cat:first-child { border-top: 0; }
+.ap-cat > .ap-cat-face { width: 28px; height: 28px; margin: 0; }
+.ap-cat-name { flex: 1; min-width: 0; font-size: 14px; line-height: 1.45; color: var(--x-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ap-cat-spin { flex: none; display: flex; color: var(--x-muted); }
+.ap-cat-spin[hidden] { display: none; }
+.ap-cat-spin > .st-spin { width: 14px; height: 14px; }
+.ap-cat-switch { cursor: pointer; }
+.ap-cat-switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ap-cat.is-locked, .ap-cat-switch[aria-disabled="true"] { cursor: progress; }
+.ap-cat-switch[aria-disabled="true"] { opacity: .6; }
+.ap-cat-note { margin: var(--x-s3) 0 0; }
+.ap-cat-note:focus { outline: none; }
 .ap-sec { margin-top: var(--x-s7); }
 .ap-sec > h3 { margin: 0 0 var(--x-s3); font-size: 12px; font-weight: 600; letter-spacing: .01em; color: var(--x-faint); }
 .ap-names, .ap-tools { list-style: none; margin: 0; padding: 0; border-radius: var(--x-r-card); background: var(--x-fill-1); overflow: hidden; }
@@ -275,8 +310,15 @@
   .ap-way-acts > button, .ap-secret-acts > button { min-height: 44px; }
   .ap-add .modal-actions > button, .ap-confirm .modal-actions > button, .ap-fail > button { min-height: 44px; }
   .ap-tool-btn, .ap-name, .ap-name-input, .ap-kind, .ap-add .field textarea { min-height: 44px; }
+  /* Item 60: 编辑 (reaching into the box's padding), the editor's fields, a cat's row; its switch takes 44px
+     around its track (the row itself is a target too). */
+  .ap-src-btn { min-height: 44px; margin: -12px 0; }
+  .ap-src-form .field input, .ap-src-form .field textarea, .ap-src-acts > button { min-height: 44px; }
+  .ap-cat { min-height: 52px; }
+  .ap-cat-switch::before { content: ""; position: absolute; inset: -12px -6px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .ap-view, .ap-wait-text { animation: none; }
   .ap-row, .ap-kind, .ap-tool-btn, .ap-tool-chev, .ap-more-chev, .ap-name-mark, .ap-secret-name, .ap-secret-in { transition: none; }
+  .ap-cat-switch::after, .ap-cat-spin > .st-spin { transition: none; animation: none; }
 }

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { BotBridge } from '../native/bridge.js';
-import { BotApps, customPatchSchema, parseCustomApp } from '../native/apps.js';
+import { BotApps, customEnabledSchema, customPatchSchema, parseCustomApp } from '../native/apps.js';
 import { ApiError } from '../errors.js';
 
 /** 应用 (docs/apps-api.md). Every answer is the engine's state read back, not what was asked for. */
@@ -20,6 +20,8 @@ export function createXbotAppsRouter(bridge: BotBridge, apps = new BotApps(bridg
   });
   router.get('/apps/:id', async (req, res) => res.json(await apps.detail(req.params.id)));
   router.patch('/apps/:id', async (req, res) => res.json(await apps.patchCustom(req.params.id, customPatchSchema.parse(req.body))));
+  router.put('/apps/:id/enabled', async (req, res) => res.json(await apps.setCustomEnabled(req.params.id, customEnabledSchema.parse(req.body).enabled)));
+  router.put('/apps/:id/cats/:name', async (req, res) => res.json(await apps.setCustomCatEnabled(req.params.id, req.params.name, customEnabledSchema.parse(req.body).enabled)));
   router.delete('/apps/:id', async (req, res) => {
     if (req.params.id === 'wechat') throw new ApiError(405, '微信不能移除，可以关掉', undefined, 'app_builtin');
     res.json(await apps.removeCustom(req.params.id));
