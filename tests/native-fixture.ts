@@ -333,6 +333,15 @@ export class NativeFixture implements NativeTransport {
     return structuredClone(result) as T;
   }
   async subscribe(_id: string, listener: (event: NativeEvent) => void) { listener({ type: 'resync' }); return () => {}; }
+  userListeners = new Set<(event: NativeEvent) => void>();
+  async subscribeUser(listener: (event: NativeEvent) => void) {
+    this.userListeners.add(listener);
+    listener({ type: 'resync' });
+    return () => { this.userListeners.delete(listener); };
+  }
+  emitUserEvent(event: NativeEvent) {
+    for (const listener of [...this.userListeners]) listener(event);
+  }
   async readFile(path:string,maxBytes:number) {
     this.calls.push({path,method:'BYTES'});
     const bytes=this.uploads.get(path);if(!bytes)throw new ApiError(404,'文件已不存在');

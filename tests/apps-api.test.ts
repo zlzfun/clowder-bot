@@ -20,7 +20,8 @@ async function setup(t: any, platform: NodeJS.Platform = 'darwin', icons?: AppIc
   const runtime = createApp({ native, dataFile: join(dir, 'presentation.json') });
   // The same router as production, with the platform under the test's control.
   const app = express(); app.use(express.json());
-  app.use('/xbot-api', createXbotAppsRouter(runtime.bridge, new BotApps(native, runtime.store, platform, icons)));
+  const router = createXbotAppsRouter(runtime.bridge, new BotApps(native, runtime.store, platform, icons));
+  app.use('/xbot-api', router);
   app.use((error: any, _req: any, res: any, _next: any) => res.status(error.status ?? (error.issues ? 400 : 500)).json({ error: error.issues ? error.issues.map((i: any) => `${i.path.join('.')}: ${i.message}`).join('；') : error.message, ...(error.code ? { code: error.code } : {}) }));
   const server = app.listen(0, '127.0.0.1'); await once(server, 'listening');
   const address = server.address(); assert.ok(address && typeof address !== 'string');
@@ -32,9 +33,9 @@ async function setup(t: any, platform: NodeJS.Platform = 'darwin', icons?: AppIc
     const response = await fetch(`http://127.0.0.1:${address.port}/xbot-api/apps${path}`);
     return { status: response.status, type: response.headers.get('content-type'), cache: response.headers.get('cache-control'), bytes: await response.arrayBuffer() };
   };
-  t.after(async () => { await runtime.close(); await new Promise<void>(r => server.close(() => r())); rmSync(dir, { recursive: true, force: true }); });
+  t.after(async () => { router.close(); await runtime.close(); await new Promise<void>(r => server.close(() => r())); rmSync(dir, { recursive: true, force: true }); });
   const sent = (pattern: RegExp, method?: string) => native.calls.filter(c => pattern.test(c.path) && (!method || c.method === method));
-  return { ...runtime, native, apps: native.apps, call, raw, sent, dataFile: join(dir, 'presentation.json'), platform };
+  return { ...runtime, native, apps: native.apps, call, raw, sent, port: address.port, dataFile: join(dir, 'presentation.json'), platform };
 }
 const wechatOf = (list: any) => list.body.apps.find((a: any) => a.id === 'wechat');
 const nativeOf = (app: any): string => app.id.slice('custom:'.length);
@@ -654,4 +655,74 @@ test('editing custom app program, args, and url (T-28): preserves existing secre
   assert.equal((await r.call(progPath, 'PATCH', { program: '   ' })).status, 400);
   assert.equal((await r.call(progPath, 'PATCH', { args: ['bad\narg'] })).status, 400);
   assert.equal(r.native.calls.filter(c => c.method !== 'GET').slice(callsBefore).length, 0);
+});
+
+test('apps SSE stream (/xbot-api/apps/events) forwards WeChat plugin_operation_changed & reconnect resyncs and cleans up cleanly', async t => {
+  const r = await setup(t);
+  const response = await fetch(`http://127.0.0.1:${r.port}/xbot-api/apps/events`);
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /text\/event-stream/);
+  const reader = response.body!.getReader(), decoder = new TextDecoder();
+  let seen = '';
+  const parseEvents = () => seen.split('\n\n').filter(block => block.startsWith('event: ')).map(block => {
+    const [head, data] = block.split('\n');
+    return { event: head!.slice(7), data: JSON.parse(data!.slice(6)) };
+  });
+  const until = async (count: number) => {
+    while (parseEvents().length < count) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      seen += decoder.decode(value, { stream: true });
+    }
+  };
+
+  // Initial ready event; initial resync during subscribeUser does not trigger a redundant wechat event.
+  await until(1);
+  assert.deepEqual(parseEvents(), [{ event: 'ready', data: { appId: 'wechat' } }]);
+  assert.equal(r.native.userListeners.size, 1);
+
+  // Other plugins and bare resync without disconnect are ignored; WeChat plugin_operation_changed is forwarded.
+  r.native.emitUserEvent({ type: 'plugin_operation_changed', pluginId: 'official.github-operations' });
+  r.native.emitUserEvent({ type: 'resync' });
+  r.native.emitUserEvent({ type: 'plugin_operation_changed', pluginId: WECHAT_PLUGIN });
+  await until(2);
+
+  // Disconnect followed by resync emits reason: 'resync'.
+  r.native.emitUserEvent({ type: 'disconnected' });
+  r.native.emitUserEvent({ type: 'resync' });
+  await until(3);
+
+  assert.deepEqual(parseEvents(), [
+    { event: 'ready', data: { appId: 'wechat' } },
+    { event: 'wechat', data: { appId: 'wechat', reason: 'operation_changed' } },
+    { event: 'wechat', data: { appId: 'wechat', reason: 'resync' } },
+  ]);
+
+  // Client disconnect removes the native user listener.
+  await reader.cancel();
+  for (let i = 0; i < 20 && r.native.userListeners.size > 0; i++) await new Promise(done => setTimeout(done, 10));
+  assert.equal(r.native.userListeners.size, 0);
+
+  // Router close ends active SSE streams and removes listeners (tested via production createApp mount).
+  const dir = mkdtempSync(join(tmpdir(), 'bot-apps-sse-close-'));
+  const prodNative = new NativeFixture();
+  const runtime = createApp({ native: prodNative, dataFile: join(dir, 'presentation.json') });
+  const srv = runtime.app.listen(0, '127.0.0.1'); await once(srv, 'listening');
+  t.after(async () => { await runtime.close(); await new Promise<void>(done => srv.close(() => done())); rmSync(dir, { recursive: true, force: true }); });
+  const addr = srv.address(); assert.ok(addr && typeof addr !== 'string');
+  const stream = await fetch(`http://127.0.0.1:${addr.port}/xbot-api/apps/events`);
+  const streamReader = stream.body!.getReader();
+  await streamReader.read();
+  assert.equal(prodNative.userListeners.size, process.platform === 'darwin' ? 1 : 0);
+  await runtime.close();
+  const afterClose = await streamReader.read();
+  assert.equal(afterClose.done, true);
+  assert.equal(prodNative.userListeners.size, 0);
+
+  // Non-Mac does not subscribe to native plugin events.
+  const nonMac = await setup(t, 'linux');
+  const nonMacStream = await fetch(`http://127.0.0.1:${nonMac.port}/xbot-api/apps/events`);
+  assert.equal(nonMacStream.status, 200);
+  assert.equal(nonMac.native.userListeners.size, 0);
+  await nonMacStream.body!.cancel();
 });

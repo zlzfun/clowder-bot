@@ -44,7 +44,8 @@ export function createApp(options: { dataFile?: string; native?: NativeTransport
   });
   app.use(express.json({ limit: '4mb' }));
   const core = createXbotCoreRouter(bridge);
-  app.use('/xbot-api', createMemoryRouter(native), createActivityRouter(bridge), createWorkspaceRouter(bridge), createComputerRouter(bridge), core.router, createXbotSchedulesRouter(bridge), createXbotAppsRouter(bridge, new BotApps(native, store, process.platform, options.appIcons)), createXbotSettingsRouter(bridge));
+  const apps = createXbotAppsRouter(bridge, new BotApps(native, store, process.platform, options.appIcons));
+  app.use('/xbot-api', createMemoryRouter(native), createActivityRouter(bridge), createWorkspaceRouter(bridge), createComputerRouter(bridge), core.router, createXbotSchedulesRouter(bridge), apps, createXbotSettingsRouter(bridge));
   app.use('/xbot-api', (_req, res) => res.status(404).json({ error: '这项功能在这里还用不了', code: 'not_adapted' }));
   app.get('/api/health', async (_req, res) => res.json({ ok: true, engine: 'clowder-ai', upstream: await native.request('/api/health') }));
   app.get('/api/state', async (_req, res) => res.json({ engine: 'clowder-ai', cats: await bridge.cats(), presentation: store.state }));
@@ -71,5 +72,5 @@ export function createApp(options: { dataFile?: string; native?: NativeTransport
     res.status(500).json({ error: '服务出现异常，请查看日志。' });
   };
   app.use(errors);
-  return { app, bridge, store, close: async () => { core.close(); await native.close(); } };
+  return { app, bridge, store, close: async () => { core.close(); apps.close(); await native.close(); } };
 }

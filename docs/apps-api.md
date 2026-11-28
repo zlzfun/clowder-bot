@@ -23,6 +23,7 @@
 - `PUT /xbot-api/apps/:id/cats/:name`（自定义）body `{ enabled: boolean }` → `App`。按猫开关（写入上游 `blockedCats` 并读回核对）；应用本身处于全局停用（`off`）时回 409 `app_disabled`。
 - `DELETE /xbot-api/apps/:id`（自定义）→ `{ removed: true }`。微信回 405 `app_builtin`。
 - `POST /xbot-api/apps/wechat/connect`、`/disconnect`、`/authorize`、`/revoke` → `App`（微信）。请求体为空对象。
+- `GET /xbot-api/apps/events` → `text/event-stream`。弹窗打开期间订阅微信插件状态变化：连上即发 `event: ready` `{"appId":"wechat"}`；引擎在用户房间推送 `plugin_operation_changed`（`official.wechat-visible-reader`）或断线重连 `resync` 时发 `event: wechat` `{"appId":"wechat","reason":"operation_changed"|"resync"}`，由界面据此触发一次 `GET /xbot-api/apps/wechat`。
 - `GET /xbot-api/apps/wechat/icon` → `image/png`（256 像素见方）：微信的图标。没有可用的图时 404。
 
 `:id` 是 `wechat` 或 `custom:<原生 id>`（放进路径时要转义冒号）。
@@ -146,7 +147,7 @@ version?       微信：插件版本
 - `POST /api/plugin-manager/plugins/:pluginId/set-enabled` body `{enabled, expectedRevision}`；版本不对回 409 `STALE_REVISION`（适配层重读一次再试）；启动失败回 503 `RUNTIME_START_FAILED`，这时引擎已经记下失败并退回停用。
 - `POST /api/plugins/:pluginId/actions/:operation/:action` → `{ok, render: "status", data: {armed, remainingMs, expiresAt?}}`；插件没在运行时 409。
 - **上游缺陷**：这个操作只要执行过一次动作，引擎就会把自己的步骤指针（`operationState`）一起交给插件，而这一版插件拒绝不认识的输入字段，于是之后的每个动作都失败（502「input contains an unsupported field」），重启也不恢复。`POST /api/plugins/:pluginId/operations/:operation/reset` 只清这个指针，不动插件自己的授权（实测：授权后重置再读状态，仍是已授权）。适配层在每个动作前先重置。Bot 不使用这个指针，显示的内容都来自动作的回应。已登记为上游需求。
-- 上游没有插件状态的事件，界面靠再读一次。
+- `plugin_operation_changed` 事件（2026-11-28 在 `fe632f8f` 隔离运行时实测并核对源码 `PluginManagerService`）：上游在用户房间（`user:<userId>`）推送 `plugin_operation_changed`（`{pluginId}`），但**仅在目录安装（`catalog install`）、`update` 与 `uninstall` 的起止触发**；`local-directory` 安装、`set-enabled`（启停与 `starting` → `on`/`failed`）以及插件内部操作（10 分钟授权 `arm`/`disarm`/到期）均不触发此事件。适配层通过 `/xbot-api/apps/events` 转发 `official.wechat-visible-reader` 的该事件与断线重连 `resync` 以即时重读微信状态；启动期间每 2 秒轮询与到期重读仍需保留。
 
 ## 已知限制
 
@@ -159,7 +160,7 @@ version?       微信：插件版本
 
 ## 验证
 
-- `tests/apps-api.test.ts`（23 项，含「这台电脑」的登记行不算应用、也碰不到；微信的图标在每种状态下都给出、取不到时不给也不报错）：列表与过滤、两种添加、失败也算添加、适配层的校验（含同一请求头的两种写法）、id 规则、探活原因的翻译、探活原话里的凭据不外泄、改名与改密钥走哪条上游路由（请求头按已存的写法替换）、移除、微信的每种状态、非 Mac、启停与版本重试、超时的启动、失败的启动（引擎回 503 而接口回读到的状态）、没到引擎的请求仍是错误、授权的全过程（含每个动作前的重置）、读不到授权时不说「未授权」、同时到达的请求（一个 Bot 里两次添加各得一个 id；两个 Bot 同时读完登记表再装也不会合并；读状态不会插进「重置—动作」之间）、同一请求重发（回应丢了、重启之后）找回同一个应用而同一标识配不同内容被拒绝、引擎收下之后的每一步失败都不变成「没加上」、微信读不到时列表里其余应用照常。
+- `tests/apps-api.test.ts`（26 项，含「这台电脑」的登记行不算应用、也碰不到；微信的图标在每种状态下都给出、取不到时不给也不报错；`/xbot-api/apps/events` SSE 转发微信的 `plugin_operation_changed` 与断线重连 `resync`、过滤其他插件、清理监听与关闭流、非 Mac 不订阅原生用户事件）：列表与过滤、两种添加、失败也算添加、适配层的校验（含同一请求头的两种写法）、id 规则、探活原因的翻译、探活原话里的凭据不外泄、改名与改密钥走哪条上游路由（请求头按已存的写法替换）、移除、微信的每种状态、非 Mac、启停与版本重试、超时的启动、失败的启动（引擎回 503 而接口回读到的状态）、没到引擎的请求仍是错误、授权的全过程（含每个动作前的重置）、读不到授权时不说「未授权」、同时到达的请求（一个 Bot 里两次添加各得一个 id；两个 Bot 同时读完登记表再装也不会合并；读状态不会插进「重置—动作」之间）、同一请求重发（回应丢了、重启之后）找回同一个应用而同一标识配不同内容被拒绝、引擎收下之后的每一步失败都不变成「没加上」、微信读不到时列表里其余应用照常。
 - 隔离运行时在新引擎（`fe632f8f`）上的实测（2026-11-27，从界面走）：添加本机程序型应用、改名、换密钥、再检查、找不到的程序、连不上的网址、被拒绝的 `http://` 网址、移除；之后 Claude haiku 猫调用了这个应用的工具，拿到的是换过之后的密钥。微信的打开（3–4 秒）、授权、倒计时、重开弹窗、撤销、关闭，都与引擎读回的一致。另一个会话把「这台电脑」登记进同一张登记表期间，「应用」的列表里没有它，`custom:computer` 是 404。
 - 隔离运行时在旧引擎上的实测（2026-11-26，当时的固定提交 `42017e0c` 加既有补丁）：经适配层添加本机程序型应用后，Claude 猫与 Codex 猫下一条消息即可调用其工具并拿到密钥；添加找不到的程序、连不上的网址，各自如实回 `failed`；微信的打开、授权 10 分钟、读状态、撤销、关闭均与引擎读回的一致。`tests/fixtures/probe-mcp.mjs` 是实测用的无依赖 MCP 服务（一个不读不写的工具）。
 - 没有验证的：真正读一次微信消息（要使用者本人同意，并给运行引擎的进程「屏幕录制」「辅助功能」权限）。「两种读法」一节来自读代码，两种读取都没有实际执行过。

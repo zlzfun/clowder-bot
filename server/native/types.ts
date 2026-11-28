@@ -17,12 +17,13 @@ export interface NativeMessage {
   replyTo?: string; isDraft?: boolean; lifecycle?: { kind: string; status?: string; [key: string]: unknown };
   extra?: Record<string, unknown>; toolEvents?: unknown[]; [key: string]: unknown;
 }
-export interface NativeEvent { threadId?: string; type?: string; seq?: number; seqEpoch?: string; [key: string]: unknown }
+export interface NativeEvent { threadId?: string; type?: string; seq?: number; seqEpoch?: string; pluginId?: string; [key: string]: unknown }
 export interface NativeTransport {
   /** `headers` carries only the native request identity of a creation (see NativeClient). */
   request<T = Record<string, unknown>>(path: string, options?: { method?: string; body?: unknown; headers?: Record<string, string> }): Promise<T>;
   /** Authorized source messages must be checked by the caller before reading native upload bytes. */
   readFile?(path: string, maxBytes: number): Promise<Buffer>;
   subscribe(threadId: string, listener: (event: NativeEvent) => void): Promise<() => void>;
+  subscribeUser?(listener: (event: NativeEvent) => void): Promise<() => void>;
   close(): Promise<void>;
 }
