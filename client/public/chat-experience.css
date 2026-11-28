@@ -51,7 +51,7 @@
 .item .preview.st.fail { color: var(--x-danger); }
 .item .preview.st.unknown { color: var(--x-faint); }
 
-/* ---- 记忆, read only throughout: 关于你 / 你的偏好 folded; then this conversation's notes. */
+/* ---- 记忆, read only throughout: 关于你 / 你的偏好 / 事项 folded; then this conversation's notes. */
 .cx-fold { margin-top: var(--x-s4); }
 .cx-fold > summary { min-height: 28px; font-size: 12px; font-weight: 600; }
 .cx-fold-body { margin-top: var(--x-s1); }
@@ -67,6 +67,12 @@
 .cx-src-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: 12px; color: var(--x-muted); }
 .cx-src-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--x-s3); }
 .cx-src-time { color: var(--x-faint); font-variant-numeric: tabular-nums; }
+/* A matter's records: what was noted, the words it quotes on a quiet fill (no rule), then when and where. */
+.cx-records { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--x-s3); }
+.cx-record-text { margin: 0; font-size: var(--x-fs-sm); line-height: 1.5; color: var(--x-text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.cx-quote { margin: var(--x-s1) 0 0; padding: 2px var(--x-s2); border-radius: var(--x-r-xs); background: var(--x-fill-2); font-size: 12px; line-height: 1.5; color: var(--x-muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+.cx-record-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--x-s3); margin: 2px 0 0; font-size: var(--x-fs-cap); line-height: 1.5; color: var(--x-faint); }
+.cx-more { margin: var(--x-s2) 0 0; font-size: 12px; }
 .psec.cx-notes { margin-top: var(--x-s5); }
 .cx-notes h4 .ws-count { font-weight: 500; }
 .cx-note > .v { margin-top: 0; white-space: pre-wrap; overflow-wrap: anywhere; }

@@ -194,8 +194,8 @@ class Doc {
     const run = (host: El | Doc, list: Listener[] | undefined) => {
       for (const l of [...(list ?? [])]) { if (ev.halted) return; ev.currentTarget = host; l.fn(ev); }
     };
-    for (let n: El | null = target; n && !ev.stopped; n = n.parent) run(n, n.listeners.get(ev.type));
-    if (!ev.stopped) run(this, this.listeners.get(ev.type));
+    for (let n: El | null = target; n && !ev.stopped; n = ev.bubbles ? n.parent : null) run(n, n.listeners.get(ev.type));
+    if (!ev.stopped && ev.bubbles) run(this, this.listeners.get(ev.type));
     return !ev.defaultPrevented;
   }
   // As a browser does when the tab is hidden or shown again.
@@ -271,7 +271,8 @@ const textOf = (root: El) => root.textContent;
 const buttons = (root: El, text: string) => all(root).filter(e => e.tagName === 'BUTTON' && e.textContent === text);
 const button = (root: El, text: string) => { const b = buttons(root, text)[0]; assert.ok(b, 'no button ' + text); return b; };
 const same = (actual: unknown, expected: unknown, message: string) => assert.ok(actual === expected, message);
-const setFold = async (f: El, open: boolean) => { f.open = open; f.dispatchEvent(new Ev('toggle')); await settle(); };
+// As in a browser, a fold's toggle does not bubble: a 记录 fold's never reaches the 事项 fold around it.
+const setFold = async (f: El, open: boolean) => { f.open = open; f.dispatchEvent(new Ev('toggle', { bubbles: false })); await settle(); };
 const ada = { type: 'bot', id: 'Ada' }, bob = { type: 'bot', id: 'Bob' }, team = { type: 'group', id: 'g-1' };
 // GET <scope>/activity as the contract describes it.
 const activity = (over: Record<string, unknown> = {}) => ({
@@ -414,6 +415,55 @@ test('memory reads keep proposed changes apart from saved content, retired entri
   assert.equal(X.memory({ entries: [] }, 'profile').readStatus, 'unavailable');
   assert.deepEqual(['denied', 'denied', 'missing', 'changed', 'error'], [401, 403, 404, 409, 500].map(status => X.memoryError({ status, message: 'x' }).kind));
   assert.equal(X.sources({ status: 'weird' }).status, 'unavailable');
+});
+
+test('事项 reads are checked: the native order kept, pages appended without repeats, a page that could not read everything makes the list partial, words quoted only while their source is current', () => {
+  const X = rules();
+  assert.equal(X.MEMORY.matters, '事项');
+  const list = X.matters({ kind: 'matters', readStatus: 'ready', entries: [
+    { id: 'm1', title: '搬家准备', content: '整理合同\r\n水电清单', revision: 3, status: 'active', entryCount: 2, summaryStatus: 'sources_changed', updatedAt: 2000 },
+    { id: 'm2', title: '', content: '', revision: 1, status: 'retired', entryCount: 0 },
+    { id: 'm1', title: '重复的一条', revision: 4, status: 'active' },
+    { id: 'm3', title: '奇怪', revision: 'x', status: 'proposed', entryCount: -1 },
+    { title: '没有标识' },
+  ], nextCursor: 'c2' });
+  assert.deepEqual(plain(list.entries.map((e: Any) => [e.id, e.status, e.revision, e.entryCount, e.sourcesChanged])), [['m1', 'active', 3, 2, true], ['m2', 'retired', 1, 0, false], ['m3', 'unknown', 0, 0, false]]);
+  assert.equal(list.entries[0].content, '整理合同\n水电清单');
+  assert.ok(list.entries[0].updatedAt > 0);
+  assert.equal(list.nextCursor, 'c2');
+  assert.equal(X.matters({ entries: [] }).readStatus, 'unavailable', 'a missing read status is not "ready"');
+  assert.equal(X.matters(null), null);
+  const page = X.matters({ readStatus: 'partial', entries: [{ id: 'm2', title: '又一次', revision: 1, status: 'retired' }, { id: 'm4', title: '新的', revision: 2, status: 'active', entryCount: 1 }] });
+  const both = X.moreMatters(list, page);
+  assert.deepEqual(plain(both.entries.map((e: Any) => e.id)), ['m1', 'm2', 'm3', 'm4']);
+  assert.equal(both.entries[1].title, '', 'what was listed stays where and as it was');
+  assert.equal(both.readStatus, 'partial');
+  assert.equal(both.nextCursor, '');
+  assert.equal(X.moreMatters(X.matters({ readStatus: 'ready', entries: [] }), X.matters({ readStatus: 'unavailable', entries: [] })).readStatus, 'unavailable');
+
+  const d = X.matter({ matter: { id: 'm1', revision: 3 }, entries: [
+    { id: 'e1', status: 'active', sourceStatus: 'current', summary: '约了周五看房', quote: '周五下午两点看房', recordedAt: 1500, source: { canOpen: true, threadId: 't', messageId: 'msg-1', occurredAt: 1400 } },
+    { id: 'e2', status: 'active', sourceStatus: 'changed', summary: '旧报价', quote: '不该再出现的旧原话', recordedAt: 1600, source: { canOpen: true, threadId: 't', messageId: 'msg-2', occurredAt: null } },
+    { id: 'e3', status: 'weird', sourceStatus: 'thread_only', source: { canOpen: false, threadId: 't', occurredAt: null } },
+    { id: 'e1', summary: '重复的一条' },
+  ], nextCursor: 'p2' });
+  assert.deepEqual(plain(d.entries.map((e: Any) => [e.id, e.status, e.sourceStatus, e.quote, e.canOpen])), [['e1', 'active', 'current', '周五下午两点看房', true], ['e2', 'active', 'changed', '', true], ['e3', 'unknown', 'thread_only', '', false]]);
+  assert.equal(d.entries[0].at, 1400 * 1000, 'when it was said');
+  assert.equal(d.entries[1].at, 1600 * 1000, 'else when it was recorded');
+  assert.equal(d.nextCursor, 'p2');
+  assert.equal(X.matter({ matter: { id: 'm1' } }), null, 'no records list: not a matter');
+  assert.equal(X.matter({ entries: [] }), null);
+  const more = X.moreRecords(d, X.matter({ matter: { id: 'm1', revision: 3 }, entries: [{ id: 'e3', summary: '又一次' }, { id: 'e4', summary: '第二页' }] }));
+  assert.deepEqual(plain(more.entries.map((e: Any) => e.id)), ['e1', 'e2', 'e3', 'e4']);
+  assert.equal(more.nextCursor, '');
+  // Review r1, item 3: the records say whether some of their sources changed; once a page says so, it stays said.
+  assert.equal(d.sourcesChanged, false);
+  const changed = X.matter({ matter: { id: 'm1', revision: 3, summaryStatus: 'sources_changed' }, entries: [] });
+  assert.equal(changed.sourcesChanged, true);
+  assert.equal(X.matter({ matter: { id: 'm1', revision: 3, summaryStatus: 'weird' }, entries: [] }).sourcesChanged, false);
+  assert.equal(X.moreRecords(d, changed).sourcesChanged, true, 'a later page saying so');
+  assert.equal(X.moreRecords(changed, d).sourcesChanged, true, 'an earlier page said so');
+  assert.equal(more.sourcesChanged, false);
 });
 
 // ---------------------------------------------------------------- status line
@@ -1031,11 +1081,11 @@ test('a late read answer for the thread or conversation the chat has left change
 });
 
 // ---------------------------------------------------------------- 记忆
-function memoryPage(answers: Record<string, () => unknown>) {
+function memoryPage(answers: Record<string, (path: string) => unknown>) {
   const p = page((path, method, body) => {
     const bare = path.split('?')[0];
     const key = method + ' ' + bare;
-    if (Object.hasOwn(answers, key)) return answers[key]!();
+    if (Object.hasOwn(answers, key)) return answers[key]!(path);
     if (bare.endsWith('/activity')) return activity();
     throw failure(404, 'unexpected ' + key + JSON.stringify(body ?? ''));
   });
@@ -1043,7 +1093,8 @@ function memoryPage(answers: Record<string, () => unknown>) {
   const root = p.cx.memoryView(ada, { memory: [{ id: 'note-1', scope: 'conversation', text: '周五前交' }] }) as El;
   p.doc.body.append(root);
   const fold = (kind: string) => root.querySelectorAll('details').find(d => d.dataset.kind === kind)!;
-  return { ...p, root, fold };
+  const body = (kind: string) => fold(kind).querySelector('.cx-fold-body')!;
+  return { ...p, root, fold, body };
 }
 
 test('记忆: 关于你 and 你的偏好 start folded and unread; opening one reads it and shows saved content apart from pending changes, with no editing controls', async () => {
@@ -1052,7 +1103,7 @@ test('记忆: 关于你 and 你的偏好 start folded and unread; opening one re
     'GET /xbot-api/memory/taste': () => ({ kind: 'taste', readStatus: 'ready', entries: [] }),
   });
   await settle();
-  assert.deepEqual(p.root.querySelectorAll('details').filter(d => d.classList.contains('cx-fold')).map(d => [textOf(d.firstChild as El), d.open]), [['关于你', false], ['你的偏好', false]]);
+  assert.deepEqual(p.root.querySelectorAll('details').filter(d => d.classList.contains('cx-fold')).map(d => [textOf(d.firstChild as El), d.open]), [['关于你', false], ['你的偏好', false], ['事项', false]]);
   assert.equal(p.calls.filter(c => c.path.startsWith('/xbot-api/memory')).length, 0, 'nothing is read until a fold opens');
   await setFold(p.fold('profile'), true);
   assert.deepEqual(p.calls.filter(c => c.path.startsWith('/xbot-api/memory')).map(c => c.path), ['/xbot-api/memory/profile']);
@@ -1125,6 +1176,425 @@ test('记忆: a source is read on demand for the entry\'s revision; a changed en
   await setFold(src(), true);
   assert.match(textOf(src()), /对话中的一句话/);
   assert.deepEqual(buttons(src(), '在对话里查看'), [], 'a message in another conversation is not offered as if it were here');
+});
+
+// 事项 (native matters) as the server projects them (server/xbot/memory.ts).
+const matterList = (over: Record<string, unknown> = {}) => ({ kind: 'matters', readStatus: 'ready', entries: [
+  { id: 'matter_1', title: '搬家准备', content: '整理租房合同与水电清单', revision: 3, status: 'active', entryCount: 2, summaryStatus: 'sources_changed', updatedAt: Date.now() },
+  { id: 'matter_2', title: '旧项目', content: '', revision: 1, status: 'retired', entryCount: 0 },
+], ...over });
+const matterRecords = (over: Record<string, unknown> = {}) => ({
+  matter: { id: 'matter_1', title: '搬家准备', content: '整理租房合同与水电清单', revision: 3, status: 'active' },
+  entries: [
+    { id: 'entry_1', status: 'active', sourceStatus: 'current', summary: '约了周五看房', quote: '周五下午两点看房', recordedAt: 1500, source: { canOpen: true, threadId: 'thread-A', messageId: 'm-said', occurredAt: Date.now() } },
+    { id: 'entry_2', status: 'active', sourceStatus: 'changed', summary: '旧报价可能已改', quote: '不该再出现的旧原话', recordedAt: Date.now(), source: { canOpen: true, threadId: 'thread-elsewhere', messageId: 'm-2', occurredAt: null } },
+    { id: 'entry_3', status: 'superseded', sourceStatus: 'thread_only', summary: '仅关联对话', source: { canOpen: false, threadId: 'thread-A', occurredAt: null } },
+  ],
+  ...over,
+});
+const recordsFold = (p: { fold: (kind: string) => El }, key = 'matters:matter_1@3') => p.fold('matters').querySelectorAll('details').find(d => d.classList.contains('cx-src') && d.dataset.key === key)!;
+
+test('记忆 › 事项: a third fold after 你的偏好, folded and unread until opened; each matter a card with its words, flags and a 记录 fold; read only; empty, unavailable, partial and no permission each say so without touching the other folds', async () => {
+  let list: () => unknown = () => matterList();
+  const p = memoryPage({
+    'GET /xbot-api/memory/matters': () => list(),
+    'GET /xbot-api/memory/profile': () => ({ kind: 'profile', readStatus: 'ready', entries: [{ id: 'doc', title: '关于你', content: '在上海工作', revision: 'r1', status: 'active', pendingCount: 0 }] }),
+  });
+  await settle();
+  assert.deepEqual(p.root.children.map(e => e.dataset.kind || e.className), ['profile', 'taste', 'matters', 'psec cx-notes'], '关于你, 你的偏好, 事项, then the conversation\'s notes');
+  assert.equal(p.calls.filter(c => c.path.startsWith('/xbot-api/memory')).length, 0, 'nothing is read until a fold opens');
+  await setFold(p.fold('matters'), true);
+  assert.deepEqual(p.calls.filter(c => c.path.startsWith('/xbot-api/memory')).map(c => c.path), ['/xbot-api/memory/matters']);
+  const cards = p.body('matters').querySelectorAll('.cx-entry');
+  assert.equal(cards.length, 2);
+  assert.equal(textOf(cards[0]!.querySelector('.k')!), '搬家准备');
+  assert.equal(textOf(cards[0]!.querySelector('.cx-content')!), '整理租房合同与水电清单');
+  assert.match(textOf(cards[0]!.querySelector('.cx-meta')!), /^更新于 今天 \d\d:\d\d · 部分来源有变化$/);
+  assert.equal(textOf(cards[0]!.querySelector('details')!.firstChild as El), '记录 · 2', 'the fold carries the count: no line saying it again');
+  assert.equal(textOf(cards[1]!.querySelector('.k')!), '旧项目已停用');
+  assert.equal(cards[1]!.querySelector('.cx-content'), null, 'a matter without words gets none put in their place');
+  assert.doesNotMatch(textOf(cards[1]!), /没有内容/);
+  assert.equal(textOf(cards[1]!.querySelector('details')!.firstChild as El), '记录');
+  assert.equal(p.calls.filter(c => c.path.startsWith('/xbot-api/memory/matters/')).length, 0, 'no records read until a 记录 fold opens');
+  // Read only: no edit, confirm, retire, forget, add or delete.
+  assert.deepEqual(all(p.root).filter(e => ['BUTTON', 'TEXTAREA', 'INPUT', 'SELECT', 'FORM'].includes(e.tagName)).map(textOf), []);
+  assert.doesNotMatch(textOf(p.root), /编辑|确认修改|遗忘|忘记|添加|删除/);
+
+  list = () => matterList({ entries: [] });
+  await setFold(p.fold('matters'), false);
+  await setFold(p.fold('matters'), true);
+  assert.equal(textOf(p.body('matters')), '还没有保存的事项。');
+  // The engine's matters switched off: the server says unavailable, never "nothing saved"; 关于你 still reads.
+  list = () => ({ kind: 'matters', readStatus: 'unavailable', entries: [] });
+  await setFold(p.fold('matters'), false);
+  await setFold(p.fold('matters'), true);
+  assert.match(textOf(p.body('matters')), /^暂时读不到，这不代表没有内容。\s?重试$/);
+  await setFold(p.fold('profile'), true);
+  assert.match(textOf(p.body('profile')), /在上海工作/);
+  list = () => matterList({ readStatus: 'partial' });
+  button(p.body('matters'), '重试').click();
+  await settle();
+  assert.match(textOf(p.body('matters')), /^部分内容暂时读不到，下面只显示读到的部分。\s?重试搬家准备/);
+
+  const q = memoryPage({ 'GET /xbot-api/memory/matters': () => { throw failure(403, 'forbidden'); } });
+  await setFold(q.fold('matters'), true);
+  assert.match(textOf(q.body('matters')), /^没有权限读取：没有权限读取。\s?重试$/);
+  assert.deepEqual([...p.posts(), ...q.posts()], [], 'nothing but reads');
+});
+
+test('记忆 › 事项: 加载更多 reads the next page once, appends it in place and keeps focus; a page asked for before the list was read again is dropped; a cursor the server no longer knows reads from the start', async () => {
+  const later: Array<ReturnType<typeof deferred>> = [];
+  let next: (path: string) => unknown = () => { const d = deferred(); later.push(d); return d.promise; };
+  let first: () => unknown = () => matterList({ nextCursor: 'c2' });
+  const p = memoryPage({ 'GET /xbot-api/memory/matters': (path) => (path.includes('cursor=') ? next(path) : first()) });
+  await setFold(p.fold('matters'), true);
+  const more = () => button(p.body('matters'), '加载更多');
+  const titles = () => p.body('matters').querySelectorAll('.cx-entry').map(c => textOf(c.querySelector('.k')!));
+  const paged = () => p.calls.filter(c => c.path.includes('cursor='));
+  more().focus();
+  more().click();
+  await settle();
+  const busy = button(p.body('matters'), '正在读取…');
+  same(p.doc.activeElement, busy, 'focus stays where 加载更多 was');
+  busy.click();
+  await settle();
+  assert.deepEqual(paged().map(c => c.path), ['/xbot-api/memory/matters?cursor=c2'], 'one request at a time');
+  later[0]!.resolve({ kind: 'matters', readStatus: 'ready', entries: [{ id: 'matter_2', title: '旧项目（又一次）', revision: 1, status: 'retired' }, { id: 'matter_3', title: '体检预约', content: '', revision: 2, status: 'active', entryCount: 1 }], nextCursor: 'c3' });
+  await settle();
+  assert.deepEqual(titles(), ['搬家准备', '旧项目已停用', '体检预约'], 'appended after what was listed, nothing listed twice');
+  same(p.doc.activeElement, more(), 'focus stays on 加载更多 while there is more');
+  more().click();
+  await settle();
+  assert.equal(paged().at(-1)!.path, '/xbot-api/memory/matters?cursor=c3');
+  later[1]!.resolve({ kind: 'matters', readStatus: 'ready', entries: [{ id: 'matter_4', title: '报税', revision: 1, status: 'active', entryCount: 0 }] });
+  await settle();
+  assert.deepEqual(titles(), ['搬家准备', '旧项目已停用', '体检预约', '报税']);
+  assert.deepEqual(buttons(p.body('matters'), '加载更多'), [], 'the last page: nothing more to load');
+  same(p.doc.activeElement, p.body('matters').querySelectorAll('.cx-entry')[3], 'focus moves to the first matter the last page brought');
+
+  // The list read again while a page is on its way: that page is not appended to the new list.
+  await setFold(p.fold('matters'), false);
+  await setFold(p.fold('matters'), true);
+  more().click();
+  await settle();
+  await setFold(p.fold('matters'), false);
+  await setFold(p.fold('matters'), true);
+  later[2]!.resolve({ kind: 'matters', readStatus: 'ready', entries: [{ id: 'matter_9', title: '过期的一页', revision: 1, status: 'active' }] });
+  await settle();
+  assert.deepEqual(titles(), ['搬家准备', '旧项目已停用']);
+  assert.equal(textOf(more()), '加载更多');
+  // Read again and failed while a page was on its way: the last list stays, and so does a working 加载更多.
+  more().click();
+  await settle();
+  first = () => { throw failure(500, '服务出了点问题，请稍后再试。'); };
+  await setFold(p.fold('matters'), false);
+  await setFold(p.fold('matters'), true);
+  later[3]!.resolve({ kind: 'matters', readStatus: 'ready', entries: [{ id: 'matter_8', title: '也过期了', revision: 1, status: 'active' }] });
+  await settle();
+  assert.match(textOf(p.body('matters')), /^刷新没有成功，显示的是上次读取的结果。\s?重试搬家准备/);
+  assert.deepEqual(titles(), ['搬家准备', '旧项目已停用']);
+  assert.equal(textOf(more()), '加载更多', 'not left reading forever');
+  first = () => matterList({ nextCursor: 'c2' });
+
+  next = () => { throw failure(400, '分页位置已失效，请重新读取'); };
+  more().click();
+  await settle();
+  assert.match(textOf(p.body('matters')), /没能读取更多：分页位置已失效，请重新读取。\s?重新读取$/);
+  assert.deepEqual(titles(), ['搬家准备', '旧项目已停用'], 'what was read stays');
+  const lists = p.calls.filter(c => c.path === '/xbot-api/memory/matters').length;
+  button(p.body('matters'), '重新读取').click();
+  await settle();
+  assert.equal(p.calls.filter(c => c.path === '/xbot-api/memory/matters').length, lists + 1, 'read again from the first page');
+  assert.equal(textOf(more()), '加载更多');
+  assert.deepEqual(p.posts(), []);
+});
+
+test('记忆 › 事项: a matter\'s records are read on demand for its revision; the words quoted only while they are what was said; 在对话里查看 only for a message in the conversation open now; a redraw keeps the fold open and focused without reading again', async () => {
+  const p = memoryPage({
+    'GET /xbot-api/memory/matters': () => matterList(),
+    'GET /xbot-api/memory/matters/matter_1': () => matterRecords(),
+  });
+  p.cx.observe(ada, 'thread-A', false);
+  await settle();
+  const said = p.row('m-said', 300);
+  await setFold(p.fold('matters'), true);
+  const detail = () => p.calls.filter(c => c.path.startsWith('/xbot-api/memory/matters/'));
+  assert.equal(detail().length, 0);
+  await setFold(recordsFold(p), true);
+  assert.deepEqual(detail().map(c => c.path), ['/xbot-api/memory/matters/matter_1?expectedRevision=3']);
+  const items = () => recordsFold(p).querySelectorAll('.cx-record');
+  assert.equal(items().length, 3);
+  const [one, two, three] = items() as [El, El, El];
+  assert.equal(textOf(one.querySelector('.cx-record-text')!), '约了周五看房');
+  assert.equal(textOf(one.querySelector('.cx-quote')!), '周五下午两点看房');
+  assert.match(textOf(one.querySelector('.cx-record-meta')!), /^今天 \d\d:\d\d在对话里查看$/);
+  assert.equal(textOf(two.querySelector('.cx-record-text')!), '旧报价可能已改');
+  assert.equal(two.querySelector('.cx-quote'), null, 'a changed source keeps no quote');
+  assert.match(textOf(two.querySelector('.cx-record-meta')!), /^今天 \d\d:\d\d原话已改动$/, 'a message in another conversation is not offered as if it were here');
+  assert.doesNotMatch(textOf(recordsFold(p)), /不该再出现的旧原话/);
+  assert.equal(textOf(three), '仅关联对话旧版', 'a conversation without its message: nothing to open');
+  // 在对话里查看 finds the message in the history.
+  button(one, '在对话里查看').click();
+  await settle();
+  same(p.doc.activeElement, said, 'the message it was said in');
+  assert.ok(said.scrolled > 0);
+
+  // The drawer drawing 记忆 again, in another thread of the same chat: still open and focused, not read again, and
+  // the message is no longer here to open.
+  (recordsFold(p).firstChild as El).focus();
+  p.cx.observe(ada, 'thread-B', false);
+  await settle();
+  p.cx.memoryView(ada, { memory: [{ id: 'note-1', scope: 'conversation', text: '周五前交' }] });
+  assert.equal(recordsFold(p).open, true);
+  same(p.doc.activeElement, recordsFold(p).firstChild, 'the fold\'s summary keeps focus');
+  assert.equal(detail().length, 1, 'a redraw reads nothing again');
+  assert.deepEqual(buttons(recordsFold(p), '在对话里查看'), []);
+  // The owner closing and opening it reads it again.
+  await setFold(recordsFold(p), false);
+  await setFold(recordsFold(p), true);
+  assert.equal(detail().length, 2);
+  assert.deepEqual(all(p.root).filter(e => ['TEXTAREA', 'INPUT', 'SELECT', 'FORM'].includes(e.tagName)), []);
+  assert.deepEqual(p.posts(), []);
+});
+
+test('记忆 › 事项: records that changed (409) or went (404) ask to read the list again; an answer for another revision counts as changed; no permission says so without a retry; any other failure retries', async () => {
+  let rev = 3, detail: () => unknown = () => { throw failure(409, '这条事项已经更新，重新读取后再试'); };
+  const p = memoryPage({
+    'GET /xbot-api/memory/matters': () => matterList({ entries: [{ id: 'matter_1', title: '搬家准备', content: '', revision: rev, status: 'active', entryCount: 1 }] }),
+    'GET /xbot-api/memory/matters/matter_1': () => detail(),
+  });
+  await setFold(p.fold('matters'), true);
+  await setFold(recordsFold(p), true);
+  const body = () => recordsFold(p, 'matters:matter_1@' + rev).querySelector('.cx-src-body')!;
+  assert.match(textOf(body()), /^这条已经更新，重新读取后再看。\s?重新读取$/);
+  const reread = button(body(), '重新读取');
+  rev = 4;
+  detail = () => matterRecords({ matter: { id: 'matter_1', revision: 4 } });
+  reread.click();
+  await settle();
+  assert.equal(p.calls.filter(c => c.path === '/xbot-api/memory/matters').length, 2, 'the list is read again for the new revision');
+  await setFold(recordsFold(p, 'matters:matter_1@4'), true);
+  assert.equal(p.calls.at(-1)!.path, '/xbot-api/memory/matters/matter_1?expectedRevision=4');
+  assert.match(textOf(body()), /约了周五看房/);
+  const reopen = async () => { await setFold(recordsFold(p, 'matters:matter_1@4'), false); await setFold(recordsFold(p, 'matters:matter_1@4'), true); };
+  detail = () => { throw failure(404, '没有找到这条事项，或当前没有权限查看'); };
+  await reopen();
+  assert.match(textOf(body()), /^没有找到这条事项：它可能已经变化。\s?重新读取$/);
+  detail = () => matterRecords({ matter: { id: 'matter_1', revision: 5 } });
+  await reopen();
+  assert.match(textOf(body()), /^这条已经更新，重新读取后再看。\s?重新读取$/, 'records of another revision are not this one\'s');
+  detail = () => { throw failure(403, 'forbidden'); };
+  await reopen();
+  assert.equal(textOf(body()), '没有权限查看详情：没有权限读取。 ');
+  assert.deepEqual(all(body()).filter(e => e.tagName === 'BUTTON'), []);
+  detail = () => { throw failure(503, '事项记忆当前不可用'); };
+  await reopen();
+  assert.match(textOf(body()), /^没能读取详情：事项记忆当前不可用。\s?重试$/);
+  detail = () => matterRecords({ matter: { id: 'matter_1', revision: 4 }, entries: [] });
+  button(body(), '重试').click();
+  await settle();
+  assert.equal(textOf(body()), '还没有记录。');
+  assert.deepEqual(p.posts(), []);
+});
+
+test('记忆 › 事项: a matter\'s 加载更多 reads its next page for the same revision, once; an answer for a fold closed and opened since is dropped; a matter that changed meanwhile shows only that', async () => {
+  const later: Array<ReturnType<typeof deferred>> = [];
+  let page: () => unknown = () => { const d = deferred(); later.push(d); return d.promise; };
+  const p = memoryPage({
+    'GET /xbot-api/memory/matters': () => matterList(),
+    'GET /xbot-api/memory/matters/matter_1': (path) => (path.includes('cursor=') ? page() : matterRecords({ nextCursor: 'page-2' })),
+  });
+  await setFold(p.fold('matters'), true);
+  await setFold(recordsFold(p), true);
+  const texts = () => recordsFold(p).querySelectorAll('.cx-record-text').map(textOf);
+  const paged = () => p.calls.filter(c => c.path.includes('cursor='));
+  button(recordsFold(p), '加载更多').focus();
+  button(recordsFold(p), '加载更多').click();
+  await settle();
+  same(p.doc.activeElement, button(recordsFold(p), '正在读取…'), 'focus stays where 加载更多 was');
+  button(recordsFold(p), '正在读取…').click();
+  await settle();
+  assert.deepEqual(paged().map(c => c.path), ['/xbot-api/memory/matters/matter_1?expectedRevision=3&cursor=page-2'], 'one request, for the same revision');
+  later[0]!.resolve(matterRecords({ entries: [
+    { id: 'entry_3', status: 'superseded', sourceStatus: 'thread_only', summary: '仅关联对话（又一次）', source: { canOpen: false, occurredAt: null } },
+    { id: 'entry_4', status: 'active', sourceStatus: 'unknown', summary: '第二页的记录', source: { canOpen: false, occurredAt: null } },
+  ] }));
+  await settle();
+  assert.deepEqual(texts(), ['约了周五看房', '旧报价可能已改', '仅关联对话', '第二页的记录']);
+  assert.deepEqual(buttons(recordsFold(p), '加载更多'), []);
+  same(p.doc.activeElement, recordsFold(p).querySelectorAll('.cx-record')[3], 'focus moves to the first record the last page brought');
+
+  // Closed and opened while a page is on its way: that page is dropped.
+  await setFold(recordsFold(p), false);
+  await setFold(recordsFold(p), true);
+  button(recordsFold(p), '加载更多').click();
+  await settle();
+  await setFold(recordsFold(p), false);
+  await setFold(recordsFold(p), true);
+  later[1]!.resolve(matterRecords({ entries: [{ id: 'entry_9', status: 'active', sourceStatus: 'unknown', summary: '过期的一页', source: { canOpen: false, occurredAt: null } }] }));
+  await settle();
+  assert.deepEqual(texts(), ['约了周五看房', '旧报价可能已改', '仅关联对话']);
+
+  page = () => { throw failure(400, '分页位置已失效，请重新读取'); };
+  button(recordsFold(p), '加载更多').click();
+  await settle();
+  assert.match(textOf(recordsFold(p)), /没能读取更多：分页位置已失效，请重新读取。\s?重新读取$/);
+  assert.equal(texts().length, 3, 'what was read stays');
+  const firsts = () => p.calls.filter(c => c.path === '/xbot-api/memory/matters/matter_1?expectedRevision=3').length;
+  const before = firsts();
+  button(recordsFold(p), '重新读取').click();
+  await settle();
+  assert.equal(firsts(), before + 1, 'read again from the first page');
+
+  page = () => { throw failure(409, '这条事项已经更新，重新读取后再试'); };
+  button(recordsFold(p), '加载更多').click();
+  await settle();
+  assert.match(textOf(recordsFold(p).querySelector('.cx-src-body')!), /^这条已经更新，重新读取后再看。\s?重新读取$/, 'records of an older revision are not left as if current');
+  assert.deepEqual(p.posts(), []);
+});
+
+// Review r1 (Codex), item 1: an edited source message does not move the matter's revision (only its sourceStatus
+// and the list's summaryStatus change), so records kept by matter and revision would keep words no longer said.
+test('记忆 › 事项, review r1: reading the list again lets go of every matter\'s records — an open 记录 fold closes and reads afresh when opened, so a quote whose message was edited since is not left on screen; the list\'s 加载更多 keeps an open fold as it is, unread', async () => {
+  let records: () => unknown = () => matterRecords();
+  const p = memoryPage({
+    'GET /xbot-api/memory/matters': (path) => (path.includes('cursor=')
+      ? { kind: 'matters', readStatus: 'ready', entries: [{ id: 'matter_3', title: '体检预约', content: '', revision: 2, status: 'active', entryCount: 1 }] }
+      : matterList({ nextCursor: 'c2' })),
+    'GET /xbot-api/memory/matters/matter_1': () => records(),
+  });
+  await setFold(p.fold('matters'), true);
+  await setFold(recordsFold(p), true);
+  const detail = () => p.calls.filter(c => c.path.startsWith('/xbot-api/memory/matters/'));
+  assert.match(textOf(recordsFold(p)), /周五下午两点看房/);
+  // The next page of the list: the fold stays open with what it read, and is not read again.
+  button(p.body('matters'), '加载更多').click();
+  await settle();
+  assert.equal(p.body('matters').querySelectorAll('.cx-entry').length, 3);
+  assert.equal(recordsFold(p).open, true);
+  assert.match(textOf(recordsFold(p)), /周五下午两点看房/);
+  assert.equal(detail().length, 1, 'a page of the list reads no records again');
+  // The message the quote came from is edited: same matter, same revision; its source is no longer what was said.
+  records = () => matterRecords({ entries: [
+    { id: 'entry_1', status: 'active', sourceStatus: 'changed', summary: '约了周五看房', quote: '周五下午两点看房', recordedAt: 1500, source: { canOpen: true, threadId: 'thread-A', messageId: 'm-said', occurredAt: Date.now() } },
+  ] });
+  await setFold(p.fold('matters'), false);
+  await setFold(p.fold('matters'), true);
+  assert.equal(recordsFold(p).open, false, 'what the fold held was read before the list was');
+  assert.doesNotMatch(textOf(p.body('matters')), /周五下午两点看房/);
+  assert.equal(detail().length, 1, 'nothing read until the owner opens it');
+  await setFold(recordsFold(p), true);
+  assert.equal(detail().length, 2);
+  assert.doesNotMatch(textOf(recordsFold(p)), /周五下午两点看房/);
+  assert.match(textOf(recordsFold(p).querySelector('.cx-record-meta')!), /原话已改动$/);
+  assert.deepEqual(p.posts(), []);
+});
+
+// Review r1, item 2: records let go of and read again for the same matter and revision start a new request; an
+// answer to the earlier one, arriving late, must not count as the new one's.
+test('记忆 › 事项, review r1: a late answer for records read before they were let go never lands on the fold read since, even for the same matter and revision', async () => {
+  const later: Array<ReturnType<typeof deferred>> = [];
+  let list: () => unknown = () => matterList();
+  const p = memoryPage({
+    'GET /xbot-api/memory/matters': () => list(),
+    'GET /xbot-api/memory/matters/matter_1': () => { const d = deferred(); later.push(d); return d.promise; },
+  });
+  await setFold(p.fold('matters'), true);
+  await setFold(recordsFold(p), true);
+  // The matter leaves the list and comes back as it was: what was read for it is let go.
+  list = () => matterList({ entries: [matterList().entries[1]] });
+  await setFold(p.fold('matters'), false);
+  await setFold(p.fold('matters'), true);
+  list = () => matterList();
+  await setFold(p.fold('matters'), false);
+  await setFold(p.fold('matters'), true);
+  await setFold(recordsFold(p), true);
+  assert.equal(later.length, 2);
+  later[1]!.resolve(matterRecords({ entries: [{ id: 'entry_7', status: 'active', sourceStatus: 'unknown', summary: '新读到的记录', source: { canOpen: false, occurredAt: null } }] }));
+  await settle();
+  assert.equal(textOf(recordsFold(p).querySelector('.cx-src-body')!), '新读到的记录');
+  later[0]!.resolve(matterRecords());
+  await settle();
+  assert.equal(textOf(recordsFold(p).querySelector('.cx-src-body')!), '新读到的记录', 'the earlier answer is dropped');
+  assert.doesNotMatch(textOf(p.body('matters')), /约了周五看房|周五下午两点看房/);
+});
+
+// Review r1, item 3: the list may not say it, while the records (or a later page of them) do.
+test('记忆 › 事项, review r1: records saying some of their sources changed put 部分来源有变化 on the matter\'s card, though the list did not say so; a later page saying so counts too', async () => {
+  let page: () => unknown = () => matterRecords({ entries: [] });
+  const p = memoryPage({
+    'GET /xbot-api/memory/matters': () => matterList({ entries: [
+      { id: 'matter_1', title: '搬家准备', content: '', revision: 3, status: 'active', entryCount: 4, updatedAt: Date.now() },
+      { id: 'matter_2', title: '旧项目', content: '', revision: 1, status: 'active', entryCount: 1 },
+    ] }),
+    'GET /xbot-api/memory/matters/matter_1': (path) => (path.includes('cursor=') ? page() : matterRecords({ nextCursor: 'page-2' })),
+    'GET /xbot-api/memory/matters/matter_2': () => matterRecords({ matter: { id: 'matter_2', revision: 1, status: 'active', summaryStatus: 'sources_changed' } }),
+  });
+  await setFold(p.fold('matters'), true);
+  const meta = (i: number) => p.body('matters').querySelectorAll('.cx-entry')[i]!.querySelector('.cx-meta');
+  assert.equal(meta(1), null, 'nothing said before its records are read');
+  await setFold(recordsFold(p, 'matters:matter_2@1'), true);
+  assert.equal(textOf(meta(1)!), '部分来源有变化');
+  await setFold(recordsFold(p), true);
+  assert.match(textOf(meta(0)!), /^更新于 今天 \d\d:\d\d$/);
+  page = () => matterRecords({ matter: { id: 'matter_1', revision: 3, status: 'active', summaryStatus: 'sources_changed' }, entries: [{ id: 'entry_4', status: 'active', sourceStatus: 'changed', summary: '第二页的记录', source: { canOpen: false, occurredAt: null } }] });
+  button(recordsFold(p), '加载更多').click();
+  await settle();
+  assert.match(textOf(meta(0)!), /^更新于 今天 \d\d:\d\d · 部分来源有变化$/);
+  assert.equal(recordsFold(p).open, true);
+});
+
+// Review r1, item 4: a last page that brings nothing new leaves no new first item and no 加载更多 to keep focus on.
+test('记忆 › 事项, review r1: 加载更多 whose last page brings nothing new hands focus to what is still there — the list\'s 重试 when some could not be read, else the last matter\'s 记录, else 事项; under a matter, its own 记录, never another matter\'s', async () => {
+  let last: () => unknown = () => ({ kind: 'matters', readStatus: 'unavailable', entries: [] });
+  let first: () => unknown = () => matterList({ nextCursor: 'c2' });
+  const p = memoryPage({ 'GET /xbot-api/memory/matters': (path) => (path.includes('cursor=') ? last() : first()) });
+  const more = async () => { const b = button(p.body('matters'), '加载更多'); b.focus(); b.click(); await settle(); };
+  const reread = async () => { await setFold(p.fold('matters'), false); await setFold(p.fold('matters'), true); };
+  await setFold(p.fold('matters'), true);
+  // Nothing more could be read: the line saying so takes focus with its 重试.
+  await more();
+  assert.match(textOf(p.body('matters')), /^部分内容暂时读不到，下面只显示读到的部分。\s?重试/);
+  same(p.doc.activeElement, button(p.body('matters'), '重试'), 'the 重试 of what could not be read');
+  // Only matters already listed: the last one's 记录.
+  last = () => ({ kind: 'matters', readStatus: 'ready', entries: [{ id: 'matter_2', title: '旧项目（又一次）', revision: 1, status: 'retired' }] });
+  await reread();
+  await more();
+  assert.deepEqual(buttons(p.body('matters'), '重试'), []);
+  same(p.doc.activeElement, recordsFold(p, 'matters:matter_2@1').firstChild, 'the last matter\'s 记录');
+  // No matter at all: 事项 itself.
+  first = () => matterList({ entries: [], nextCursor: 'c2' });
+  last = () => ({ kind: 'matters', readStatus: 'ready', entries: [] });
+  await reread();
+  await more();
+  assert.equal(textOf(p.body('matters')), '还没有保存的事项。');
+  same(p.doc.activeElement, p.fold('matters').firstChild, '事项');
+
+  // Under a matter: its own 记录, though another matter's records are open above it.
+  let records: () => unknown = () => matterRecords({ entries: [{ id: 'entry_3', status: 'superseded', sourceStatus: 'thread_only', summary: '仅关联对话（又一次）', source: { canOpen: false, occurredAt: null } }] });
+  const q = memoryPage({
+    'GET /xbot-api/memory/matters': () => matterList({ entries: [
+      { id: 'matter_2', title: '旧项目', content: '', revision: 1, status: 'active', entryCount: 1 },
+      { id: 'matter_1', title: '搬家准备', content: '', revision: 3, status: 'active', entryCount: 4 },
+    ] }),
+    'GET /xbot-api/memory/matters/matter_2': () => matterRecords({ matter: { id: 'matter_2', revision: 1 }, nextCursor: 'other' }),
+    'GET /xbot-api/memory/matters/matter_1': (path) => (path.includes('cursor=') ? records() : matterRecords({ nextCursor: 'page-2' })),
+  });
+  await setFold(q.fold('matters'), true);
+  await setFold(recordsFold(q, 'matters:matter_2@1'), true);
+  await setFold(recordsFold(q), true);
+  const moreRecords = async () => { const b = button(recordsFold(q), '加载更多'); b.focus(); b.click(); await settle(); };
+  await moreRecords();
+  assert.deepEqual(recordsFold(q).querySelectorAll('.cx-record-text').map(textOf), ['约了周五看房', '旧报价可能已改', '仅关联对话']);
+  same(q.doc.activeElement, recordsFold(q).firstChild, 'its own 记录');
+  // The next page found the matter changed: only that is left, and focus stays with this matter.
+  await setFold(recordsFold(q), false);
+  await setFold(recordsFold(q), true);
+  records = () => { throw failure(409, '这条事项已经更新，重新读取后再试'); };
+  await moreRecords();
+  assert.match(textOf(recordsFold(q).querySelector('.cx-src-body')!), /^这条已经更新，重新读取后再看。\s?重新读取$/);
+  same(q.doc.activeElement, recordsFold(q).firstChild, 'still this matter\'s 记录');
+  assert.equal(recordsFold(q, 'matters:matter_2@1').open, true);
 });
 
 test('这个对话的便笺 is read only like the rest of 记忆: no add or delete; a failed read says so and retries, never "no notes"; a group shows no owner records', async () => {

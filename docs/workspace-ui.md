@@ -64,9 +64,11 @@
 
 整个「记忆」入口只读：不提供任何写操作（编辑、确认、停用、遗忘、添加、删除）。
 
-- 单聊「记忆」页：默认收起的「关于你」「你的偏好」，展开才读取；条目按原生内容原样显示，`pendingCount` 只写「另有 N 条待确认的修改，确认前不算已保存，也不在上面的内容里」，停用条目排后并标注。失败、没有权限、部分可读、暂时读不到、接口未开放与真的为空各有说法，失败从不显示为「还没有」。每条「来源」展开才带 `revision` 读取；409 提示「这条已经更新，重新读取后再看来源」。没有任何编辑、确认、停用或遗忘按钮。
+- 单聊「记忆」页：默认收起的「关于你」「你的偏好」「事项」（依次排列，下面是「这个对话的便笺」），展开才读取；「关于你」「你的偏好」的条目按原生内容原样显示，`pendingCount` 只写「另有 N 条待确认的修改，确认前不算已保存，也不在上面的内容里」，停用条目排后并标注。失败、没有权限、部分可读、暂时读不到、接口未开放与真的为空各有说法，失败从不显示为「还没有」。每条「来源」展开才带 `revision` 读取；409 提示「这条已经更新，重新读取后再看来源」。没有任何编辑、确认、停用或遗忘按钮。
+- 「事项」（原生事项记忆，2026-11-28，[xbot-frontend.md](xbot-frontend.md) 第 62 项）：展开才 `GET /xbot-api/memory/matters`。每个事项一张卡片（与上面的条目同一种卡片）：标题，停用的标「已停用」、状态读不出的标「状态未知」；有说明才显示说明，没有说明不补「（没有内容）」；下面一行淡字「更新于 时间」，目录或这个事项读到的记录标出来源有变化时接「· 部分来源有变化」。卡片里默认收起的「记录 · N」（条数为 0 或未给出时只写「记录」，条数不在别处重复），展开才带这一版的 `expectedRevision` 读取 `GET /xbot-api/memory/matters/:id`；重绘时保持展开和焦点、不重读（目录的「加载更多」也一样），主人收起再展开才重读；目录重读后所有「记录」收起、之前读到的记录不留，再展开即重读（原话所在的消息改过时事项的版本不变，留着就会显示已经不是原话的引用）。每条记录：记下的内容；来源仍是原话（`sourceStatus: 'current'`）时下面是一小块引用的原话；来源改过时不显示旧原话，只淡淡写「原话已改动」；时间（说这句话的时间，没有时用记下的时间）；`superseded` 标「旧版」、`retired` 标「已停用」；来源是当前打开的对话里的一条消息时才有「在对话里查看」（定位并聚焦那条消息），别的对话或只有对话没有消息的不给。没有记录写「还没有记录。」。目录或记录有下一页（`nextCursor`）时，列表末尾一个「加载更多」：一次只发一个请求，读取中按钮写「正在读取…」，读到的接在后面（已列出的不重复、不重排）；焦点留在按钮上，没有下一页时移到新读到的第一项；最后一页没有读到新的时，目录移到列表上面那行提示的「重试」，没有这行时移到最后一个事项的「记录」，一个事项也没有时移到「事项」；记录移到这个事项自己的「记录」。目录重读、记录收起再展开之后，之前那一页的应答一律丢弃。
+- 「事项」的说法：读到为空写「还没有保存的事项。」；引擎没有开启事项记忆（服务端答 `readStatus: 'unavailable'`）写「暂时读不到，这不代表没有内容。」加「重试」，不影响「关于你」「你的偏好」；部分读到、没有权限、读取失败与上面两组相同。记录：409 写「这条已经更新，重新读取后再看。」，应答是另一版时也这样说；404 写「没有找到这条事项：它可能已经变化。」，两种都给「重新读取」（重读目录，新一版的「记录」收起，再展开即读新一版）；401／403 写「没有权限查看详情：原因。」，不给重试；其余写「没能读取详情：原因。」加「重试」。「加载更多」失败写「没能读取更多：原因。」加「重试」，原生不再认得这一页（400）时按钮是「重新读取」，从第一页读起；读下一页时事项已经更新或不在了，只显示上面那句，不留旧一版的记录。
 - 「这个对话的便笺」：原会话便笺，与原便笺界面一样只读，没有输入框、添加或删除。抽屉自带便笺时直接显示；没带时 `GET` 读取一次，失败写「便笺没能读取：原因。这不代表没有便笺。」加「重试」（再次失败时焦点留在「重试」，抽屉重绘不自动重读），读到为空才写「这个对话还没有便笺。」。提示「便笺只属于这个对话，换到别的对话不会带过去。」
-- 群聊「记忆」页只写「群聊没有可查看的记忆。关于你的资料和偏好，在和猫猫的单聊里查看。」，不读取 owner 资料，也不承诺「说记住就会出现」。
+- 群聊「记忆」页只写「群聊没有可查看的记忆。关于你的资料和偏好，在和猫猫的单聊里查看。」，不读取 owner 资料和事项，也不承诺「说记住就会出现」。
 
 ## 用到的接口
 
@@ -74,7 +76,7 @@
 
 第 32 项另用到：`GET <scope>/approvals`、`POST <scope>/approvals/:id`、`POST <scope>/messages/:messageId/blocks/:blockId/answer`，以及会话行的 `blocks`、`blocks_hidden`、`ended`、`notice`。
 
-`GET <scope>/activity`、`POST <scope>/read`、`GET /xbot-api/bots/status`（`thread_id`、`activity`、`groups`）、`GET /xbot-api/memory/profile|taste`、`GET /xbot-api/memory/:kind/:id/source?revision=…`、`GET /xbot-api/bots/:name/memory`（便笺，只读；服务端原有的 `POST`／`DELETE` 路由保留，前端不调用）；`GET <scope>/workspace`（只用 `threadId`、`workspacePath`、`sharedPath`；`defaultRoot`、`filePolicy` 等字段不显示、不据此声明）；`GET /xbot-api/bots/:name/conversations`、`PUT /xbot-api/bots/:name/conversation`；`GET/POST <scope>/files`、`GET <scope>/workspace-tree`、`POST <scope>/deliverables`；`GET /xbot-api/files/:id/download`（含 HEAD 探测）、`/preview`、`/image`；`GET <scope>/tasks`、`POST <scope>/tasks/:id/handoff`、`POST <scope>/tasks/:id/control`；既有的 `POST <scope>/messages` 与 `POST /xbot-api/groups`。`<scope>` 为 `/xbot-api/bots/:name` 或 `/xbot-api/groups/:id`。下载链接、图片地址都按文件 ID 自行拼出，不直接使用服务端返回的 URL。前端不再调用 `/xbot-api/projects`、`PUT <scope>/workspace`、`POST <scope>/tasks` 与 `PATCH <scope>/tasks/:id`（服务端兼容接口另行保留或退役）。
+`GET <scope>/activity`、`POST <scope>/read`、`GET /xbot-api/bots/status`（`thread_id`、`activity`、`groups`）、`GET /xbot-api/memory/profile|taste`、`GET /xbot-api/memory/:kind/:id/source?revision=…`、`GET /xbot-api/memory/matters`（下一页带 `?cursor=…`）、`GET /xbot-api/memory/matters/:id?expectedRevision=…`（下一页另带 `&cursor=…`）、`GET /xbot-api/bots/:name/memory`（便笺，只读；服务端原有的 `POST`／`DELETE` 路由保留，前端不调用）；`GET <scope>/workspace`（只用 `threadId`、`workspacePath`、`sharedPath`；`defaultRoot`、`filePolicy` 等字段不显示、不据此声明）；`GET /xbot-api/bots/:name/conversations`、`PUT /xbot-api/bots/:name/conversation`；`GET/POST <scope>/files`、`GET <scope>/workspace-tree`、`POST <scope>/deliverables`；`GET /xbot-api/files/:id/download`（含 HEAD 探测）、`/preview`、`/image`；`GET <scope>/tasks`、`POST <scope>/tasks/:id/handoff`、`POST <scope>/tasks/:id/control`；既有的 `POST <scope>/messages` 与 `POST /xbot-api/groups`。`<scope>` 为 `/xbot-api/bots/:name` 或 `/xbot-api/groups/:id`。下载链接、图片地址都按文件 ID 自行拼出，不直接使用服务端返回的 URL。前端不再调用 `/xbot-api/projects`、`PUT <scope>/workspace`、`POST <scope>/tasks` 与 `PATCH <scope>/tasks/:id`（服务端兼容接口另行保留或退役）。
 
 ## 已知限制
 

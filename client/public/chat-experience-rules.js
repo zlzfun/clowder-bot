@@ -178,7 +178,7 @@
   }
 
   // ---- Read-only long-term memory ----
-  const MEMORY = { profile: "关于你", taste: "你的偏好" };
+  const MEMORY = { profile: "关于你", taste: "你的偏好", matters: "事项" };
   // GET /xbot-api/memory/profile|taste, checked. Entries keep the native
   // order, retired ones after the rest. pendingCount is the number of
   // proposed changes not yet confirmed: they are never part of the content.
@@ -205,6 +205,69 @@
       .filter((s) => s.label || s.occurredAt);
     return { status, sources: list };
   }
+  // ---- 事项 (native matters), read only ----
+  // GET /xbot-api/memory/matters, checked: the native order as it is (pages
+  // are appended, never re-sorted, so 加载更多 moves nothing already shown).
+  // revision is the native positive integer, 0 when missing (the detail is
+  // then read without one). entryCount 0 may also mean "not said".
+  const posInt = (v) => (Number.isSafeInteger(v) && v > 0 ? v : 0);
+  const cursor = (v) => (typeof v === "string" && v ? v : "");
+  function matters(data) {
+    if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+    const seen = new Set();
+    const entries = (Array.isArray(data.entries) ? data.entries : [])
+      .filter((e) => e && typeof e === "object" && typeof e.id === "string" && e.id && !seen.has(e.id) && seen.add(e.id))
+      .map((e) => ({
+        id: e.id, title: oneLine(e.title), content: str(e.content).replace(/\r\n?/g, "\n").trim(),
+        revision: posInt(e.revision),
+        status: e.status === "active" || e.status === "retired" ? e.status : "unknown",
+        entryCount: count(e.entryCount) || 0,
+        sourcesChanged: e.summaryStatus === "sources_changed",
+        updatedAt: at(e.updatedAt),
+      }));
+    return { kind: "matters", readStatus: READ.includes(data.readStatus) ? data.readStatus : "unavailable", entries, nextCursor: cursor(data.nextCursor) };
+  }
+  // Two reads in one list: what is listed once stays where it is; a page that
+  // could not read everything makes the whole list partial (or unavailable
+  // while nothing at all was read).
+  const joined = (a, b, n) => (a === "ready" && b === "ready" ? "ready" : n ? "partial" : "unavailable");
+  function moreMatters(list, page) {
+    const have = new Set(list.entries.map((e) => e.id));
+    const entries = [...list.entries, ...page.entries.filter((e) => !have.has(e.id))];
+    return { ...list, readStatus: joined(list.readStatus, page.readStatus, entries.length), entries, nextCursor: page.nextCursor };
+  }
+  // GET /xbot-api/memory/matters/:id, checked: the matter's records in the
+  // native order. The words quoted are kept only while their source is
+  // current; a changed source keeps no quote. at: when it was said, else when
+  // it was recorded. sourcesChanged: the matter says some of its records'
+  // sources changed (an edited message keeps the revision; only this says it).
+  // null when the answer is not a matter at all.
+  const RECORD = ["active", "superseded", "retired"];
+  const SOURCE = ["current", "changed", "thread_only"];
+  function matter(data) {
+    if (!data || typeof data !== "object" || !data.matter || typeof data.matter !== "object" || typeof data.matter.id !== "string" || !Array.isArray(data.entries)) return null;
+    const seen = new Set();
+    const entries = data.entries
+      .filter((e) => e && typeof e === "object" && typeof e.id === "string" && e.id && !seen.has(e.id) && seen.add(e.id))
+      .map((e) => {
+        const src = e.source && typeof e.source === "object" ? e.source : {};
+        const sourceStatus = SOURCE.includes(e.sourceStatus) ? e.sourceStatus : "unknown";
+        return {
+          id: e.id, status: RECORD.includes(e.status) ? e.status : "unknown", sourceStatus,
+          summary: str(e.summary).replace(/\r\n?/g, "\n").trim(),
+          quote: sourceStatus === "current" ? str(e.quote).replace(/\r\n?/g, "\n").trim() : "",
+          at: at(src.occurredAt) || at(e.recordedAt),
+          canOpen: src.canOpen === true, threadId: str(src.threadId), messageId: str(src.messageId),
+        };
+      });
+    return { id: data.matter.id, revision: posInt(data.matter.revision), sourcesChanged: data.matter.summaryStatus === "sources_changed", entries, nextCursor: cursor(data.nextCursor) };
+  }
+  // Once a page says some sources changed, the records read so far say so.
+  function moreRecords(detail, page) {
+    const have = new Set(detail.entries.map((e) => e.id));
+    return { ...detail, sourcesChanged: !!(detail.sourcesChanged || page.sourcesChanged), entries: [...detail.entries, ...page.entries.filter((e) => !have.has(e.id))], nextCursor: page.nextCursor };
+  }
+
   // A failed memory read in words, by kind of failure. A failure is never an
   // empty memory.
   function memoryError(error) {
@@ -218,6 +281,6 @@
   }
 
   window.ClowderExperienceRules = Object.freeze({
-    KINDS, TAG, SHORT, MEMORY, activity, line, withoutShown, lead, itemText, failureParts, side, readTarget, memory, sources, memoryError, oneLine, unreadText,
+    KINDS, TAG, SHORT, MEMORY, activity, line, withoutShown, lead, itemText, failureParts, side, readTarget, memory, sources, matters, moreMatters, matter, moreRecords, memoryError, oneLine, unreadText,
   });
 })();
