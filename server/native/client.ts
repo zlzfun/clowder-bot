@@ -13,6 +13,7 @@ export class NativeClient implements NativeTransport {
   private closed = false;
   private reconnect?: ReturnType<typeof setTimeout>;
   private listeners = new EventEmitter();
+  private userListeners = new Set<(event: NativeEvent) => void>();
   private rooms = new Map<string, number>();
   private cursors = new Map<string, { seq: number; epoch?: string }>();
   constructor(readonly baseUrl: string, private origin: string, private fetcher: typeof fetch = fetch) {
@@ -126,9 +127,16 @@ export class NativeClient implements NativeTransport {
           else for (const id of this.rooms.keys()) this.listeners.emit(id, { type: 'resync', threadId: id });
         });
       }
+      socket.on('plugin_operation_changed', (payload: unknown) => {
+        const data = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
+        const pluginId = typeof data.pluginId === 'string' && data.pluginId.length > 0 && data.pluginId.length <= 128 ? data.pluginId : undefined;
+        const event: NativeEvent = { type: 'plugin_operation_changed', ...(pluginId ? { pluginId } : {}) };
+        for (const listener of [...this.userListeners]) listener(event);
+      });
       socket.on('disconnect', () => {
-        if (this.closed || !this.rooms.size) return;
+        if (this.closed || (!this.rooms.size && !this.userListeners.size)) return;
         for (const id of this.rooms.keys()) this.listeners.emit(id, { type: 'disconnected', threadId: id });
+        for (const listener of [...this.userListeners]) listener({ type: 'disconnected' });
         this.scheduleReconnect();
       });
       await new Promise<void>((resolve, reject) => {
@@ -137,6 +145,7 @@ export class NativeClient implements NativeTransport {
         socket.once('connect_error', () => { clearTimeout(timeout); reject(new ApiError(503, 'Clowder AI 实时连接失败')); });
         socket.connect();
       });
+      for (const listener of [...this.userListeners]) listener({ type: 'resync' });
       for (const id of this.rooms.keys()) {
         await this.join(id);
         this.listeners.emit(id, { type: 'resync', threadId: id });
@@ -148,7 +157,7 @@ export class NativeClient implements NativeTransport {
     if (this.reconnect) return;
     this.reconnect = setTimeout(() => {
       this.reconnect = undefined;
-      void this.connect().catch(() => { if (!this.closed && this.rooms.size) this.scheduleReconnect(); });
+      void this.connect().catch(() => { if (!this.closed && (this.rooms.size || this.userListeners.size)) this.scheduleReconnect(); });
     }, 1500);
     this.reconnect.unref();
   }
@@ -157,6 +166,7 @@ export class NativeClient implements NativeTransport {
     if (!ack?.ok) throw new ApiError(502, 'Clowder AI 拒绝了这段对话的实时更新');
   }
   async subscribe(threadId: string, listener: (event: NativeEvent) => void): Promise<() => void> {
+    if (this.closed) throw new ApiError(503, 'Bridge is closed');
     const existing = this.rooms.has(threadId);
     this.rooms.set(threadId, (this.rooms.get(threadId) ?? 0) + 1);
     this.listeners.on(threadId, listener);
@@ -164,7 +174,10 @@ export class NativeClient implements NativeTransport {
       this.listeners.off(threadId, listener);
       const count = (this.rooms.get(threadId) ?? 1) - 1;
       if (count) this.rooms.set(threadId, count);
-      else { this.rooms.delete(threadId); this.cursors.delete(threadId); this.socket?.emit('leave_room', `thread:${threadId}`); }
+      else {
+        this.rooms.delete(threadId); this.cursors.delete(threadId); this.socket?.emit('leave_room', `thread:${threadId}`);
+        if (!this.rooms.size && !this.userListeners.size && this.reconnect) { clearTimeout(this.reconnect); this.reconnect = undefined; }
+      }
     };
     try {
       const connected = this.socket?.connected;
@@ -173,10 +186,22 @@ export class NativeClient implements NativeTransport {
       return remove;
     } catch (error) { remove(); throw error; }
   }
+  async subscribeUser(listener: (event: NativeEvent) => void): Promise<() => void> {
+    if (this.closed) throw new ApiError(503, 'Bridge is closed');
+    this.userListeners.add(listener);
+    const remove = () => {
+      this.userListeners.delete(listener);
+      if (!this.rooms.size && !this.userListeners.size && this.reconnect) { clearTimeout(this.reconnect); this.reconnect = undefined; }
+    };
+    try {
+      await this.connect();
+      return remove;
+    } catch (error) { remove(); throw error; }
+  }
   async close(): Promise<void> {
     this.closed = true;
     clearTimeout(this.reconnect);
     this.socket?.disconnect(); this.socket?.removeAllListeners();
-    this.listeners.removeAllListeners(); this.rooms.clear();
+    this.listeners.removeAllListeners(); this.userListeners.clear(); this.rooms.clear();
   }
 }

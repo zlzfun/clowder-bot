@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { ApiError } from '../errors.js';
 import type { ProductStore } from '../product-store.js';
-import type { NativeCat, NativeTransport } from './types.js';
+import type { NativeCat, NativeEvent, NativeTransport } from './types.js';
 import { computerEntry } from './computer.js';
 import { noIcons, type AppIcons } from './app-icons.js';
 
@@ -65,6 +65,7 @@ export interface AppRow {
   disclosure?: string;
   version?: string;
 }
+export interface WechatAppEvent { appId: 'wechat'; reason: 'operation_changed' | 'resync' }
 
 const oneLine = (value: string) => !/[\0\r\n]/.test(value);
 const few = (value: Record<string, string>) => Object.keys(value).length <= 32;
@@ -525,5 +526,25 @@ export class BotApps {
     if (now.state !== 'on') throw new ApiError(409, now.state === 'starting' ? '还在启动，稍等一下' : '先打开微信这个应用', undefined, 'app_not_on');
     const authorization = await this.action(allow ? 'arm' : 'disarm');
     return { ...now, authorization };
+  }
+  /** Subscribes to native user-room `plugin_operation_changed` events for 微信 (install/update/uninstall transitions, plus resync after disconnect). */
+  async subscribeWechatEvents(listener: (event: WechatAppEvent) => void): Promise<() => void> {
+    if (this.platform !== 'darwin' || !this.native.subscribeUser) return () => {};
+    let sawDisconnect = false, active = false;
+    const release = await this.native.subscribeUser(event => {
+      if (!active) return;
+      if (event.type === 'disconnected') { sawDisconnect = true; return; }
+      if (event.type === 'resync') {
+        if (!sawDisconnect) return;
+        sawDisconnect = false;
+        listener({ appId: 'wechat', reason: 'resync' });
+        return;
+      }
+      if (event.type === 'plugin_operation_changed' && event.pluginId === WECHAT_PLUGIN) {
+        listener({ appId: 'wechat', reason: 'operation_changed' });
+      }
+    });
+    active = true;
+    return release;
   }
 }

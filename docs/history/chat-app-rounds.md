@@ -281,6 +281,15 @@
 
 **前端**：已完成并合入（第 64 项，`da5f4ffd`）：由本机 Claude Code（`claude-opus-5-5`，xhigh）实现。`chat-cards*` 支持自适应图集与看图器焦点归位、音频播放器与转写正文、多列网格卡片及方向键导航、不发聊天消息的直接动作回调与原位附言、重启/睡眠接续胶囊；`chat-experience*` 在单聊空闲且缓存过期时安静提示「隔了一阵，下一句可能慢一点」。经过 Codex（`gpt-6-astra`，xhigh）两轮只读检视，4 条问题全部修正。全量测试通过。
 
+<a id="round-27"></a>
+### 第 27 轮 · 应用插件前提实测与微信状态事件订阅（2026-11-28）
+
+**内容**：完成待办 `T-39`。在固定提交 `fe632f8f` 的隔离运行时上逐条实测 `CAT_CAFE_DEPLOYMENT_ID=clowder-bot` 下插件 MCP 投递的四项前提（确认插件技能不挂载、能力表不落盘、且 `pluginMcpExposureProject` 要求会话目录严格等于根工作区而 Bot 单聊/群聊位于 `workspace/cats|groups/*` 子目录，故自定义应用走外部 MCP 登记的 `A003` 前提依然成立），并接入原生 `plugin_operation_changed` 用户房间事件推送微信状态重读。
+
+**后端（适配层）**：已完成并合入（`724d64c5`）：`server/native/client.ts` 新增 `subscribeUser` 订阅 `user:<privateUserId>` 房间的 `plugin_operation_changed` 与断线重连 `resync`（在会话房间重连前立即广播以免被慢房间阻塞）；`server/xbot/apps.ts` 新增 `GET /xbot-api/apps/events` SSE 流，对 `official.wechat-visible-reader` 推送状态变更与重连信号并随路由关闭清理。详见 [应用](../apps-api.md) 与 [上游维护](../upstream-maintenance.md) `A003`。
+
+**前端**：已完成并合入（第 67 项，`88c03108`）：由本机 Claude Code（`claude-opus-5-5`，xhigh）实现。`apps-dialog.js` 仅在「应用」弹窗打开期间建立 `EventSource('/xbot-api/apps/events')`、关闭弹窗即断开，合并重读微信状态并严格让位给在途写操作，恢复正常读取时自动收起先前的读取错误提示。经过 Codex（`gpt-6-astra`，xhigh）只读检视，2 条问题全部修正。全量 963 项测试（959 通过，4 项按原因跳过）通过。
+
 ## 部署记录
 
 部署的做法在 [验证环境与部署](../operations.md)。第 17、18 轮的部署、2026-11-26 日常实例换引擎和 2026-11-27 部署「同一时间只有一只猫」只写在上面各轮自己的记录里，换引擎的经过另见 [上游维护记录](upstream-records.md)。

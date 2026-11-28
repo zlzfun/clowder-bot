@@ -68,7 +68,7 @@
 | P006 | `patches/0006-bot-schedules.patch` | 由 `CAT_CAFE_BOT_SCHEDULES=1` 启用：schedule 列表补充 reminder 归属、正文、版本与调度器就绪状态；owner 创建接受 UUID 并在原生定义表及审计事务去重；Bot 一次任务结束/错过后保留 disabled 定义和线程账本，拒绝恢复过期计划；通过原生原子 private input 投递完整任务正文。未新增调度器或存储。原先还把可选插件的激活挪到调度器启动之后，2026-11-26 退掉：上游已把插件激活移出启动路径。共 7 文件。 | 上游提供同等字段、幂等、历史保留、正文投递后删除。 |
 | A002 | `server/product-store.ts` | 只保存 UI 元数据和原生引用；单进程原子写。 | 官方插件提供产品配置持久化时替换此存储。 |
 | D001 | `scripts/start-runtime.mjs`、`scripts/prepare-upstream.mjs` | 独立配置/数据/workspace/Redis/API/指标端口、专属 cookie/userId；用上游 bootstrap 生成 MCP。避免与用户现有 Clowder 实例串线。构建目录是数据目录里偏好仓库的链接工作树（见「偏好仓库」），数据默认在检出之外（见「数据位置」）。 | 官方嵌入部署或插件生命周期接管时移除本启动器。 |
-| A003 | `server/native/apps.ts`、`server/xbot/apps.ts` | 应用（2026-11-26）：把上游的外部 MCP 登记（安装、探活、改密钥、删除）和官方插件 `official.wechat-visible-reader` 的启停与授权操作，呈现为「自定义应用」和「微信」。不保存状态与密钥，只在 A002 里保存自定义应用的显示名。上游对安装请求不做校验，校验在适配层；插件操作前先调上游的重置路由，绕开下面「应用依赖的上游行为」里记的缺陷。见 [应用：第一版接口](apps-api.md)。 | 上游修复操作状态的缺陷后去掉动作前的重置；上游让插件的 MCP 与技能在本部署下生效后，应用可改由插件包承载。 |
+| A003 | `server/native/apps.ts`、`server/xbot/apps.ts` | 应用（2026-11-26；2026-11-28 T-39 在 `fe632f8f` 重核）：把上游的外部 MCP 登记（安装、探活、改密钥、全局与按猫开关、删除）和官方插件 `official.wechat-visible-reader` 的启停、授权操作及 `plugin_operation_changed` 订阅（`/xbot-api/apps/events`）呈现为「自定义应用」和「微信」。不保存状态与密钥，只在 A002 里保存自定义应用的显示名。上游对安装请求不做校验，校验在适配层；插件操作前先调上游的重置路由，绕开下面「应用依赖的上游行为」里记的缺陷。见 [应用：第一版接口](apps-api.md)。 | 上游修复操作状态的缺陷后去掉动作前的重置；上游让插件的 MCP（含子目录会话与按猫禁用持久化）与技能在 `clowder-bot` 部署下完整生效后，再评估是否以插件包承载（任意用户自填 stdio/HTTP 外部 MCP 仍需能力登记表）。 |
 | D002 | `computer-driver.lock.json`、`scripts/install-computer-driver.mjs` | 「这台电脑」背后的桌面驱动（cua-driver 自带的已签名应用），固定到一个发布版本，按校验和、签名身份和公证安装到数据目录的 `tools/` 下。不随 Bot 启动，也不由 Bot 看管：驱动的 MCP 入口按需自己拉起后台进程。引擎里只有注册表中的一条登记（见 [接口范围](xbot-api.md)「这台电脑」）。 | 驱动只是暂定的选择（使用者 2026-11-26：「那我们也用cua-driver吧，暂时。」）。之后若并入「应用」，或上游提供自己的桌面能力，按那时的做法迁移。 |
 | U001 | `client/public/app.js`、`runtime.*` | UI 显示原生排队状态、订阅事件、选择原生执行工具；独立面板承接原生特有概念。 | 随 Bot 产品迭代，不向核心反向渗透。 |
 
@@ -135,6 +135,16 @@ cafile=/Users/<你>/.config/node-ca/system-ca.pem
 固定提交在隔离运行时上的实测，与 [应用：第一版接口](apps-api.md) 相关的部分。升级固定提交时逐条重新核对。
 
 2026-11-27：引擎换到 `next` 的 `fe632f8f` 之后重新核对过（读了改动的路由，又在升级后的隔离运行时上从界面走了一遍），下面各条都还成立，适配层没有因此改动。隔离运行时是这一天升级的：旧引擎正常停下后做了冷备份 `~/.clowder-bot-dev.before-fe632f8f-20261127`，旧锁文件留在 `.runtime/dev/upstream.lock.42017e0c.json`，旧构建 `.runtime/clowder-ai-dev` 没有删。
+
+2026-11-28（`fe632f8f`，T-39 重核）：在临时隔离运行时（`.runtime/clowder-ai-fe632f8f` 只读 + `/tmp` 数据目录 + `CAT_CAFE_DEPLOYMENT_ID=clowder-bot`）结合上游源码重核了「应用不走插件包」的四个条件及 `plugin_operation_changed` 事件：
+
+- **重核「插件带的 MCP 与技能到不了猫」的四个条件**：
+  - `CAT_CAFE_DEPLOYMENT_ID=clowder-bot` 下 `allowsImplicitCapabilityWrites` 为 `false`（`persistCapabilities: false`）：插件运行时**不**将 MCP 写入 `capabilities.json`（只保留内存中的激活描述），**不**挂载也不登记技能（`declared-static-resources.ts:127` 直接返回，`.claude/skills`、`.codex/skills` 均未挂载）。同时 `GET /api/capabilities`（无 `projectPath` 或 `projectPath=workspace`）仍投影出该条（`accessManagedByPlugin: true`），`GET /api/capabilities?projectPath=<workspace>/cats/<id>` 返回空，且 `PATCH /api/capabilities` 对该条目返回 **404**（因 `capabilities.json` 中不存在，无法按猫禁用或全局开关）。
+  - 上游在调用时通过 `projectLocalPluginMcpCapabilities`（`plugin-mcp-exposure.ts:39-92`、`invoke-single-cat.ts:1552-1609`）有条件地投影插件 MCP，**四个条件必须同时成立**：(1) `ownerAuthProvenance === 'strict'`；(2) `pluginMcpExposureProject(thread.projectPath, workingDirectory)` 与 `CAT_CAFE_CONFIG_ROOT`（`<数据目录>/native/workspace`）**完全同一目录**（`isSameCapabilityRoot`）；(3) 非插件受限成员（`!isScopedMember`）且成员匹配；(4) `capabilities.json` 中无同 id 或同 `:`→`__` 编码名冲突、且激活仍为 current。
+  - **对 Bot 的结论**：Bot 的单聊 `projectPath` 是 `workspace/cats/<catId>`、群聊是 `workspace/groups/<key>`（`server/workspaces.ts`），与 `CAT_CAFE_CONFIG_ROOT`（`workspace`）不是同一目录，条件 (2) 在常规 Bot 会话下恒为假，实测投影结果为空（`[]`）；仅当线程的 `projectPath` 设为 `workspace` 自身或 `'default'`（且工作目录为 `workspace`）时才会投影。即便改通条件 (2)，自定义应用仍不能改走插件包：插件技能仍不生效、没有 `capabilities.json` 落点就做不了按猫禁用与全局开关、且用户添加的任意 stdio / `streamableHttp` 外部 MCP 服务并非插件包（上游声明式插件 MCP 也只支持 `stdio`）。
+- **`plugin_operation_changed` 事件覆盖面**：实测与源码（`PluginManagerService.running`）确认，上游在用户房间 `user:<userId>` 推送 `plugin_operation_changed`（`{ pluginId }`），但**仅覆盖目录安装（`catalog install`）、`update` 与 `uninstall` 的起止**；`local-directory` 安装、`set-enabled`（启停与启动完成）及插件内部操作（10 分钟授权 `arm`/`disarm`/到期）均不发事件。适配层新增 `GET /xbot-api/apps/events` 转发 `official.wechat-visible-reader` 的该事件与断线重连 `resync` 以即时刷新微信状态，原有启动期间 2 秒轮询与到期重读仍需保留。
+
+下面为 2026-11-26 初版记录（其中「插件带的 MCP 与技能到不了猫」的内部机制与「没有状态事件」两句以本节上方 2026-11-28 重核为准）：
 
 - **插件带的 MCP 与技能到不了猫**。Bot 启动引擎时的部署标识是 `clowder-bot`，上游的 `allowsImplicitCapabilityWrites` 因此为假，插件运行时不把自己的 MCP 写进能力登记表、也不挂载技能；剩下的调用时投影要求线程的项目目录等于能力根目录，而每只猫的对话在 `workspace/cats/<id>`。实测：自写的插件包（一个 stdio MCP、一条技能、一个密钥字段）能安装、配置、运行，但猫的会话里没有它的工具和技能。读取侧的 `GET /api/capabilities/snapshot?catId=` 仍把它显示为已启用，不能当作「已连接」的依据。把标识改成上游自己的 `runtime` 能打开这个开关，但那是上游自身安装的身份（共享 MCP 的部署标签、运行时部署登记、启动时的 CLI 配置再生成），与使用者自己的 Clowder AI 会串线，不采用。
 - **插件带的直接工具与外接节点到得了猫**：`tool` 贡献经 `plugin_list_tools`／`plugin_call`，`limb` 贡献经 `limb_list_available`。实测 `official.enterprise-workflow` 的两个工具和 `official.wechat-visible-reader` 的节点都被测试猫列出。

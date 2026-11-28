@@ -16,9 +16,12 @@
 // {program, args} | {url} (item 60: changed in place; a program's only while it
 // is not turned off); PUT …/:id/enabled
 // {enabled} (停用 / 启用) and PUT …/:id/cats/:name {enabled} (one cat's
-// switch, item 60); DELETE …/:id. Closing abandons everything in flight;
-// nothing is read on a timer while the dialog is closed, and nothing is shown
-// that the engine did not answer (a switch moves when the answer says so).
+// switch, item 60); DELETE …/:id. While the dialog is open it listens on GET
+// /xbot-api/apps/events (item 67): each `wechat` event there is one fresh GET
+// …/wechat (events that come together are one read). Closing abandons
+// everything in flight and closes that stream; nothing is read on a timer and
+// nothing is listened to while the dialog is closed, and nothing is shown that
+// the engine did not answer (a switch moves when the answer says so).
 (() => {
   "use strict";
   const R = window.ClowderAppsRules;
@@ -231,6 +234,10 @@
       wbusy: "", wnote: "", anote: null,
       badIcons: new Set(),       // icon addresses that did not load: their tiles keep the drawn mark
       wseq: 0, wseen: 0, wwrites: 0, winflight: 0, // 微信's evidence, in the order its requests started (wechatAsk)
+      es: null,                  // the stream of the engine's word that 微信 changed (item 67), while open
+      wEventPending: false,      // such word came and its read has not been asked for yet (drainWechatEvent)
+      wEventReading: false,      // the read it led to is on its way
+      wown: 0,                   // a read the owner's own act waits on (再看一次, the read after a failed write) is on its way
       notes: new Map(),          // id → {text, bad} shown on its page
       busy: new Map(),           // id → {kind: "toggle" | "cat", on, cat}: its 停用 / 启用 or one cat's switch on its way
       catNotes: new Map(),       // id → {text}: what failed about a cat's switch, under the cats
@@ -282,6 +289,9 @@
       for (const c of S.ctrls) { try { c.abort(); } catch { /* done */ } }
       for (const t of S.timers) clearTimeout(t);
       S.timers.clear();
+      if (S.es) { try { S.es.close(); } catch { /* gone */ } }
+      S.es = null;
+      S.wEventPending = false;
       if (S.layer) S.layer.remove();
       root.remove();
       for (const n of quiet) n.inert = false;
@@ -437,6 +447,7 @@
         // The list's read is a read of 微信 too: failed, it is no evidence of the ten minutes (unless newer evidence came).
         if (authShown() && wechatTake(asked)) { authUnknown(); paintWechatPage(); }
         paintList();
+        drainWechatEvent();
         return false;
       }
       if (!S.alive) return false;
@@ -487,6 +498,7 @@
         for (const id of ids) queueCheck(id);
         pump();
       }
+      drainWechatEvent();
       return true;
     }
     // An app that is no longer there: its checks stop, its row goes (the mark of its last write stays: a list asked
@@ -507,7 +519,11 @@
       const prev = S.apps.get(app.id);
       S.apps.set(app.id, app);
       S.readAt.set(app.id, now());
-      if (app.id === R.WECHAT) wechatChanged(prev, app, why);
+      if (app.id === R.WECHAT) {
+        // 微信 read again: a failed read said under the ten minutes no longer stands; what a write failed to do does.
+        if (S.anote && S.anote.read) S.anote = null;
+        wechatChanged(prev, app, why);
+      }
       paintRow(app.id);
       if (view && view.id === app.id) view.paint();
     }
@@ -634,11 +650,13 @@
     const polling = () => !!(S.poll && (S.poll.timer || S.poll.reading));
     function wechatChanged(prev, next, why) {
       const wasStarting = !!prev && prev.state === "starting";
-      if (next.state === "starting") { if (!polling()) startPoll(); }
+      // Still starting: the poll runs (a poll a failed read stopped runs again); one that gave up stays given up
+      // (only 再看一次 starts it again: an event's or the list's read finding it still starting does not).
+      if (next.state === "starting") { if (!polling() && !(S.poll && S.poll.gaveUp)) startPoll(); }
       else {
         if (S.poll) { cancel(S.poll.timer); S.poll = null; }
-        // Only a start seen ending by the poll was not the owner's doing at that moment.
-        if (wasStarting && why === "poll") announce(next.state === "on" ? R.SAID.started : (next.state === "failed" || R.trim(next.reason)) ? R.SAID.startFailed(next.reason) : "");
+        // Only a start seen ending by the poll, or by the read an event led to, was not the owner's doing at that moment.
+        if (wasStarting && (why === "poll" || why === "event")) announce(next.state === "on" ? R.SAID.started : (next.state === "failed" || R.trim(next.reason)) ? R.SAID.startFailed(next.reason) : "");
       }
       // Said only when the plugin answered that the ten minutes are over and 微信 is still on (unknown is not over;
       // 微信 off ends both ways, which its own state line says).
@@ -696,9 +714,21 @@
       syncCountdown();
       return true;
     }
-    // 微信 read fresh. why: "poll", "zero" (the authorization ran out), "manual" (再看一次), "after" (a failed write).
-    // null: no answer to go by (failed, or older than evidence already taken).
+    // 微信 read fresh. why: "poll", "zero" (the authorization ran out), "manual" (再看一次), "after" (a failed write),
+    // "event" (the engine said it changed: drainWechatEvent). null: no answer to go by (failed, or older than evidence
+    // already taken). 再看一次 and the read after a failed write are fresh reads already: an event that came before
+    // they started needs no read of its own.
     async function readWechat(why) {
+      if (why === "manual" || why === "after") S.wEventPending = false;
+      if (why === "event") S.wEventReading = true;
+      try { return await readWechatOnce(why); }
+      finally {
+        if (why === "event") S.wEventReading = false;
+        // After a failed write the events wait until wechatAct has said what failed.
+        if (why !== "after") drainWechatEvent();
+      }
+    }
+    async function readWechatOnce(why) {
       if (why === "manual") { S.wbusy = "reread"; S.wnote = ""; S.anote = null; hold(); paintWechatPage(); }
       const asked = wechatAsk();
       let app = null, error = null;
@@ -715,11 +745,54 @@
       const wasOn = authUnknown() || (S.apps.get(R.WECHAT) || {}).state === "on";
       if (why === "poll" && S.poll) { S.poll.reading = false; S.poll.error = text; }
       // Where 微信 is on, the failure is said in the open chat's part, beside its 再看一次.
-      else if (wasOn && why !== "after") S.anote = { text };
+      else if (wasOn && why !== "after") S.anote = { text, read: true };
       else if (why === "manual") S.wnote = text;
       paintWechatPage();
       return null;
     }
+
+    // ---------------------------------------------------------------- 微信: the engine's word that it changed
+    // While the dialog is open (only then), GET /xbot-api/apps/events (docs/apps-api.md): the engine's
+    // plugin_operation_changed for 微信 (its install, update or removal) and the adapter's resync after it lost the
+    // engine, each a `wechat` event; and `ready` each time the stream is (re)connected. Each is one fresh read of
+    // 微信, not evidence itself: what is shown is what that read answers. It starts and its answer is taken as any
+    // read's (wechatAsk / wechatTake), so it never paints over a write or a newer read. The engine says nothing when
+    // a start ends or the ten minutes do: the poll and the zero-time read stay. A browser without the stream, or a
+    // stream that fails, is no error: everything else works as without it, and nothing is said.
+    function listen() {
+      const ES = typeof EventSource === "function" ? EventSource : window.EventSource;
+      if (typeof ES !== "function") return;
+      let es = null;
+      try {
+        es = new ES("/xbot-api/apps/events");
+        // Lost and connected again: what was said meanwhile was not heard (a refused stream does not come back).
+        // Once the dialog is closed (its stream with it) nothing here reads anything (drainWechatEvent).
+        let gap = false;
+        es.addEventListener("wechat", wechatEvent);
+        es.addEventListener("ready", () => { if (gap) { gap = false; S.wEventPending = true; drainWechatEvent(); } });
+        es.addEventListener("error", () => { gap = true; });
+        S.es = es;
+      } catch {
+        if (es) { try { es.close(); } catch { /* gone */ } }
+        S.es = null;
+      }
+    }
+    function wechatEvent(ev) {
+      let data = null;
+      try { data = JSON.parse(ev && ev.data); } catch { return; }
+      if (!data || typeof data !== "object" || data.appId !== R.WECHAT) return;
+      S.wEventPending = true;
+      drainWechatEvent();
+    }
+    // One read for however many events came, and none on top of another request about 微信 that settles it: a write on
+    // its way (its answer is the newer one), the read an event already led to, a read the owner's act waits on (with
+    // what it then says), the list not yet read (it reads 微信 too). Once that settles, one read if any came meanwhile.
+    function drainWechatEvent() {
+      if (!S.alive || !S.wEventPending || S.winflight || S.wEventReading || S.wown || (!S.order && S.reading)) return;
+      S.wEventPending = false;
+      readWechat("event");
+    }
+
     function syncCountdown() {
       const app = S.apps.get(R.WECHAT);
       const end = R.deadline(app && app.state === "on" ? app.authorization : null, S.readAt.get(R.WECHAT) || now());
@@ -931,8 +1004,12 @@
       if (act === "reread") {
         if (S.poll) cancel(S.poll.timer);
         S.poll = null;
+        S.wown++;
         await readWechat("manual");
-        if (S.alive && focusWasHeld()) wechatFocus("reread");
+        S.wown--;
+        if (!S.alive) return;
+        if (focusWasHeld()) wechatFocus("reread");
+        drainWechatEvent();
         return;
       }
       S.wbusy = act;
@@ -952,11 +1029,14 @@
         // Every read that overlapped it gave way; its answer is what is shown.
         if (wechatTake(asked, true)) setApp(app, act);
         if (held) wechatFocus(act);
+        drainWechatEvent();
         return;
       }
       const what = R.wechatError(error, act);
       // Every failed write is followed by one fresh read: what the engine is doing now is what is shown.
+      S.wown++;
       await readWechat("after");
+      S.wown--;
       if (!S.alive) return;
       const shown = S.apps.get(R.WECHAT);
       // A start the engine went on with is not a failure: its state says what it is doing.
@@ -967,6 +1047,7 @@
       }
       paintWechatPage();
       if (held) wechatFocus(act);
+      drainWechatEvent();
     }
     // After an action: where the answer is — the state line; for the ten minutes, the open chat's own state
     // (its time left, 未授权, or unknown); after a failure, the button that was tried.
@@ -2053,6 +2134,7 @@
     show(L);
     card.focus();
     readList("open");
+    listen();
     return api;
   }
 
