@@ -5,9 +5,9 @@ Clowder Bot 是独立项目，不代表上游项目，也没有上游官方背�
 ## 执行引擎：Clowder AI
 
 - 仓库：[zts212653/clowder-ai](https://github.com/zts212653/clowder-ai)
-- 固定提交：`b2c9952f27d31480191ff6fd120789405c97238c`，以 `upstream.lock.json` 为准。
+- 固定提交：以 `upstream.lock.json` 为准（2026-11-26 起是上游 `next` 分支上的 `fe632f8febdaaf189b0b3aaa078c6d36032da492`）。
 - **直接复用完整原生代码与执行链路**。Git 子模块原样保留；API、shared、finance、MCP 按上游依赖关系构建，原生 web 不作为 Bot 前端构建。
-- 唯一核心差异为外置成员执行准入补丁；具体文件、原因、同步方法见 [维护说明](upstream-maintenance.md)。
+- 与上游的差异是六个外置补丁（成员准入、后台委派两个、任务控制、猫猫模板、定时），都算待退出的历史债务；具体文件、原因、退出条件和同步方法见 [维护说明](upstream-maintenance.md)，各自撑着哪些特性见 [特性与上游的关系](features.md)。
 - 角色模板读取原生 API，不再抽取为本地静态副本。
 - MIT 许可保留于原始仓库与 [副本](licenses/clowder-ai-MIT.txt)。
 

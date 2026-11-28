@@ -1,5 +1,7 @@
 # 聊天体验探索：资料与成果、协作、记忆
 
+> 历史记录：2026-11-05 特性 1、3、5（资料与成果、协作、记忆）的探索与首批实施。其中仍然有效的内容——首批实施的范围、记忆写操作的原生契约、三组留给上游的缺口——已整理进 [特性与上游的关系](../features.md) 和 [计划与待办](../backlog.md)；接口以 [聊天体验适配契约](../chat-experience-api.md) 为准。文中的「当前实例」指 2026-11-05 的那一个，「能力出处」基于旧固定提交 `42017e0c`。
+
 更新日期：2026-11-05。对应[特性清单](feature-exploration.md)的 **1、3、5**。首轮探索之后，已按用户授权实施首批 Bot 层适配；以下先记录实施范围，再保留研究依据。长期记忆本轮只读。
 
 ## 首批实施
@@ -10,10 +12,10 @@
 | **3 看得懂、少打扰的协作** | 输入框上方汇总待确认、失败、处理中、排队与未完成任务；按原生消息或任务定位；实际看见回复后才更新该会话的已读位置。 | 审批沿用现有运行面板；当前消息定位限于已加载记录。只做应用内提醒，不增加调度器或通知服务。 |
 | **5 知道它记住了什么** | 原记忆页按需展开「关于你」「你的偏好」和来源；会话便笺明确范围并保持只读；群聊不展示 owner 私有资料。 | 无新增写入、确认、修改或遗忘入口；待确认候选不当作已保存内容。原生读取失败显示错误与重试，不显示成空记忆。 |
 
-- **复用范围**：实施以 `6fae4ab9` 为基线，选择性采用附件分支 `1893f70c` 的 Bot 层代码与前端；未导入该分支的 P006／P007、宿主隔离或启动策略。Clowder AI 子模块、固定版本和当时已有五个补丁保持原样。提交前整合远端 `458ee358` 的定时任务功能，保留其已有 `0006-bot-schedules.patch`，没有修改补丁；它与附件分支的 P006 不同。[文件兼容说明](default-files.md)
+- **复用范围**：实施以 `6fae4ab9` 为基线，选择性采用附件分支 `1893f70c` 的 Bot 层代码与前端；未导入该分支的 P006／P007、宿主隔离或启动策略。Clowder AI 子模块、固定版本和当时已有五个补丁保持原样。提交前整合远端 `458ee358` 的定时任务功能，保留其已有 `0006-bot-schedules.patch`，没有修改补丁；它与附件分支的 P006 不同。[文件兼容说明](../default-files.md)
 - **前端执行**：本机 Claude Code 使用 `claude-opus-5-5 --effort xhigh` 实现及修订；实际模型回执一致。保持 XBot／猫咖样式，扩展与审核摘要登记在前端 manifest，原始来源摘要未改。
 - **数据归属**：Bot 新增的持久化内容仅为会话已读游标和复用的文件元数据／快照；任务、消息、执行状态、长期记忆仍以原生记录为准。没有迁移或删除已有用户数据。
-- **接口与实现**：[适配契约](chat-experience-api.md)、[前端交互规范](workspace-ui.md)、[聊天文件适配](workspaces.md)。
+- **接口与实现**：[适配契约](../chat-experience-api.md)、[前端交互规范](../workspace-ui.md)、[聊天文件适配](../workspaces.md)。
 
 首轮验证使用隔离临时数据与协议样例，不触发真实 Agent 任务或写入用户记忆。当时对隔壁已运行实例只读核对：Profile、Approval Hub、队列、成果目录可读；Taste 返回 503「来源不可用」。随后按用户授权修复了部署前置条件，当前实例已恢复读取，见下节；没有通过 Bot 返回空数组掩盖原生错误。该实例原有的本地补丁不作为未修改上游的能力证明。
 
@@ -42,7 +44,7 @@
 | **3 看得懂、少打扰的协作** | 上游已有执行、队列、审批与负责人事实；Bot 的未读与提醒尚不完整。 | 聚合真实状态，补齐“需要我处理／有新结果”的提醒与已读语义。 | 与 1 一起验证；先做观察与提醒。 |
 | **5 知道它记住了什么** | 探索时“记忆”主要是会话便笺；上游已有长期记忆的分类读取和原生修改操作。 | 首批只读查看用户资料与偏好。 | 写操作留待后续单独规划、验证。 |
 
-共同约束见 [AGENTS.md](../AGENTS.md)：允许组合原生操作、投影事实和保存展示状态；不扩展本地运行时补丁，不另建记忆、调度或执行机制。交互建议由本机 Claude Code 按既有 XBot／猫咖规范提出，主代理核对能力边界与事实来源。
+共同约束见 [AGENTS.md](../../AGENTS.md)：允许组合原生操作、投影事实和保存展示状态；不扩展本地运行时补丁，不另建记忆、调度或执行机制。交互建议由本机 Claude Code 按既有 XBot／猫咖规范提出，主代理核对能力边界与事实来源。
 
 ## 最小交互方案
 
@@ -120,10 +122,10 @@
 
 | 范围 | 依据 |
 | --- | --- |
-| 消息附件与文件发布 | [context attachment 类型](../upstream/clowder-ai/packages/shared/src/types/context-attachment.ts)、[RichFileBlock](../upstream/clowder-ai/packages/shared/src/types/rich.ts)、[原生消息回调](../upstream/clowder-ai/packages/api/src/routes/callbacks.ts) |
-| 成果聚合、版本和下载 | [thread 路由](../upstream/clowder-ai/packages/api/src/routes/threads.ts)、[成果 DTO](../upstream/clowder-ai/packages/shared/src/types/thread-artifact.ts)、[原生展示投影](../upstream/clowder-ai/packages/shared/src/thread-works.ts)、[授权文件下载](../upstream/clowder-ai/packages/api/src/routes/workspace-file-download.ts) |
-| 状态、负责人和待处理 | [队列](../upstream/clowder-ai/packages/api/src/routes/queue.ts)、[Task](../upstream/clowder-ai/packages/shared/src/types/task.ts)、[审批](../upstream/clowder-ai/packages/api/src/routes/approval-hub-routes.ts)、[运行交互](../upstream/clowder-ai/packages/api/src/routes/runtime-interaction-routes.ts) |
-| 记忆及生命周期 | [会话便笺](../upstream/clowder-ai/packages/api/src/routes/memory.ts)、[Profile](../upstream/clowder-ai/packages/api/src/routes/profile-memory-owner.ts)、[Taste](../upstream/clowder-ai/packages/api/src/routes/taste-browse.ts)、[操作与遗忘范围](../upstream/clowder-ai/packages/shared/src/types/memory-owner-lifecycle.ts)、[owner 授权](../upstream/clowder-ai/packages/api/src/routes/owner-memory-browser-auth.ts) |
-| Bot 现有适配缺口 | [原生接口白名单](../server/app.ts)、[认证与事件桥](../server/native/client.ts)、[便笺与已读投影](../server/native/bridge.ts) |
+| 消息附件与文件发布 | [context attachment 类型](../../upstream/clowder-ai/packages/shared/src/types/context-attachment.ts)、[RichFileBlock](../../upstream/clowder-ai/packages/shared/src/types/rich.ts)、[原生消息回调](../../upstream/clowder-ai/packages/api/src/routes/callbacks.ts) |
+| 成果聚合、版本和下载 | [thread 路由](../../upstream/clowder-ai/packages/api/src/routes/threads.ts)、[成果 DTO](../../upstream/clowder-ai/packages/shared/src/types/thread-artifact.ts)、[原生展示投影](../../upstream/clowder-ai/packages/shared/src/thread-works.ts)、[授权文件下载](../../upstream/clowder-ai/packages/api/src/routes/workspace-file-download.ts) |
+| 状态、负责人和待处理 | [队列](../../upstream/clowder-ai/packages/api/src/routes/queue.ts)、[Task](../../upstream/clowder-ai/packages/shared/src/types/task.ts)、[审批](../../upstream/clowder-ai/packages/api/src/routes/approval-hub-routes.ts)、[运行交互](../../upstream/clowder-ai/packages/api/src/routes/runtime-interaction-routes.ts) |
+| 记忆及生命周期 | [会话便笺](../../upstream/clowder-ai/packages/api/src/routes/memory.ts)、[Profile](../../upstream/clowder-ai/packages/api/src/routes/profile-memory-owner.ts)、[Taste](../../upstream/clowder-ai/packages/api/src/routes/taste-browse.ts)、[操作与遗忘范围](../../upstream/clowder-ai/packages/shared/src/types/memory-owner-lifecycle.ts)、[owner 授权](../../upstream/clowder-ai/packages/api/src/routes/owner-memory-browser-auth.ts) |
+| Bot 现有适配缺口 | [原生接口白名单](../../server/app.ts)、[认证与事件桥](../../server/native/client.ts)、[便笺与已读投影](../../server/native/bridge.ts) |
 
 附件分支的核对位置：上述提交中的 `docs/default-files.md`、`docs/workspace-ui.md`、`docs/workspaces.md`、`server/workspaces.ts`、`server/xbot/workspaces.ts`、P006／P007；其 `.runtime/simplify-20261105/final-preview-evidence.json` 为本机验收记录，不进入仓库。

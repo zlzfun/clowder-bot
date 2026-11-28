@@ -1,6 +1,6 @@
 # 猫猫模板与画像：实现说明
 
-日期：2026-11-03。正式前端由本机 Claude Code `claude-opus-5-5 --effort xhigh` 开发，模板 CRUD 与创建接口已接通。此前样页留作历史记录，见 [样页说明](cat-templates-prototype.md)；当前接口以 [API 契约](cat-templates-api.md) 为准。
+日期：2026-11-03。正式前端由本机 Claude Code `claude-opus-5-5 --effort xhigh` 开发，模板 CRUD 与创建接口已接通。此前样页留作历史记录，见 [样页说明](history/cat-templates-prototype.md)；当前接口以 [API 契约](cat-templates-api.md) 为准。
 
 ## 对象与入口
 
