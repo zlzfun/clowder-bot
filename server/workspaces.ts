@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { constants } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, openSync, realpathSync, rmdirSync, unlinkSync } from 'node:fs';
 import { lstat, mkdir, open, readdir, realpath, stat, writeFile } from 'node:fs/promises';
-import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { ApiError } from './errors.js';
 import type { BotBridge } from './native/bridge.js';
 import type { NativeCat, NativeMessage, NativeThread } from './native/types.js';
@@ -12,6 +12,14 @@ const digest = (data: Buffer) => createHash('sha256').update(data).digest('hex')
 const contained = (root: string, path: string) => { const r = relative(root, path); return r === '' || (!isAbsolute(r) && r !== '..' && !r.startsWith(`..${sep}`)); };
 const safeSegment = (value: string) => /^[\p{L}\p{N}_ .-]{1,120}$/u.test(value) && value !== '.' && value !== '..' && !value.startsWith('.');
 const textTypes = new Set(['.txt', '.md', '.json', '.csv', '.tsv', '.js', '.ts', '.tsx', '.jsx', '.css', '.py', '.rs', '.go', '.java', '.yaml', '.yml', '.toml', '.xml', '.html', '.sql', '.sh', '.log']);
+const imageExtTypes = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp']);
+function previewableFor(name: string, size: number): 'text' | 'image' | null {
+  if (size > MAX_FILE_BYTES) return null;
+  const ext = extname(name).toLowerCase();
+  if (textTypes.has(ext)) return 'text';
+  if (size > 0 && imageExtTypes.has(ext)) return 'image';
+  return null;
+}
 export function mimeFor(name: string, data: Buffer): string {
   if (data.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) return 'image/png';
   if (data[0] === 255 && data[1] === 216 && data[2] === 255) return 'image/jpeg';
@@ -21,10 +29,14 @@ export function mimeFor(name: string, data: Buffer): string {
   return textTypes.has(extname(name).toLowerCase()) && !data.includes(0) ? 'text/plain' : 'application/octet-stream';
 }
 
+const UNCERTAIN_SEND_HOLD_MS = 5 * 60 * 1000;
 /** Product file catalogue and native Thread workspace bindings. Execution remains in Clowder AI. */
 export class Workspaces {
   private switches = new Map<string, Promise<unknown>>();
   private directoryCreates = new Map<string, Promise<string>>();
+  private deletingFiles = new Set<string>();
+  private sendingFiles = new Map<string, number>();
+  private uncertainFiles = new Map<string, number>();
   constructor(readonly bridge: BotBridge) {}
   project(id?: string | null) {
     if (!id) return null;
@@ -81,13 +93,30 @@ export class Workspaces {
         if (e instanceof ApiError && e.status === 404 && id !== current.id) return null;
         throw e;
       }
+      if (thread.deletedAt && id !== current.id) return null;
       if (thread.preferredCats?.length !== 1 || thread.preferredCats[0] !== cat.id) return null;
       const legacyKey = Object.entries(meta.workspaceThreads ?? {}).find(([,tid]) => tid === id)?.[0];
       const oldProject = this.bridge.store.state.projects.find(p => p.id === legacyKey);
-      return { id, title: oldProject?.name ?? thread.title ?? cat.name,
+      const useProjectName = oldProject && (!thread.title || thread.title === cat.name) && !meta.renamedConversationIds?.includes(id);
+      return { id, title: useProjectName ? oldProject.name : (thread.title ?? cat.name),
         current: id === current.id, createdAt: thread.createdAt ?? 0 };
     }));
     return { conversations: conversations.filter((c): c is NonNullable<typeof c> => c !== null) };
+  }
+  private forgetConversation(catId: string, threadId: string) {
+    const meta = this.bridge.store.bot(catId);
+    if (meta.conversationIds) meta.conversationIds = meta.conversationIds.filter(id => id !== threadId);
+    if (meta.workspaceThreads) {
+      for (const [key, id] of Object.entries(meta.workspaceThreads)) {
+        if (id === threadId) delete meta.workspaceThreads[key];
+      }
+    }
+    if (meta.renamedConversationIds) {
+      meta.renamedConversationIds = meta.renamedConversationIds.filter(id => id !== threadId);
+      if (!meta.renamedConversationIds.length) delete meta.renamedConversationIds;
+    }
+    if (meta.greetingSources && threadId in meta.greetingSources) delete meta.greetingSources[threadId];
+    this.bridge.store.save();
   }
   private async changingConversation<T>(cat: NativeCat, work: () => Promise<T>): Promise<T> {
     if (this.switches.has(cat.id)) throw new ApiError(409, '对话正在切换，请稍后重试');
@@ -104,6 +133,7 @@ export class Workspaces {
       if (old.id !== expectedThreadId) throw new ApiError(409, '当前对话已变化，请刷新后再切换');
       if (!this.knownConversations(cat).includes(threadId)) throw new ApiError(404, '找不到这只猫的历史对话');
       const thread = await this.bridge.thread(threadId);
+      if (thread.deletedAt) throw new ApiError(404, '这段对话已不存在');
       if (thread.preferredCats?.length !== 1 || thread.preferredCats[0] !== cat.id) throw new ApiError(403, '这段对话不属于这只猫猫');
       if (threadId !== old.id) { await this.requireIdle(old.id); await this.requireIdle(threadId); }
       const meta = this.bridge.store.bot(cat.id);
@@ -112,6 +142,51 @@ export class Workspaces {
       // Retain old references as provenance, never re-create or migrate a project.
       meta.projectId = Object.entries(meta.workspaceThreads ?? {}).find(([key,id]) => key !== 'personal' && id === threadId)?.[0] ?? null;
       this.bridge.store.save(); return this.view(thread, cat);
+    });
+  }
+  async renameConversation(cat: NativeCat, threadId: string, title: string) {
+    const current = await this.bridge.direct(cat);
+    if (!this.knownConversations(cat).includes(threadId)) throw new ApiError(404, '找不到这只猫的历史对话');
+    const thread = await this.bridge.thread(threadId);
+    if (thread.deletedAt) throw new ApiError(404, '这段对话已不存在');
+    if (thread.preferredCats?.length !== 1 || thread.preferredCats[0] !== cat.id) throw new ApiError(403, '这段对话不属于这只猫猫');
+    await this.bridge.native.request<NativeThread>(`/api/threads/${encodeURIComponent(threadId)}`, { method: 'PATCH', body: { title } });
+    const updated = await this.bridge.thread(threadId);
+    if (updated.title !== title) throw new ApiError(502, '引擎没有确认对话标题已更新，请刷新后再试');
+    const meta = this.bridge.store.bot(cat.id);
+    if (Object.values(meta.workspaceThreads ?? {}).includes(threadId) && !meta.renamedConversationIds?.includes(threadId)) {
+      meta.renamedConversationIds = [...(meta.renamedConversationIds ?? []), threadId];
+      this.bridge.store.save();
+    }
+    return { conversation: { id: threadId, title: updated.title, current: threadId === current.id, createdAt: updated.createdAt ?? 0 } };
+  }
+  async deleteConversation(cat: NativeCat, threadId: string) {
+    return this.changingConversation(cat, async () => {
+      const current = await this.bridge.direct(cat);
+      if (threadId === current.id) throw new ApiError(409, '正在聊的这段对话不能直接删除，请先开始新对话或切到别段');
+      if (!this.knownConversations(cat).includes(threadId)) throw new ApiError(404, '找不到这只猫的历史对话');
+      let thread: NativeThread;
+      try { thread = await this.bridge.thread(threadId); } catch (e) {
+        if (e instanceof ApiError && e.status === 404) this.forgetConversation(cat.id, threadId);
+        throw e;
+      }
+      if (thread.preferredCats?.length !== 1 || thread.preferredCats[0] !== cat.id) throw new ApiError(403, '这段对话不属于这只猫猫');
+      if (thread.deletedAt) {
+        this.forgetConversation(cat.id, threadId);
+        throw new ApiError(404, '这段对话已不存在');
+      }
+      await this.requireIdle(threadId);
+      try {
+        const scheduled = await this.bridge.native.request<{ tasks?: Array<{ enabled?: boolean; deliveryThreadId?: string | null }> }>('/api/schedule/tasks');
+        if (Array.isArray(scheduled.tasks) && scheduled.tasks.some(t => t.enabled && t.deliveryThreadId === threadId)) {
+          throw new ApiError(409, '这段对话上还有开启的定时任务，请先停用或删除后再删这段对话');
+        }
+      } catch (e) {
+        if (!(e instanceof ApiError && e.status === 404)) throw e;
+      }
+      await this.bridge.native.request(`/api/threads/${encodeURIComponent(threadId)}`, { method: 'DELETE' });
+      this.forgetConversation(cat.id, threadId);
+      return { deleted: true };
     });
   }
   async newConversation(cat: NativeCat) {
@@ -151,7 +226,97 @@ export class Workspaces {
     if (!(await stat(full)).isDirectory()) throw new ApiError(400, '请选择目录');
     const entries = (await readdir(full, { withFileTypes: true })).filter(e => !e.name.startsWith('.') && !e.isSymbolicLink() && (e.isDirectory() || e.isFile()) && e.name !== 'node_modules');
     const selected = entries.sort((a,b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name)).slice(0, 200);
-    return { path, area, truncated: entries.length > 200, entries: await Promise.all(selected.map(async e => ({ name: e.name, path: [path,e.name].filter(Boolean).join('/'), type: e.isDirectory() ? 'directory' : 'file', ...(!e.isDirectory() ? { size: (await stat(join(full,e.name))).size } : {}) }))) };
+    return { path, area, truncated: entries.length > 200, entries: await Promise.all(selected.map(async e => {
+      if (e.isDirectory()) return { name: e.name, path: [path,e.name].filter(Boolean).join('/'), type: 'directory' as const };
+      const size = (await stat(join(full, e.name))).size;
+      return { name: e.name, path: [path,e.name].filter(Boolean).join('/'), type: 'file' as const, size, previewable: previewableFor(e.name, size) };
+    })) };
+  }
+  async workspaceFile(thread: NativeThread, path: string, area: 'workspace' | 'shared') {
+    const full = await this.sourcePath(thread, path, area);
+    const bytes = await this.readBounded(full);
+    const name = basename(full);
+    return { name, mime: mimeFor(name, bytes), bytes };
+  }
+  private sendUncertain(id: string) {
+    const until = this.uncertainFiles.get(id);
+    if (!until) return false;
+    if (Date.now() < until) return true;
+    this.uncertainFiles.delete(id);
+    return false;
+  }
+  markSendUncertain(ids: string[]) {
+    const until = Date.now() + UNCERTAIN_SEND_HOLD_MS;
+    for (const id of ids) this.uncertainFiles.set(id, until);
+  }
+  async deleteAttachment(thread: NativeThread, id: string) {
+    if (this.deletingFiles.has(id)) throw new ApiError(409, '正在删除这个附件');
+    if (this.sendingFiles.has(id)) throw new ApiError(409, '这个附件正在随消息发送，不能删除');
+    if (this.sendUncertain(id)) throw new ApiError(409, '这条消息刚才没收到确认，可能还在发送中，暂时不能删除附件');
+    this.deletingFiles.add(id);
+    try {
+      const file = this.file(id);
+      if (file.threadId !== thread.id) throw new ApiError(409, '对话已变化，这个附件属于另一段对话');
+      if (file.kind !== 'attachment') throw new ApiError(409, '只有未发送的附件可以删除');
+      const messages = await this.bridge.allMessages(thread.id);
+      if (messages.some(m => this.references(m).some(ref => ref.id === file.id))) {
+        this.uncertainFiles.delete(id);
+        throw new ApiError(409, '这个附件已经发在对话里，不能删除');
+      }
+      if (this.sendingFiles.has(id)) throw new ApiError(409, '这个附件正在随消息发送，不能删除');
+      if (this.sendUncertain(id)) throw new ApiError(409, '这条消息刚才没收到确认，可能还在发送中，暂时不能删除附件');
+      if (!this.bridge.store.state.files[id]) throw new ApiError(404, '文件记录不存在');
+      const root = await this.root(thread);
+      const baseDir = join(root, '.clowder-bot-files');
+      if (!safeSegment(file.id)) throw new ApiError(403, '附件标识无效');
+      const dest = join(baseDir, file.id);
+      const target = resolve(file.path);
+      if (!contained(dest, target) || target === dest || dirname(target) !== dest) {
+        throw new ApiError(403, '附件路径超出附件目录');
+      }
+      const statSyncNoFollow = (p: string) => {
+        try { return lstatSync(p); } catch (e: any) { if (e?.code === 'ENOENT') return null; throw e; }
+      };
+      const assertUnredirectedDir = (p: string, msg: string) => {
+        const st = statSyncNoFollow(p);
+        if (!st) return false;
+        if (st.isSymbolicLink() || !st.isDirectory() || realpathSync(p) !== p) throw new ApiError(403, msg);
+        return true;
+      };
+      if (realpathSync(root) !== root) throw new ApiError(403, '工作区目录被重定向');
+      const hasBase = assertUnredirectedDir(baseDir, '文件存储目录被重定向');
+      const hasDest = hasBase && assertUnredirectedDir(dest, '附件目录被重定向');
+      if (hasDest) {
+        const st = statSyncNoFollow(target);
+        if (st) {
+          if (st.isSymbolicLink() || !st.isFile() || realpathSync(target) !== target) {
+            throw new ApiError(403, '附件路径无效');
+          }
+          let fd: number | undefined;
+          try {
+            fd = openSync(target, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+            if (!fstatSync(fd).isFile()) throw new ApiError(403, '附件路径无效');
+          } catch (e: any) {
+            if (e?.code === 'ELOOP') throw new ApiError(403, '附件路径无效');
+            if (e?.code !== 'ENOENT') throw e;
+          } finally {
+            if (fd !== undefined) closeSync(fd);
+          }
+          if (realpathSync(root) !== root || !assertUnredirectedDir(baseDir, '文件存储目录被重定向') || !assertUnredirectedDir(dest, '附件目录被重定向')) {
+            throw new ApiError(403, '附件目录被重定向');
+          }
+          try { unlinkSync(target); } catch (e: any) { if (e?.code !== 'ENOENT') throw e; }
+        }
+        if (realpathSync(root) === root && assertUnredirectedDir(baseDir, '文件存储目录被重定向') && assertUnredirectedDir(dest, '附件目录被重定向')) {
+          try { rmdirSync(dest); } catch (e: any) { if (e?.code !== 'ENOENT' && e?.code !== 'ENOTEMPTY') throw e; }
+        }
+      }
+      delete this.bridge.store.state.files[id];
+      this.bridge.store.save();
+      return { deleted: true };
+    } finally {
+      this.deletingFiles.delete(id);
+    }
   }
   fileView(file: WorkspaceFile) { return { ...file, url: `/xbot-api/files/${file.id}/download`, ...(file.mime.startsWith('image/') ? { previewUrl: `/xbot-api/files/${file.id}/image` } : {}) }; }
   async saveFile(thread: NativeThread, name: string, data: Buffer, kind: WorkspaceFile['kind'], source?: { sourcePath: string; sourceMessageId?: string }) {
@@ -198,6 +363,20 @@ export class Workspaces {
   messageFiles(threadId: string, message: NativeMessage) {
     return [...this.references(message).flatMap(ref => { const file = this.bridge.store.state.files[ref.id]; return file && file.threadId === threadId && file.path === ref.path && ref.revision === `sha256:${file.sha256}` ? [this.fileView(file)] : []; }),
       ...this.bridge.nativeFiles.project(threadId, message)];
+  }
+  async withAttachments<T>(threadId: string, ids: string[], work: (attachments: Awaited<ReturnType<Workspaces['attachments']>>) => Promise<T>): Promise<T> {
+    if (ids.length > 8 || new Set(ids).size !== ids.length) throw new ApiError(400, '一次最多发送 8 个不同附件');
+    if (ids.some(id => this.deletingFiles.has(id))) throw new ApiError(409, '附件正在删除，请重新选择');
+    for (const id of ids) this.sendingFiles.set(id, (this.sendingFiles.get(id) ?? 0) + 1);
+    try {
+      return await work(await this.attachments(threadId, ids));
+    } finally {
+      for (const id of ids) {
+        const next = (this.sendingFiles.get(id) ?? 1) - 1;
+        if (next > 0) this.sendingFiles.set(id, next);
+        else this.sendingFiles.delete(id);
+      }
+    }
   }
   async attachments(threadId: string, ids: string[]) {
     if (ids.length > 8 || new Set(ids).size !== ids.length) throw new ApiError(400, '一次最多发送 8 个不同附件');

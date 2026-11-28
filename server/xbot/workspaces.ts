@@ -1,4 +1,4 @@
-import express, { type Request } from 'express';
+import express, { type Request, type Response } from 'express';
 import { z } from 'zod';
 import { ApiError } from '../errors.js';
 import { BotBridge, encode } from '../native/bridge.js';
@@ -9,6 +9,28 @@ interface Task { id: string; threadId: string; kind: string; subjectKey: string 
 const expected = z.string().min(1).max(200);
 const revision = z.number().int().nonnegative();
 const area = z.enum(['workspace','shared']).default('workspace');
+const conversationTitle = z.string().trim().min(1, '对话标题不能为空').max(120, '对话标题最多 120 个字')
+  .refine(v => !/[\x00-\x1f\x7f]/.test(v), '对话标题不能包含控制字符');
+
+function sendFileMode(res: Response, mode: 'download' | 'preview' | 'image', file: { name: string; mime: string }, bytes: Buffer) {
+  res.set({
+    'Content-Security-Policy': "default-src 'none'; sandbox",
+    'X-Content-Type-Options': 'nosniff',
+    'Cache-Control': 'no-store',
+  });
+  if (mode === 'preview') {
+    if (file.mime !== 'text/plain') throw new ApiError(415, '此文件只支持下载');
+    return res.json({ text: bytes.subarray(0, 128 * 1024).toString('utf8'), truncated: bytes.length > 128 * 1024 });
+  }
+  if (mode === 'image') {
+    if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(file.mime)) throw new ApiError(415, '此文件不支持图片预览');
+    res.type(file.mime);
+  } else {
+    res.type('application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encode(file.name)}`);
+  }
+  return res.send(bytes);
+}
 
 export function createWorkspaceRouter(bridge: BotBridge) {
   const router = express.Router(), ws = bridge.workspaces;
@@ -40,11 +62,26 @@ export function createWorkspaceRouter(bridge: BotBridge) {
         const body=z.object({threadId:expected,expectedThreadId:expected}).strict().parse(req.body);
         const {cat}=await context(req); res.json(await ws.switchConversation(cat!,body.threadId,body.expectedThreadId));
       });
+      router.patch(`${base}/conversations/:id`,async(req,res)=>{
+        const body=z.object({title:conversationTitle}).strict().parse(req.body);
+        const {cat}=await context(req); res.json(await ws.renameConversation(cat!,String(req.params.id),body.title));
+      });
+      router.delete(`${base}/conversations/:id`,async(req,res)=>{
+        const {cat}=await context(req); res.json(await ws.deleteConversation(cat!,String(req.params.id)));
+      });
     }
     router.get(`${base}/workspace-tree`,async(req,res)=>{
       const query=z.object({path:z.string().max(2000).default(''),area}).strict().parse(req.query);
       const {thread}=await context(req); res.json(await ws.tree(thread,query.path,query.area));
     });
+    for (const mode of ['preview','image'] as const) {
+      router.get(`${base}/workspace-file/${mode}`,async(req,res)=>{
+        const query=z.object({path:z.string().min(1).max(2000),area,expectedThreadId:expected}).strict().parse(req.query);
+        const {thread}=await context(req); checkThread(thread,query.expectedThreadId);
+        const file=await ws.workspaceFile(thread,query.path,query.area);
+        sendFileMode(res,mode,file,file.bytes);
+      });
+    }
     router.get(`${base}/files`,async(req,res)=>{
       const {thread}=await context(req);
       const native = await bridge.nativeFiles.list(thread.id);
@@ -55,6 +92,10 @@ export function createWorkspaceRouter(bridge: BotBridge) {
       if(!Buffer.isBuffer(req.body)) throw new ApiError(415,'文件上传需要 application/octet-stream');
       const {thread}=await context(req); checkThread(thread,query.expectedThreadId);
       const file=await ws.saveFile(thread,query.name,req.body,'attachment'); res.status(201).json({file});
+    });
+    router.delete(`${base}/files/:id`,async(req,res)=>{
+      const {thread}=await context(req);
+      res.json(await ws.deleteAttachment(thread,String(req.params.id)));
     });
     router.post(`${base}/deliverables`,async(req,res)=>{
       const body=z.object({path:z.string().min(1).max(2000),area,expectedThreadId:expected,sourceMessageId:expected.optional()}).strict().parse(req.body);
@@ -95,20 +136,13 @@ export function createWorkspaceRouter(bridge: BotBridge) {
       res.json(await bridge.native.request(`/api/tasks/${encode(String(req.params.id))}/background-control`,{method:'POST',body}));
     });
   }
-  for(const mode of ['download','preview','image']) router.get(`/files/:id/${mode}`,async(req,res)=>{
+  for(const mode of ['download','preview','image'] as const) router.get(`/files/:id/${mode}`,async(req,res)=>{
     const id=String(req.params.id);
     let file: {name:string;mime:string}, bytes:Buffer;
     if(id.startsWith('nf.') || id.startsWith('nfu.')) {
       const native=await bridge.nativeFiles.read(id);file=native;bytes=native.bytes;
     } else {const stored=ws.file(id);file=stored;bytes=await ws.bytes(stored);}
-    res.set({'Content-Security-Policy':"default-src 'none'; sandbox",'Cache-Control':'no-store'});
-    if(mode==='preview') {
-      if(file.mime!=='text/plain') throw new ApiError(415,'此文件只支持下载');
-      return res.json({text:bytes.subarray(0,128*1024).toString('utf8'),truncated:bytes.length>128*1024});
-    }
-    if(mode==='image') {if(!['image/png','image/jpeg','image/gif','image/webp'].includes(file.mime))throw new ApiError(415,'此文件不支持图片预览');res.type(file.mime);}
-    else {res.type('application/octet-stream');res.setHeader('Content-Disposition',`attachment; filename*=UTF-8''${encode(file.name)}`);}
-    res.send(bytes);
+    sendFileMode(res,mode,file,bytes);
   });
   return router;
 }
